@@ -1,0 +1,86 @@
+import { existsSync } from "node:fs";
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import cors from "@fastify/cors";
+import jwt from "@fastify/jwt";
+import fastifyStatic from "@fastify/static";
+import type Database from "better-sqlite3";
+import { ZodError } from "zod";
+import { ready } from "@engramer/crypto";
+import { loadConfig, type ConfigOverrides, type ServerConfig } from "./config.js";
+import { nextSeq, openDatabase, storageUsed } from "./db.js";
+import { registerAuthRoutes } from "./routes/auth.js";
+import { registerStorageRoutes } from "./routes/storage.js";
+import { registerShareRoutes } from "./routes/shares.js";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    config: ServerConfig;
+    db: Database.Database;
+    authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    nextSeq: (userId: number) => number;
+    storageUsed: (userId: number) => number;
+  }
+}
+
+declare module "@fastify/jwt" {
+  interface FastifyJWT {
+    payload: { uid: number };
+    user: { uid: number };
+  }
+}
+
+export async function buildApp(overrides: ConfigOverrides = {}): Promise<FastifyInstance> {
+  await ready();
+  const config = loadConfig(overrides);
+  const db = openDatabase(config.dbPath);
+
+  const app = Fastify({ bodyLimit: 16 * 1024 * 1024 });
+
+  app.decorate("config", config);
+  app.decorate("db", db);
+  app.decorate("nextSeq", (userId: number) => nextSeq(db, userId));
+  app.decorate("storageUsed", (userId: number) => storageUsed(db, userId));
+  app.decorate("authenticate", async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      await request.jwtVerify();
+    } catch {
+      await reply.code(401).send({ error: "authentication required" });
+    }
+  });
+
+  // Ciphertext blobs arrive as raw octet streams and are piped straight to disk.
+  app.addContentTypeParser("application/octet-stream", (_request, payload, done) => {
+    done(null, payload);
+  });
+
+  app.setErrorHandler((error: unknown, _request, reply) => {
+    if (error instanceof ZodError) {
+      return reply.code(400).send({ error: "invalid request", details: error.issues });
+    }
+    app.log.error(error);
+    const statusCode = (error as { statusCode?: number }).statusCode ?? 500;
+    return reply.code(statusCode).send({ error: "internal server error" });
+  });
+
+  await app.register(cors, { origin: true });
+  await app.register(jwt, { secret: config.jwtSecret, sign: { expiresIn: "30d" } });
+
+  registerAuthRoutes(app);
+  registerStorageRoutes(app);
+  registerShareRoutes(app);
+
+  app.get("/api/health", async () => ({ status: "ok" }));
+
+  if (config.webDistDir && existsSync(config.webDistDir)) {
+    await app.register(fastifyStatic, { root: config.webDistDir });
+    // Single-page app: unknown non-API paths fall through to the client router.
+    app.setNotFoundHandler((request, reply) => {
+      if (request.url.startsWith("/api/")) {
+        return reply.code(404).send({ error: "not found" });
+      }
+      return reply.sendFile("index.html");
+    });
+  }
+
+  return app;
+}
