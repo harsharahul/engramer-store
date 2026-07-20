@@ -12,10 +12,12 @@ Cloud storage should not require trusting the storage provider. Engramer Store a
 
 - **True end-to-end encryption.** XChaCha20-Poly1305 streaming encryption for file content, XSalsa20-Poly1305 for keys and metadata, Argon2id for password key derivation. All primitives from libsodium; no custom cryptography.
 - **Drive-style file management.** Nested folders, drag-and-drop multi-file upload with per-file progress, rename, move, trash and restore.
-- **Client-side search.** Fuzzy file name search plus full-text search over content extracted from text files at upload time. The index is part of the encrypted metadata; queries never leave your device.
+- **Auto-organization.** Every upload is analyzed on your device and filed into category folders (Photos, Screenshots, Receipts, Code, and more) with auto-assigned tags: capture year, camera make, invoice, contract, resume. The Library sidebar gives live category views. All of it lives inside encrypted metadata; the server sees none of it. See [docs/intelligence.md](docs/intelligence.md).
+- **Client-side search.** A Cmd+K command palette and top-bar search over names, tags, and full text extracted from text files and PDFs at upload time, with filters like `tag:receipts`, `type:image`, `in:Work`, `is:favorite`. Queries never leave your device.
 - **Encrypted previews and thumbnails.** Images, video, audio, PDF, and text preview in the browser after local decryption. Thumbnails are generated on the client and stored encrypted.
 - **Public share links that keep the server blind.** The decryption key travels in the URL fragment, which browsers never send over the wire. Links are revocable server-side.
 - **Recovery keys.** A random recovery key, shown once at signup, can restore access after a lost password. Password changes re-wrap the master key without re-encrypting any data.
+- **Installable app.** The web client is a PWA: add it to your iPhone home screen or your Mac Dock and it runs standalone with its own icon. Paste a screenshot anywhere in the app to store it encrypted. Native desktop and mobile plans are in [docs/native-apps.md](docs/native-apps.md).
 - **Quotas and delta sync.** Per-user storage quotas enforced during streaming upload, and a sequence-number sync protocol so clients converge in one round trip.
 
 ## What the server can and cannot see
@@ -35,6 +37,8 @@ pnpm --filter @engramer/server start
 ```
 
 Open http://127.0.0.1:3080, create a vault, and store your recovery key somewhere safe. All state lives under `apps/server/data/`.
+
+To use it as an app: on iPhone, open the site in Safari, tap Share, then "Add to Home Screen"; on a Mac, use Safari's File menu, "Add to Dock" (or Chrome's Install button).
 
 Configuration via environment variables:
 

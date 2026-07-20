@@ -126,7 +126,7 @@ React 19 + Vite. All cryptography runs in the browser through the shared crypto 
 - The file browser is a Drive-style tree with grid and list views, breadcrumbs, drag-and-drop upload, multi-file upload with per-file progress, and keyboard navigation.
 - Uploads: read, chunk-encrypt, and stream per file; generate and encrypt thumbnails for images and video frames; extract text content from small text files into the encrypted metadata for search.
 - Previews decrypt to an in-memory blob URL: images, video, audio, PDF, and text render natively without the plaintext ever touching the server.
-- Search runs entirely on the client over decrypted metadata: fuzzy file name match, type filters, and full-text hits from the extracted content index. This is the Ente principle applied to files: the intelligence lives with the user, the ciphertext lives with the server.
+- Search runs entirely on the client over decrypted metadata: fuzzy file name match, type filters, and full-text hits from the extracted content index. This is the Ente principle applied to files: the intelligence lives with the user, the ciphertext lives with the server. Auto-categorization, tags, and the search grammar are described in [intelligence.md](intelligence.md).
 - Session state keeps decrypted keys in memory only. Reloading re-derives from the password or a session-cached wrapped key.
 
 ## Trust model
