@@ -12,8 +12,13 @@ export interface FileMetadata {
   mtime: number;
   width?: number;
   height?: number;
-  /** Extracted text content for client-side full-text search (small text files). */
+  /** Extracted text content for client-side full-text search. */
   text?: string;
+  /** Auto-assigned category (client-side analysis; opaque to the server). */
+  category?: string;
+  /** Tags, auto-assigned and user-edited alike. */
+  tags?: string[];
+  favorite?: boolean;
 }
 
 export interface FolderMetadata {

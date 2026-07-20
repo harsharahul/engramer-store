@@ -1,4 +1,5 @@
-import type { FileEntry } from "./store";
+import type { FileEntry, FolderEntry } from "./store";
+import { fileKind } from "./format";
 
 export interface SearchHit {
   file: FileEntry;
@@ -6,38 +7,121 @@ export interface SearchHit {
   matchedText: string | null;
 }
 
+export interface ParsedQuery {
+  terms: string;
+  tags: string[];
+  types: string[];
+  folder: string | null;
+  favorite: boolean;
+}
+
 /**
- * Client-side search over decrypted metadata: fuzzy subsequence match on file
- * names plus substring match on extracted text content. The ciphertext on the
- * server is never involved; all intelligence runs on the user's device.
+ * Query grammar: free text plus `tag:receipts`, `type:image`, `type:pdf`,
+ * `in:folder-name`, `is:favorite`. Filters narrow; free text ranks.
  */
-export function searchFiles(files: Iterable<FileEntry>, query: string): SearchHit[] {
-  const q = query.trim().toLowerCase();
-  if (!q) {
+export function parseQuery(query: string): ParsedQuery {
+  const parsed: ParsedQuery = { terms: "", tags: [], types: [], folder: null, favorite: false };
+  const words: string[] = [];
+  for (const token of query.trim().split(/\s+/)) {
+    const match = /^(tag|type|in|is):(.*)$/i.exec(token);
+    if (!match || !match[2]) {
+      if (token) {
+        words.push(token);
+      }
+      continue;
+    }
+    const value = match[2].toLowerCase();
+    switch (match[1]!.toLowerCase()) {
+      case "tag":
+        parsed.tags.push(value);
+        break;
+      case "type":
+        parsed.types.push(value);
+        break;
+      case "in":
+        parsed.folder = value;
+        break;
+      case "is":
+        if (value === "favorite" || value === "starred") {
+          parsed.favorite = true;
+        }
+        break;
+    }
+  }
+  parsed.terms = words.join(" ").toLowerCase();
+  return parsed;
+}
+
+/**
+ * Client-side search over decrypted metadata: filters plus fuzzy name match
+ * and substring match on extracted content. Never touches the network.
+ */
+export function searchFiles(
+  files: Iterable<FileEntry>,
+  query: string,
+  folders?: ReadonlyMap<string, FolderEntry>,
+): SearchHit[] {
+  const parsed = parseQuery(query);
+  if (!parsed.terms && parsed.tags.length === 0 && parsed.types.length === 0 && !parsed.folder && !parsed.favorite) {
     return [];
   }
   const hits: SearchHit[] = [];
   for (const file of files) {
-    if (file.trashed) {
+    if (file.trashed || !passesFilters(file, parsed, folders)) {
       continue;
     }
-    const nameScore = fuzzyScore(file.name.toLowerCase(), q);
+    if (!parsed.terms) {
+      hits.push({ file, score: 1, matchedText: null });
+      continue;
+    }
+    const nameScore = fuzzyScore(file.name.toLowerCase(), parsed.terms);
+    const tagScore = file.tags.some((t) => t.includes(parsed.terms)) ? 0.8 : 0;
     let contentSnippet: string | null = null;
     if (file.text) {
-      const index = file.text.toLowerCase().indexOf(q);
+      const index = file.text.toLowerCase().indexOf(parsed.terms);
       if (index >= 0) {
-        contentSnippet = snippet(file.text, index, q.length);
+        contentSnippet = snippet(file.text, index, parsed.terms.length);
       }
     }
-    if (nameScore > 0 || contentSnippet) {
-      hits.push({
-        file,
-        score: Math.max(nameScore, contentSnippet ? 0.5 : 0),
-        matchedText: contentSnippet,
-      });
+    const score = Math.max(nameScore, tagScore, contentSnippet ? 0.5 : 0);
+    if (score > 0) {
+      hits.push({ file, score, matchedText: contentSnippet });
     }
   }
   return hits.sort((a, b) => b.score - a.score);
+}
+
+function passesFilters(
+  file: FileEntry,
+  parsed: ParsedQuery,
+  folders?: ReadonlyMap<string, FolderEntry>,
+): boolean {
+  if (parsed.favorite && !file.favorite) {
+    return false;
+  }
+  for (const tag of parsed.tags) {
+    if (!file.tags.some((t) => t.includes(tag))) {
+      return false;
+    }
+  }
+  for (const type of parsed.types) {
+    const kind = fileKind(file.mime, file.name);
+    const ext = file.name.slice(file.name.lastIndexOf(".") + 1).toLowerCase();
+    const category = file.category?.toLowerCase() ?? "";
+    if (kind !== type && ext !== type && category !== type) {
+      return false;
+    }
+  }
+  if (parsed.folder) {
+    if (!folders || !file.folderId) {
+      return false;
+    }
+    const folder = folders.get(file.folderId);
+    if (!folder || !folder.name.toLowerCase().includes(parsed.folder)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Subsequence match: all query characters in order, rewarded for tightness. */

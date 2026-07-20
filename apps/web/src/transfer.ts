@@ -7,29 +7,10 @@ import {
   type FileMetadata,
 } from "@engramer/crypto";
 import { api, uploadBlob, type FileDto } from "./api";
+import { categorize, type Analysis } from "./intel/categorize";
+import { extractExif, extractText } from "./intel/extract";
 
-const TEXT_EXTRACT_LIMIT = 512 * 1024;
-const TEXT_STORE_LIMIT = 100_000;
 const THUMB_SIZE = 512;
-
-const TEXTUAL_EXTENSIONS =
-  /\.(txt|md|markdown|json|yaml|yml|toml|csv|log|ts|tsx|js|jsx|py|go|rs|java|c|h|cpp|rb|sh|css|html|xml|sql)$/i;
-
-function isTextual(file: File): boolean {
-  return file.type.startsWith("text/") || TEXTUAL_EXTENSIONS.test(file.name);
-}
-
-async function extractText(file: File): Promise<string | undefined> {
-  if (!isTextual(file) || file.size > TEXT_EXTRACT_LIMIT) {
-    return undefined;
-  }
-  try {
-    const text = await file.text();
-    return text.slice(0, TEXT_STORE_LIMIT);
-  } catch {
-    return undefined;
-  }
-}
 
 interface Thumbnail {
   bytes: Uint8Array;
@@ -105,36 +86,58 @@ async function makeThumbnail(file: File): Promise<Thumbnail | null> {
   return null;
 }
 
+export interface PreparedFile {
+  meta: FileMetadata;
+  analysis: Analysis;
+  thumbnail: Thumbnail | null;
+}
+
+/**
+ * Client-side analysis phase: search text, EXIF, category, tags, thumbnail.
+ * Everything computed here ships only inside encrypted metadata.
+ */
+export async function analyzeFile(file: File): Promise<PreparedFile> {
+  const [text, exif, thumbnail] = await Promise.all([
+    extractText(file),
+    extractExif(file),
+    makeThumbnail(file),
+  ]);
+  const analysis = categorize({
+    name: file.name,
+    mime: file.type || "application/octet-stream",
+    mtime: file.lastModified,
+    text,
+    exif,
+  });
+  const meta: FileMetadata = {
+    name: file.name,
+    mime: file.type || "application/octet-stream",
+    size: file.size,
+    mtime: file.lastModified,
+    category: analysis.category,
+    tags: analysis.tags,
+    ...(thumbnail ? { width: thumbnail.width, height: thumbnail.height } : {}),
+    ...(text !== undefined ? { text } : {}),
+  };
+  return { meta, analysis, thumbnail };
+}
+
 export interface UploadResult {
   dto: FileDto;
   fileKey: Uint8Array;
   meta: FileMetadata;
 }
 
-/**
- * The full client-side upload pipeline: fresh file key, thumbnail and search
- * text extraction, metadata and content encryption, then upload. Nothing
- * derived from the plaintext ever leaves this function unencrypted.
- */
+/** Encrypts a prepared file and uploads content plus thumbnail. */
 export async function encryptAndUpload(
   file: File,
   folderId: string | null,
   masterKey: Uint8Array,
+  prepared: PreparedFile,
   onProgress: (fraction: number) => void,
 ): Promise<UploadResult> {
   const fileKey = generateKey();
-  const [text, thumbnail] = await Promise.all([extractText(file), makeThumbnail(file)]);
-
-  const meta: FileMetadata = {
-    name: file.name,
-    mime: file.type || "application/octet-stream",
-    size: file.size,
-    mtime: file.lastModified,
-    ...(thumbnail ? { width: thumbnail.width, height: thumbnail.height } : {}),
-    ...(text !== undefined ? { text } : {}),
-  };
-
-  const encryptedMeta = encryptFileMetadata(meta, fileKey);
+  const encryptedMeta = encryptFileMetadata(prepared.meta, fileKey);
   const encryptedKey = secretBoxSeal(fileKey, masterKey);
   const dto = await api.createFile(folderId, encryptedKey, encryptedMeta);
 
@@ -142,17 +145,17 @@ export async function encryptAndUpload(
   const ciphertext = encryptBytes(plaintext, fileKey);
   await uploadBlob(dto.id, "data", ciphertext, onProgress);
 
-  if (thumbnail) {
-    await uploadBlob(dto.id, "thumbnail", encryptBytes(thumbnail.bytes, fileKey));
+  if (prepared.thumbnail) {
+    await uploadBlob(dto.id, "thumbnail", encryptBytes(prepared.thumbnail.bytes, fileKey));
   }
 
   const uploadedDto: FileDto = {
     ...dto,
     uploaded: true,
     size: ciphertext.length,
-    thumbSize: thumbnail ? 1 : 0,
+    thumbSize: prepared.thumbnail ? 1 : 0,
   };
-  return { dto: uploadedDto, fileKey, meta };
+  return { dto: uploadedDto, fileKey, meta: prepared.meta };
 }
 
 export async function downloadAndDecrypt(fileId: string, fileKey: Uint8Array): Promise<Uint8Array> {
