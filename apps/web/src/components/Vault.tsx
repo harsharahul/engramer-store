@@ -16,28 +16,87 @@ import { FileCard, FolderCard } from "./FileCard";
 import { Preview } from "./Preview";
 import { ShareDialog } from "./ShareDialog";
 import { UploadTray } from "./UploadTray";
+import { TagEditor } from "./TagEditor";
+import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { Confirm, TextPrompt } from "./Dialogs";
 import {
+  AsteriskGlyph,
+  AudioGlyph,
+  BookGlyph,
+  BoxGlyph,
   ClockGlyph,
+  CodeGlyph,
+  DocGlyph,
+  EaselGlyph,
   FolderGlyph,
+  GridGlyph,
   Keyhole,
   LockGlyph,
+  MonitorGlyph,
+  NoteGlyph,
+  PenNibGlyph,
+  PhotoGlyph,
   PlusGlyph,
+  ReceiptGlyph,
   RestoreGlyph,
   SearchGlyph,
+  SparkGlyph,
+  StarGlyph,
   TrashGlyph,
   UploadGlyph,
+  VideoGlyph,
   XGlyph,
 } from "./Icon";
 
-type View = { kind: "folder"; id: string | null } | { kind: "recent" } | { kind: "trash" };
+const CATEGORY_ICONS: Record<string, (props: { size?: number }) => React.ReactNode> = {
+  Photos: PhotoGlyph,
+  Screenshots: MonitorGlyph,
+  Videos: VideoGlyph,
+  Audio: AudioGlyph,
+  Documents: DocGlyph,
+  Receipts: ReceiptGlyph,
+  Notes: NoteGlyph,
+  Code: CodeGlyph,
+  Spreadsheets: GridGlyph,
+  Presentations: EaselGlyph,
+  Design: PenNibGlyph,
+  Archives: BoxGlyph,
+  Books: BookGlyph,
+  Other: AsteriskGlyph,
+};
+
+type View =
+  | { kind: "folder"; id: string | null }
+  | { kind: "recent" }
+  | { kind: "trash" }
+  | { kind: "favorites" }
+  | { kind: "category"; name: string };
+
+const CATEGORY_ORDER = [
+  "Photos",
+  "Screenshots",
+  "Documents",
+  "Receipts",
+  "Notes",
+  "Code",
+  "Videos",
+  "Audio",
+  "Spreadsheets",
+  "Presentations",
+  "Design",
+  "Archives",
+  "Books",
+  "Other",
+];
 
 export function Vault() {
   const store = useStore();
   const [view, setView] = useState<View>({ kind: "folder", id: null });
   const [query, setQuery] = useState("");
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [shareId, setShareId] = useState<string | null>(null);
+  const [tagsId, setTagsId] = useState<string | null>(null);
   const [renameFileId, setRenameFileId] = useState<string | null>(null);
   const [renameFolderId, setRenameFolderId] = useState<string | null>(null);
   const [deleteFolderId, setDeleteFolderId] = useState<string | null>(null);
@@ -47,6 +106,7 @@ export function Vault() {
   const [toast, setToast] = useState<string | null>(null);
   const dragDepth = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((message: string) => {
@@ -58,6 +118,31 @@ export function Vault() {
   }, []);
 
   const currentFolderId = view.kind === "folder" ? view.id : null;
+  const searching = query.trim().length > 0;
+
+  const liveFiles = useMemo(
+    () => [...store.files.values()].filter((f) => !f.trashed),
+    [store.files],
+  );
+
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const file of liveFiles) {
+      const category = file.category ?? "Other";
+      counts.set(category, (counts.get(category) ?? 0) + 1);
+    }
+    return counts;
+  }, [liveFiles]);
+
+  const allTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const file of liveFiles) {
+      for (const tag of file.tags) {
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([tag]) => tag);
+  }, [liveFiles]);
 
   const breadcrumbs = useMemo(() => {
     const chain: Array<{ id: string; name: string }> = [];
@@ -73,6 +158,21 @@ export function Vault() {
     return chain;
   }, [currentFolderId, store.folders]);
 
+  const folderCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const file of liveFiles) {
+      if (file.folderId) {
+        counts.set(file.folderId, (counts.get(file.folderId) ?? 0) + 1);
+      }
+    }
+    for (const folder of store.folders.values()) {
+      if (folder.parentId) {
+        counts.set(folder.parentId, (counts.get(folder.parentId) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [liveFiles, store.folders]);
+
   const childFolders = useMemo(
     () =>
       [...store.folders.values()]
@@ -83,19 +183,27 @@ export function Vault() {
 
   const childFiles = useMemo(
     () =>
-      [...store.files.values()]
-        .filter((f) => !f.trashed && f.folderId === currentFolderId)
+      liveFiles
+        .filter((f) => f.folderId === currentFolderId)
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [store.files, currentFolderId],
+    [liveFiles, currentFolderId],
   );
 
   const recentFiles = useMemo(
+    () => [...liveFiles].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 60),
+    [liveFiles],
+  );
+
+  const favoriteFiles = useMemo(() => liveFiles.filter((f) => f.favorite), [liveFiles]);
+
+  const categoryFiles = useMemo(
     () =>
-      [...store.files.values()]
-        .filter((f) => !f.trashed)
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, 40),
-    [store.files],
+      view.kind === "category"
+        ? liveFiles
+            .filter((f) => (f.category ?? "Other") === view.name)
+            .sort((a, b) => b.updatedAt - a.updatedAt)
+        : [],
+    [liveFiles, view],
   );
 
   const trashedFiles = useMemo(
@@ -107,12 +215,13 @@ export function Vault() {
   );
 
   const hits = useMemo(
-    () => (query.trim() ? searchFiles(store.files.values(), query) : []),
-    [store.files, query],
+    () => (searching ? searchFiles(store.files.values(), query, store.folders) : []),
+    [store.files, store.folders, query, searching],
   );
 
   const previewFile = previewId ? store.files.get(previewId) : undefined;
   const shareFile = shareId ? store.files.get(shareId) : undefined;
+  const tagsFile = tagsId ? store.files.get(tagsId) : undefined;
   const renameFile = renameFileId ? store.files.get(renameFileId) : undefined;
   const renameFolder = renameFolderId ? store.folders.get(renameFolderId) : undefined;
 
@@ -124,6 +233,42 @@ export function Vault() {
     },
     [store, currentFolderId],
   );
+
+  // Cmd+K opens the palette; "/" jumps to search when not already typing.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const typing =
+        event.target instanceof HTMLElement &&
+        (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA");
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen(true);
+      } else if (event.key === "/" && !typing && !paletteOpen) {
+        event.preventDefault();
+        searchInput.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [paletteOpen]);
+
+  // Paste an image or file anywhere to upload it.
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
+        return;
+      }
+      const files = [...(event.clipboardData?.files ?? [])];
+      if (files.length > 0) {
+        event.preventDefault();
+        uploadTo(files);
+        showToast(`Encrypting ${files.length} pasted item${files.length > 1 ? "s" : ""}`);
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [uploadTo, showToast]);
 
   const onDrop = (event: DragEvent) => {
     event.preventDefault();
@@ -141,11 +286,47 @@ export function Vault() {
     void saveDecryptedFile(file).catch(() => showToast("Download failed."));
   };
 
+  const searchTag = (tag: string) => {
+    setQuery(`tag:${tag}`);
+    searchInput.current?.focus();
+  };
+
+  const paletteActions = useMemo<PaletteAction[]>(
+    () => [
+      { id: "upload", label: "Upload files", hint: "encrypt and store", run: () => fileInput.current?.click() },
+      { id: "new-folder", label: "New folder", run: () => setNewFolderOpen(true) },
+      { id: "go-files", label: "Go to All files", run: () => setView({ kind: "folder", id: null }) },
+      { id: "go-recent", label: "Go to Recent", run: () => setView({ kind: "recent" }) },
+      { id: "go-favorites", label: "Go to Favorites", run: () => setView({ kind: "favorites" }) },
+      { id: "go-trash", label: "Go to Trash", run: () => setView({ kind: "trash" }) },
+      { id: "lock", label: "Lock vault and sign out", run: lock },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   const usagePercent = store.usage
     ? Math.min(100, Math.round((store.usage.usedBytes / store.usage.quotaBytes) * 100))
     : 0;
 
-  const searching = query.trim().length > 0;
+  const libraryCategories = CATEGORY_ORDER.filter((c) => (categoryCounts.get(c) ?? 0) > 0);
+
+  const openFile = (id: string) => {
+    setPreviewId(id);
+    setQuery("");
+  };
+
+  const fileCardProps = (file: FileEntry, index: number) => ({
+    key: file.id,
+    file,
+    index,
+    onOpen: () => setPreviewId(file.id),
+    onDownload: () => download(file),
+    onShare: () => setShareId(file.id),
+    onToggleFavorite: () => void store.toggleFavorite(file.id),
+    onTagClick: searchTag,
+    onTrash: () => void store.trashFile(file.id),
+  });
 
   return (
     <div
@@ -188,6 +369,16 @@ export function Vault() {
           <ClockGlyph /> Recent
         </button>
         <button
+          className={`nav-item${view.kind === "favorites" && !searching ? " active" : ""}`}
+          onClick={() => {
+            setQuery("");
+            setView({ kind: "favorites" });
+          }}
+        >
+          <StarGlyph /> Favorites
+          {favoriteFiles.length > 0 && <span className="nav-count">{favoriteFiles.length}</span>}
+        </button>
+        <button
           className={`nav-item${view.kind === "trash" && !searching ? " active" : ""}`}
           onClick={() => {
             setQuery("");
@@ -196,6 +387,36 @@ export function Vault() {
         >
           <TrashGlyph /> Trash
         </button>
+
+        {libraryCategories.length > 0 && (
+          <>
+            <div className="sidebar-label">
+              <SparkGlyph size={12} /> Library
+            </div>
+            <div className="library-list">
+              {libraryCategories.map((name) => {
+                const CategoryIcon = CATEGORY_ICONS[name] ?? AsteriskGlyph;
+                return (
+                  <button
+                    key={name}
+                    className={`nav-item small${
+                      view.kind === "category" && view.name === name && !searching ? " active" : ""
+                    }`}
+                    onClick={() => {
+                      setQuery("");
+                      setView({ kind: "category", name });
+                    }}
+                  >
+                    <CategoryIcon size={14} />
+                    {name}
+                    <span className="nav-count">{categoryCounts.get(name)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+
         <div className="spacer" />
         {store.usage && (
           <div className="usage">
@@ -223,11 +444,15 @@ export function Vault() {
               <SearchGlyph />
             </span>
             <input
-              placeholder="Search names and contents (decrypted locally)"
+              ref={searchInput}
+              placeholder="Search names, contents, tags   /"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
+          <button className="btn btn-ghost palette-trigger" onClick={() => setPaletteOpen(true)}>
+            <SparkGlyph size={14} /> <kbd className="mono">⌘K</kbd>
+          </button>
           <div className="grow" />
           <button className="btn" onClick={() => setNewFolderOpen(true)}>
             <PlusGlyph /> New folder
@@ -252,7 +477,7 @@ export function Vault() {
             <SearchResults
               hits={hits}
               query={query}
-              onOpen={(id) => setPreviewId(id)}
+              onOpen={openFile}
               onClear={() => setQuery("")}
             />
           ) : view.kind === "trash" ? (
@@ -262,7 +487,31 @@ export function Vault() {
               onDeleteForever={(id) => setDeleteForeverId(id)}
             />
           ) : view.kind === "recent" ? (
-            <RecentList files={recentFiles} onOpen={(id) => setPreviewId(id)} />
+            <SimpleList title="Recent" files={recentFiles} onOpen={openFile} />
+          ) : view.kind === "favorites" ? (
+            <SimpleList
+              title="Favorites"
+              files={favoriteFiles}
+              onOpen={openFile}
+              emptyMark="☆"
+              emptyTitle="No favorites yet"
+              emptyHint="Tap the star on any file to keep it one click away."
+            />
+          ) : view.kind === "category" ? (
+            <>
+              <div className="crumbs">
+                <span className="current">{view.name}</span>
+                <span className="crumb-note">
+                  auto-categorized on this device · {categoryFiles.length} item
+                  {categoryFiles.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="grid">
+                {categoryFiles.map((file, i) => (
+                  <FileCard {...fileCardProps(file, i)} />
+                ))}
+              </div>
+            </>
           ) : (
             <>
               <div className="crumbs">
@@ -287,7 +536,7 @@ export function Vault() {
                   <h3>{store.synced ? "An empty shelf" : "Decrypting your library"}</h3>
                   <p>
                     {store.synced
-                      ? "Drop files anywhere, or use Upload. Everything is encrypted before it leaves this device."
+                      ? "Drop files anywhere, paste from the clipboard, or press ⌘K. Everything is encrypted and sorted on this device."
                       : "One moment."}
                   </p>
                 </div>
@@ -297,6 +546,7 @@ export function Vault() {
                     <FolderCard
                       key={folder.id}
                       name={folder.name}
+                      count={folderCounts.get(folder.id) ?? 0}
                       index={i}
                       onOpen={() => setView({ kind: "folder", id: folder.id })}
                       onRename={() => setRenameFolderId(folder.id)}
@@ -304,16 +554,7 @@ export function Vault() {
                     />
                   ))}
                   {childFiles.map((file, i) => (
-                    <FileCard
-                      key={file.id}
-                      file={file}
-                      index={childFolders.length + i}
-                      onOpen={() => setPreviewId(file.id)}
-                      onDownload={() => download(file)}
-                      onShare={() => setShareId(file.id)}
-                      onRename={() => setRenameFileId(file.id)}
-                      onTrash={() => void store.trashFile(file.id)}
-                    />
+                    <FileCard {...fileCardProps(file, childFolders.length + i)} />
                   ))}
                 </div>
               )}
@@ -324,6 +565,23 @@ export function Vault() {
 
       <UploadTray />
 
+      {store.reveal && (
+        <RevealToast
+          onOpen={(folderId) => {
+            store.dismissReveal();
+            setQuery("");
+            setView({ kind: "folder", id: folderId });
+          }}
+        />
+      )}
+
+      {paletteOpen && (
+        <CommandPalette
+          actions={paletteActions}
+          onOpenFile={openFile}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
       {previewFile && (
         <Preview
           file={previewFile}
@@ -332,10 +590,20 @@ export function Vault() {
             setShareId(previewFile.id);
             setPreviewId(null);
           }}
+          onRename={() => setRenameFileId(previewFile.id)}
+          onEditTags={() => setTagsId(previewFile.id)}
         />
       )}
       {shareFile && (
         <ShareDialog file={shareFile} onClose={() => setShareId(null)} onToast={showToast} />
+      )}
+      {tagsFile && (
+        <TagEditor
+          file={tagsFile}
+          suggestions={allTags}
+          onSave={(tags) => store.setTags(tagsFile.id, tags)}
+          onClose={() => setTagsId(null)}
+        />
       )}
       {newFolderOpen && (
         <TextPrompt
@@ -389,6 +657,55 @@ export function Vault() {
   );
 }
 
+/** The payoff moment: what was filed where, and what it was tagged. */
+function RevealToast(props: { onOpen: (folderId: string | null) => void }) {
+  const reveal = useStore((s) => s.reveal);
+  const dismiss = useStore((s) => s.dismissReveal);
+
+  useEffect(() => {
+    const timer = setTimeout(dismiss, 7000);
+    return () => clearTimeout(timer);
+  }, [reveal, dismiss]);
+
+  if (!reveal) {
+    return null;
+  }
+  const first = reveal.items[0]!;
+  const others = reveal.items.length - 1;
+  const tags = first.tags.slice(0, 4);
+
+  return (
+    <div className="reveal" onClick={() => props.onOpen(first.folderId)}>
+      <div className="reveal-icon">
+        <SparkGlyph size={17} />
+      </div>
+      <div className="reveal-body">
+        <div className="reveal-title">
+          Filed into <strong>{first.folderName ?? first.category}</strong>
+          {others > 0 ? ` and ${others} more` : ""}
+        </div>
+        <div className="reveal-tags">
+          {tags.map((tag) => (
+            <span key={tag} className="tag">
+              {tag}
+            </span>
+          ))}
+        </div>
+      </div>
+      <button
+        className="icon-btn"
+        title="Dismiss"
+        onClick={(e) => {
+          e.stopPropagation();
+          dismiss();
+        }}
+      >
+        <XGlyph size={14} />
+      </button>
+    </div>
+  );
+}
+
 function SearchResults(props: {
   hits: ReturnType<typeof searchFiles>;
   query: string;
@@ -409,7 +726,10 @@ function SearchResults(props: {
         <div className="empty">
           <span className="empty-mark">∅</span>
           <h3>No matches</h3>
-          <p>Search covers file names and extracted text, decrypted only on this device.</p>
+          <p>
+            Search covers names, tags, and text inside documents, decrypted only on this device.
+            Try <code>tag:receipts</code>, <code>type:image</code>, or <code>is:favorite</code>.
+          </p>
         </div>
       ) : (
         <div className="rows">
@@ -425,6 +745,7 @@ function SearchResults(props: {
                 <div className="name">{hit.file.name}</div>
                 {hit.matchedText && <div className="snippet">{hit.matchedText}</div>}
               </div>
+              {hit.file.category && <span className="row-tag">{hit.file.category}</span>}
               <span className="row-meta">{formatBytes(hit.file.size)}</span>
             </div>
           ))}
@@ -434,16 +755,24 @@ function SearchResults(props: {
   );
 }
 
-function RecentList(props: { files: FileEntry[]; onOpen: (id: string) => void }) {
+function SimpleList(props: {
+  title: string;
+  files: FileEntry[];
+  onOpen: (id: string) => void;
+  emptyMark?: string;
+  emptyTitle?: string;
+  emptyHint?: string;
+}) {
   return (
     <>
       <div className="crumbs">
-        <span className="current">Recent</span>
+        <span className="current">{props.title}</span>
       </div>
       {props.files.length === 0 ? (
         <div className="empty">
-          <span className="empty-mark">◷</span>
-          <h3>Nothing yet</h3>
+          <span className="empty-mark">{props.emptyMark ?? "◷"}</span>
+          <h3>{props.emptyTitle ?? "Nothing yet"}</h3>
+          {props.emptyHint && <p>{props.emptyHint}</p>}
         </div>
       ) : (
         <div className="rows">
@@ -458,6 +787,7 @@ function RecentList(props: { files: FileEntry[]; onOpen: (id: string) => void })
               <div className="row-main">
                 <div className="name">{file.name}</div>
               </div>
+              {file.category && <span className="row-tag">{file.category}</span>}
               <span className="row-meta">
                 {formatBytes(file.size)} · {formatDate(file.updatedAt)}
               </span>
@@ -487,22 +817,14 @@ function TrashList(props: {
       ) : (
         <div className="rows">
           {props.files.map((file, i) => (
-            <div
-              key={file.id}
-              className="row"
-              style={{ "--i": Math.min(i, 20) } as CSSProperties}
-            >
+            <div key={file.id} className="row" style={{ "--i": Math.min(i, 20) } as CSSProperties}>
               <span className="row-glyph">{extension(file.name) || "FILE"}</span>
               <div className="row-main">
                 <div className="name">{file.name}</div>
               </div>
               <span className="row-meta">{formatBytes(file.size)}</span>
               <div className="row-actions" style={{ opacity: 1 }}>
-                <button
-                  className="icon-btn"
-                  title="Restore"
-                  onClick={() => props.onRestore(file.id)}
-                >
+                <button className="icon-btn" title="Restore" onClick={() => props.onRestore(file.id)}>
                   <RestoreGlyph />
                 </button>
                 <button
