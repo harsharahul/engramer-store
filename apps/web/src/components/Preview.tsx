@@ -3,14 +3,20 @@ import type { FileEntry } from "../store";
 import { downloadAndDecrypt } from "../transfer";
 import { fileKind, formatBytes } from "../format";
 import { triggerDownload } from "../download";
-import { DownloadGlyph, ShareGlyph, XGlyph } from "./Icon";
+import { DownloadGlyph, PencilGlyph, ShareGlyph, TagGlyph, XGlyph } from "./Icon";
 
 interface Loaded {
   url: string | null;
   text: string | null;
 }
 
-export function Preview(props: { file: FileEntry; onClose: () => void; onShare: () => void }) {
+export function Preview(props: {
+  file: FileEntry;
+  onClose: () => void;
+  onShare: () => void;
+  onRename: () => void;
+  onEditTags: () => void;
+}) {
   const { file } = props;
   const kind = fileKind(file.mime, file.name);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -73,6 +79,12 @@ export function Preview(props: { file: FileEntry; onClose: () => void; onShare: 
         <div className="grow" />
         <button className="icon-btn" title="Share" onClick={props.onShare}>
           <ShareGlyph />
+        </button>
+        <button className="icon-btn" title="Edit tags" onClick={props.onEditTags}>
+          <TagGlyph />
+        </button>
+        <button className="icon-btn" title="Rename" onClick={props.onRename}>
+          <PencilGlyph />
         </button>
         <button className="icon-btn" title="Download" onClick={download}>
           <DownloadGlyph />
