@@ -91,6 +91,16 @@ describe("account key hierarchy", () => {
     expect(() => unlockWithPassword(password, keyAttributes)).toThrow();
   });
 
+  // Guards against a future change quietly weakening password derivation.
+  // The floor is OWASP's Argon2id recommendation (19 MiB, 2 passes); the
+  // default is libsodium's moderate profile, far above it.
+  it("derives keys with Argon2id parameters at or above the security floor", () => {
+    const { kdf } = account.keyAttributes;
+    expect(kdf.memLimit).toBeGreaterThanOrEqual(19 * 1024 * 1024);
+    expect(kdf.opsLimit).toBeGreaterThanOrEqual(2);
+    expect(kdf.salt.length).toBeGreaterThan(0);
+  });
+
   it("derives a stable login key digest that differs from the login key", () => {
     const digest = loginKeyDigest(account.loginKey);
     expect(digest).toBe(loginKeyDigest(account.loginKey));

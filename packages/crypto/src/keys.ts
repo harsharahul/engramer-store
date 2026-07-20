@@ -40,10 +40,17 @@ export interface AccountKeys {
 const LOGIN_KDF_CONTEXT = "es-login";
 
 /**
- * Derives the key encryption key with Argon2id at sensitive parameters, halving
- * memory (and doubling passes to keep total cost) until the platform can afford
- * the allocation. The parameters that succeeded are recorded in KdfParams so
- * every later derivation uses exactly the same cost.
+ * Derives the key encryption key with Argon2id.
+ *
+ * The default is libsodium's moderate profile: 256 MiB and 3 passes, roughly an
+ * order of magnitude above the OWASP floor for Argon2id, and affordable on
+ * phones and in browser tabs. The sensitive profile (1 GiB) is deliberately not
+ * the default: a single allocation that large exhausts the heap on mobile
+ * Safari and on CI runners, and a login the user cannot complete protects
+ * nothing. If even the moderate allocation fails, memory halves and passes
+ * double (holding total work roughly constant) until the platform can afford
+ * it. Whatever succeeded is recorded in KdfParams, so every later derivation
+ * for that account repeats exactly the same cost.
  */
 export function deriveKeyEncryptionKey(
   password: string,
@@ -63,8 +70,8 @@ export function deriveKeyEncryptionKey(
   }
 
   const salt = s.randombytes_buf(s.crypto_pwhash_SALTBYTES);
-  let opsLimit = s.crypto_pwhash_OPSLIMIT_SENSITIVE;
-  let memLimit = s.crypto_pwhash_MEMLIMIT_SENSITIVE;
+  let opsLimit = s.crypto_pwhash_OPSLIMIT_MODERATE;
+  let memLimit = s.crypto_pwhash_MEMLIMIT_MODERATE;
   for (;;) {
     try {
       const kek = s.crypto_pwhash(
