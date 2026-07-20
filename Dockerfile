@@ -3,7 +3,7 @@
 # Build:  docker build -t engramer-store .
 # Run:    docker run -d --name engramer -p 3080:3080 -v engramer-data:/data engramer-store
 #         then open http://localhost:3080 and create a vault.
-FROM node:24-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 
 # Toolchain for the better-sqlite3 native module when no prebuild matches.
 RUN apt-get update \
@@ -19,7 +19,7 @@ RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @engramer/web build
 
 # Production dependencies only, for the server and its workspace packages.
-FROM node:24-bookworm-slim AS proddeps
+FROM node:26-bookworm-slim AS proddeps
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ \
@@ -33,7 +33,7 @@ COPY apps/server/package.json apps/server/package.json
 COPY apps/web/package.json apps/web/package.json
 RUN CI=true pnpm install --frozen-lockfile --prod --filter @engramer/server...
 
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 
 LABEL org.opencontainers.image.title="Engramer Store" \
       org.opencontainers.image.description="Self-hostable, end-to-end encrypted cloud storage" \
