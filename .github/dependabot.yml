@@ -18,3 +18,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # The base image tracks a Node LTS line, matching the versions CI tests.
+      # Major bumps are taken deliberately once the new line reaches Active LTS,
+      # not on release day.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]

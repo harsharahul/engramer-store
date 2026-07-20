@@ -3,6 +3,7 @@
 # Build:  docker build -t engramer-store .
 # Run:    docker run -d --name engramer -p 3080:3080 -v engramer-data:/data engramer-store
 #         then open http://localhost:3080 and create a vault.
+# The base tracks a Node Active LTS line, matching the versions CI tests.
 FROM node:24-bookworm-slim AS build
 
 # Toolchain for the better-sqlite3 native module when no prebuild matches.
