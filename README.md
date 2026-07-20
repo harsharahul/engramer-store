@@ -1,6 +1,13 @@
 # Engramer Store
 
-Self-hostable, end-to-end encrypted cloud storage. Files, file names, folder names, and search text are encrypted on your device before upload; the server stores ciphertext it cannot read.
+**Self-hostable cloud storage that is end-to-end encrypted, and still smart.**
+
+[![CI](https://github.com/harsharahul/engramer-store/actions/workflows/ci.yml/badge.svg)](https://github.com/harsharahul/engramer-store/actions/workflows/ci.yml)
+[![Docker](https://img.shields.io/badge/ghcr.io-engramer--store-2496ed?logo=docker&logoColor=white)](https://github.com/harsharahul/engramer-store/pkgs/container/engramer-store)
+[![Node 22+](https://img.shields.io/badge/node-22%2B-brightgreen)](package.json)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+
+Files, file names, folder names, tags, and search text are encrypted on your device before upload; the server stores ciphertext it cannot read. Auto-categorization, full-text search, and previews all run on the client, so the intelligence works without giving anyone else your data.
 
 ![Engramer Store vault](docs/media/vault.png)
 
@@ -27,6 +34,17 @@ The server stores: ciphertext blobs, wrapped keys, KDF parameters, a one-way dig
 The server can never see: file contents, file names, folder names, thumbnails, extracted search text, your password, or any decryption key. This holds even if the server is fully compromised. The full design is in [docs/architecture.md](docs/architecture.md).
 
 ## Quickstart
+
+### Docker
+
+```bash
+docker run -d --name engramer -p 3080:3080 -v engramer-data:/data \
+  ghcr.io/harsharahul/engramer-store:latest
+```
+
+Or with Compose: `docker compose up -d` (see [compose.yml](compose.yml)). All state lives in the `/data` volume.
+
+### From source
 
 Requirements: Node.js 22+ and pnpm.
 
@@ -58,8 +76,9 @@ Run it behind TLS in production; the login key must only ever travel over HTTPS.
 ```bash
 pnpm --filter @engramer/server dev   # API server with reload, port 3080
 pnpm --filter @engramer/web dev      # Vite dev server, port 5173, proxies /api
-pnpm test                            # crypto unit tests + server integration tests
+pnpm test                            # crypto, web, and server suites
 pnpm build                           # typecheck and build everything
+docker build -t engramer-store .     # container image
 ```
 
 The repository is a pnpm workspace:
@@ -70,7 +89,7 @@ apps/server/       Zero-knowledge API: Fastify, SQLite metadata, on-disk blobs
 apps/web/          Web client: React, all crypto in the browser
 ```
 
-The integration tests drive the real API with the real crypto package, including a check that blobs on disk contain no plaintext.
+The integration tests drive the real API with the real crypto package, including a check that blobs on disk contain no plaintext. CI runs the suites on Node 22 and 24, audits production dependencies, and builds the container image; pushes to `main` and version tags publish a multi-architecture image to `ghcr.io`.
 
 ## Security
 
