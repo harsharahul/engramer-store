@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify release integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the release tag matches the package version
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          ver="v$(node -p "require('./package.json').version")"
+          echo "release tag=$tag  package.json=$ver"
+          test "$tag" = "$ver" || { echo "::error::release tag $tag != package version $ver"; exit 1; }
+      - name: Verify the changelog has an entry for this version
+        run: |
+          ver="$(node -p "require('./package.json').version")"
+          grep -q "^## $ver" CHANGELOG.md || { echo "::error::CHANGELOG.md has no entry for $ver"; exit 1; }
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Build and test the released revision
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          pnpm test
