@@ -3,6 +3,21 @@
 All notable changes to Engramer Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.2.1] - 2026-07-20
+
+### Fixed
+- Password key derivation now uses libsodium's moderate Argon2id profile
+  (256 MiB, 3 passes) instead of the sensitive profile (1 GiB). The larger
+  allocation exhausted memory on mobile browsers and CI runners, so signup and
+  unlock could fail outright on constrained devices. The moderate profile
+  remains an order of magnitude above the OWASP floor, and signup and unlock
+  are now substantially faster. Existing accounts are unaffected: each account
+  stores the parameters it was created with and keeps using them.
+
+### Added
+- A test asserting the Argon2id parameters stay at or above the OWASP floor, so
+  the cost cannot be weakened unnoticed.
+
 ## [0.2.0] - 2026-07-20
 
 Intelligence and experience release. Everything below runs on the client; the

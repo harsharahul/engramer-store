@@ -15,14 +15,14 @@ Engramer Store is designed so that a fully compromised server cannot read user c
 **Not protected:**
 
 - A compromised client device or browser. The client is the trust anchor: whoever controls the code served to the browser controls the cryptography. Self-hosting keeps that code under the operator's control.
-- Weak passwords. Argon2id at sensitive parameters slows offline guessing but cannot rescue a guessable password.
+- Weak passwords. Argon2id slows offline guessing but cannot rescue a guessable password.
 - Loss of both the password and the recovery key. There is no backdoor; the data is unrecoverable by design.
 
 ## Cryptography
 
 All primitives come from [libsodium](https://doc.libsodium.org/):
 
-- Argon2id (`crypto_pwhash`) for password key derivation, sensitive parameters with recorded fallback.
+- Argon2id (`crypto_pwhash`) for password key derivation: libsodium's moderate profile (256 MiB, 3 passes) by default, with a recorded fallback for memory-constrained devices. A test asserts the parameters stay at or above the OWASP floor.
 - XSalsa20-Poly1305 (`crypto_secretbox`) for key wrapping and metadata.
 - XChaCha20-Poly1305 streaming AEAD (`crypto_secretstream`) for file content, 4 MiB chunks. Truncation, reordering, and bit flips fail authentication.
 - X25519 sealed boxes (`crypto_box_seal`) for asymmetric key sharing.

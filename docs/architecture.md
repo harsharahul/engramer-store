@@ -49,7 +49,7 @@ password ── Argon2id ──> keyEncryptionKey (KEK)      never leaves the cl
 recoveryKey (random 32 B) <── secretbox ── masterKey (and vice versa)
 ```
 
-- The KEK is derived on the client with Argon2id (moderate parameters, with an automatic fallback to interactive parameters on memory-constrained browsers; the parameters used are stored per account).
+- The KEK is derived on the client with Argon2id at libsodium's moderate profile (256 MiB, 3 passes). If a device cannot afford that allocation, memory halves and passes double until it can; the parameters that succeeded are stored per account and reused for every later derivation. The sensitive profile (1 GiB) is not the default because a single allocation that large fails on mobile browsers.
 - The master key is random, encrypted with the KEK, and stored on the server as ciphertext. Password changes re-wrap the master key without re-encrypting any data.
 - The login key is a one-way BLAKE2b subkey of the KEK. The server stores only a BLAKE2b digest of the login key, so the server can verify authentication but can never recover the KEK or master key.
 - The recovery key is random, shown to the user exactly once at signup. Master key and recovery key are each stored encrypted with the other, enabling password reset without data loss.
