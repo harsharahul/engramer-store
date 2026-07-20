@@ -1,0 +1,16 @@
+services:
+  engramer:
+    image: ghcr.io/harsharahul/engramer-store:latest
+    build: .
+    container_name: engramer
+    ports:
+      - "3080:3080"
+    volumes:
+      - engramer-data:/data
+    environment:
+      # Per-user storage quota in bytes (default 10 GB).
+      ENGRAMER_QUOTA_BYTES: "10737418240"
+    restart: unless-stopped
+
+volumes:
+  engramer-data:
