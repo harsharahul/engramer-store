@@ -7,10 +7,11 @@ import {
   generateKey,
   secretBoxOpen,
   secretBoxSeal,
+  type FileMetadata,
 } from "@engramer/crypto";
 import { api, type FileDto, type FolderDto } from "./api";
 import { clearSession, type Session } from "./session";
-import { encryptAndUpload } from "./transfer";
+import { analyzeFile, encryptAndUpload } from "./transfer";
 
 export interface FolderEntry {
   id: string;
@@ -31,6 +32,9 @@ export interface FileEntry {
   width?: number;
   height?: number;
   text?: string;
+  category?: string;
+  tags: string[];
+  favorite: boolean;
   key: Uint8Array;
   hasThumb: boolean;
   trashed: boolean;
@@ -51,6 +55,20 @@ export interface Usage {
   quotaBytes: number;
 }
 
+export interface RevealItem {
+  fileId: string;
+  name: string;
+  category: string;
+  folderId: string | null;
+  folderName: string | null;
+  tags: string[];
+}
+
+export interface Reveal {
+  items: RevealItem[];
+  at: number;
+}
+
 interface StoreState {
   session: Session | null;
   synced: boolean;
@@ -58,6 +76,7 @@ interface StoreState {
   files: Map<string, FileEntry>;
   usage: Usage | null;
   uploads: UploadItem[];
+  reveal: Reveal | null;
 
   startSession: (session: Session) => Promise<void>;
   logout: () => void;
@@ -68,11 +87,14 @@ interface StoreState {
   deleteFolder: (id: string) => Promise<void>;
   uploadFiles: (files: File[], folderId: string | null) => Promise<void>;
   renameFile: (id: string, name: string) => Promise<void>;
+  setTags: (id: string, tags: string[]) => Promise<void>;
+  toggleFavorite: (id: string) => Promise<void>;
   moveFile: (id: string, folderId: string | null) => Promise<void>;
   trashFile: (id: string) => Promise<void>;
   restoreFile: (id: string) => Promise<void>;
   deleteForever: (id: string) => Promise<void>;
   clearFinishedUploads: () => void;
+  dismissReveal: () => void;
 }
 
 function decryptFolder(dto: FolderDto, masterKey: Uint8Array): FolderEntry {
@@ -101,11 +123,29 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
     width: meta.width,
     height: meta.height,
     text: meta.text,
+    category: meta.category,
+    tags: meta.tags ?? [],
+    favorite: meta.favorite ?? false,
     key,
     hasThumb: dto.thumbSize > 0,
     trashed: dto.trashed,
     createdAt: dto.createdAt,
     updatedAt: dto.updatedAt,
+  };
+}
+
+function metadataOf(file: FileEntry): FileMetadata {
+  return {
+    name: file.name,
+    mime: file.mime,
+    size: file.size,
+    mtime: file.mtime,
+    width: file.width,
+    height: file.height,
+    text: file.text,
+    category: file.category,
+    tags: file.tags,
+    favorite: file.favorite,
   };
 }
 
@@ -138,6 +178,43 @@ export const useStore = create<StoreState>((set, get) => {
     set({ files });
   };
 
+  const patchFileMeta = async (id: string, patch: Partial<FileMetadata>) => {
+    const file = get().files.get(id);
+    if (!file) {
+      return;
+    }
+    const dto = await api.patchFile(id, {
+      encryptedMeta: encryptFileMetadata({ ...metadataOf(file), ...patch }, file.key),
+    });
+    applyFile(dto);
+  };
+
+  /** Find or create a root folder for a category. Deduplicates concurrent creates. */
+  const categoryFolderPromises = new Map<string, Promise<string>>();
+  const ensureCategoryFolder = (name: string): Promise<string> => {
+    for (const folder of get().folders.values()) {
+      if (folder.parentId === null && folder.name === name) {
+        return Promise.resolve(folder.id);
+      }
+    }
+    let pending = categoryFolderPromises.get(name);
+    if (!pending) {
+      pending = (async () => {
+        const folderKey = generateKey();
+        const dto = await api.createFolder(
+          null,
+          secretBoxSeal(folderKey, masterKey()),
+          encryptFolderMetadata({ name }, folderKey),
+        );
+        applyFolder(dto);
+        categoryFolderPromises.delete(name);
+        return dto.id;
+      })();
+      categoryFolderPromises.set(name, pending);
+    }
+    return pending;
+  };
+
   return {
     session: null,
     synced: false,
@@ -145,9 +222,17 @@ export const useStore = create<StoreState>((set, get) => {
     files: new Map(),
     usage: null,
     uploads: [],
+    reveal: null,
 
     startSession: async (session) => {
-      set({ session, synced: false, folders: new Map(), files: new Map(), uploads: [] });
+      set({
+        session,
+        synced: false,
+        folders: new Map(),
+        files: new Map(),
+        uploads: [],
+        reveal: null,
+      });
       await get().refresh();
       await get().refreshUsage();
     },
@@ -161,6 +246,7 @@ export const useStore = create<StoreState>((set, get) => {
         files: new Map(),
         usage: null,
         uploads: [],
+        reveal: null,
       });
     },
 
@@ -215,6 +301,7 @@ export const useStore = create<StoreState>((set, get) => {
 
     uploadFiles: async (fileList, folderId) => {
       const key = masterKey();
+      const revealItems: RevealItem[] = [];
       for (const file of fileList) {
         const uploadId = crypto.randomUUID();
         set({
@@ -228,38 +315,55 @@ export const useStore = create<StoreState>((set, get) => {
             uploads: get().uploads.map((u) => (u.id === uploadId ? { ...u, ...patch } : u)),
           });
         try {
-          const result = await encryptAndUpload(file, folderId, key, (fraction) =>
+          const prepared = await analyzeFile(file);
+          // Root uploads are auto-filed into a category folder; uploads into a
+          // folder the user picked stay where the user put them.
+          const destination =
+            folderId ?? (await ensureCategoryFolder(prepared.analysis.category));
+          const result = await encryptAndUpload(file, destination, key, prepared, (fraction) =>
             update({ status: "uploading", progress: fraction }),
           );
           applyFile(result.dto);
           update({ status: "done", progress: 1 });
+          revealItems.push({
+            fileId: result.dto.id,
+            name: file.name,
+            category: prepared.analysis.category,
+            folderId: destination,
+            folderName: destination ? (get().folders.get(destination)?.name ?? null) : null,
+            tags: prepared.analysis.tags,
+          });
         } catch (err) {
           update({ status: "error", error: err instanceof Error ? err.message : "upload failed" });
         }
       }
+      if (revealItems.length > 0) {
+        set({ reveal: { items: revealItems, at: Date.now() } });
+      }
       await get().refreshUsage();
     },
 
-    renameFile: async (id, name) => {
+    renameFile: async (id, name) => patchFileMeta(id, { name }),
+
+    setTags: async (id, tags) =>
+      patchFileMeta(id, { tags: [...new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))] }),
+
+    toggleFavorite: async (id) => {
       const file = get().files.get(id);
       if (!file) {
         return;
       }
-      const dto = await api.patchFile(id, {
-        encryptedMeta: encryptFileMetadata(
-          {
-            name,
-            mime: file.mime,
-            size: file.size,
-            mtime: file.mtime,
-            width: file.width,
-            height: file.height,
-            text: file.text,
-          },
-          file.key,
-        ),
-      });
-      applyFile(dto);
+      // Optimistic flip so the star answers instantly.
+      const files = new Map(get().files);
+      files.set(id, { ...file, favorite: !file.favorite });
+      set({ files });
+      try {
+        await patchFileMeta(id, { favorite: !file.favorite });
+      } catch {
+        const rollback = new Map(get().files);
+        rollback.set(id, file);
+        set({ files: rollback });
+      }
     },
 
     moveFile: async (id, folderId) => {
@@ -293,5 +397,7 @@ export const useStore = create<StoreState>((set, get) => {
     clearFinishedUploads: () => {
       set({ uploads: get().uploads.filter((u) => u.status !== "done" && u.status !== "error") });
     },
+
+    dismissReveal: () => set({ reveal: null }),
   };
 });
