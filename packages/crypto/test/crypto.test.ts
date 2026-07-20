@@ -27,6 +27,23 @@ beforeAll(async () => {
   await ready();
 });
 
+/**
+ * Compares byte arrays without handing millions of elements to the deep-equal
+ * matcher, which builds a per-element diff and exhausts the heap on multi-chunk
+ * files. This is a memcmp, and only a mismatch pays for a detailed report.
+ */
+function expectBytesEqual(actual: Uint8Array, expected: Uint8Array): void {
+  expect(actual.length).toBe(expected.length);
+  const a = Buffer.from(actual.buffer, actual.byteOffset, actual.byteLength);
+  const b = Buffer.from(expected.buffer, expected.byteOffset, expected.byteLength);
+  if (!a.equals(b)) {
+    const index = actual.findIndex((byte, i) => byte !== expected[i]);
+    throw new Error(
+      `byte arrays differ at index ${index}: ${actual[index]} !== ${expected[index]}`,
+    );
+  }
+}
+
 describe("secretbox", () => {
   it("round-trips data", () => {
     const key = generateKey();
@@ -111,13 +128,13 @@ describe("account key hierarchy", () => {
 describe("streaming file encryption", () => {
   it("round-trips an empty file", () => {
     const key = generateKey();
-    expect(decryptBytes(encryptBytes(new Uint8Array(0), key), key)).toEqual(new Uint8Array(0));
+    expectBytesEqual(decryptBytes(encryptBytes(new Uint8Array(0), key), key), new Uint8Array(0));
   });
 
   it("round-trips a small file", () => {
     const key = generateKey();
     const data = crypto.getRandomValues(new Uint8Array(1024));
-    expect(decryptBytes(encryptBytes(data, key), key)).toEqual(data);
+    expectBytesEqual(decryptBytes(encryptBytes(data, key), key), data);
   });
 
   it("round-trips a multi-chunk file", () => {
@@ -126,7 +143,7 @@ describe("streaming file encryption", () => {
     for (let i = 0; i < data.length; i += 65536) {
       crypto.getRandomValues(data.subarray(i, Math.min(i + 65536, data.length)));
     }
-    expect(decryptBytes(encryptBytes(data, key), key)).toEqual(data);
+    expectBytesEqual(decryptBytes(encryptBytes(data, key), key), data);
   });
 
   it("rejects a flipped bit anywhere in the blob", () => {
@@ -174,7 +191,7 @@ describe("sealed boxes for sharing", () => {
     const fileKey = generateKey();
     const sealed = sealToPublicKey(fileKey, recipient.publicKey);
     const opened = openSealed(sealed, recipient.publicKey, recipient.privateKey);
-    expect(opened).toEqual(fileKey);
+    expectBytesEqual(opened, fileKey);
   });
 
   it("cannot be opened by a different key pair", () => {
