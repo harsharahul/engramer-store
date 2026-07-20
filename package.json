@@ -1,0 +1,17 @@
+{
+  "name": "engramer-store",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hostable, end-to-end encrypted cloud storage",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "dev": "pnpm --parallel -r dev"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
