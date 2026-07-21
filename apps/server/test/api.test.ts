@@ -163,6 +163,25 @@ describe("files and folders", () => {
     expect(decrypted).toEqual(content);
   });
 
+  it("replaces blob content in place for in-app edits", async () => {
+    const file = await uploadFile("note.md", utf8Encode("first draft"));
+    const revised = utf8Encode("second draft, revised in the editor");
+    const replaced = await app.inject({
+      method: "PUT",
+      url: `/api/files/${file.id}/data`,
+      headers: { ...authHeader(), "content-type": "application/octet-stream" },
+      payload: Buffer.from(encryptBytes(revised, file.fileKey)),
+    });
+    expect(replaced.statusCode).toBe(200);
+
+    const download = await app.inject({
+      method: "GET",
+      url: `/api/files/${file.id}/data`,
+      headers: authHeader(),
+    });
+    expect(decryptBytes(new Uint8Array(download.rawPayload), file.fileKey)).toEqual(revised);
+  });
+
   it("stores only ciphertext on disk", async () => {
     const marker = "MARKER-plaintext-should-never-appear";
     const file = await uploadFile("secret.txt", utf8Encode(`${marker} content`));

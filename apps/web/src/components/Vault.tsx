@@ -9,11 +9,12 @@ import {
 } from "react";
 import { useStore, type FileEntry } from "../store";
 import { searchFiles } from "../search";
-import { extension, formatBytes, formatDate } from "../format";
+import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { saveDecryptedFile } from "../download";
 import { clearThumbnailCache } from "../thumbs";
 import { FileCard, FolderCard } from "./FileCard";
 import { Preview } from "./Preview";
+import { Editor } from "./Editor";
 import { ShareDialog } from "./ShareDialog";
 import { UploadTray } from "./UploadTray";
 import { TagEditor } from "./TagEditor";
@@ -95,6 +96,8 @@ export function Vault() {
   const [query, setQuery] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [editorId, setEditorId] = useState<string | null>(null);
+  const [newNoteOpen, setNewNoteOpen] = useState(false);
   const [shareId, setShareId] = useState<string | null>(null);
   const [tagsId, setTagsId] = useState<string | null>(null);
   const [renameFileId, setRenameFileId] = useState<string | null>(null);
@@ -220,6 +223,7 @@ export function Vault() {
   );
 
   const previewFile = previewId ? store.files.get(previewId) : undefined;
+  const editorFile = editorId ? store.files.get(editorId) : undefined;
   const shareFile = shareId ? store.files.get(shareId) : undefined;
   const tagsFile = tagsId ? store.files.get(tagsId) : undefined;
   const renameFile = renameFileId ? store.files.get(renameFileId) : undefined;
@@ -294,6 +298,7 @@ export function Vault() {
   const paletteActions = useMemo<PaletteAction[]>(
     () => [
       { id: "upload", label: "Upload files", hint: "encrypt and store", run: () => fileInput.current?.click() },
+      { id: "new-note", label: "New note", hint: "write, encrypted", run: () => setNewNoteOpen(true) },
       { id: "new-folder", label: "New folder", run: () => setNewFolderOpen(true) },
       { id: "go-files", label: "Go to All files", run: () => setView({ kind: "folder", id: null }) },
       { id: "go-recent", label: "Go to Recent", run: () => setView({ kind: "recent" }) },
@@ -582,7 +587,7 @@ export function Vault() {
           onClose={() => setPaletteOpen(false)}
         />
       )}
-      {previewFile && (
+      {previewFile && !editorFile && (
         <Preview
           file={previewFile}
           onClose={() => setPreviewId(null)}
@@ -592,6 +597,33 @@ export function Vault() {
           }}
           onRename={() => setRenameFileId(previewFile.id)}
           onEditTags={() => setTagsId(previewFile.id)}
+          onEdit={
+            fileKind(previewFile.mime, previewFile.name) === "text"
+              ? () => {
+                  setEditorId(previewFile.id);
+                  setPreviewId(null);
+                }
+              : undefined
+          }
+        />
+      )}
+      {editorFile && (
+        <Editor
+          file={editorFile}
+          onSave={(content) => store.saveFileContent(editorFile.id, content)}
+          onClose={() => setEditorId(null)}
+        />
+      )}
+      {newNoteOpen && (
+        <TextPrompt
+          title="New note"
+          sub="Notes are Markdown files, encrypted like everything else."
+          submitLabel="Create and open"
+          onSubmit={async (name) => {
+            const id = await store.createNote(name, currentFolderId);
+            setEditorId(id);
+          }}
+          onClose={() => setNewNoteOpen(false)}
         />
       )}
       {shareFile && (
