@@ -2,14 +2,16 @@ import { create } from "zustand";
 import {
   decryptFileMetadata,
   decryptFolderMetadata,
+  encryptBytes,
   encryptFileMetadata,
   encryptFolderMetadata,
   generateKey,
   secretBoxOpen,
   secretBoxSeal,
+  utf8Encode,
   type FileMetadata,
 } from "@engramer/crypto";
-import { api, type FileDto, type FolderDto } from "./api";
+import { api, uploadBlob, type FileDto, type FolderDto } from "./api";
 import { clearSession, type Session } from "./session";
 import { analyzeFile, encryptAndUpload } from "./transfer";
 
@@ -86,6 +88,8 @@ interface StoreState {
   renameFolder: (id: string, name: string) => Promise<void>;
   deleteFolder: (id: string) => Promise<void>;
   uploadFiles: (files: File[], folderId: string | null) => Promise<void>;
+  saveFileContent: (id: string, text: string) => Promise<void>;
+  createNote: (name: string, folderId: string | null) => Promise<string>;
   renameFile: (id: string, name: string) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
   toggleFavorite: (id: string) => Promise<void>;
@@ -341,6 +345,45 @@ export const useStore = create<StoreState>((set, get) => {
         set({ reveal: { items: revealItems, at: Date.now() } });
       }
       await get().refreshUsage();
+    },
+
+    // In-app editing: re-encrypt with the file's existing key and replace the
+    // blob, then refresh the metadata (size, mtime, search text) in one patch.
+    saveFileContent: async (id, text) => {
+      const file = get().files.get(id);
+      if (!file) {
+        throw new Error("file not found");
+      }
+      const bytes = utf8Encode(text);
+      await uploadBlob(id, "data", encryptBytes(bytes, file.key));
+      await patchFileMeta(id, {
+        size: bytes.length,
+        mtime: Date.now(),
+        text: text.slice(0, 100_000),
+      });
+      await get().refreshUsage();
+    },
+
+    createNote: async (name, folderId) => {
+      const fileName = /\.(md|txt)$/i.test(name) ? name : `${name}.md`;
+      const fileKey = generateKey();
+      const meta: FileMetadata = {
+        name: fileName,
+        mime: "text/markdown",
+        size: 0,
+        mtime: Date.now(),
+        category: "Notes",
+        tags: ["notes", "md", String(new Date().getFullYear())],
+        text: "",
+      };
+      const dto = await api.createFile(
+        folderId,
+        secretBoxSeal(fileKey, masterKey()),
+        encryptFileMetadata(meta, fileKey),
+      );
+      await uploadBlob(dto.id, "data", encryptBytes(new Uint8Array(0), fileKey));
+      applyFile({ ...dto, uploaded: true });
+      return dto.id;
     },
 
     renameFile: async (id, name) => patchFileMeta(id, { name }),
