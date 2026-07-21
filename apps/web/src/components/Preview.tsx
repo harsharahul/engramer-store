@@ -16,6 +16,7 @@ export function Preview(props: {
   onShare: () => void;
   onRename: () => void;
   onEditTags: () => void;
+  onEdit?: () => void;
 }) {
   const { file } = props;
   const kind = fileKind(file.mime, file.name);
@@ -77,6 +78,11 @@ export function Preview(props: {
         <span className="name">{file.name}</span>
         <span className="meta">{formatBytes(file.size)}</span>
         <div className="grow" />
+        {props.onEdit && (
+          <button className="btn" onClick={props.onEdit}>
+            <PencilGlyph size={14} /> Edit
+          </button>
+        )}
         <button className="icon-btn" title="Share" onClick={props.onShare}>
           <ShareGlyph />
         </button>
