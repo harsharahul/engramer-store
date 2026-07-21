@@ -1,8 +1,7 @@
-import { createReadStream } from "node:fs";
 import { randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { blobPath } from "../blobs.js";
+import { blobKey } from "../blobs.js";
 import type { FileRow, ShareRow } from "../db.js";
 
 /**
@@ -79,6 +78,6 @@ export function registerShareRoutes(app: FastifyInstance): void {
     }
     reply.header("content-type", "application/octet-stream");
     reply.header("content-length", file.size);
-    return reply.send(createReadStream(blobPath(app.config.blobDir, file.id, "data")));
+    return reply.send(await app.blobs.get(blobKey(file.id, "data")));
   });
 }
