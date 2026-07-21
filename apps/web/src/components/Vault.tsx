@@ -13,6 +13,7 @@ import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { saveDecryptedFile } from "../download";
 import { clearThumbnailCache } from "../thumbs";
 import { FileCard, FolderCard } from "./FileCard";
+import { BrandMark, FolderArt } from "./FileArt";
 import { FileList, sortFiles, type SortKey, type SortState } from "./FileList";
 import { DetailsPanel } from "./DetailsPanel";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
@@ -234,6 +235,10 @@ export function Vault() {
   const renameFolder = renameFolderId ? store.folders.get(renameFolderId) : undefined;
   const selectedFile =
     selection.size === 1 ? (store.files.get([...selection][0]!) ?? null) : null;
+  const freshIds = useMemo(
+    () => new Set(store.reveal?.items.map((item) => item.fileId) ?? []),
+    [store.reveal],
+  );
 
   // ----- selection -----
 
@@ -537,7 +542,7 @@ export function Vault() {
     >
       <aside className="sidebar">
         <div className="brand">
-          <Keyhole size={19} />
+          <BrandMark size={24} />
           Engramer Store
         </div>
         {navButton(view.kind === "folder", () => setView({ kind: "folder", id: null }), <FolderGlyph />, "Files")}
@@ -798,6 +803,7 @@ export function Vault() {
                   file={file}
                   index={(view.kind === "folder" ? childFolders.length : 0) + i}
                   selected={selection.has(file.id)}
+                  fresh={freshIds.has(file.id)}
                   onSelect={(e) => select(file.id, e)}
                   onOpen={() => openFile(file.id)}
                   onContextMenu={(e) => openFileMenu(file.id, e)}
@@ -1007,7 +1013,7 @@ function EmptyState(props: {
   }
   return (
     <div className="empty">
-      <span className="empty-mark">⌘</span>
+      <span className="empty-art"><FolderArt /></span>
       <h3>An empty shelf</h3>
       <p>Drop files anywhere, paste from the clipboard, or start writing.</p>
       <div className="empty-actions">

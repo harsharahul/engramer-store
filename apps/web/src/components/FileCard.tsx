@@ -3,7 +3,7 @@ import type { FileEntry } from "../store";
 import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { StarGlyph } from "./Icon";
-import { FolderArt, SheetArt } from "./FileArt";
+import { FolderArt, KIND_ACCENTS, SheetArt } from "./FileArt";
 
 /**
  * Grid tile. Selection-first interaction: click selects (and opens the
@@ -14,6 +14,7 @@ export function FileCard(props: {
   file: FileEntry;
   index: number;
   selected: boolean;
+  fresh?: boolean;
   onSelect: (event: React.MouseEvent) => void;
   onOpen: () => void;
   onContextMenu: (event: React.MouseEvent) => void;
@@ -40,7 +41,7 @@ export function FileCard(props: {
 
   return (
     <div
-      className={`card${props.selected ? " selected" : ""}`}
+      className={`card${props.selected ? " selected" : ""}${props.fresh ? " fresh" : ""}`}
       style={{ "--i": Math.min(props.index, 20) } as CSSProperties}
       onClick={(e) => (coarse ? props.onOpen() : props.onSelect(e))}
       onDoubleClick={props.onOpen}
@@ -55,7 +56,7 @@ export function FileCard(props: {
       }}
       title={file.name}
     >
-      <div className="art">
+      <div className="art" style={{ color: KIND_ACCENTS[fileKind(file.mime, file.name)] }}>
         {thumb ? (
           <img src={thumb} alt="" loading="lazy" />
         ) : (

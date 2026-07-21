@@ -1,26 +1,63 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <defs><linearGradient id="brass" x1="0" y1="0" x2="0.6" y2="1">
-      <stop offset="0" stop-color="#f2cd7e"/><stop offset="0.55" stop-color="#dfae47"/><stop offset="1" stop-color="#aa7f2b"/>
+  <defs>
+    <linearGradient id="brass" x1="0.1" y1="0" x2="0.75" y2="1">
+      <stop offset="0" stop-color="#f8dc95"/>
+      <stop offset="0.32" stop-color="#eec161"/>
+      <stop offset="0.62" stop-color="#d9a83f"/>
+      <stop offset="1" stop-color="#9c722a"/>
     </linearGradient>
     <linearGradient id="brassdark" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#c69a3c"/><stop offset="1" stop-color="#8a651f"/>
+      <stop offset="0" stop-color="#c2963a"/>
+      <stop offset="1" stop-color="#7c5a1d"/>
     </linearGradient>
-    <radialGradient id="bg" cx="0.5" cy="0.38" r="0.85">
-      <stop offset="0" stop-color="#22262e"/><stop offset="1" stop-color="#0b0c0f"/>
-    </radialGradient></defs>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="bg" cx="0.5" cy="0.32" r="0.95">
+      <stop offset="0" stop-color="#262a33"/>
+      <stop offset="0.6" stop-color="#14161b"/>
+      <stop offset="1" stop-color="#08090b"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.42" r="0.55">
+      <stop offset="0" stop-color="#e3b34c" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#e3b34c" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+    <filter id="tiny" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="112" fill="url(#halo)"/>
+
   <!-- back panel with tab -->
-  <path d="M 92 176 a 18 18 0 0 1 18 -18 h 92 l 30 30 h 170 a 18 18 0 0 1 18 18 v 150 a 18 18 0 0 1 -18 18 H 110 a 18 18 0 0 1 -18 -18 Z"
-        fill="url(#brassdark)"/>
-  <!-- papers peeking -->
-  <rect x="124" y="180" width="252" height="120" rx="10" fill="#ece9e2"/>
-  <rect x="140" y="196" width="150" height="9" rx="4.5" fill="#b9b4a8"/>
-  <rect x="140" y="216" width="110" height="9" rx="4.5" fill="#cfc9bc"/>
+  <path d="M 88 170 a 20 20 0 0 1 20 -20 h 96 l 32 32 h 168 a 20 20 0 0 1 20 20 v 152 a 20 20 0 0 1 -20 20 H 108 a 20 20 0 0 1 -20 -20 Z"
+        fill="url(#brassdark)" filter="url(#soft)"/>
+
+  <!-- papers peeking, staggered -->
+  <g filter="url(#tiny)">
+    <rect x="150" y="168" width="212" height="110" rx="9" fill="#d8d3c6"/>
+    <rect x="126" y="184" width="248" height="110" rx="9" fill="#efece4"/>
+  </g>
+  <rect x="144" y="202" width="146" height="9" rx="4.5" fill="#b3ad9f"/>
+  <rect x="144" y="222" width="104" height="9" rx="4.5" fill="#ccc6b8"/>
+
   <!-- front flap -->
-  <path d="M 74 240 h 364 a 16 16 0 0 1 15.6 19.6 l -24 106 a 22 22 0 0 1 -21.5 17.4 H 104 a 22 22 0 0 1 -21.5 -17.4 l -24 -106 A 16 16 0 0 1 74 240 Z"
-        fill="url(#brass)"/>
-  <path d="M 74 240 h 364" stroke="#ffe9b8" stroke-width="4" opacity="0.5"/>
-  <!-- keyhole stud on the flap -->
-  <circle cx="256" cy="300" r="21" fill="#0d0e11"/>
-  <path d="M 247.5 313 L 241 349 a 5.5 5.5 0 0 0 5.5 6.8 h 19 a 5.5 5.5 0 0 0 5.5 -6.8 L 264.5 313 Z" fill="#0d0e11"/>
+  <path d="M 72 244 h 368 a 15 15 0 0 1 14.7 18.4 l -24.6 108 a 22 22 0 0 1 -21.4 17.6 H 103.3 a 22 22 0 0 1 -21.4 -17.6 l -24.6 -108 A 15 15 0 0 1 72 244 Z"
+        fill="url(#brass)" filter="url(#tiny)"/>
+  <!-- flap sheen -->
+  <path d="M 76 248 h 360 a 11 11 0 0 1 10.8 13.4 l -3.4 15 H 68.6 l -3.4 -15 A 11 11 0 0 1 76 248 Z"
+        fill="url(#sheen)" opacity="0.35"/>
+
+  <!-- keyhole with emboss -->
+  <g>
+    <circle cx="256" cy="303" r="22.5" fill="#f6e2ac" opacity="0.55" transform="translate(0,2)"/>
+    <path d="M 247 316 L 240 355 a 6 6 0 0 0 6 7.2 h 20 a 6 6 0 0 0 6 -7.2 L 265 316 Z" fill="#f6e2ac" opacity="0.55" transform="translate(0,2.5)"/>
+    <circle cx="256" cy="302" r="21.5" fill="#101114"/>
+    <path d="M 247.5 315 L 240.8 353 a 5.8 5.8 0 0 0 5.8 6.9 h 18.8 a 5.8 5.8 0 0 0 5.8 -6.9 L 264.5 315 Z" fill="#101114"/>
+  </g>
 </svg>

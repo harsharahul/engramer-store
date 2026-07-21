@@ -104,3 +104,29 @@ export function FolderArt() {
     </svg>
   );
 }
+
+/** Compact folder-and-keyhole brand mark, matching the app icon. */
+export function BrandMark({ size = 22 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 96 84" aria-hidden="true" className="brand-mark">
+      <defs>
+        <linearGradient id="bm-brass" x1="0.1" y1="0" x2="0.75" y2="1">
+          <stop offset="0" stopColor="#f4d284" />
+          <stop offset="0.5" stopColor="#e3b34c" />
+          <stop offset="1" stopColor="#a97f2c" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M 10 22 a 5 5 0 0 1 5 -5 h 22 l 8 8 h 36 a 5 5 0 0 1 5 5 v 34 a 5 5 0 0 1 -5 5 H 15 a 5 5 0 0 1 -5 -5 Z"
+        fill="#8a651f"
+      />
+      <rect x="20" y="20" width="56" height="26" rx="4" fill="#efece4" />
+      <path
+        d="M 5 40 h 86 a 4 4 0 0 1 3.9 4.9 l -5.6 26 a 6 6 0 0 1 -5.9 4.9 H 12.6 a 6 6 0 0 1 -5.9 -4.9 l -5.6 -26 A 4 4 0 0 1 5 40 Z"
+        fill="url(#bm-brass)"
+      />
+      <circle cx="48" cy="55" r="5.4" fill="#101114" />
+      <path d="M 45.8 58.4 L 44 68 a 1.6 1.6 0 0 0 1.6 1.9 h 4.8 a 1.6 1.6 0 0 0 1.6 -1.9 l -1.8 -9.6 Z" fill="#101114" />
+    </svg>
+  );
+}
