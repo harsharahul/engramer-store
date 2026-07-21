@@ -3,6 +3,20 @@
 All notable changes to Engramer Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.4.1] - 2026-07-21
+
+### Changed
+- App icon refined: richer brass, layered papers, sheen, and an embossed
+  keyhole, with the same mark now used as the in-app brand on the sign-in
+  screen and sidebar.
+- Every file kind casts its own subtle color atmosphere behind its card art,
+  and thumbnails ease into a gentle zoom on hover.
+- Newly uploaded files greet you with a brass shimmer sweep.
+- View titles are set in the display serif; the active sidebar item gains a
+  brass indicator bar; primary buttons, the storage meter, and the details
+  panel pick up gradient, glow, and slide-in refinements.
+- Empty states show the folder illustration with clear next actions.
+
 ## [0.4.0] - 2026-07-21
 
 ### Added
