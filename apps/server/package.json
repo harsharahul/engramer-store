@@ -1,6 +1,6 @@
 {
   "name": "@engramer/server",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Zero-knowledge storage server for Engramer Store",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -11,6 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1090.0",
+    "@aws-sdk/lib-storage": "^3.1090.0",
     "@engramer/crypto": "workspace:*",
     "@fastify/cors": "^11.3.0",
     "@fastify/jwt": "^10.2.0",
