@@ -1,15 +1,8 @@
-import { createReadStream } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Readable } from "node:stream";
 import { z } from "zod";
-import {
-  BlobTooLargeError,
-  blobPath,
-  deleteBlobIfExists,
-  writeBlobStream,
-  type BlobKind,
-} from "../blobs.js";
+import { BlobTooLargeError, blobKey, type BlobKind } from "../blobs.js";
 import type { FileRow, FolderRow } from "../db.js";
 
 const secretBoxSchema = z.object({ ciphertext: z.string(), nonce: z.string() });
@@ -217,10 +210,9 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     if (maxBytes <= 0 || declared > maxBytes) {
       return reply.code(413).send({ error: "storage quota exceeded" });
     }
-    const destination = blobPath(app.config.blobDir, id, kind);
     let written: number;
     try {
-      written = await writeBlobStream(request.body as Readable, destination, maxBytes);
+      written = await app.blobs.put(blobKey(id, kind), request.body as Readable, maxBytes);
     } catch (err) {
       if (err instanceof BlobTooLargeError) {
         return reply.code(413).send({ error: "storage quota exceeded" });
@@ -241,7 +233,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   app.put("/api/files/:id/data", auth, (request, reply) => uploadBlob(request, reply, "data"));
   app.put("/api/files/:id/thumbnail", auth, (request, reply) => uploadBlob(request, reply, "thumb"));
 
-  const downloadBlob = (request: FastifyRequest, reply: FastifyReply, kind: BlobKind) => {
+  const downloadBlob = async (request: FastifyRequest, reply: FastifyReply, kind: BlobKind) => {
     const { id } = request.params as { id: string };
     const file = getOwnFile(id, request.user.uid);
     if (!file || (kind === "data" && !file.uploaded) || (kind === "thumb" && !file.thumb_size)) {
@@ -249,7 +241,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     }
     reply.header("content-type", "application/octet-stream");
     reply.header("content-length", kind === "data" ? file.size : file.thumb_size);
-    return reply.send(createReadStream(blobPath(app.config.blobDir, id, kind)));
+    return reply.send(await app.blobs.get(blobKey(id, kind)));
   };
 
   app.get("/api/files/:id/data", auth, (request, reply) => downloadBlob(request, reply, "data"));
@@ -331,8 +323,8 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         .run(app.nextSeq(uid), Date.now(), id);
     });
     run();
-    deleteBlobIfExists(blobPath(app.config.blobDir, id, "data"));
-    deleteBlobIfExists(blobPath(app.config.blobDir, id, "thumb"));
+    await app.blobs.remove(blobKey(id, "data"));
+    await app.blobs.remove(blobKey(id, "thumb"));
     return reply.code(204).send();
   });
 

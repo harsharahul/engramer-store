@@ -7,6 +7,8 @@ import type Database from "better-sqlite3";
 import { ZodError } from "zod";
 import { ready } from "@engramer/crypto";
 import { loadConfig, type ConfigOverrides, type ServerConfig } from "./config.js";
+import { FsBlobStore, type BlobStore } from "./blobs.js";
+import { S3BlobStore } from "./s3.js";
 import { nextSeq, openDatabase, storageUsed } from "./db.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerStorageRoutes } from "./routes/storage.js";
@@ -16,6 +18,7 @@ declare module "fastify" {
   interface FastifyInstance {
     config: ServerConfig;
     db: Database.Database;
+    blobs: BlobStore;
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     nextSeq: (userId: number) => number;
     storageUsed: (userId: number) => number;
@@ -36,7 +39,17 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
 
   const app = Fastify({ bodyLimit: 16 * 1024 * 1024 });
 
+  let blobs: BlobStore;
+  if (config.s3) {
+    const s3 = new S3BlobStore(config.s3);
+    await s3.init();
+    blobs = s3;
+  } else {
+    blobs = new FsBlobStore(config.blobDir);
+  }
+
   app.decorate("config", config);
+  app.decorate("blobs", blobs);
   app.decorate("db", db);
   app.decorate("nextSeq", (userId: number) => nextSeq(db, userId));
   app.decorate("storageUsed", (userId: number) => storageUsed(db, userId));

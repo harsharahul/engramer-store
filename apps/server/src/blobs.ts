@@ -1,4 +1,4 @@
-import { createWriteStream, existsSync, statSync, unlinkSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, unlinkSync } from "node:fs";
 import { rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
@@ -7,8 +7,8 @@ import { Transform } from "node:stream";
 
 export type BlobKind = "data" | "thumb";
 
-export function blobPath(blobDir: string, fileId: string, kind: BlobKind): string {
-  return join(blobDir, kind === "data" ? fileId : `${fileId}.thumb`);
+export function blobKey(fileId: string, kind: BlobKind): string {
+  return kind === "data" ? fileId : `${fileId}.thumb`;
 }
 
 export class BlobTooLargeError extends Error {
@@ -18,18 +18,20 @@ export class BlobTooLargeError extends Error {
 }
 
 /**
- * Streams a request body to disk through a temp file, counting bytes and
- * aborting past maxBytes so a client cannot blow through its quota mid-upload.
- * Returns the number of bytes written.
+ * Where ciphertext lives. The metadata database never holds blob bytes; a
+ * store implementation only needs streaming put/get/remove of opaque keys.
  */
-export async function writeBlobStream(
-  source: Readable,
-  destination: string,
-  maxBytes: number,
-): Promise<number> {
-  const tmp = `${destination}.upload-${process.pid}-${Date.now()}`;
+export interface BlobStore {
+  /** Streams a blob in, enforcing maxBytes; resolves to the byte count. */
+  put(key: string, source: Readable, maxBytes: number): Promise<number>;
+  get(key: string): Promise<Readable>;
+  remove(key: string): Promise<void>;
+}
+
+/** Counts bytes flowing through and aborts the stream past maxBytes. */
+export function byteLimiter(maxBytes: number): { transform: Transform; written: () => number } {
   let written = 0;
-  const counter = new Transform({
+  const transform = new Transform({
     transform(chunk: Buffer, _enc, callback) {
       written += chunk.length;
       if (written > maxBytes) {
@@ -39,22 +41,41 @@ export async function writeBlobStream(
       callback(null, chunk);
     },
   });
-  try {
-    await pipeline(source, counter, createWriteStream(tmp, { mode: 0o600 }));
-    await rename(tmp, destination);
-    return written;
-  } catch (err) {
-    await unlink(tmp).catch(() => {});
-    throw err;
-  }
+  return { transform, written: () => written };
 }
 
-export function deleteBlobIfExists(path: string): void {
-  if (existsSync(path)) {
-    unlinkSync(path);
-  }
-}
+/**
+ * Local filesystem store: writes go through a temp file and an atomic rename,
+ * so a crashed upload never leaves a partial blob under its final name.
+ */
+export class FsBlobStore implements BlobStore {
+  constructor(private readonly dir: string) {}
 
-export function blobSize(path: string): number {
-  return statSync(path).size;
+  private path(key: string): string {
+    return join(this.dir, key);
+  }
+
+  async put(key: string, source: Readable, maxBytes: number): Promise<number> {
+    const destination = this.path(key);
+    const tmp = `${destination}.upload-${process.pid}-${Date.now()}`;
+    const limiter = byteLimiter(maxBytes);
+    try {
+      await pipeline(source, limiter.transform, createWriteStream(tmp, { mode: 0o600 }));
+      await rename(tmp, destination);
+      return limiter.written();
+    } catch (err) {
+      await unlink(tmp).catch(() => {});
+      throw err;
+    }
+  }
+
+  async get(key: string): Promise<Readable> {
+    return createReadStream(this.path(key));
+  }
+
+  async remove(key: string): Promise<void> {
+    if (existsSync(this.path(key))) {
+      unlinkSync(this.path(key));
+    }
+  }
 }
