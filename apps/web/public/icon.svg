@@ -1,35 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <defs>
-    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#f2c96b"/>
-      <stop offset="0.55" stop-color="#e3b34c"/>
-      <stop offset="1" stop-color="#b98a2e"/>
+  <defs><linearGradient id="brass" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#f2cd7e"/><stop offset="0.55" stop-color="#dfae47"/><stop offset="1" stop-color="#aa7f2b"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.75">
-      <stop offset="0" stop-color="#23262e"/>
-      <stop offset="1" stop-color="#0d0e11"/>
-    </radialGradient>
-  </defs>
-
-  <rect width="512" height="512" rx="112" fill="url(#glow)"/>
-
-  <!-- vault door: outer ring -->
-  <circle cx="256" cy="256" r="164" fill="none" stroke="url(#brass)" stroke-width="14"/>
-  <!-- dial tick marks, inside the door -->
-  <g stroke="url(#brass)" stroke-width="9" stroke-linecap="round" opacity="0.7">
-    <line x1="256" y1="102" x2="256" y2="122"/>
-    <line x1="256" y1="390" x2="256" y2="410"/>
-    <line x1="102" y1="256" x2="122" y2="256"/>
-    <line x1="390" y1="256" x2="410" y2="256"/>
-    <line x1="147.1" y1="147.1" x2="161.3" y2="161.3"/>
-    <line x1="350.7" y1="350.7" x2="364.9" y2="364.9"/>
-    <line x1="364.9" y1="147.1" x2="350.7" y2="161.3"/>
-    <line x1="161.3" y1="350.7" x2="147.1" y2="364.9"/>
-  </g>
-  <!-- inner ring -->
-  <circle cx="256" cy="256" r="120" fill="none" stroke="url(#brass)" stroke-width="5" opacity="0.45"/>
-
-  <!-- keyhole -->
-  <circle cx="256" cy="222" r="46" fill="url(#brass)"/>
-  <path d="M 236 252 L 218 330 a 8 8 0 0 0 8 10 h 60 a 8 8 0 0 0 8 -10 L 276 252 Z" fill="url(#brass)"/>
+    <linearGradient id="brassdark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c69a3c"/><stop offset="1" stop-color="#8a651f"/>
+    </linearGradient>
+    <radialGradient id="bg" cx="0.5" cy="0.38" r="0.85">
+      <stop offset="0" stop-color="#22262e"/><stop offset="1" stop-color="#0b0c0f"/>
+    </radialGradient></defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- back panel with tab -->
+  <path d="M 92 176 a 18 18 0 0 1 18 -18 h 92 l 30 30 h 170 a 18 18 0 0 1 18 18 v 150 a 18 18 0 0 1 -18 18 H 110 a 18 18 0 0 1 -18 -18 Z"
+        fill="url(#brassdark)"/>
+  <!-- papers peeking -->
+  <rect x="124" y="180" width="252" height="120" rx="10" fill="#ece9e2"/>
+  <rect x="140" y="196" width="150" height="9" rx="4.5" fill="#b9b4a8"/>
+  <rect x="140" y="216" width="110" height="9" rx="4.5" fill="#cfc9bc"/>
+  <!-- front flap -->
+  <path d="M 74 240 h 364 a 16 16 0 0 1 15.6 19.6 l -24 106 a 22 22 0 0 1 -21.5 17.4 H 104 a 22 22 0 0 1 -21.5 -17.4 l -24 -106 A 16 16 0 0 1 74 240 Z"
+        fill="url(#brass)"/>
+  <path d="M 74 240 h 364" stroke="#ffe9b8" stroke-width="4" opacity="0.5"/>
+  <!-- keyhole stud on the flap -->
+  <circle cx="256" cy="300" r="21" fill="#0d0e11"/>
+  <path d="M 247.5 313 L 241 349 a 5.5 5.5 0 0 0 5.5 6.8 h 19 a 5.5 5.5 0 0 0 5.5 -6.8 L 264.5 313 Z" fill="#0d0e11"/>
 </svg>
