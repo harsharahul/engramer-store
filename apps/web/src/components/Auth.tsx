@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { login, registerAccount, type Session } from "../session";
 import { useStore } from "../store";
-import { Keyhole } from "./Icon";
+import { BrandMark } from "./FileArt";
 
 type Mode = "signin" | "signup";
 
@@ -59,7 +59,7 @@ export function Auth() {
     <div className="auth-shell">
       <div className="auth-card">
         <div className="auth-brand">
-          <Keyhole size={34} />
+          <BrandMark size={52} />
           <h1>Engramer Store</h1>
           <p>End-to-end encrypted storage. Your keys never leave this device.</p>
         </div>
