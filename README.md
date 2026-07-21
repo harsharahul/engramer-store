@@ -69,8 +69,9 @@ Configuration via environment variables:
 | `ENGRAMER_QUOTA_BYTES` | `10737418240` | Per-user storage quota (10 GB) |
 | `ENGRAMER_MAX_BLOB_BYTES` | `21474836480` | Hard cap for a single upload |
 | `ENGRAMER_WEB_DIST` | auto-detected | Path to a built web client to serve |
+| `ENGRAMER_S3_BUCKET` | unset | Store blobs in an S3-compatible bucket instead of local disk |
 
-Run it behind TLS in production; the login key must only ever travel over HTTPS.
+Run it behind TLS in production; the login key must only ever travel over HTTPS. Storage architecture, the S3-compatible backend, and backup recipes are covered in [docs/storage.md](docs/storage.md).
 
 ## Development
 

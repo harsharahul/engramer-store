@@ -3,6 +3,28 @@
 All notable changes to Engramer Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.4.0] - 2026-07-21
+
+### Added
+- Details panel: a right-hand inspector with preview, metadata, actions, and
+  inline tag editing, opened by selecting any file.
+- Selection model: click to select, double-click to open, shift and
+  Cmd/Ctrl-click for ranges, with a floating bulk bar for favorite, move, and
+  trash across many files at once.
+- Right-click context menus for files and folders, a Move dialog, and
+  drag-and-drop of files onto folders and breadcrumbs.
+- List view with sortable columns alongside the grid, plus sort controls and a
+  per-user remembered layout.
+- S3-compatible blob storage backend (`ENGRAMER_S3_*`): AWS S3, MinIO,
+  Cloudflare R2, Garage, and Ceph RGW, with streaming multipart uploads and
+  automatic bucket creation. Storage architecture and reliability recipes are
+  documented in docs/storage.md.
+
+### Changed
+- New app icon: a brass vault dial.
+- Keyboard focus outlines throughout, and animations respect
+  `prefers-reduced-motion`.
+
 ## [0.3.0] - 2026-07-21
 
 ### Added
