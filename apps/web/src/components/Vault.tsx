@@ -13,11 +13,14 @@ import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { saveDecryptedFile } from "../download";
 import { clearThumbnailCache } from "../thumbs";
 import { FileCard, FolderCard } from "./FileCard";
+import { FileList, sortFiles, type SortKey, type SortState } from "./FileList";
+import { DetailsPanel } from "./DetailsPanel";
+import { ContextMenu, type MenuItem } from "./ContextMenu";
+import { MoveDialog } from "./MoveDialog";
 import { Preview } from "./Preview";
 import { Editor } from "./Editor";
 import { ShareDialog } from "./ShareDialog";
 import { UploadTray } from "./UploadTray";
-import { TagEditor } from "./TagEditor";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { Confirm, TextPrompt } from "./Dialogs";
 import {
@@ -28,26 +31,46 @@ import {
   ClockGlyph,
   CodeGlyph,
   DocGlyph,
+  DownloadGlyph,
   EaselGlyph,
   FolderGlyph,
   GridGlyph,
+  InfoGlyph,
   Keyhole,
+  LayoutGridGlyph,
+  LayoutListGlyph,
   LockGlyph,
   MonitorGlyph,
+  MoveGlyph,
   NoteGlyph,
+  PencilGlyph,
   PenNibGlyph,
   PhotoGlyph,
   PlusGlyph,
   ReceiptGlyph,
   RestoreGlyph,
   SearchGlyph,
+  ShareGlyph,
   SparkGlyph,
   StarGlyph,
+  TagGlyph,
   TrashGlyph,
   UploadGlyph,
   VideoGlyph,
   XGlyph,
 } from "./Icon";
+
+type View =
+  | { kind: "folder"; id: string | null }
+  | { kind: "recent" }
+  | { kind: "trash" }
+  | { kind: "favorites" }
+  | { kind: "category"; name: string };
+
+const CATEGORY_ORDER = [
+  "Photos", "Screenshots", "Documents", "Receipts", "Notes", "Code", "Videos",
+  "Audio", "Spreadsheets", "Presentations", "Design", "Archives", "Books", "Other",
+];
 
 const CATEGORY_ICONS: Record<string, (props: { size?: number }) => React.ReactNode> = {
   Photos: PhotoGlyph,
@@ -66,40 +89,32 @@ const CATEGORY_ICONS: Record<string, (props: { size?: number }) => React.ReactNo
   Other: AsteriskGlyph,
 };
 
-type View =
-  | { kind: "folder"; id: string | null }
-  | { kind: "recent" }
-  | { kind: "trash" }
-  | { kind: "favorites" }
-  | { kind: "category"; name: string };
+const DRAG_TYPE = "application/x-engramer-files";
 
-const CATEGORY_ORDER = [
-  "Photos",
-  "Screenshots",
-  "Documents",
-  "Receipts",
-  "Notes",
-  "Code",
-  "Videos",
-  "Audio",
-  "Spreadsheets",
-  "Presentations",
-  "Design",
-  "Archives",
-  "Books",
-  "Other",
-];
+function loadPref<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 export function Vault() {
   const store = useStore();
   const [view, setView] = useState<View>({ kind: "folder", id: null });
   const [query, setQuery] = useState("");
+  const [layout, setLayout] = useState<"grid" | "list">(() => loadPref("engramer-layout", "grid"));
+  const [sort, setSort] = useState<SortState>(() => loadPref("engramer-sort", { key: "name", dir: 1 }));
+  const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
+  const [detailsOpen, setDetailsOpen] = useState(() => loadPref("engramer-details", true));
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [moveIds, setMoveIds] = useState<string[] | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [editorId, setEditorId] = useState<string | null>(null);
   const [newNoteOpen, setNewNoteOpen] = useState(false);
   const [shareId, setShareId] = useState<string | null>(null);
-  const [tagsId, setTagsId] = useState<string | null>(null);
   const [renameFileId, setRenameFileId] = useState<string | null>(null);
   const [renameFolderId, setRenameFolderId] = useState<string | null>(null);
   const [deleteFolderId, setDeleteFolderId] = useState<string | null>(null);
@@ -108,9 +123,18 @@ export function Vault() {
   const [dragging, setDragging] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const dragDepth = useRef(0);
+  const lastSelected = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const persist = (key: string, value: unknown) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // Preference persistence is best-effort.
+    }
+  };
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -135,16 +159,6 @@ export function Vault() {
       counts.set(category, (counts.get(category) ?? 0) + 1);
     }
     return counts;
-  }, [liveFiles]);
-
-  const allTags = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const file of liveFiles) {
-      for (const tag of file.tags) {
-        counts.set(tag, (counts.get(tag) ?? 0) + 1);
-      }
-    }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([tag]) => tag);
   }, [liveFiles]);
 
   const breadcrumbs = useMemo(() => {
@@ -184,50 +198,103 @@ export function Vault() {
     [store.folders, currentFolderId],
   );
 
-  const childFiles = useMemo(
-    () =>
-      liveFiles
-        .filter((f) => f.folderId === currentFolderId)
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [liveFiles, currentFolderId],
-  );
-
-  const recentFiles = useMemo(
-    () => [...liveFiles].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 60),
-    [liveFiles],
-  );
-
-  const favoriteFiles = useMemo(() => liveFiles.filter((f) => f.favorite), [liveFiles]);
-
-  const categoryFiles = useMemo(
-    () =>
-      view.kind === "category"
-        ? liveFiles
-            .filter((f) => (f.category ?? "Other") === view.name)
-            .sort((a, b) => b.updatedAt - a.updatedAt)
-        : [],
-    [liveFiles, view],
-  );
-
-  const trashedFiles = useMemo(
-    () =>
-      [...store.files.values()]
-        .filter((f) => f.trashed)
-        .sort((a, b) => b.updatedAt - a.updatedAt),
-    [store.files],
-  );
+  // The file list the current view shows, in display order.
+  const viewFiles = useMemo(() => {
+    let files: FileEntry[];
+    switch (view.kind) {
+      case "recent":
+        return [...liveFiles].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 60);
+      case "favorites":
+        files = liveFiles.filter((f) => f.favorite);
+        break;
+      case "category":
+        files = liveFiles.filter((f) => (f.category ?? "Other") === view.name);
+        break;
+      case "trash":
+        return [...store.files.values()]
+          .filter((f) => f.trashed)
+          .sort((a, b) => b.updatedAt - a.updatedAt);
+      default:
+        files = liveFiles.filter((f) => f.folderId === currentFolderId);
+    }
+    return sortFiles(files, sort);
+  }, [view, liveFiles, store.files, currentFolderId, sort]);
 
   const hits = useMemo(
     () => (searching ? searchFiles(store.files.values(), query, store.folders) : []),
     [store.files, store.folders, query, searching],
   );
 
+  const visibleFiles = searching ? hits.map((h) => h.file) : viewFiles;
+
   const previewFile = previewId ? store.files.get(previewId) : undefined;
   const editorFile = editorId ? store.files.get(editorId) : undefined;
   const shareFile = shareId ? store.files.get(shareId) : undefined;
-  const tagsFile = tagsId ? store.files.get(tagsId) : undefined;
   const renameFile = renameFileId ? store.files.get(renameFileId) : undefined;
   const renameFolder = renameFolderId ? store.folders.get(renameFolderId) : undefined;
+  const selectedFile =
+    selection.size === 1 ? (store.files.get([...selection][0]!) ?? null) : null;
+
+  // ----- selection -----
+
+  const select = useCallback(
+    (id: string, event: React.MouseEvent) => {
+      setSelection((prev) => {
+        if (event.metaKey || event.ctrlKey) {
+          const next = new Set(prev);
+          if (next.has(id)) {
+            next.delete(id);
+          } else {
+            next.add(id);
+          }
+          lastSelected.current = id;
+          return next;
+        }
+        if (event.shiftKey && lastSelected.current) {
+          const order = visibleFiles.map((f) => f.id);
+          const from = order.indexOf(lastSelected.current);
+          const to = order.indexOf(id);
+          if (from >= 0 && to >= 0) {
+            const [lo, hi] = from < to ? [from, to] : [to, from];
+            return new Set(order.slice(lo, hi + 1));
+          }
+        }
+        lastSelected.current = id;
+        return new Set([id]);
+      });
+    },
+    [visibleFiles],
+  );
+
+  const clearSelection = useCallback(() => {
+    setSelection(new Set());
+    lastSelected.current = null;
+  }, []);
+
+  useEffect(() => clearSelection(), [view, query, clearSelection]);
+
+  // ----- actions -----
+
+  const download = (file: FileEntry) => {
+    void saveDecryptedFile(file).catch(() => showToast("Download failed."));
+  };
+
+  const openFile = (id: string) => {
+    setPreviewId(id);
+    setQuery("");
+  };
+
+  const searchTag = (tag: string) => {
+    setQuery(`tag:${tag}`);
+    searchInput.current?.focus();
+  };
+
+  const inspect = (id: string) => {
+    setSelection(new Set([id]));
+    lastSelected.current = id;
+    setDetailsOpen(true);
+    persist("engramer-details", true);
+  };
 
   const uploadTo = useCallback(
     (files: File[]) => {
@@ -238,7 +305,97 @@ export function Vault() {
     [store, currentFolderId],
   );
 
-  // Cmd+K opens the palette; "/" jumps to search when not already typing.
+  const fileMenuItems = (file: FileEntry): MenuItem[] => [
+    { id: "open", label: "Open", run: () => openFile(file.id) },
+    ...(fileKind(file.mime, file.name) === "text"
+      ? [{ id: "edit", label: "Edit", icon: <PencilGlyph size={13} />, run: () => setEditorId(file.id) }]
+      : []),
+    { id: "download", label: "Download", icon: <DownloadGlyph size={13} />, run: () => download(file) },
+    { id: "share", label: "Share", icon: <ShareGlyph size={13} />, run: () => setShareId(file.id) },
+    { id: "d1", label: "", divider: true, run: () => {} },
+    {
+      id: "favorite",
+      label: file.favorite ? "Remove favorite" : "Add to favorites",
+      icon: <StarGlyph size={13} filled={file.favorite} />,
+      run: () => void store.toggleFavorite(file.id),
+    },
+    { id: "tags", label: "Tags and details", icon: <TagGlyph size={13} />, run: () => inspect(file.id) },
+    { id: "rename", label: "Rename", icon: <PencilGlyph size={13} />, run: () => setRenameFileId(file.id) },
+    {
+      id: "move",
+      label: "Move to…",
+      icon: <MoveGlyph size={13} />,
+      run: () => setMoveIds(selection.has(file.id) && selection.size > 1 ? [...selection] : [file.id]),
+    },
+    { id: "d2", label: "", divider: true, run: () => {} },
+    {
+      id: "trash",
+      label: "Move to trash",
+      icon: <TrashGlyph size={13} />,
+      danger: true,
+      run: () => {
+        void store.trashFile(file.id);
+        clearSelection();
+      },
+    },
+  ];
+
+  const openFileMenu = (id: string, event: React.MouseEvent) => {
+    event.preventDefault();
+    const file = store.files.get(id);
+    if (!file) {
+      return;
+    }
+    if (!selection.has(id)) {
+      setSelection(new Set([id]));
+      lastSelected.current = id;
+    }
+    setCtxMenu({ x: event.clientX, y: event.clientY, items: fileMenuItems(file) });
+  };
+
+  const openFolderMenu = (folderId: string, event: React.MouseEvent) => {
+    event.preventDefault();
+    setCtxMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        { id: "open", label: "Open", run: () => setView({ kind: "folder", id: folderId }) },
+        { id: "rename", label: "Rename", icon: <PencilGlyph size={13} />, run: () => setRenameFolderId(folderId) },
+        { id: "d", label: "", divider: true, run: () => {} },
+        {
+          id: "delete",
+          label: "Delete folder",
+          icon: <TrashGlyph size={13} />,
+          danger: true,
+          run: () => setDeleteFolderId(folderId),
+        },
+      ],
+    });
+  };
+
+  const startFileDrag = (id: string, event: React.DragEvent) => {
+    const ids = selection.has(id) ? [...selection] : [id];
+    event.dataTransfer.setData(DRAG_TYPE, JSON.stringify(ids));
+    event.dataTransfer.effectAllowed = "move";
+  };
+
+  const dropOnFolder = (folderId: string | null, event: React.DragEvent) => {
+    try {
+      const ids = JSON.parse(event.dataTransfer.getData(DRAG_TYPE)) as string[];
+      void (async () => {
+        for (const id of ids) {
+          await store.moveFile(id, folderId);
+        }
+        showToast(`Moved ${ids.length} item${ids.length === 1 ? "" : "s"}`);
+        clearSelection();
+      })();
+    } catch {
+      // Not an internal drag.
+    }
+  };
+
+  // ----- global keys and paste -----
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const typing =
@@ -250,13 +407,14 @@ export function Vault() {
       } else if (event.key === "/" && !typing && !paletteOpen) {
         event.preventDefault();
         searchInput.current?.focus();
+      } else if (event.key === "Escape" && !typing && selection.size > 0 && !previewId && !editorId && !ctxMenu) {
+        clearSelection();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [paletteOpen]);
+  }, [paletteOpen, selection, previewId, editorId, ctxMenu, clearSelection]);
 
-  // Paste an image or file anywhere to upload it.
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const target = event.target;
@@ -274,7 +432,7 @@ export function Vault() {
     return () => window.removeEventListener("paste", onPaste);
   }, [uploadTo, showToast]);
 
-  const onDrop = (event: DragEvent) => {
+  const onOsDrop = (event: DragEvent) => {
     event.preventDefault();
     dragDepth.current = 0;
     setDragging(false);
@@ -286,20 +444,12 @@ export function Vault() {
     store.logout();
   };
 
-  const download = (file: FileEntry) => {
-    void saveDecryptedFile(file).catch(() => showToast("Download failed."));
-  };
-
-  const searchTag = (tag: string) => {
-    setQuery(`tag:${tag}`);
-    searchInput.current?.focus();
-  };
-
   const paletteActions = useMemo<PaletteAction[]>(
     () => [
       { id: "upload", label: "Upload files", hint: "encrypt and store", run: () => fileInput.current?.click() },
       { id: "new-note", label: "New note", hint: "write, encrypted", run: () => setNewNoteOpen(true) },
       { id: "new-folder", label: "New folder", run: () => setNewFolderOpen(true) },
+      { id: "toggle-layout", label: "Toggle grid and list", run: () => toggleLayout() },
       { id: "go-files", label: "Go to All files", run: () => setView({ kind: "folder", id: null }) },
       { id: "go-recent", label: "Go to Recent", run: () => setView({ kind: "recent" }) },
       { id: "go-favorites", label: "Go to Favorites", run: () => setView({ kind: "favorites" }) },
@@ -310,36 +460,71 @@ export function Vault() {
     [],
   );
 
+  const toggleLayout = () => {
+    setLayout((prev) => {
+      const next = prev === "grid" ? "list" : "grid";
+      persist("engramer-layout", next);
+      return next;
+    });
+  };
+
+  const onSort = (key: SortKey) => {
+    setSort((prev) => {
+      const next: SortState =
+        prev.key === key ? { key, dir: prev.dir === 1 ? -1 : 1 } : { key, dir: key === "name" ? 1 : -1 };
+      persist("engramer-sort", next);
+      return next;
+    });
+  };
+
   const usagePercent = store.usage
     ? Math.min(100, Math.round((store.usage.usedBytes / store.usage.quotaBytes) * 100))
     : 0;
 
   const libraryCategories = CATEGORY_ORDER.filter((c) => (categoryCounts.get(c) ?? 0) > 0);
 
-  const openFile = (id: string) => {
-    setPreviewId(id);
-    setQuery("");
-  };
+  const viewTitle = searching
+    ? `${hits.length} result${hits.length === 1 ? "" : "s"}`
+    : view.kind === "folder"
+      ? (breadcrumbs[breadcrumbs.length - 1]?.name ?? "All files")
+      : view.kind === "category"
+        ? view.name
+        : view.kind === "recent"
+          ? "Recent"
+          : view.kind === "favorites"
+            ? "Favorites"
+            : "Trash";
 
-  const fileCardProps = (file: FileEntry, index: number) => ({
-    key: file.id,
-    file,
-    index,
-    onOpen: () => setPreviewId(file.id),
-    onDownload: () => download(file),
-    onShare: () => setShareId(file.id),
-    onToggleFavorite: () => void store.toggleFavorite(file.id),
-    onTagClick: searchTag,
-    onTrash: () => void store.trashFile(file.id),
-  });
+  const showViewControls = !searching && view.kind !== "trash";
+
+  const navButton = (
+    active: boolean,
+    onClick: () => void,
+    icon: React.ReactNode,
+    label: string,
+    count?: number,
+  ) => (
+    <button
+      className={`nav-item${active && !searching ? " active" : ""}`}
+      onClick={() => {
+        setQuery("");
+        onClick();
+      }}
+    >
+      {icon} {label}
+      {count !== undefined && count > 0 && <span className="nav-count">{count}</span>}
+    </button>
+  );
 
   return (
     <div
-      className={`frame${dragging ? " dropzone-active" : ""}`}
+      className={`frame${dragging ? " dropzone-active" : ""}${detailsOpen ? " with-details" : ""}`}
       onDragEnter={(e) => {
-        e.preventDefault();
-        dragDepth.current += 1;
-        setDragging(true);
+        if (e.dataTransfer.types.includes("Files") && !e.dataTransfer.types.includes(DRAG_TYPE)) {
+          e.preventDefault();
+          dragDepth.current += 1;
+          setDragging(true);
+        }
       }}
       onDragLeave={() => {
         dragDepth.current = Math.max(0, dragDepth.current - 1);
@@ -348,50 +533,23 @@ export function Vault() {
         }
       }}
       onDragOver={(e) => e.preventDefault()}
-      onDrop={onDrop}
+      onDrop={onOsDrop}
     >
       <aside className="sidebar">
         <div className="brand">
           <Keyhole size={19} />
           Engramer Store
         </div>
-        <button
-          className={`nav-item${view.kind === "folder" && !searching ? " active" : ""}`}
-          onClick={() => {
-            setQuery("");
-            setView({ kind: "folder", id: null });
-          }}
-        >
-          <FolderGlyph /> Files
-        </button>
-        <button
-          className={`nav-item${view.kind === "recent" && !searching ? " active" : ""}`}
-          onClick={() => {
-            setQuery("");
-            setView({ kind: "recent" });
-          }}
-        >
-          <ClockGlyph /> Recent
-        </button>
-        <button
-          className={`nav-item${view.kind === "favorites" && !searching ? " active" : ""}`}
-          onClick={() => {
-            setQuery("");
-            setView({ kind: "favorites" });
-          }}
-        >
-          <StarGlyph /> Favorites
-          {favoriteFiles.length > 0 && <span className="nav-count">{favoriteFiles.length}</span>}
-        </button>
-        <button
-          className={`nav-item${view.kind === "trash" && !searching ? " active" : ""}`}
-          onClick={() => {
-            setQuery("");
-            setView({ kind: "trash" });
-          }}
-        >
-          <TrashGlyph /> Trash
-        </button>
+        {navButton(view.kind === "folder", () => setView({ kind: "folder", id: null }), <FolderGlyph />, "Files")}
+        {navButton(view.kind === "recent", () => setView({ kind: "recent" }), <ClockGlyph />, "Recent")}
+        {navButton(
+          view.kind === "favorites",
+          () => setView({ kind: "favorites" }),
+          <StarGlyph />,
+          "Favorites",
+          liveFiles.filter((f) => f.favorite).length,
+        )}
+        {navButton(view.kind === "trash", () => setView({ kind: "trash" }), <TrashGlyph />, "Trash")}
 
         {libraryCategories.length > 0 && (
           <>
@@ -459,11 +617,24 @@ export function Vault() {
             <SparkGlyph size={14} /> <kbd className="mono">⌘K</kbd>
           </button>
           <div className="grow" />
-          <button className="btn" onClick={() => setNewFolderOpen(true)}>
-            <PlusGlyph /> New folder
+          <button className="btn" title="New note" onClick={() => setNewNoteOpen(true)}>
+            <NoteGlyph size={14} /> <span className="btn-label">New note</span>
+          </button>
+          <button className="btn" title="New folder" onClick={() => setNewFolderOpen(true)}>
+            <PlusGlyph /> <span className="btn-label">New folder</span>
           </button>
           <button className="btn btn-brass" onClick={() => fileInput.current?.click()}>
             <UploadGlyph /> Upload
+          </button>
+          <button
+            className={`icon-btn info-toggle${detailsOpen ? " active" : ""}`}
+            title={detailsOpen ? "Hide details" : "Show details"}
+            onClick={() => {
+              setDetailsOpen(!detailsOpen);
+              persist("engramer-details", !detailsOpen);
+            }}
+          >
+            <InfoGlyph />
           </button>
           <input
             ref={fileInput}
@@ -477,50 +648,21 @@ export function Vault() {
           />
         </div>
 
-        <div className="content">
-          {searching ? (
-            <SearchResults
-              hits={hits}
-              query={query}
-              onOpen={openFile}
-              onClear={() => setQuery("")}
-            />
-          ) : view.kind === "trash" ? (
-            <TrashList
-              files={trashedFiles}
-              onRestore={(id) => void store.restoreFile(id)}
-              onDeleteForever={(id) => setDeleteForeverId(id)}
-            />
-          ) : view.kind === "recent" ? (
-            <SimpleList title="Recent" files={recentFiles} onOpen={openFile} />
-          ) : view.kind === "favorites" ? (
-            <SimpleList
-              title="Favorites"
-              files={favoriteFiles}
-              onOpen={openFile}
-              emptyMark="☆"
-              emptyTitle="No favorites yet"
-              emptyHint="Tap the star on any file to keep it one click away."
-            />
-          ) : view.kind === "category" ? (
-            <>
-              <div className="crumbs">
-                <span className="current">{view.name}</span>
-                <span className="crumb-note">
-                  auto-categorized on this device · {categoryFiles.length} item
-                  {categoryFiles.length === 1 ? "" : "s"}
-                </span>
-              </div>
-              <div className="grid">
-                {categoryFiles.map((file, i) => (
-                  <FileCard {...fileCardProps(file, i)} />
-                ))}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="crumbs">
-                <button onClick={() => setView({ kind: "folder", id: null })}>All files</button>
+        <div className="viewbar">
+          <div className="crumbs">
+            {view.kind === "folder" && !searching ? (
+              <>
+                <button
+                  onClick={() => setView({ kind: "folder", id: null })}
+                  onDragOver={(e) => {
+                    if (e.dataTransfer.types.includes(DRAG_TYPE)) {
+                      e.preventDefault();
+                    }
+                  }}
+                  onDrop={(e) => dropOnFolder(null, e)}
+                >
+                  All files
+                </button>
                 {breadcrumbs.map((crumb, i) => (
                   <span key={crumb.id} style={{ display: "contents" }}>
                     <span className="sep">/</span>
@@ -533,20 +675,85 @@ export function Vault() {
                     )}
                   </span>
                 ))}
+              </>
+            ) : (
+              <span className="current">{viewTitle}</span>
+            )}
+            <span className="crumb-note">
+              {searching
+                ? `for “${query}”`
+                : `${visibleFiles.length} file${visibleFiles.length === 1 ? "" : "s"}${
+                    view.kind === "folder" && childFolders.length
+                      ? ` · ${childFolders.length} folder${childFolders.length === 1 ? "" : "s"}`
+                      : ""
+                  }`}
+            </span>
+            {searching && (
+              <button className="icon-btn" onClick={() => setQuery("")} title="Clear search">
+                <XGlyph size={13} />
+              </button>
+            )}
+          </div>
+          {showViewControls && (
+            <div className="view-controls">
+              <select
+                className="sort-select"
+                value={sort.key}
+                onChange={(e) => onSort(e.target.value as SortKey)}
+                title="Sort by"
+              >
+                <option value="name">Name</option>
+                <option value="mtime">Modified</option>
+                <option value="size">Size</option>
+              </select>
+              <button
+                className="icon-btn"
+                title={sort.dir === 1 ? "Ascending" : "Descending"}
+                onClick={() => onSort(sort.key)}
+              >
+                {sort.dir === 1 ? "↑" : "↓"}
+              </button>
+              <div className="seg">
+                <button
+                  className={layout === "grid" ? "active" : ""}
+                  title="Grid"
+                  onClick={() => layout !== "grid" && toggleLayout()}
+                >
+                  <LayoutGridGlyph size={14} />
+                </button>
+                <button
+                  className={layout === "list" ? "active" : ""}
+                  title="List"
+                  onClick={() => layout !== "list" && toggleLayout()}
+                >
+                  <LayoutListGlyph size={14} />
+                </button>
               </div>
+            </div>
+          )}
+        </div>
 
-              {childFolders.length === 0 && childFiles.length === 0 ? (
-                <div className="empty">
-                  <span className="empty-mark">⌘</span>
-                  <h3>{store.synced ? "An empty shelf" : "Decrypting your library"}</h3>
-                  <p>
-                    {store.synced
-                      ? "Drop files anywhere, paste from the clipboard, or press ⌘K. Everything is encrypted and sorted on this device."
-                      : "One moment."}
-                  </p>
-                </div>
-              ) : (
-                <div className="grid">
+        <div className="content" onClick={(e) => e.target === e.currentTarget && clearSelection()}>
+          {searching ? (
+            <SearchResults
+              hits={hits}
+              selection={selection}
+              onSelect={select}
+              onOpen={openFile}
+              onContextMenu={openFileMenu}
+            />
+          ) : view.kind === "trash" ? (
+            <TrashList
+              files={viewFiles}
+              onRestore={(id) => void store.restoreFile(id)}
+              onDeleteForever={(id) => setDeleteForeverId(id)}
+            />
+          ) : visibleFiles.length === 0 && (view.kind !== "folder" || childFolders.length === 0) ? (
+            <EmptyState view={view} synced={store.synced} onUpload={() => fileInput.current?.click()} onNote={() => setNewNoteOpen(true)} />
+          ) : layout === "list" && view.kind !== "recent" ? (
+            <>
+              {view.kind === "folder" && childFolders.length > 0 && (
+                <div className="grid folders-strip">
                   {childFolders.map((folder, i) => (
                     <FolderCard
                       key={folder.id}
@@ -554,22 +761,109 @@ export function Vault() {
                       count={folderCounts.get(folder.id) ?? 0}
                       index={i}
                       onOpen={() => setView({ kind: "folder", id: folder.id })}
-                      onRename={() => setRenameFolderId(folder.id)}
-                      onDelete={() => setDeleteFolderId(folder.id)}
+                      onContextMenu={(e) => openFolderMenu(folder.id, e)}
+                      onDropFiles={(e) => dropOnFolder(folder.id, e)}
                     />
-                  ))}
-                  {childFiles.map((file, i) => (
-                    <FileCard {...fileCardProps(file, childFolders.length + i)} />
                   ))}
                 </div>
               )}
+              <FileList
+                files={visibleFiles}
+                selection={selection}
+                sort={sort}
+                onSort={onSort}
+                onSelect={select}
+                onOpen={openFile}
+                onContextMenu={openFileMenu}
+                onDragStart={startFileDrag}
+              />
             </>
+          ) : (
+            <div className="grid">
+              {view.kind === "folder" &&
+                childFolders.map((folder, i) => (
+                  <FolderCard
+                    key={folder.id}
+                    name={folder.name}
+                    count={folderCounts.get(folder.id) ?? 0}
+                    index={i}
+                    onOpen={() => setView({ kind: "folder", id: folder.id })}
+                    onContextMenu={(e) => openFolderMenu(folder.id, e)}
+                    onDropFiles={(e) => dropOnFolder(folder.id, e)}
+                  />
+                ))}
+              {visibleFiles.map((file, i) => (
+                <FileCard
+                  key={file.id}
+                  file={file}
+                  index={(view.kind === "folder" ? childFolders.length : 0) + i}
+                  selected={selection.has(file.id)}
+                  onSelect={(e) => select(file.id, e)}
+                  onOpen={() => openFile(file.id)}
+                  onContextMenu={(e) => openFileMenu(file.id, e)}
+                  onDragStart={(e) => startFileDrag(file.id, e)}
+                />
+              ))}
+            </div>
           )}
         </div>
       </main>
 
-      <UploadTray />
+      {detailsOpen && view.kind !== "trash" && (
+        <DetailsPanel
+          file={selectedFile}
+          selectionCount={selection.size}
+          onOpen={openFile}
+          onEdit={(id) => setEditorId(id)}
+          onDownload={download}
+          onShare={(id) => setShareId(id)}
+          onRename={(id) => setRenameFileId(id)}
+          onTrash={(id) => {
+            void store.trashFile(id);
+            clearSelection();
+          }}
+          onTagClick={searchTag}
+          onClose={() => {
+            setDetailsOpen(false);
+            persist("engramer-details", false);
+          }}
+        />
+      )}
 
+      {selection.size > 1 && (
+        <div className="bulk-bar">
+          <span>{selection.size} selected</span>
+          <button
+            className="btn btn-ghost"
+            onClick={() => {
+              for (const id of selection) {
+                void store.toggleFavorite(id);
+              }
+            }}
+          >
+            <StarGlyph size={13} /> Favorite
+          </button>
+          <button className="btn btn-ghost" onClick={() => setMoveIds([...selection])}>
+            <MoveGlyph size={13} /> Move
+          </button>
+          <button
+            className="btn btn-ghost danger"
+            onClick={() => {
+              for (const id of selection) {
+                void store.trashFile(id);
+              }
+              clearSelection();
+            }}
+          >
+            <TrashGlyph size={13} /> Trash
+          </button>
+          <button className="icon-btn" title="Clear selection" onClick={clearSelection}>
+            <XGlyph size={13} />
+          </button>
+        </div>
+      )}
+
+      <UploadTray />
       {store.reveal && (
         <RevealToast
           onOpen={(folderId) => {
@@ -579,13 +873,19 @@ export function Vault() {
           }}
         />
       )}
-
-      {paletteOpen && (
-        <CommandPalette
-          actions={paletteActions}
-          onOpenFile={openFile}
-          onClose={() => setPaletteOpen(false)}
+      {ctxMenu && <ContextMenu {...ctxMenu} onClose={() => setCtxMenu(null)} />}
+      {moveIds && (
+        <MoveDialog
+          fileIds={moveIds}
+          onMoved={() => {
+            showToast("Moved.");
+            clearSelection();
+          }}
+          onClose={() => setMoveIds(null)}
         />
+      )}
+      {paletteOpen && (
+        <CommandPalette actions={paletteActions} onOpenFile={openFile} onClose={() => setPaletteOpen(false)} />
       )}
       {previewFile && !editorFile && (
         <Preview
@@ -596,7 +896,10 @@ export function Vault() {
             setPreviewId(null);
           }}
           onRename={() => setRenameFileId(previewFile.id)}
-          onEditTags={() => setTagsId(previewFile.id)}
+          onEditTags={() => {
+            setPreviewId(null);
+            inspect(previewFile.id);
+          }}
           onEdit={
             fileKind(previewFile.mime, previewFile.name) === "text"
               ? () => {
@@ -624,17 +927,6 @@ export function Vault() {
             setEditorId(id);
           }}
           onClose={() => setNewNoteOpen(false)}
-        />
-      )}
-      {shareFile && (
-        <ShareDialog file={shareFile} onClose={() => setShareId(null)} onToast={showToast} />
-      )}
-      {tagsFile && (
-        <TagEditor
-          file={tagsFile}
-          suggestions={allTags}
-          onSave={(tags) => store.setTags(tagsFile.id, tags)}
-          onClose={() => setTagsId(null)}
         />
       )}
       {newFolderOpen && (
@@ -689,7 +981,47 @@ export function Vault() {
   );
 }
 
-/** The payoff moment: what was filed where, and what it was tagged. */
+function EmptyState(props: {
+  view: View;
+  synced: boolean;
+  onUpload: () => void;
+  onNote: () => void;
+}) {
+  if (!props.synced) {
+    return (
+      <div className="empty">
+        <span className="empty-mark">⌘</span>
+        <h3>Decrypting your library</h3>
+        <p>One moment.</p>
+      </div>
+    );
+  }
+  if (props.view.kind === "favorites") {
+    return (
+      <div className="empty">
+        <span className="empty-mark">☆</span>
+        <h3>No favorites yet</h3>
+        <p>Right-click any file and choose "Add to favorites".</p>
+      </div>
+    );
+  }
+  return (
+    <div className="empty">
+      <span className="empty-mark">⌘</span>
+      <h3>An empty shelf</h3>
+      <p>Drop files anywhere, paste from the clipboard, or start writing.</p>
+      <div className="empty-actions">
+        <button className="btn btn-brass" onClick={props.onUpload}>
+          <UploadGlyph /> Upload files
+        </button>
+        <button className="btn" onClick={props.onNote}>
+          <NoteGlyph size={14} /> New note
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function RevealToast(props: { onOpen: (folderId: string | null) => void }) {
   const reveal = useStore((s) => s.reveal);
   const dismiss = useStore((s) => s.dismissReveal);
@@ -704,7 +1036,6 @@ function RevealToast(props: { onOpen: (folderId: string | null) => void }) {
   }
   const first = reveal.items[0]!;
   const others = reveal.items.length - 1;
-  const tags = first.tags.slice(0, 4);
 
   return (
     <div className="reveal" onClick={() => props.onOpen(first.folderId)}>
@@ -717,7 +1048,7 @@ function RevealToast(props: { onOpen: (folderId: string | null) => void }) {
           {others > 0 ? ` and ${others} more` : ""}
         </div>
         <div className="reveal-tags">
-          {tags.map((tag) => (
+          {first.tags.slice(0, 4).map((tag) => (
             <span key={tag} className="tag">
               {tag}
             </span>
@@ -740,94 +1071,44 @@ function RevealToast(props: { onOpen: (folderId: string | null) => void }) {
 
 function SearchResults(props: {
   hits: ReturnType<typeof searchFiles>;
-  query: string;
+  selection: ReadonlySet<string>;
+  onSelect: (id: string, event: React.MouseEvent) => void;
   onOpen: (id: string) => void;
-  onClear: () => void;
+  onContextMenu: (id: string, event: React.MouseEvent) => void;
 }) {
-  return (
-    <>
-      <div className="crumbs">
-        <span className="current">
-          {props.hits.length} result{props.hits.length === 1 ? "" : "s"} for “{props.query}”
-        </span>
-        <button onClick={props.onClear} title="Clear search">
-          <XGlyph size={13} />
-        </button>
+  if (props.hits.length === 0) {
+    return (
+      <div className="empty">
+        <span className="empty-mark">∅</span>
+        <h3>No matches</h3>
+        <p>
+          Search covers names, tags, and text inside documents, decrypted only on this device. Try{" "}
+          <code>tag:receipts</code>, <code>type:image</code>, or <code>is:favorite</code>.
+        </p>
       </div>
-      {props.hits.length === 0 ? (
-        <div className="empty">
-          <span className="empty-mark">∅</span>
-          <h3>No matches</h3>
-          <p>
-            Search covers names, tags, and text inside documents, decrypted only on this device.
-            Try <code>tag:receipts</code>, <code>type:image</code>, or <code>is:favorite</code>.
-          </p>
-        </div>
-      ) : (
-        <div className="rows">
-          {props.hits.map((hit, i) => (
-            <div
-              key={hit.file.id}
-              className="row"
-              style={{ "--i": Math.min(i, 20) } as CSSProperties}
-              onClick={() => props.onOpen(hit.file.id)}
-            >
-              <span className="row-glyph">{extension(hit.file.name) || "FILE"}</span>
-              <div className="row-main">
-                <div className="name">{hit.file.name}</div>
-                {hit.matchedText && <div className="snippet">{hit.matchedText}</div>}
-              </div>
-              {hit.file.category && <span className="row-tag">{hit.file.category}</span>}
-              <span className="row-meta">{formatBytes(hit.file.size)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
-
-function SimpleList(props: {
-  title: string;
-  files: FileEntry[];
-  onOpen: (id: string) => void;
-  emptyMark?: string;
-  emptyTitle?: string;
-  emptyHint?: string;
-}) {
+    );
+  }
   return (
-    <>
-      <div className="crumbs">
-        <span className="current">{props.title}</span>
-      </div>
-      {props.files.length === 0 ? (
-        <div className="empty">
-          <span className="empty-mark">{props.emptyMark ?? "◷"}</span>
-          <h3>{props.emptyTitle ?? "Nothing yet"}</h3>
-          {props.emptyHint && <p>{props.emptyHint}</p>}
+    <div className="rows">
+      {props.hits.map((hit, i) => (
+        <div
+          key={hit.file.id}
+          className={`row${props.selection.has(hit.file.id) ? " selected" : ""}`}
+          style={{ "--i": Math.min(i, 20) } as CSSProperties}
+          onClick={(e) => props.onSelect(hit.file.id, e)}
+          onDoubleClick={() => props.onOpen(hit.file.id)}
+          onContextMenu={(e) => props.onContextMenu(hit.file.id, e)}
+        >
+          <span className="row-glyph">{extension(hit.file.name) || "FILE"}</span>
+          <div className="row-main">
+            <div className="name">{hit.file.name}</div>
+            {hit.matchedText && <div className="snippet">{hit.matchedText}</div>}
+          </div>
+          {hit.file.category && <span className="row-tag">{hit.file.category}</span>}
+          <span className="row-meta">{formatBytes(hit.file.size)}</span>
         </div>
-      ) : (
-        <div className="rows">
-          {props.files.map((file, i) => (
-            <div
-              key={file.id}
-              className="row"
-              style={{ "--i": Math.min(i, 20) } as CSSProperties}
-              onClick={() => props.onOpen(file.id)}
-            >
-              <span className="row-glyph">{extension(file.name) || "FILE"}</span>
-              <div className="row-main">
-                <div className="name">{file.name}</div>
-              </div>
-              {file.category && <span className="row-tag">{file.category}</span>}
-              <span className="row-meta">
-                {formatBytes(file.size)} · {formatDate(file.updatedAt)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </>
+      ))}
+    </div>
   );
 }
 
@@ -836,41 +1117,33 @@ function TrashList(props: {
   onRestore: (id: string) => void;
   onDeleteForever: (id: string) => void;
 }) {
-  return (
-    <>
-      <div className="crumbs">
-        <span className="current">Trash</span>
+  if (props.files.length === 0) {
+    return (
+      <div className="empty">
+        <span className="empty-mark">◌</span>
+        <h3>Trash is empty</h3>
       </div>
-      {props.files.length === 0 ? (
-        <div className="empty">
-          <span className="empty-mark">◌</span>
-          <h3>Trash is empty</h3>
+    );
+  }
+  return (
+    <div className="rows">
+      {props.files.map((file, i) => (
+        <div key={file.id} className="row" style={{ "--i": Math.min(i, 20) } as CSSProperties}>
+          <span className="row-glyph">{extension(file.name) || "FILE"}</span>
+          <div className="row-main">
+            <div className="name">{file.name}</div>
+          </div>
+          <span className="row-meta">{formatBytes(file.size)}</span>
+          <div className="row-actions" style={{ opacity: 1 }}>
+            <button className="icon-btn" title="Restore" onClick={() => props.onRestore(file.id)}>
+              <RestoreGlyph />
+            </button>
+            <button className="icon-btn" title="Delete forever" onClick={() => props.onDeleteForever(file.id)}>
+              <XGlyph />
+            </button>
+          </div>
         </div>
-      ) : (
-        <div className="rows">
-          {props.files.map((file, i) => (
-            <div key={file.id} className="row" style={{ "--i": Math.min(i, 20) } as CSSProperties}>
-              <span className="row-glyph">{extension(file.name) || "FILE"}</span>
-              <div className="row-main">
-                <div className="name">{file.name}</div>
-              </div>
-              <span className="row-meta">{formatBytes(file.size)}</span>
-              <div className="row-actions" style={{ opacity: 1 }}>
-                <button className="icon-btn" title="Restore" onClick={() => props.onRestore(file.id)}>
-                  <RestoreGlyph />
-                </button>
-                <button
-                  className="icon-btn"
-                  title="Delete forever"
-                  onClick={() => props.onDeleteForever(file.id)}
-                >
-                  <XGlyph />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </>
+      ))}
+    </div>
   );
 }
