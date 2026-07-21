@@ -1,0 +1,180 @@
+import { useEffect, useState } from "react";
+import { useStore, type FileEntry } from "../store";
+import { thumbnailUrl } from "../thumbs";
+import { extension, fileKind, formatBytes, formatDate } from "../format";
+import { SheetArt } from "./FileArt";
+import {
+  DownloadGlyph,
+  PencilGlyph,
+  ShareGlyph,
+  StarGlyph,
+  TrashGlyph,
+  XGlyph,
+} from "./Icon";
+
+/**
+ * The right-hand inspector: everything about the selected file in one place,
+ * with tags editable inline. Multi-selection shows a summary instead.
+ */
+export function DetailsPanel(props: {
+  file: FileEntry | null;
+  selectionCount: number;
+  onOpen: (id: string) => void;
+  onEdit: (id: string) => void;
+  onDownload: (file: FileEntry) => void;
+  onShare: (id: string) => void;
+  onRename: (id: string) => void;
+  onTrash: (id: string) => void;
+  onTagClick: (tag: string) => void;
+  onClose: () => void;
+}) {
+  const { file } = props;
+  const folders = useStore((s) => s.folders);
+  const setTags = useStore((s) => s.setTags);
+  const toggleFavorite = useStore((s) => s.toggleFavorite);
+  const [thumb, setThumb] = useState<string | null>(null);
+  const [tagDraft, setTagDraft] = useState("");
+
+  useEffect(() => {
+    setThumb(null);
+    setTagDraft("");
+    let cancelled = false;
+    if (file?.hasThumb) {
+      void thumbnailUrl(file.id, file.key).then((url) => {
+        if (!cancelled) {
+          setThumb(url);
+        }
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [file?.id, file?.hasThumb, file?.key]);
+
+  if (!file) {
+    return (
+      <aside className="details">
+        <header>
+          <span className="details-title">
+            {props.selectionCount > 1 ? `${props.selectionCount} selected` : "Details"}
+          </span>
+          <button className="icon-btn" title="Close" onClick={props.onClose}>
+            <XGlyph size={14} />
+          </button>
+        </header>
+        <div className="details-empty">
+          {props.selectionCount > 1
+            ? "Use the bar below for bulk actions."
+            : "Select a file to inspect it."}
+        </div>
+      </aside>
+    );
+  }
+
+  const kind = fileKind(file.mime, file.name);
+  const folderName = file.folderId ? (folders.get(file.folderId)?.name ?? "…") : "All files";
+
+  const addTag = async () => {
+    const tag = tagDraft.trim().toLowerCase();
+    if (tag && !file.tags.includes(tag)) {
+      await setTags(file.id, [...file.tags, tag]);
+    }
+    setTagDraft("");
+  };
+
+  return (
+    <aside className="details">
+      <header>
+        <span className="details-title">Details</span>
+        <button className="icon-btn" title="Close" onClick={props.onClose}>
+          <XGlyph size={14} />
+        </button>
+      </header>
+
+      <div className="details-art" onDoubleClick={() => props.onOpen(file.id)}>
+        {thumb ? <img src={thumb} alt="" /> : <SheetArt kind={kind} ext={extension(file.name)} />}
+      </div>
+
+      <div className="details-name" title={file.name}>
+        {file.name}
+        <button
+          className={`icon-btn star-inline${file.favorite ? " on" : ""}`}
+          title={file.favorite ? "Unfavorite" : "Favorite"}
+          onClick={() => void toggleFavorite(file.id)}
+        >
+          <StarGlyph filled={file.favorite} size={15} />
+        </button>
+      </div>
+
+      <div className="details-actions">
+        <button className="btn" onClick={() => props.onOpen(file.id)}>
+          Open
+        </button>
+        {kind === "text" && (
+          <button className="btn" onClick={() => props.onEdit(file.id)}>
+            <PencilGlyph size={13} /> Edit
+          </button>
+        )}
+        <button className="icon-btn" title="Download" onClick={() => props.onDownload(file)}>
+          <DownloadGlyph />
+        </button>
+        <button className="icon-btn" title="Share" onClick={() => props.onShare(file.id)}>
+          <ShareGlyph />
+        </button>
+        <button className="icon-btn" title="Move to trash" onClick={() => props.onTrash(file.id)}>
+          <TrashGlyph />
+        </button>
+      </div>
+
+      <dl className="details-meta">
+        <dt>Where</dt>
+        <dd>{folderName}</dd>
+        <dt>Category</dt>
+        <dd>{file.category ?? "Other"}</dd>
+        <dt>Type</dt>
+        <dd>{file.mime || extension(file.name) || "unknown"}</dd>
+        <dt>Size</dt>
+        <dd>{formatBytes(file.size)}</dd>
+        <dt>Modified</dt>
+        <dd>{formatDate(file.mtime)}</dd>
+        <dt>Added</dt>
+        <dd>{formatDate(file.createdAt)}</dd>
+      </dl>
+
+      <div className="details-tags">
+        <span className="details-label">Tags</span>
+        <div className="tag-input compact">
+          {file.tags.map((tag) => (
+            <span key={tag} className="tag editable">
+              <button className="tag-link" title={`Search tag:${tag}`} onClick={() => props.onTagClick(tag)}>
+                {tag}
+              </button>
+              <button
+                title="Remove"
+                onClick={() => void setTags(file.id, file.tags.filter((t) => t !== tag))}
+              >
+                <XGlyph size={10} />
+              </button>
+            </span>
+          ))}
+          <input
+            value={tagDraft}
+            placeholder={file.tags.length === 0 ? "Add tag" : "+"}
+            onChange={(e) => setTagDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === ",") {
+                e.preventDefault();
+                void addTag();
+              }
+            }}
+            onBlur={() => void addTag()}
+          />
+        </div>
+      </div>
+
+      <button className="btn btn-ghost details-rename" onClick={() => props.onRename(file.id)}>
+        <PencilGlyph size={13} /> Rename
+      </button>
+    </aside>
+  );
+}
