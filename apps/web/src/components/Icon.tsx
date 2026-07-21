@@ -237,3 +237,36 @@ export const AsteriskGlyph = ({ size = 16 }: IconProps) => (
     <path d="M12 5v14M6 8.5l12 7M18 8.5l-12 7" />
   </Svg>
 );
+
+export const LayoutGridGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <rect x="4" y="4" width="7" height="7" rx="1.4" />
+    <rect x="13" y="4" width="7" height="7" rx="1.4" />
+    <rect x="4" y="13" width="7" height="7" rx="1.4" />
+    <rect x="13" y="13" width="7" height="7" rx="1.4" />
+  </Svg>
+);
+
+export const LayoutListGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <path d="M9 6h11M9 12h11M9 18h11" />
+    <circle cx="5" cy="6" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="5" cy="12" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="5" cy="18" r="1.1" fill="currentColor" stroke="none" />
+  </Svg>
+);
+
+export const InfoGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 11v5" />
+    <circle cx="12" cy="8" r="0.6" fill="currentColor" stroke="none" />
+  </Svg>
+);
+
+export const MoveGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <path d="M3 7.5V17a1.5 1.5 0 0 0 1.5 1.5h15A1.5 1.5 0 0 0 21 17V9.5A1.5 1.5 0 0 0 19.5 8h-7l-2-2.5H4.5A1.5 1.5 0 0 0 3 7Z" />
+    <path d="M10.5 13h6M14 10.5l2.5 2.5-2.5 2.5" />
+  </Svg>
+);
