@@ -24,6 +24,7 @@ Cloud storage should not require trusting the storage provider. Engramer Store a
 - **Encrypted previews and thumbnails.** Images, video, audio, PDF, and text preview in the browser after local decryption. Thumbnails are generated on the client and stored encrypted.
 - **Public share links that keep the server blind.** The decryption key travels in the URL fragment, which browsers never send over the wire. Links are revocable server-side.
 - **Recovery keys.** A random recovery key, shown once at signup, can restore access after a lost password. Password changes re-wrap the master key without re-encrypting any data.
+- **In-app editing and notes.** Edit text, Markdown, and code in the browser, or create notes from the command palette. Content decrypts into the editor and re-encrypts on save; edits are instantly searchable. The live-collaboration architecture is documented in [docs/editing.md](docs/editing.md).
 - **Installable app.** The web client is a PWA: add it to your iPhone home screen or your Mac Dock and it runs standalone with its own icon. Paste a screenshot anywhere in the app to store it encrypted. Native desktop and mobile plans are in [docs/native-apps.md](docs/native-apps.md).
 - **Quotas and delta sync.** Per-user storage quotas enforced during streaming upload, and a sequence-number sync protocol so clients converge in one round trip.
 

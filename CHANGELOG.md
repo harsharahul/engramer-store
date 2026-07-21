@@ -3,6 +3,18 @@
 All notable changes to Engramer Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.3.0] - 2026-07-21
+
+### Added
+- In-app editor for text, Markdown, and code files: content decrypts in the
+  browser and re-encrypts with the file's existing key on save (Cmd+S), with
+  the search index refreshed from the new content in the same operation.
+- Notes: create a Markdown note from the toolbar prompt or the command palette
+  and start writing immediately.
+- Document editing architecture documentation, including the end-to-end
+  encrypted live-collaboration design (client-side CRDTs over an encrypted
+  relay) and the reasoning for not integrating server-side office suites.
+
 ## [0.2.1] - 2026-07-20
 
 ### Fixed
