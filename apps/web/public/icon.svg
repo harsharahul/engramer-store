@@ -1,8 +1,35 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="112" fill="#0d0e11"/>
-  <g transform="translate(256 256) scale(9.6) translate(-12 -12)" fill="none" stroke="#e3b34c" stroke-width="1.6">
-    <circle cx="12" cy="9" r="3.2" fill="#e3b34c" stroke="none"/>
-    <path d="M10.6 11.4 L9 18.5 h6 L13.4 11.4 Z" fill="#e3b34c" stroke="none"/>
-    <circle cx="12" cy="12" r="10.4"/>
+  <defs>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f2c96b"/>
+      <stop offset="0.55" stop-color="#e3b34c"/>
+      <stop offset="1" stop-color="#b98a2e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.75">
+      <stop offset="0" stop-color="#23262e"/>
+      <stop offset="1" stop-color="#0d0e11"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#glow)"/>
+
+  <!-- vault door: outer ring -->
+  <circle cx="256" cy="256" r="164" fill="none" stroke="url(#brass)" stroke-width="14"/>
+  <!-- dial tick marks, inside the door -->
+  <g stroke="url(#brass)" stroke-width="9" stroke-linecap="round" opacity="0.7">
+    <line x1="256" y1="102" x2="256" y2="122"/>
+    <line x1="256" y1="390" x2="256" y2="410"/>
+    <line x1="102" y1="256" x2="122" y2="256"/>
+    <line x1="390" y1="256" x2="410" y2="256"/>
+    <line x1="147.1" y1="147.1" x2="161.3" y2="161.3"/>
+    <line x1="350.7" y1="350.7" x2="364.9" y2="364.9"/>
+    <line x1="364.9" y1="147.1" x2="350.7" y2="161.3"/>
+    <line x1="161.3" y1="350.7" x2="147.1" y2="364.9"/>
   </g>
+  <!-- inner ring -->
+  <circle cx="256" cy="256" r="120" fill="none" stroke="url(#brass)" stroke-width="5" opacity="0.45"/>
+
+  <!-- keyhole -->
+  <circle cx="256" cy="222" r="46" fill="url(#brass)"/>
+  <path d="M 236 252 L 218 330 a 8 8 0 0 0 8 10 h 60 a 8 8 0 0 0 8 -10 L 276 252 Z" fill="url(#brass)"/>
 </svg>
