@@ -6,11 +6,11 @@
 |---|---|
 | Web | Full client at your server's URL |
 | iPhone / iPad | Installable web app (PWA): Share, then "Add to Home Screen". Opens standalone with its own icon; on iOS 26 home-screen sites open as apps by default |
-| Mac | Installable web app: Safari File menu, "Add to Dock", or Chrome "Install Engramer Store". Runs in its own window with a Dock icon |
+| Mac | Installable web app: Safari File menu, "Add to Dock", or Chrome "Install Engram Store". Runs in its own window with a Dock icon |
 | Android | Installable PWA with install prompt |
 | Native desktop and mobile binaries | Planned; see roadmap below |
 
-For comparison: Google Drive ships native iOS, Android, and desktop sync clients; Ente ships Flutter apps for iOS and Android plus desktop builds. Engramer Store starts from an installable web app because the entire client, including all cryptography, already runs in the browser.
+For comparison: Google Drive ships native iOS, Android, and desktop sync clients; Ente ships Flutter apps for iOS and Android plus desktop builds. Engram Store starts from an installable web app because the entire client, including all cryptography, already runs in the browser.
 
 ### iOS notes
 

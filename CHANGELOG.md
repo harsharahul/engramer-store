@@ -1,7 +1,26 @@
 # Changelog
 
-All notable changes to Engramer Store are documented here, following
+All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
+
+## [0.5.0] - 2026-07-22
+
+Rebrand to Engram Store, with a themeable ocean design system.
+
+### Changed
+- New brand: the app is now Engram Store, with a shield-document logo, the
+  "engram store" wordmark, and the tagline "Private, encrypted, yours." The app
+  icons and the in-app brand mark are generated from the ocean logo.
+- Redesigned around an ocean palette (deep navy ink, cool paper, an ocean-blue
+  accent with a cyan highlight) in place of the previous warm theme, and the
+  primary button gets a cleaner two-stop fill.
+
+### Added
+- Day and night (light and dark) modes, remembered per device and initialised
+  from the system preference, with a toggle in the sidebar.
+- Accent themes drawn from the brand's gradient variants: Ocean, Aurora,
+  Emerald, Violet, Sunset, and Midnight. Selecting one recolours the whole
+  interface and the in-app logo together.
 
 ## [0.4.1] - 2026-07-21
 

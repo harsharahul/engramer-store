@@ -1,4 +1,4 @@
-# Engramer Store - self-hostable, end-to-end encrypted cloud storage
+# Engram Store - self-hostable, end-to-end encrypted cloud storage
 #
 # Build:  docker build -t engramer-store .
 # Run:    docker run -d --name engramer -p 3080:3080 -v engramer-data:/data engramer-store
@@ -36,7 +36,7 @@ RUN CI=true pnpm install --frozen-lockfile --prod --filter @engramer/server...
 
 FROM node:24-bookworm-slim
 
-LABEL org.opencontainers.image.title="Engramer Store" \
+LABEL org.opencontainers.image.title="Engram Store" \
       org.opencontainers.image.description="Self-hostable, end-to-end encrypted cloud storage" \
       org.opencontainers.image.source="https://github.com/harsharahul/engramer-store" \
       org.opencontainers.image.licenses="AGPL-3.0-only"
