@@ -14,6 +14,8 @@ Rebrand to Engram Store, with a themeable ocean design system.
 - Redesigned around an ocean palette (deep navy ink, cool paper, an ocean-blue
   accent with a cyan highlight) in place of the previous warm theme, and the
   primary button gets a cleaner two-stop fill.
+- Typography moves to Geist, with Geist Mono for keyboard hints, for a crisper,
+  more premium feel.
 
 ### Added
 - Day and night (light and dark) modes, remembered per device and initialised
