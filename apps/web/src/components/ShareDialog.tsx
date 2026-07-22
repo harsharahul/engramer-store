@@ -82,7 +82,7 @@ export function ShareDialog(props: {
         ) : (
           <div className="share-link-box">
             <input readOnly value={link} onFocus={(e) => e.target.select()} />
-            <button className="btn btn-brass" onClick={copy} title="Copy link">
+            <button className="btn btn-primary" onClick={copy} title="Copy link">
               <CopyGlyph />
             </button>
           </div>

@@ -37,7 +37,7 @@ export function TextPrompt(props: {
             <button type="button" className="btn btn-ghost" onClick={props.onClose}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-brass" disabled={busy || !value.trim()}>
+            <button type="submit" className="btn btn-primary" disabled={busy || !value.trim()}>
               {props.submitLabel}
             </button>
           </div>
@@ -77,7 +77,7 @@ export function Confirm(props: {
             Cancel
           </button>
           <button
-            className={props.danger ? "btn btn-danger" : "btn btn-brass"}
+            className={props.danger ? "btn btn-danger" : "btn btn-primary"}
             onClick={confirm}
             disabled={busy}
           >

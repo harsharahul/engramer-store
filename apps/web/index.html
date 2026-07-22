@@ -3,15 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#0d0e11" />
-    <meta name="description" content="End-to-end encrypted cloud storage" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0a0e1a" />
+    <script>
+      // Apply the saved appearance before first paint to avoid a flash.
+      (function () {
+        try {
+          var t = localStorage.getItem("engram-theme");
+          if (t !== "light" && t !== "dark") {
+            t =
+              window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
+          }
+          document.documentElement.dataset.theme = t;
+          document.documentElement.dataset.accent = localStorage.getItem("engram-accent") || "ocean";
+        } catch (e) {
+          document.documentElement.dataset.theme = "dark";
+          document.documentElement.dataset.accent = "ocean";
+        }
+      })();
+    </script>
+    <meta name="description" content="Private, encrypted, yours. End-to-end encrypted cloud storage." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Engramer" />
+    <meta name="apple-mobile-web-app-title" content="Engram" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <title>Engramer Store</title>
+    <title>Engram Store</title>
   </head>
   <body>
     <div id="root"></div>
