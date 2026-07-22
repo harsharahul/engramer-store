@@ -1,6 +1,6 @@
-# Engramer Store: Architecture
+# Engram Store: Architecture
 
-Engramer Store is a self-hostable, end-to-end encrypted cloud storage platform. Files, file names, folder names, and all other user metadata are encrypted on the client before they leave the device. The server stores ciphertext and opaque identifiers only; it can never read user content, and neither can anyone who compromises it.
+Engram Store is a self-hostable, end-to-end encrypted cloud storage platform. Files, file names, folder names, and all other user metadata are encrypted on the client before they leave the device. The server stores ciphertext and opaque identifiers only; it can never read user content, and neither can anyone who compromises it.
 
 The cryptographic design follows the model proven by [Ente](https://ente.io/architecture): a password-derived key encryption key, a random master key, per-file keys, and streaming authenticated encryption for file content.
 

@@ -2,7 +2,7 @@
 
 ## Threat model
 
-Engramer Store is designed so that a fully compromised server cannot read user content.
+Engram Store is designed so that a fully compromised server cannot read user content.
 
 **Protected against a malicious or compromised server:**
 

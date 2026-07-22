@@ -2,7 +2,7 @@
 
 ## Where bytes live
 
-Engramer Store separates two very different kinds of data:
+Engram Store separates two very different kinds of data:
 
 - **Ciphertext blobs** (file content and thumbnails) live in a blob store, never in the database. Uploads stream to the store in chunks with constant memory; nothing buffers a whole file.
 - **Metadata** (wrapped keys, encrypted names and tags, tree shape, quotas) lives in SQLite. Metadata rows are a few kilobytes regardless of file size, so the database stays small even with terabytes of blobs: a million files is roughly a couple of gigabytes of metadata.

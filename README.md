@@ -1,4 +1,4 @@
-# Engramer Store
+# Engram Store
 
 **Self-hostable cloud storage that is end-to-end encrypted, and still smart.**
 
@@ -9,11 +9,11 @@
 
 Files, file names, folder names, tags, and search text are encrypted on your device before upload; the server stores ciphertext it cannot read. Auto-categorization, full-text search, and previews all run on the client, so the intelligence works without giving anyone else your data.
 
-![Engramer Store vault](docs/media/vault.png)
+![Engram Store vault](docs/media/vault.png)
 
 ## Why
 
-Cloud storage should not require trusting the storage provider. Engramer Store applies the end-to-end encryption model proven by [Ente](https://ente.io) to general-purpose file storage: the intelligence (search, previews, thumbnails) lives on the client, and the server is reduced to an authenticated ciphertext warehouse.
+Cloud storage should not require trusting the storage provider. Engram Store applies the end-to-end encryption model proven by [Ente](https://ente.io) to general-purpose file storage: the intelligence (search, previews, thumbnails) lives on the client, and the server is reduced to an authenticated ciphertext warehouse.
 
 ## Features
 
