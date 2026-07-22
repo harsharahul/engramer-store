@@ -8,12 +8,20 @@ import {
   type DragEvent,
 } from "react";
 import { useStore, type FileEntry } from "../store";
+import {
+  ACCENTS,
+  applyAccent,
+  applyTheme,
+  currentAccent,
+  currentTheme,
+  type ThemeMode,
+} from "../theme";
 import { searchFiles } from "../search";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { saveDecryptedFile } from "../download";
 import { clearThumbnailCache } from "../thumbs";
 import { FileCard, FolderCard } from "./FileCard";
-import { BrandMark, FolderArt } from "./FileArt";
+import { BrandMark, FolderArt, Wordmark } from "./FileArt";
 import { FileList, sortFiles, type SortKey, type SortState } from "./FileList";
 import { DetailsPanel } from "./DetailsPanel";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
@@ -42,6 +50,7 @@ import {
   LayoutListGlyph,
   LockGlyph,
   MonitorGlyph,
+  MoonGlyph,
   MoveGlyph,
   NoteGlyph,
   PencilGlyph,
@@ -54,6 +63,7 @@ import {
   ShareGlyph,
   SparkGlyph,
   StarGlyph,
+  SunGlyph,
   TagGlyph,
   TrashGlyph,
   UploadGlyph,
@@ -123,6 +133,8 @@ export function Vault() {
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [theme, setTheme] = useState<ThemeMode>(() => currentTheme());
+  const [accent, setAccent] = useState<string>(() => currentAccent());
   const dragDepth = useRef(0);
   const lastSelected = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -542,8 +554,8 @@ export function Vault() {
     >
       <aside className="sidebar">
         <div className="brand">
-          <BrandMark size={24} />
-          Engramer Store
+          <BrandMark size={26} />
+          <Wordmark />
         </div>
         {navButton(view.kind === "folder", () => setView({ kind: "folder", id: null }), <FolderGlyph />, "Files")}
         {navButton(view.kind === "recent", () => setView({ kind: "recent" }), <ClockGlyph />, "Recent")}
@@ -586,6 +598,35 @@ export function Vault() {
         )}
 
         <div className="spacer" />
+        <div className="appearance">
+          <button
+            className="theme-toggle"
+            title="Toggle day and night"
+            onClick={() => {
+              const next = theme === "dark" ? "light" : "dark";
+              applyTheme(next);
+              setTheme(next);
+            }}
+          >
+            {theme === "dark" ? <SunGlyph size={15} /> : <MoonGlyph size={15} />}
+            {theme === "dark" ? "Day" : "Night"}
+          </button>
+          <div className="accent-dots">
+            {ACCENTS.map((a) => (
+              <button
+                key={a.id}
+                className={`accent-dot${accent === a.id ? " on" : ""}`}
+                title={a.label}
+                aria-label={`${a.label} theme`}
+                style={{ background: `linear-gradient(135deg, ${a.from}, ${a.to})` }}
+                onClick={() => {
+                  applyAccent(a.id);
+                  setAccent(a.id);
+                }}
+              />
+            ))}
+          </div>
+        </div>
         {store.usage && (
           <div className="usage">
             <div>
@@ -628,7 +669,7 @@ export function Vault() {
           <button className="btn" title="New folder" onClick={() => setNewFolderOpen(true)}>
             <PlusGlyph /> <span className="btn-label">New folder</span>
           </button>
-          <button className="btn btn-brass" onClick={() => fileInput.current?.click()}>
+          <button className="btn btn-primary" onClick={() => fileInput.current?.click()}>
             <UploadGlyph /> Upload
           </button>
           <button
@@ -1017,7 +1058,7 @@ function EmptyState(props: {
       <h3>An empty shelf</h3>
       <p>Drop files anywhere, paste from the clipboard, or start writing.</p>
       <div className="empty-actions">
-        <button className="btn btn-brass" onClick={props.onUpload}>
+        <button className="btn btn-primary" onClick={props.onUpload}>
           <UploadGlyph /> Upload files
         </button>
         <button className="btn" onClick={props.onNote}>

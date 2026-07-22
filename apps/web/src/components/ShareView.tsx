@@ -10,7 +10,8 @@ import {
 import { api } from "../api";
 import { fileKind, formatBytes } from "../format";
 import { triggerDownload } from "../download";
-import { DownloadGlyph, Keyhole } from "./Icon";
+import { DownloadGlyph } from "./Icon";
+import { BrandMark } from "./FileArt";
 
 export function ShareView() {
   const { token } = useParams<{ token: string }>();
@@ -87,7 +88,7 @@ export function ShareView() {
   return (
     <div className="share-shell">
       <div className="share-card">
-        <Keyhole size={28} />
+        <BrandMark size={40} />
         {error ? (
           <>
             <h1>Nothing here</h1>
@@ -102,7 +103,7 @@ export function ShareView() {
               {formatBytes(meta.size)} · shared end-to-end encrypted · decrypted in your browser
             </p>
             <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-              <button className="btn btn-brass" onClick={download} disabled={busy}>
+              <button className="btn btn-primary" onClick={download} disabled={busy}>
                 <DownloadGlyph /> Download
               </button>
               {canPreview && !previewUrl && previewText === null && (

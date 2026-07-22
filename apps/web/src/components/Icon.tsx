@@ -270,3 +270,16 @@ export const MoveGlyph = ({ size = 16 }: IconProps) => (
     <path d="M10.5 13h6M14 10.5l2.5 2.5-2.5 2.5" />
   </Svg>
 );
+
+export const SunGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <circle cx="12" cy="12" r="4.2" />
+    <path d="M12 3.5V5.5M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6 18 18M18 6l-1.4 1.4M7.4 16.6 6 18" />
+  </Svg>
+);
+
+export const MoonGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <path d="M19 14.5A8 8 0 0 1 9.5 5a7 7 0 1 0 9.5 9.5Z" />
+  </Svg>
+);

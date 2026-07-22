@@ -93,7 +93,7 @@ export function Editor(props: {
         </span>
         <div className="grow" />
         {error && <span className="error-text">{error}</span>}
-        <button className="btn btn-brass" onClick={save} disabled={!dirty || busy}>
+        <button className="btn btn-primary" onClick={save} disabled={!dirty || busy}>
           {busy ? <span className="spinner" /> : null}
           {busy ? "Encrypting" : "Save"}
           {!busy && <kbd className="mono save-kbd">⌘S</kbd>}

@@ -1,7 +1,7 @@
 {
   "name": "@engramer/web",
-  "version": "0.4.1",
-  "description": "Web client for Engramer Store",
+  "version": "0.5.0",
+  "description": "Web client for Engram Store",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@engramer/crypto": "workspace:*",
-    "@fontsource-variable/fraunces": "^5.3.0",
     "@fontsource-variable/instrument-sans": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "exifr": "^7.1.3",
