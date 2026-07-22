@@ -1,10 +1,10 @@
 # Document editing
 
-Engramer Store edits documents without giving the server plaintext. This page explains the design, what ships today, and where collaborative editing is headed.
+Engram Store edits documents without giving the server plaintext. This page explains the design, what ships today, and where collaborative editing is headed.
 
 ## The constraint
 
-Self-hosted office suites in the Nextcloud mold (Collabora Online, OnlyOffice Document Server) integrate over WOPI: the storage app hands the document to a suite server, which renders and processes it server-side. That architecture requires plaintext on the server, which is why Nextcloud's own end-to-end encrypted folders cannot be opened by those integrations. Bolting a WOPI suite onto Engramer Store would quietly delete its core guarantee.
+Self-hosted office suites in the Nextcloud mold (Collabora Online, OnlyOffice Document Server) integrate over WOPI: the storage app hands the document to a suite server, which renders and processes it server-side. That architecture requires plaintext on the server, which is why Nextcloud's own end-to-end encrypted folders cannot be opened by those integrations. Bolting a WOPI suite onto Engram Store would quietly delete its core guarantee.
 
 The constraint is not a dead end. CryptPad ships collaborative documents where the server is a blind relay that stores and orders encrypted patches it cannot read, with all merging done client-side, and Proton Docs delivers Google-Docs-style live co-editing (cursors, presence, comments) fully end-to-end encrypted. Editing under E2EE is a solved product category; it just has to run on the client.
 

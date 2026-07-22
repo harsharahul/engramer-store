@@ -1,4 +1,4 @@
-# Contributing to Engramer Store
+# Contributing to Engram Store
 
 Thanks for your interest. This is a security-critical project with a small,
 deliberately focused surface; contributions that keep it that way are very
