@@ -1,29 +1,35 @@
-/* Engramer Store: "the quiet vault" design system.
-   Dark warm graphite, paper-white type, a single brass accent.
-   Fraunces for voice, Instrument Sans for interface, JetBrains Mono for keys. */
+/* Engram Store: the ocean design system.
+   Deep navy-slate ink, cool paper-white type, an ocean-blue accent with a
+   cyan highlight. Instrument Sans throughout, JetBrains Mono for keys. */
 
 :root {
-  --ink-0: #0d0e11;
-  --ink-1: #14161b;
-  --ink-2: #1b1e25;
-  --ink-3: #232730;
-  --hairline: rgba(236, 233, 226, 0.09);
-  --hairline-strong: rgba(236, 233, 226, 0.16);
-  --paper: #ece9e2;
-  --paper-dim: #a8a49a;
-  --paper-faint: #6e6b64;
-  --brass: #e3b34c;
-  --brass-bright: #f2c96b;
-  --brass-dim: rgba(227, 179, 76, 0.13);
-  --danger: #e2604f;
-  --danger-dim: rgba(226, 96, 79, 0.14);
-  --ok: #86b073;
-  --font-display: "Fraunces Variable", "Georgia", serif;
+  --ink-0: #0a0e1a;
+  --ink-1: #0f1626;
+  --ink-2: #15203a;
+  --ink-3: #1f2c49;
+  --hairline: rgba(191, 219, 254, 0.08);
+  --hairline-strong: rgba(191, 219, 254, 0.16);
+  --paper: #e9f0fb;
+  --paper-dim: #a2b3cf;
+  --paper-faint: #647694;
+  /* Accent trio (default: Ocean). Overridden per palette via [data-accent]. */
+  --accent: #3b82f6;
+  --accent-bright: #60a5fa;
+  --accent-2: #22d3ee;
+  --brand-a: #172554;
+  --brand-b: #2563eb;
+  --accent-dim: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-2-dim: color-mix(in srgb, var(--accent-2) 14%, transparent);
+  --accent-deep: color-mix(in srgb, var(--accent) 70%, #000);
+  --danger: #f2685a;
+  --danger-dim: rgba(242, 104, 90, 0.14);
+  --ok: #34d399;
+  --font-display: "Instrument Sans Variable", "Helvetica Neue", sans-serif;
   --font-ui: "Instrument Sans Variable", "Helvetica Neue", sans-serif;
   --font-mono: "JetBrains Mono Variable", "Menlo", monospace;
   --radius: 10px;
   --radius-lg: 16px;
-  --shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.55), 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.6), 0 4px 16px rgba(0, 0, 0, 0.45);
 }
 
 * {
@@ -59,8 +65,8 @@ body::after {
 }
 
 ::selection {
-  background: var(--brass-dim);
-  color: var(--brass-bright);
+  background: var(--accent-dim);
+  color: var(--accent-bright);
 }
 
 button {
@@ -85,7 +91,7 @@ textarea {
 }
 
 input:focus {
-  border-color: var(--brass);
+  border-color: var(--accent);
 }
 
 input::placeholder {
@@ -93,7 +99,7 @@ input::placeholder {
 }
 
 a {
-  color: var(--brass);
+  color: var(--accent);
   text-decoration: none;
 }
 
@@ -158,18 +164,31 @@ a {
   cursor: default;
 }
 
-.btn-brass {
-  background: linear-gradient(180deg, var(--brass-bright), var(--brass) 60%, #c9993a);
-  border-color: rgba(255, 233, 184, 0.35);
-  color: #171204;
+.btn-primary {
+  /* A near-uniform accent fill so white text keeps even contrast top to
+     bottom; only a faint sheen and a crisp darker edge give it depth. */
+  background-color: color-mix(in srgb, var(--accent) 90%, #000);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 46%);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, #000);
+  color: #ffffff;
   font-weight: 600;
-  box-shadow: 0 2px 10px rgba(227, 179, 76, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 1px 2px rgba(0, 0, 0, 0.28);
 }
 
-.btn-brass:hover {
-  background: linear-gradient(180deg, #f7d488, var(--brass-bright) 60%, var(--brass));
-  border-color: rgba(255, 233, 184, 0.5);
-  box-shadow: 0 4px 16px rgba(227, 179, 76, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+.btn-primary:hover {
+  background-color: var(--accent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 2px 12px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.btn-primary:active {
+  background-color: color-mix(in srgb, var(--accent) 80%, #000);
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.22);
 }
 
 .btn-danger {
@@ -213,7 +232,7 @@ a {
   height: 16px;
   border-radius: 50%;
   border: 2px solid var(--hairline-strong);
-  border-top-color: var(--brass);
+  border-top-color: var(--accent);
   animation: spin 0.7s linear infinite;
 }
 
@@ -235,8 +254,8 @@ a {
   place-items: center;
   padding: 32px;
   background:
-    radial-gradient(1200px 600px at 70% -10%, rgba(227, 179, 76, 0.07), transparent 60%),
-    radial-gradient(900px 500px at 10% 110%, rgba(227, 179, 76, 0.04), transparent 60%),
+    radial-gradient(1200px 600px at 70% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%),
+    radial-gradient(900px 500px at 10% 110%, color-mix(in srgb, var(--accent) 4%, transparent), transparent 60%),
     var(--ink-0);
 }
 
@@ -253,13 +272,13 @@ a {
 
 .auth-brand .keyhole {
   font-size: 30px;
-  color: var(--brass);
+  color: var(--accent);
   display: block;
   margin-bottom: 14px;
 }
 
 .brand-mark {
-  filter: drop-shadow(0 4px 12px rgba(227, 179, 76, 0.25));
+  filter: drop-shadow(0 4px 12px color-mix(in srgb, var(--accent) 25%, transparent));
   vertical-align: middle;
 }
 
@@ -268,18 +287,52 @@ a {
 }
 
 .wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.2em;
   font-family: var(--font-display);
-  font-weight: 550;
-  font-variation-settings: "opsz" 40;
-  letter-spacing: 0.01em;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.wm-engram {
+  font-weight: 700;
+  color: var(--paper);
+}
+
+.wm-store {
+  font-weight: 300;
+  color: var(--accent-bright);
+}
+
+.wm-dot {
+  align-self: center;
+  width: 0.26em;
+  height: 0.26em;
+  border-radius: 50%;
+  background: var(--accent-2);
+  margin-left: 0.05em;
+  box-shadow: 0 0 9px color-mix(in srgb, var(--accent-2) 55%, transparent);
 }
 
 .auth-brand h1 {
-  font-family: var(--font-display);
-  font-size: 34px;
-  font-weight: 550;
-  font-variation-settings: "opsz" 60;
-  letter-spacing: 0.005em;
+  font-size: 38px;
+  margin-top: 2px;
+}
+
+.tagline {
+  margin-top: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--paper-faint);
+}
+
+.tagline b {
+  color: var(--accent-2);
+  font-weight: inherit;
 }
 
 .auth-brand p {
@@ -343,7 +396,7 @@ a {
 }
 
 :focus-visible {
-  outline: 2px solid var(--brass);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 6px;
 }
@@ -370,16 +423,14 @@ a {
 .sidebar .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   padding: 4px 10px 18px;
-  font-family: var(--font-display);
   font-size: 17px;
-  font-weight: 550;
 }
 
-.sidebar .brand .keyhole {
-  color: var(--brass);
-  font-size: 18px;
+.sidebar .brand .brand-mark {
+  border-radius: 7px;
+  flex-shrink: 0;
 }
 
 .nav-item {
@@ -405,8 +456,8 @@ a {
 }
 
 .nav-item.active {
-  background: var(--brass-dim);
-  color: var(--brass-bright);
+  background: var(--accent-dim);
+  color: var(--accent-bright);
 }
 
 .nav-item.active::before {
@@ -417,7 +468,7 @@ a {
   bottom: 20%;
   width: 3px;
   border-radius: 2px;
-  background: linear-gradient(180deg, var(--brass-bright), var(--brass));
+  background: linear-gradient(180deg, var(--accent-bright), var(--accent));
 }
 
 .sidebar .spacer {
@@ -441,10 +492,10 @@ a {
 
 .usage .meter > div {
   height: 100%;
-  background: linear-gradient(90deg, var(--brass), var(--brass-bright));
+  background: linear-gradient(90deg, var(--accent), var(--accent-bright));
   border-radius: 2px;
   transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
-  box-shadow: 0 0 8px rgba(227, 179, 76, 0.35);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .account-row {
@@ -522,8 +573,8 @@ a {
   overflow-y: auto;
   padding: 20px 24px 120px;
   background:
-    radial-gradient(900px 420px at 85% -8%, rgba(227, 179, 76, 0.05), transparent 60%),
-    radial-gradient(700px 500px at -10% 108%, rgba(227, 179, 76, 0.03), transparent 60%);
+    radial-gradient(900px 420px at 85% -8%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 60%),
+    radial-gradient(700px 500px at -10% 108%, color-mix(in srgb, var(--accent) 3%, transparent), transparent 60%);
 }
 
 .crumbs {
@@ -554,11 +605,10 @@ a {
 .crumbs .current {
   font-family: var(--font-display);
   font-size: 19px;
-  font-weight: 560;
-  font-variation-settings: "opsz" 30;
+  font-weight: 700;
   color: var(--paper);
   padding: 4px 8px;
-  letter-spacing: 0.002em;
+  letter-spacing: -0.015em;
 }
 
 .toolbar-row {
@@ -605,7 +655,7 @@ a {
   box-shadow:
     0 14px 34px rgba(0, 0, 0, 0.42),
     0 2px 8px rgba(0, 0, 0, 0.3),
-    0 0 0 1px rgba(227, 179, 76, 0.07);
+    0 0 0 1px color-mix(in srgb, var(--accent) 7%, transparent);
 }
 
 .card .art {
@@ -638,7 +688,7 @@ a {
   transform: scale(1.045);
 }
 
-/* Fresh uploads get a brass shimmer sweep: the "sealed" moment. */
+/* Fresh uploads get a cyan shimmer sweep: the "sealed" moment. */
 @keyframes shimmer-sweep {
   from {
     transform: translateX(-130%) skewX(-18deg);
@@ -652,13 +702,13 @@ a {
   content: "";
   position: absolute;
   inset: -10% 55% -10% 0;
-  background: linear-gradient(100deg, transparent, rgba(242, 201, 107, 0.28), transparent);
+  background: linear-gradient(100deg, transparent, color-mix(in srgb, var(--accent-2) 28%, transparent), transparent);
   animation: shimmer-sweep 1.5s cubic-bezier(0.4, 0, 0.2, 1) 0.25s 2;
   pointer-events: none;
 }
 
 .card.fresh {
-  border-color: rgba(227, 179, 76, 0.5);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .card .glyph {
@@ -677,8 +727,8 @@ a {
 }
 
 .card.folder-card .glyph {
-  color: var(--brass);
-  border-color: rgba(227, 179, 76, 0.35);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .card .label {
@@ -783,8 +833,8 @@ a {
 }
 
 .row .snippet mark {
-  background: var(--brass-dim);
-  color: var(--brass-bright);
+  background: var(--accent-dim);
+  color: var(--accent-bright);
   border-radius: 3px;
   padding: 0 2px;
 }
@@ -853,9 +903,9 @@ a {
   place-items: center;
   font-family: var(--font-display);
   font-size: 24px;
-  color: var(--brass-bright);
+  color: var(--accent-bright);
   background: rgba(13, 14, 17, 0.86);
-  border: 1.5px dashed var(--brass);
+  border: 1.5px dashed var(--accent);
   border-radius: var(--radius-lg);
   backdrop-filter: blur(4px);
 }
@@ -936,7 +986,7 @@ a {
 
 .progress > div {
   height: 100%;
-  background: var(--brass);
+  background: var(--accent);
   transition: width 0.2s ease;
 }
 
@@ -994,7 +1044,7 @@ a {
   border-radius: var(--radius);
   padding: 14px 16px;
   word-break: break-all;
-  color: var(--brass-bright);
+  color: var(--accent-bright);
 }
 
 .share-link-box {
@@ -1119,7 +1169,7 @@ a {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--brass);
+  background: var(--accent);
   margin-left: 8px;
   vertical-align: middle;
 }
@@ -1138,7 +1188,7 @@ a {
   place-items: center;
   padding: 32px;
   background:
-    radial-gradient(1000px 500px at 50% -10%, rgba(227, 179, 76, 0.06), transparent 60%),
+    radial-gradient(1000px 500px at 50% -10%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 60%),
     var(--ink-0);
 }
 
@@ -1154,7 +1204,7 @@ a {
 }
 
 .share-card .keyhole {
-  color: var(--brass);
+  color: var(--accent);
   font-size: 26px;
   display: block;
   margin-bottom: 12px;
@@ -1278,7 +1328,8 @@ a {
 }
 
 .folder-art {
-  filter: drop-shadow(0 10px 24px rgba(227, 179, 76, 0.14));
+  color: var(--accent);
+  filter: drop-shadow(0 10px 24px color-mix(in srgb, var(--accent) 14%, transparent));
 }
 
 /* ---------- library, tags, favorites ---------- */
@@ -1295,7 +1346,7 @@ a {
 }
 
 .sidebar-label svg {
-  color: var(--brass);
+  color: var(--accent);
 }
 
 .library-list {
@@ -1323,8 +1374,8 @@ a {
 }
 
 .nav-item.active .nav-count {
-  color: var(--brass-bright);
-  background: rgba(227, 179, 76, 0.16);
+  color: var(--accent-bright);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .tag-row {
@@ -1348,9 +1399,9 @@ a {
 }
 
 button.tag:hover {
-  color: var(--brass-bright);
-  border-color: rgba(227, 179, 76, 0.4);
-  background: var(--brass-dim);
+  color: var(--accent-bright);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--accent-dim);
 }
 
 .tag.more {
@@ -1364,9 +1415,9 @@ button.tag:hover {
   font-size: 10px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--brass-bright);
+  color: var(--accent-bright);
   background: rgba(13, 14, 17, 0.78);
-  border: 1px solid rgba(227, 179, 76, 0.3);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: 999px;
   padding: 2px 8px;
   backdrop-filter: blur(6px);
@@ -1395,11 +1446,11 @@ button.tag:hover {
 }
 
 .star.on {
-  color: var(--brass);
+  color: var(--accent);
 }
 
 .star:hover {
-  color: var(--brass-bright);
+  color: var(--accent-bright);
 }
 
 @keyframes star-pop {
@@ -1438,7 +1489,7 @@ button.tag:hover {
 .empty code {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--brass);
+  color: var(--accent);
   background: var(--ink-2);
   border-radius: 5px;
   padding: 1px 5px;
@@ -1470,9 +1521,9 @@ button.tag:hover {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: var(--brass-bright);
-  background: var(--brass-dim);
-  border-color: rgba(227, 179, 76, 0.28);
+  color: var(--accent-bright);
+  background: var(--accent-dim);
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
   padding: 3px 5px 3px 9px;
 }
 
@@ -1573,8 +1624,8 @@ button.tag:hover {
 }
 
 .palette-row.active .palette-badge {
-  color: var(--brass);
-  border-color: rgba(227, 179, 76, 0.4);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .palette-main {
@@ -1643,7 +1694,7 @@ button.tag:hover {
   max-width: 460px;
   padding: 11px 12px 11px 14px;
   background: var(--ink-2);
-  border: 1px solid rgba(227, 179, 76, 0.32);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
   border-radius: 14px;
   box-shadow: var(--shadow-modal);
   z-index: 250;
@@ -1652,7 +1703,7 @@ button.tag:hover {
 }
 
 .reveal:hover {
-  border-color: var(--brass);
+  border-color: var(--accent);
 }
 
 .reveal-icon {
@@ -1661,8 +1712,8 @@ button.tag:hover {
   width: 32px;
   height: 32px;
   border-radius: 9px;
-  color: var(--brass);
-  background: var(--brass-dim);
+  color: var(--accent);
+  background: var(--accent-dim);
   flex-shrink: 0;
 }
 
@@ -1678,7 +1729,7 @@ button.tag:hover {
 }
 
 .reveal-title strong {
-  color: var(--brass-bright);
+  color: var(--accent-bright);
   font-weight: 600;
 }
 
@@ -1746,13 +1797,13 @@ button.tag:hover {
 }
 
 .seg button.active {
-  background: var(--brass-dim);
-  color: var(--brass-bright);
+  background: var(--accent-dim);
+  color: var(--accent-bright);
 }
 
 .info-toggle.active {
-  color: var(--brass);
-  background: var(--brass-dim);
+  color: var(--accent);
+  background: var(--accent-dim);
 }
 
 /* ---------- selection ---------- */
@@ -1771,7 +1822,7 @@ button.tag:hover {
 }
 
 .card.selected .select-ring {
-  border-color: var(--brass);
+  border-color: var(--accent);
 }
 
 .card.selected {
@@ -1779,23 +1830,23 @@ button.tag:hover {
 }
 
 .card.drop-target {
-  border-color: var(--brass);
-  background: var(--brass-dim);
+  border-color: var(--accent);
+  background: var(--accent-dim);
 }
 
 .fav-mark {
-  color: var(--brass);
+  color: var(--accent);
   margin-right: 5px;
   vertical-align: -1px;
   display: inline-flex;
 }
 
 .row.selected {
-  background: var(--brass-dim);
+  background: var(--accent-dim);
 }
 
 .row.selected:hover {
-  background: var(--brass-dim);
+  background: var(--accent-dim);
 }
 
 /* ---------- list view columns ---------- */
@@ -1945,7 +1996,7 @@ button.tag:hover {
 }
 
 .star-inline.on {
-  color: var(--brass);
+  color: var(--accent);
 }
 
 .details-actions {
@@ -2101,8 +2152,8 @@ button.tag:hover {
 }
 
 .move-node:hover:not(:disabled) {
-  background: var(--brass-dim);
-  color: var(--brass-bright);
+  background: var(--accent-dim);
+  color: var(--accent-bright);
 }
 
 .move-node:disabled {
@@ -2115,4 +2166,141 @@ button.tag:hover {
   gap: 10px;
   justify-content: center;
   margin-top: 18px;
+}
+
+/* ---------- day / night themes ---------- */
+
+/* Day: cool light surfaces, same accent. */
+:root[data-theme="light"] {
+  --ink-0: #eff3fa;
+  --ink-1: #ffffff;
+  --ink-2: #eef2f9;
+  --ink-3: #e2e8f3;
+  --hairline: rgba(15, 23, 42, 0.1);
+  --hairline-strong: rgba(15, 23, 42, 0.18);
+  --paper: #101a2e;
+  --paper-dim: #48566f;
+  --paper-faint: #8593a8;
+  --shadow-modal: 0 24px 70px rgba(15, 23, 42, 0.22), 0 4px 14px rgba(15, 23, 42, 0.12);
+}
+
+:root[data-theme="light"] body::after {
+  opacity: 0.02;
+}
+
+:root[data-theme="light"] .card {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+:root[data-theme="light"] .card:hover {
+  box-shadow:
+    0 12px 28px rgba(15, 23, 42, 0.14),
+    0 2px 6px rgba(15, 23, 42, 0.08);
+}
+
+:root[data-theme="light"] .overlay {
+  background: rgba(15, 23, 42, 0.42);
+}
+
+:root[data-theme="light"] .nav-item.active {
+  color: var(--accent-deep);
+}
+
+/* ---------- accent palettes (the gradient logo variants) ---------- */
+
+:root[data-accent="ocean"] {
+  --accent: #3b82f6;
+  --accent-bright: #60a5fa;
+  --accent-2: #22d3ee;
+  --brand-a: #172554;
+  --brand-b: #2563eb;
+}
+
+:root[data-accent="aurora"] {
+  --accent: #14b8a6;
+  --accent-bright: #2dd4bf;
+  --accent-2: #818cf8;
+  --brand-a: #134e4a;
+  --brand-b: #6d28d9;
+}
+
+:root[data-accent="emerald"] {
+  --accent: #10b981;
+  --accent-bright: #34d399;
+  --accent-2: #6ee7b7;
+  --brand-a: #064e3b;
+  --brand-b: #059669;
+}
+
+:root[data-accent="violet"] {
+  --accent: #8b5cf6;
+  --accent-bright: #a78bfa;
+  --accent-2: #c4b5fd;
+  --brand-a: #2e1065;
+  --brand-b: #7c3aed;
+}
+
+:root[data-accent="sunset"] {
+  --accent: #f43f5e;
+  --accent-bright: #fb7185;
+  --accent-2: #fbbf24;
+  --brand-a: #4c0519;
+  --brand-b: #be123c;
+}
+
+:root[data-accent="midnight"] {
+  --accent: #3b82f6;
+  --accent-bright: #60a5fa;
+  --accent-2: #94a3b8;
+  --brand-a: #0f172a;
+  --brand-b: #334155;
+}
+
+/* ---------- appearance bar (sidebar) ---------- */
+
+.appearance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--hairline);
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--paper-dim);
+  padding: 5px 8px;
+  border-radius: 8px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.theme-toggle:hover {
+  background: var(--ink-2);
+  color: var(--paper);
+}
+
+.accent-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.accent-dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  transition: transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.accent-dot:hover {
+  transform: scale(1.2);
+}
+
+.accent-dot.on {
+  box-shadow: 0 0 0 2px var(--ink-1), 0 0 0 3.5px var(--accent);
 }

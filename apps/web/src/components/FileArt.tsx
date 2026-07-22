@@ -2,19 +2,19 @@ import type { FileKind } from "../format";
 
 /**
  * Illustrated art for cards: a layered folder and a document sheet with a
- * kind-specific pictogram. Each kind carries its own accent hue, kept muted
- * so the brass brand accent still leads.
+ * kind-specific pictogram. Each kind carries its own accent hue, kept in the
+ * cool family so the ocean brand accent still leads.
  */
 
 export const KIND_ACCENTS: Record<FileKind | "folder", string> = {
-  folder: "#e3b34c",
-  image: "#e3b34c",
-  video: "#c98bde",
-  audio: "#86b073",
-  pdf: "#e2604f",
-  text: "#8fb8d8",
-  archive: "#b09a7a",
-  other: "#8a8577",
+  folder: "#3b82f6",
+  image: "#38bdf8",
+  video: "#a78bfa",
+  audio: "#34d399",
+  pdf: "#f47272",
+  text: "#60a5fa",
+  archive: "#93a4c3",
+  other: "#8593ab",
 };
 
 const stroke = {
@@ -79,54 +79,80 @@ export function SheetArt(props: { kind: FileKind; ext: string }) {
   );
 }
 
-/** A layered folder: back panel, papers peeking out, front flap that lifts on hover. */
+/**
+ * A layered folder: back panel, papers peeking out, front flap that lifts on
+ * hover. Outline and stud follow the accent (via currentColor set in CSS).
+ */
 export function FolderArt() {
   return (
     <svg className="folder-art" viewBox="0 0 96 72" width="112" height="84" aria-hidden="true">
       <path
         d="M8 16a4 4 0 0 1 4-4h20l7 8h45a4 4 0 0 1 4 4v32a4 4 0 0 1-4 4H12a4 4 0 0 1-4-4Z"
-        fill="rgba(227, 179, 76, 0.14)"
-        stroke="rgba(227, 179, 76, 0.55)"
+        fill="currentColor"
+        fillOpacity="0.16"
+        stroke="currentColor"
+        strokeOpacity="0.6"
         strokeWidth="1.5"
       />
       <rect className="folder-paper" x="18" y="14" width="60" height="34" rx="3"
-        fill="#1b1e25" stroke="rgba(236,233,226,0.28)" strokeWidth="1.3" />
-      <path className="folder-paper-lines" d="M25 22h36M25 28h28" stroke="rgba(236,233,226,0.3)"
-        strokeWidth="1.3" strokeLinecap="round" fill="none" />
+        fill="var(--ink-1)" stroke="currentColor" strokeOpacity="0.28" strokeWidth="1.3" />
+      <path className="folder-paper-lines" d="M25 22h36M25 28h28" stroke="currentColor"
+        strokeOpacity="0.4" strokeWidth="1.3" strokeLinecap="round" fill="none" />
       <path
         className="folder-front"
         d="M8 26h80a4 4 0 0 1 4 4l-3.4 26a4 4 0 0 1-4 3.5H11.4a4 4 0 0 1-4-3.5L4 30a4 4 0 0 1 4-4Z"
-        fill="#232730"
-        stroke="rgba(227, 179, 76, 0.7)"
+        fill="currentColor"
+        fillOpacity="0.14"
+        stroke="currentColor"
+        strokeOpacity="0.8"
         strokeWidth="1.5"
       />
-      <circle className="folder-stud" cx="48" cy="43" r="2.6" fill="rgba(227, 179, 76, 0.8)" />
+      <circle className="folder-stud" cx="48" cy="43" r="2.6" fill="var(--accent-2)" />
     </svg>
   );
 }
 
-/** Compact folder-and-keyhole brand mark, matching the app icon. */
-export function BrandMark({ size = 22 }: { size?: number }) {
+/**
+ * The brand mark: an ocean shield-document with a folded corner and the
+ * "face" of text bars, matching the app icon. Rendered on its rounded tile.
+ */
+export function BrandMark({ size = 24 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 96 84" aria-hidden="true" className="brand-mark">
+    <svg width={size} height={size} viewBox="0 0 512 512" aria-hidden="true" className="brand-mark">
       <defs>
-        <linearGradient id="bm-brass" x1="0.1" y1="0" x2="0.75" y2="1">
-          <stop offset="0" stopColor="#f4d284" />
-          <stop offset="0.5" stopColor="#e3b34c" />
-          <stop offset="1" stopColor="#a97f2c" />
+        <linearGradient id="bm-tile" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style={{ stopColor: "var(--brand-a)" }} />
+          <stop offset="100%" style={{ stopColor: "var(--brand-b)" }} />
+        </linearGradient>
+        <linearGradient id="bm-sheet" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="100%" stopColor="#dbeafe" />
         </linearGradient>
       </defs>
+      <rect width="512" height="512" rx="120" fill="url(#bm-tile)" />
       <path
-        d="M 10 22 a 5 5 0 0 1 5 -5 h 22 l 8 8 h 36 a 5 5 0 0 1 5 5 v 34 a 5 5 0 0 1 -5 5 H 15 a 5 5 0 0 1 -5 -5 Z"
-        fill="#8a651f"
+        d="M 168 176 Q 168 152 192 152 L 312 152 L 344 186 L 344 292 Q 344 356 256 396 Q 168 356 168 292 Z"
+        fill="url(#bm-sheet)"
       />
-      <rect x="20" y="20" width="56" height="26" rx="4" fill="#efece4" />
-      <path
-        d="M 5 40 h 86 a 4 4 0 0 1 3.9 4.9 l -5.6 26 a 6 6 0 0 1 -5.9 4.9 H 12.6 a 6 6 0 0 1 -5.9 -4.9 l -5.6 -26 A 4 4 0 0 1 5 40 Z"
-        fill="url(#bm-brass)"
-      />
-      <circle cx="48" cy="55" r="5.4" fill="#101114" />
-      <path d="M 45.8 58.4 L 44 68 a 1.6 1.6 0 0 0 1.6 1.9 h 4.8 a 1.6 1.6 0 0 0 1.6 -1.9 l -1.8 -9.6 Z" fill="#101114" />
+      <path d="M 312 152 L 344 186 L 312 186 Z" fill="#93c5fd" />
+      <rect x="200" y="228" width="66" height="13" rx="6.5" fill="#1e40af" />
+      <rect x="274" y="228" width="40" height="13" rx="6.5" fill="#2563eb" />
+      <rect x="200" y="258" width="44" height="13" rx="6.5" fill="#22d3ee" />
+      <rect x="252" y="258" width="62" height="13" rx="6.5" fill="#1e40af" />
+      <rect x="214" y="288" width="52" height="13" rx="6.5" fill="#2563eb" />
+      <rect x="274" y="288" width="24" height="13" rx="6.5" fill="#22d3ee" />
+      <rect x="226" y="318" width="40" height="13" rx="6.5" fill="#1e40af" />
     </svg>
+  );
+}
+
+/** The "engram store" wordmark: bold + light, with a cyan full-stop. */
+export function Wordmark() {
+  return (
+    <span className="wordmark">
+      <span className="wm-engram">engram</span>
+      <span className="wm-store">store</span>
+      <span className="wm-dot" aria-hidden="true" />
+    </span>
   );
 }

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { login, registerAccount, type Session } from "../session";
 import { useStore } from "../store";
-import { BrandMark } from "./FileArt";
+import { BrandMark, Wordmark } from "./FileArt";
 
 type Mode = "signin" | "signup";
 
@@ -59,8 +59,13 @@ export function Auth() {
     <div className="auth-shell">
       <div className="auth-card">
         <div className="auth-brand">
-          <BrandMark size={52} />
-          <h1>Engramer Store</h1>
+          <BrandMark size={64} />
+          <h1>
+            <Wordmark />
+          </h1>
+          <p className="tagline">
+            Private <b>·</b> Encrypted <b>·</b> Yours
+          </p>
           <p>End-to-end encrypted storage. Your keys never leave this device.</p>
         </div>
 
@@ -99,7 +104,7 @@ export function Auth() {
             </>
           )}
           {error && <div className="error-text">{error}</div>}
-          <button className="btn btn-brass" type="submit" disabled={busy !== null}>
+          <button className="btn btn-primary" type="submit" disabled={busy !== null}>
             {busy ? <span className="spinner" /> : null}
             {busy ?? (mode === "signup" ? "Create vault" : "Unlock")}
           </button>
@@ -145,7 +150,7 @@ export function Auth() {
               >
                 Copy
               </button>
-              <button className="btn btn-brass" onClick={finishSignup} disabled={busy !== null}>
+              <button className="btn btn-primary" onClick={finishSignup} disabled={busy !== null}>
                 I saved it, open my vault
               </button>
             </div>
