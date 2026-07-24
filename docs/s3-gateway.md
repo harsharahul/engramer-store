@@ -148,12 +148,15 @@ clickable:
 
 ## Build sequence
 
-1. Scoped API tokens (the credential foundation the REST API and both S3 planes
-   share).
-2. The local S3 bridge (plane 1): the zero-knowledge path, reusing the client
-   crypto, with SigV4 verification, `ListObjectsV2`, ranged `GetObject`,
-   `PutObject`, and multipart.
-3. Hosted gateway buckets (plane 2) with credential-derived at-rest keys and
+1. **The local S3 bridge, read path (shipped).** `apps/bridge` runs inside the
+   user's trust boundary, unlocks the vault locally, and serves `ListBuckets`,
+   `ListObjectsV2` (prefix and delimiter), `HeadObject`, and ranged
+   `GetObject`, verifying SigV4 against a locally generated credential. An
+   end-to-end test drives it with the AWS S3 SDK and confirms downloaded bytes
+   decrypt to the original. See [apps/bridge/README.md](../apps/bridge/README.md).
+2. The bridge write path: `PutObject`, multipart upload, `DeleteObject`.
+3. Scoped API tokens shared by the REST API and both S3 planes.
+4. Hosted gateway buckets (plane 2) with credential-derived at-rest keys and
    revocable per-folder grants.
 
 ## References
