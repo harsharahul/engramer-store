@@ -3,6 +3,18 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.6.0] - 2026-07-24
+
+### Added
+- Local S3 bridge (`apps/bridge`): a self-hostable, zero-knowledge S3 endpoint
+  that runs inside your own trust boundary, unlocks the vault locally, and lets
+  any S3 client (rclone, s3fs, the AWS SDK) browse and download your encrypted
+  files, with each top-level folder presented as a bucket. It serves
+  ListBuckets, ListObjectsV2 with prefix and delimiter, HeadObject, and ranged
+  GetObject, verifying SigV4 against a locally generated credential. The Engram
+  Store server still only ever holds ciphertext. Read path first; write support
+  is planned. Design in docs/s3-gateway.md.
+
 ## [0.5.0] - 2026-07-22
 
 Rebrand to Engram Store, with a themeable ocean design system.
