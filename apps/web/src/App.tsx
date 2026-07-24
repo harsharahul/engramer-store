@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router";
 import { setUnauthorizedHandler } from "./api";
 import { restoreSession } from "./session";
 import { useStore } from "./store";
