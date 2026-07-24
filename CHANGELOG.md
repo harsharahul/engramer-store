@@ -15,6 +15,13 @@ All notable changes to Engram Store are documented here, following
   Store server still only ever holds ciphertext. Read path first; write support
   is planned. Design in docs/s3-gateway.md.
 
+### Security
+- Cleared three dependency advisories: bumped `@fastify/static` to 10.1.2 (route
+  guard and non-canonical path authorization bypasses), and migrated the web
+  client from the frozen `react-router-dom` 7 to `react-router` 8 (the RSC-mode
+  CSRF advisory; the app is a client-side SPA, so the flaw did not apply, and the
+  supported fix is the v8 package merge).
+
 ## [0.5.0] - 2026-07-22
 
 Rebrand to Engram Store, with a themeable ocean design system.
