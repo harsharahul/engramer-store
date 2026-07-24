@@ -71,7 +71,7 @@ Configuration via environment variables:
 | `ENGRAMER_WEB_DIST` | auto-detected | Path to a built web client to serve |
 | `ENGRAMER_S3_BUCKET` | unset | Store blobs in an S3-compatible bucket instead of local disk |
 
-Run it behind TLS in production; the login key must only ever travel over HTTPS. Storage architecture, the S3-compatible backend, and backup recipes are covered in [docs/storage.md](docs/storage.md).
+Run it behind TLS in production; the login key must only ever travel over HTTPS. Storage architecture, the S3-compatible backend, and backup recipes are covered in [docs/storage.md](docs/storage.md). A design for exposing an S3 API and for rich document editing lives in [docs/s3-gateway.md](docs/s3-gateway.md) and [docs/editing.md](docs/editing.md).
 
 ## Development
 
