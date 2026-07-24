@@ -19,6 +19,34 @@ importers:
         specifier: 4.1.10
         version: 4.1.10(@types/node@26.1.1)(vite@8.1.5(@types/node@26.1.1)(esbuild@0.28.1)(terser@5.49.0)(tsx@4.23.1))
 
+  apps/bridge:
+    dependencies:
+      '@engramer/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
+      fastify:
+        specifier: 5.10.0
+        version: 5.10.0
+    devDependencies:
+      '@aws-sdk/client-s3':
+        specifier: 3.1090.0
+        version: 3.1090.0
+      '@types/node':
+        specifier: 26.1.1
+        version: 26.1.1
+      aws4:
+        specifier: 1.13.2
+        version: 1.13.2
+      tsx:
+        specifier: 4.23.1
+        version: 4.23.1
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@types/node@26.1.1)(vite@8.1.5(@types/node@26.1.1)(esbuild@0.28.1)(terser@5.49.0)(tsx@4.23.1))
+
   apps/server:
     dependencies:
       '@aws-sdk/client-s3':
@@ -1603,6 +1631,9 @@ packages:
 
   avvio@9.3.0:
     resolution: {integrity: sha512-g2tQ7LE7oOSqDfwEm3M+ZCMTJc7KiZCdJ4UwyZJb5ckTKyYu50OYmvv0mCFXPuYXoM4zkSt8zM9XQ9KCvxA74A==}
+
+  aws4@1.13.2:
+    resolution: {integrity: sha512-lHe62zvbTB5eEABUVi/AwVh0ZKY9rMMDhmm+eeyuuUQbQ3+J+fONVQOZyj+DdrvD4BY33uYniyRJ4UJIaSKAfw==}
 
   babel-plugin-polyfill-corejs2@0.4.17:
     resolution: {integrity: sha512-aTyf30K/rqAsNwN76zYrdtx8obu0E4KoUME29B1xj+B3WxgvWkp943vYQ+z8Mv3lw9xHXMHpvSPOBxzAkIa94w==}
@@ -4578,6 +4609,8 @@ snapshots:
     dependencies:
       '@fastify/error': 4.2.0
       fastq: 1.20.1
+
+  aws4@1.13.2: {}
 
   babel-plugin-polyfill-corejs2@0.4.17(@babel/core@7.29.7):
     dependencies:
