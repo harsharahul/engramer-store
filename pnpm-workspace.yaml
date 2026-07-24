@@ -5,6 +5,7 @@ allowBuilds:
   better-sqlite3: true
   esbuild: true
 overrides:
-  # Force the patched fast-uri (GHSA-v2hh-gcrm-f6hx, host confusion) into
-  # Fastify's transitive tree. Remove once Fastify ships it directly.
-  fast-uri@3: "^3.1.4"
+  # Force patched versions of Fastify's transitive deps into the tree until
+  # Fastify ships them directly.
+  fast-uri@3: "^3.1.4" # GHSA-v2hh-gcrm-f6hx (host confusion)
+  find-my-way@9: "^9.6.1" # GHSA-c96f-x56v-gq3h (HTTP/2 DoS)
