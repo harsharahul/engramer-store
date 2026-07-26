@@ -131,28 +131,142 @@ export const api = {
     return new Uint8Array(await response.arrayBuffer());
   },
 
-  createShare: (fileId: string) =>
+  createShare: (fileId: string, options?: ShareOptions) =>
     request<{ token: string }>("/api/shares", {
       method: "POST",
-      body: JSON.stringify({ fileId }),
+      body: JSON.stringify({ fileId, ...options }),
     }),
 
-  listShares: () =>
-    request<{ shares: Array<{ token: string; fileId: string; createdAt: number }> }>("/api/shares"),
+  listShares: () => request<{ shares: ShareInfo[] }>("/api/shares"),
 
   revokeShare: (token: string) => request<void>(`/api/shares/${token}`, { method: "DELETE" }),
 
-  publicMeta: (token: string) =>
-    request<{ encryptedMeta: SecretBox; size: number }>(`/api/public/${token}/meta`),
+  publicMeta: (token: string, accessKey?: string) =>
+    request<PublicMeta>(`/api/public/${token}/meta`, {
+      headers: accessKey ? { "x-share-access": accessKey } : {},
+    }),
 
-  publicData: async (token: string): Promise<Uint8Array> => {
-    const response = await fetch(`/api/public/${token}/data`);
+  publicData: async (token: string, accessKey?: string): Promise<Uint8Array> => {
+    const response = await fetch(`/api/public/${token}/data`, {
+      headers: accessKey ? { "x-share-access": accessKey } : {},
+    });
     if (!response.ok) {
-      throw new ApiError(response.status, "this link is no longer available");
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new ApiError(response.status, body.error ?? "this link is no longer available");
     }
     return new Uint8Array(await response.arrayBuffer());
   },
+
+  createFileRequest: (folderId: string | null, encryptedMeta: SecretBox, expiresAt?: number | null) =>
+    request<{ token: string }>("/api/requests", {
+      method: "POST",
+      body: JSON.stringify({ folderId, encryptedMeta, expiresAt }),
+    }),
+
+  listFileRequests: () => request<{ requests: FileRequestInfo[] }>("/api/requests"),
+
+  revokeFileRequest: (token: string) => request<void>(`/api/requests/${token}`, { method: "DELETE" }),
+
+  listRequestUploads: () => request<{ uploads: RequestUploadInfo[] }>("/api/requests/uploads"),
+
+  acceptRequestUpload: (id: string, encryptedKey: SecretBox, encryptedMeta: SecretBox) =>
+    request<FileDto>(`/api/requests/uploads/${id}/accept`, {
+      method: "POST",
+      body: JSON.stringify({ encryptedKey, encryptedMeta }),
+    }),
+
+  discardRequestUpload: (id: string) =>
+    request<void>(`/api/requests/uploads/${id}`, { method: "DELETE" }),
+
+  publicRequestInfo: (token: string) =>
+    request<{ publicKey: string; maxBytes: number }>(`/api/public/requests/${token}`),
+
+  publicRequestCreateFile: (token: string, sealedKey: string, encryptedMeta: SecretBox) =>
+    request<{ id: string }>(`/api/public/requests/${token}/files`, {
+      method: "POST",
+      body: JSON.stringify({ sealedKey, encryptedMeta }),
+    }),
 };
+
+export interface ShareOptions {
+  expiresAt?: number | null;
+  maxDownloads?: number | null;
+  password?: {
+    digest: string;
+    kdf: KdfParams;
+    wrappedKey: SecretBox;
+  } | null;
+}
+
+export interface ShareInfo {
+  token: string;
+  fileId: string;
+  createdAt: number;
+  expiresAt: number | null;
+  maxDownloads: number | null;
+  downloadCount: number;
+  protected: boolean;
+}
+
+export interface PublicMeta {
+  protected: boolean;
+  kdf?: KdfParams;
+  encryptedMeta?: SecretBox;
+  size?: number;
+  wrappedKey?: SecretBox;
+}
+
+export interface FileRequestInfo {
+  token: string;
+  folderId: string | null;
+  encryptedMeta: SecretBox;
+  expiresAt: number | null;
+  revoked: boolean;
+  createdAt: number;
+  received: number;
+  pending: number;
+}
+
+export interface RequestUploadInfo {
+  id: string;
+  requestToken: string;
+  sealedKey: string;
+  encryptedMeta: SecretBox;
+  size: number;
+  thumbSize: number;
+  createdAt: number;
+}
+
+/** Anonymous upload to a file request; same XHR progress pattern, no auth. */
+export function uploadRequestBlob(
+  requestToken: string,
+  uploadId: string,
+  kind: "data" | "thumbnail",
+  payload: Uint8Array,
+  onProgress?: (fraction: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", `/api/public/requests/${requestToken}/files/${uploadId}/${kind}`);
+    xhr.setRequestHeader("content-type", "application/octet-stream");
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        onProgress(event.loaded / event.total);
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else if (xhr.status === 413) {
+        reject(new ApiError(413, "the recipient is out of storage space"));
+      } else {
+        reject(new ApiError(xhr.status, `upload failed (${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(0, "network error during upload"));
+    xhr.send(payload.slice().buffer as ArrayBuffer);
+  });
+}
 
 /** Upload with real progress reporting; fetch cannot observe upload progress. */
 export function uploadBlob(

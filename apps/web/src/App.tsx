@@ -6,6 +6,7 @@ import { useStore } from "./store";
 import { Auth } from "./components/Auth";
 import { Vault } from "./components/Vault";
 import { ShareView } from "./components/ShareView";
+import { RequestView } from "./components/RequestView";
 
 export function App() {
   const session = useStore((s) => s.session);
@@ -27,6 +28,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/s/:token" element={<ShareView />} />
+      <Route path="/r/:token" element={<RequestView />} />
       <Route
         path="*"
         element={
