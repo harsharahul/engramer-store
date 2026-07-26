@@ -13,6 +13,7 @@ import { nextSeq, openDatabase, storageUsed } from "./db.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerStorageRoutes } from "./routes/storage.js";
 import { registerShareRoutes } from "./routes/shares.js";
+import { registerRequestRoutes } from "./routes/requests.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -81,6 +82,7 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   registerAuthRoutes(app);
   registerStorageRoutes(app);
   registerShareRoutes(app);
+  registerRequestRoutes(app);
 
   app.get("/api/health", async () => ({ status: "ok" }));
 

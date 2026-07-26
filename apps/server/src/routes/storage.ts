@@ -42,7 +42,7 @@ function folderToDto(row: FolderRow) {
   };
 }
 
-function fileToDto(row: FileRow) {
+export function fileToDto(row: FileRow) {
   return {
     id: row.id,
     folderId: row.folder_id,

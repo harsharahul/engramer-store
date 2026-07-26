@@ -42,6 +42,35 @@ export interface ShareRow {
   user_id: number;
   file_id: string;
   created_at: number;
+  expires_at: number | null;
+  max_downloads: number | null;
+  download_count: number;
+  password_digest: string | null;
+  password_kdf: string | null;
+  wrapped_key: string | null;
+}
+
+export interface FileRequestRow {
+  token: string;
+  user_id: number;
+  folder_id: string | null;
+  encrypted_meta: string;
+  expires_at: number | null;
+  revoked: number;
+  created_at: number;
+}
+
+export interface RequestUploadRow {
+  id: string;
+  request_token: string;
+  user_id: number;
+  sealed_key: string;
+  encrypted_meta: string;
+  size: number;
+  thumb_size: number;
+  uploaded: number;
+  consumed: number;
+  created_at: number;
 }
 
 export function openDatabase(path: string): Database.Database {
@@ -91,8 +120,54 @@ export function openDatabase(path: string): Database.Database {
       file_id TEXT NOT NULL REFERENCES files(id),
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS file_requests (
+      token TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      folder_id TEXT,
+      encrypted_meta TEXT NOT NULL,
+      expires_at INTEGER,
+      revoked INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS request_uploads (
+      id TEXT PRIMARY KEY,
+      request_token TEXT NOT NULL REFERENCES file_requests(token),
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      sealed_key TEXT NOT NULL,
+      encrypted_meta TEXT NOT NULL,
+      size INTEGER NOT NULL DEFAULT 0,
+      thumb_size INTEGER NOT NULL DEFAULT 0,
+      uploaded INTEGER NOT NULL DEFAULT 0,
+      consumed INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS request_uploads_owner ON request_uploads(user_id, uploaded, consumed);
   `);
+  // Additive migrations for databases created before these columns existed.
+  ensureColumns(db, "shares", {
+    expires_at: "INTEGER",
+    max_downloads: "INTEGER",
+    download_count: "INTEGER NOT NULL DEFAULT 0",
+    password_digest: "TEXT",
+    password_kdf: "TEXT",
+    wrapped_key: "TEXT",
+  });
   return db;
+}
+
+function ensureColumns(
+  db: Database.Database,
+  table: string,
+  columns: Record<string, string>,
+): void {
+  const existing = new Set(
+    (db.pragma(`table_info(${table})`) as Array<{ name: string }>).map((c) => c.name),
+  );
+  for (const [name, type] of Object.entries(columns)) {
+    if (!existing.has(name)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    }
+  }
 }
 
 /** Monotonic per-user sequence number; every mutation gets the next value. */
@@ -103,12 +178,21 @@ export function nextSeq(db: Database.Database, userId: number): number {
   return row.last_seq;
 }
 
-/** Bytes of ciphertext currently stored for a user (uploaded, not permanently deleted). */
+/**
+ * Bytes of ciphertext currently stored for a user (uploaded, not permanently
+ * deleted), including file-request uploads waiting to be filed: those blobs
+ * already occupy the owner's storage even before they are accepted.
+ */
 export function storageUsed(db: Database.Database, userId: number): number {
-  const row = db
+  const files = db
     .prepare(
       "SELECT COALESCE(SUM(size + thumb_size), 0) AS used FROM files WHERE user_id = ? AND deleted = 0",
     )
     .get(userId) as { used: number };
-  return row.used;
+  const pending = db
+    .prepare(
+      "SELECT COALESCE(SUM(size + thumb_size), 0) AS used FROM request_uploads WHERE user_id = ? AND consumed = 0",
+    )
+    .get(userId) as { used: number };
+  return files.used + pending.used;
 }

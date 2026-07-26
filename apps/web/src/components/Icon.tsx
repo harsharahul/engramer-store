@@ -271,6 +271,28 @@ export const MoveGlyph = ({ size = 16 }: IconProps) => (
   </Svg>
 );
 
+export const LinkGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <path d="M9.5 14.5 14.5 9.5" />
+    <path d="M8 12.5 5.8 14.7a3.6 3.6 0 0 0 0 5.1 3.6 3.6 0 0 0 5.1 0l2.6-2.6" />
+    <path d="M16 11.5l2.2-2.2a3.6 3.6 0 0 0 0-5.1 3.6 3.6 0 0 0-5.1 0l-2.6 2.6" />
+  </Svg>
+);
+
+export const InboxGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <path d="M3.5 13.5 6 6a1.5 1.5 0 0 1 1.4-1h9.2A1.5 1.5 0 0 1 18 6l2.5 7.5" />
+    <path d="M3.5 13.5V18A1.5 1.5 0 0 0 5 19.5h14a1.5 1.5 0 0 0 1.5-1.5v-4.5h-5a3.5 3.5 0 0 1-7 0Z" />
+  </Svg>
+);
+
+export const KeyGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <circle cx="8" cy="15.5" r="4" />
+    <path d="M11 12.5 19.5 4M15.5 8l2.5 2.5M13 10.5l2 2" />
+  </Svg>
+);
+
 export const SunGlyph = ({ size = 16 }: IconProps) => (
   <Svg size={size}>
     <circle cx="12" cy="12" r="4.2" />

@@ -3,6 +3,31 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.7.0] - 2026-07-26
+
+### Added
+- Password-protected share links. Setting a password wraps the file key under
+  an Argon2id-derived key on your device; the server stores only the wrapped
+  key and a verifier digest (the same scheme as login), so it can refuse
+  visitors who do not know the password while remaining unable to decrypt
+  anything itself. The public page prompts for the password and unwraps the
+  key locally.
+- Link expiry (1 hour to 30 days, or never) and download limits (including
+  one-time links), both enforced server side with an atomic download counter.
+- A Shared view in the sidebar listing every active link with its file, expiry,
+  download count, and protection status, plus copy and revoke actions.
+- File requests: create a link anyone can use to send files into your vault.
+  The public page encrypts each file on the sender's device, including
+  thumbnail and searchable metadata, and seals the file key to your public
+  key; arrivals are unsealed, re-wrapped, and filed into the folder you chose
+  automatically on your next sync. Requests support labels (kept out of the
+  server's sight), destination folders, expiry, and closing at any time.
+  Design notes in docs/sharing.md.
+
+### Fixed
+- The Share dialog opens again from the context menu, preview, and details
+  panel; its mount was lost in the 0.4.0 interface rework.
+
 ## [0.6.0] - 2026-07-24
 
 ### Added

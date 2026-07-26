@@ -1058,6 +1058,211 @@ a {
   font-size: 12px;
 }
 
+.modal.modal-wide {
+  max-width: 520px;
+}
+
+/* ---------- share options and link management ---------- */
+
+.share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.share-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--ink-0);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+.share-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.share-row-token {
+  font-size: 12px;
+  color: var(--paper);
+  white-space: nowrap;
+}
+
+.share-row-meta {
+  font-size: 11.5px;
+  color: var(--paper-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent-bright);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.share-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.share-option-row {
+  display: flex;
+  gap: 8px;
+}
+
+.share-option-row select {
+  flex: 1;
+  min-width: 0;
+  background: var(--ink-2);
+  color: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.share-option-row select:focus {
+  border-color: var(--accent);
+}
+
+.icon-btn.danger:hover {
+  color: var(--danger, #ef4444);
+}
+
+/* ---------- shared view (links + file requests) ---------- */
+
+.shared-view {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  max-width: 860px;
+}
+
+.shared-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.shared-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-weight: 550;
+  font-size: 15px;
+  color: var(--paper);
+}
+
+.shared-head h3 svg {
+  color: var(--accent);
+}
+
+.shared-empty {
+  color: var(--paper-dim);
+  font-size: 13px;
+  padding: 14px 4px;
+  max-width: 520px;
+}
+
+.row.static {
+  cursor: default;
+}
+
+/* ---------- public request (receive) page ---------- */
+
+.share-card.request-card {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.share-card.request-card.dropzone-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.share-card .sub.small {
+  font-size: 11.5px;
+  margin-top: 14px;
+  margin-bottom: 0;
+}
+
+.share-unlock {
+  display: flex;
+  gap: 8px;
+  margin: 0 auto 6px;
+  max-width: 360px;
+}
+
+.request-items {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+
+.request-item-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 5px;
+}
+
+.request-item-main .name {
+  font-size: 13px;
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.request-item-main .meta {
+  font-size: 11.5px;
+  color: var(--paper-dim);
+  white-space: nowrap;
+}
+
+.request-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--ink-2);
+  overflow: hidden;
+}
+
+.request-bar > div {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.2s ease;
+}
+
+.request-bar.failed > div {
+  background: var(--danger, #ef4444);
+}
+
 /* ---------- preview ---------- */
 
 .preview-shell {

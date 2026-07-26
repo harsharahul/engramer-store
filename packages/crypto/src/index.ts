@@ -43,3 +43,11 @@ export {
   encryptFolderMetadata,
   decryptFolderMetadata,
 } from "./metadata.js";
+export {
+  type ShareProtection,
+  type ShareAccess,
+  protectShareKey,
+  deriveShareAccess,
+  openShareKey,
+  shareAccessDigest,
+} from "./share.js";

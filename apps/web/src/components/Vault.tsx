@@ -29,6 +29,7 @@ import { MoveDialog } from "./MoveDialog";
 import { Preview } from "./Preview";
 import { Editor } from "./Editor";
 import { ShareDialog } from "./ShareDialog";
+import { SharedView, NewRequestDialog } from "./SharedView";
 import { UploadTray } from "./UploadTray";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { Confirm, TextPrompt } from "./Dialogs";
@@ -44,10 +45,12 @@ import {
   EaselGlyph,
   FolderGlyph,
   GridGlyph,
+  InboxGlyph,
   InfoGlyph,
   Keyhole,
   LayoutGridGlyph,
   LayoutListGlyph,
+  LinkGlyph,
   LockGlyph,
   MonitorGlyph,
   MoonGlyph,
@@ -76,6 +79,7 @@ type View =
   | { kind: "recent" }
   | { kind: "trash" }
   | { kind: "favorites" }
+  | { kind: "shared" }
   | { kind: "category"; name: string };
 
 const CATEGORY_ORDER = [
@@ -131,6 +135,7 @@ export function Vault() {
   const [deleteFolderId, setDeleteFolderId] = useState<string | null>(null);
   const [deleteForeverId, setDeleteForeverId] = useState<string | null>(null);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [requestFolder, setRequestFolder] = useState<{ folderId: string | null } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => currentTheme());
@@ -217,6 +222,8 @@ export function Vault() {
     switch (view.kind) {
       case "recent":
         return [...liveFiles].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 60);
+      case "shared":
+        return [];
       case "favorites":
         files = liveFiles.filter((f) => f.favorite);
         break;
@@ -378,6 +385,12 @@ export function Vault() {
       items: [
         { id: "open", label: "Open", run: () => setView({ kind: "folder", id: folderId }) },
         { id: "rename", label: "Rename", icon: <PencilGlyph size={13} />, run: () => setRenameFolderId(folderId) },
+        {
+          id: "request",
+          label: "Request files here…",
+          icon: <InboxGlyph size={13} />,
+          run: () => setRequestFolder({ folderId }),
+        },
         { id: "d", label: "", divider: true, run: () => {} },
         {
           id: "delete",
@@ -467,9 +480,16 @@ export function Vault() {
       { id: "new-note", label: "New note", hint: "write, encrypted", run: () => setNewNoteOpen(true) },
       { id: "new-folder", label: "New folder", run: () => setNewFolderOpen(true) },
       { id: "toggle-layout", label: "Toggle grid and list", run: () => toggleLayout() },
+      {
+        id: "request-files",
+        label: "Request files…",
+        hint: "receive, encrypted to you",
+        run: () => setRequestFolder({ folderId: null }),
+      },
       { id: "go-files", label: "Go to All files", run: () => setView({ kind: "folder", id: null }) },
       { id: "go-recent", label: "Go to Recent", run: () => setView({ kind: "recent" }) },
       { id: "go-favorites", label: "Go to Favorites", run: () => setView({ kind: "favorites" }) },
+      { id: "go-shared", label: "Go to Shared", run: () => setView({ kind: "shared" }) },
       { id: "go-trash", label: "Go to Trash", run: () => setView({ kind: "trash" }) },
       { id: "lock", label: "Lock vault and sign out", run: lock },
     ],
@@ -510,9 +530,11 @@ export function Vault() {
           ? "Recent"
           : view.kind === "favorites"
             ? "Favorites"
-            : "Trash";
+            : view.kind === "shared"
+              ? "Shared"
+              : "Trash";
 
-  const showViewControls = !searching && view.kind !== "trash";
+  const showViewControls = !searching && view.kind !== "trash" && view.kind !== "shared";
 
   const navButton = (
     active: boolean,
@@ -566,6 +588,7 @@ export function Vault() {
           "Favorites",
           liveFiles.filter((f) => f.favorite).length,
         )}
+        {navButton(view.kind === "shared", () => setView({ kind: "shared" }), <LinkGlyph />, "Shared")}
         {navButton(view.kind === "trash", () => setView({ kind: "trash" }), <TrashGlyph />, "Trash")}
 
         {libraryCategories.length > 0 && (
@@ -728,11 +751,13 @@ export function Vault() {
             <span className="crumb-note">
               {searching
                 ? `for “${query}”`
-                : `${visibleFiles.length} file${visibleFiles.length === 1 ? "" : "s"}${
-                    view.kind === "folder" && childFolders.length
-                      ? ` · ${childFolders.length} folder${childFolders.length === 1 ? "" : "s"}`
-                      : ""
-                  }`}
+                : view.kind === "shared"
+                  ? "links and file requests"
+                  : `${visibleFiles.length} file${visibleFiles.length === 1 ? "" : "s"}${
+                      view.kind === "folder" && childFolders.length
+                        ? ` · ${childFolders.length} folder${childFolders.length === 1 ? "" : "s"}`
+                        : ""
+                    }`}
             </span>
             {searching && (
               <button className="icon-btn" onClick={() => setQuery("")} title="Clear search">
@@ -788,6 +813,8 @@ export function Vault() {
               onOpen={openFile}
               onContextMenu={openFileMenu}
             />
+          ) : view.kind === "shared" ? (
+            <SharedView onToast={showToast} />
           ) : view.kind === "trash" ? (
             <TrashList
               files={viewFiles}
@@ -856,7 +883,7 @@ export function Vault() {
         </div>
       </main>
 
-      {detailsOpen && view.kind !== "trash" && (
+      {detailsOpen && view.kind !== "trash" && view.kind !== "shared" && (
         <DetailsPanel
           file={selectedFile}
           selectionCount={selection.size}
@@ -984,6 +1011,16 @@ export function Vault() {
           onSubmit={(name) => store.createFolder(name, currentFolderId)}
           onClose={() => setNewFolderOpen(false)}
         />
+      )}
+      {requestFolder && (
+        <NewRequestDialog
+          folderId={requestFolder.folderId}
+          onCreated={() => showToast("Request link copied. Send it to anyone.")}
+          onClose={() => setRequestFolder(null)}
+        />
+      )}
+      {shareFile && (
+        <ShareDialog file={shareFile} onClose={() => setShareId(null)} onToast={showToast} />
       )}
       {renameFolder && (
         <TextPrompt
