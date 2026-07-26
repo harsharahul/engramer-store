@@ -5,7 +5,9 @@ import {
   encryptBytes,
   encryptFileMetadata,
   encryptFolderMetadata,
+  encryptJson,
   generateKey,
+  openSealed,
   secretBoxOpen,
   secretBoxSeal,
   utf8Encode,
@@ -99,6 +101,8 @@ interface StoreState {
   deleteForever: (id: string) => Promise<void>;
   clearFinishedUploads: () => void;
   dismissReveal: () => void;
+  createFileRequest: (label: string, folderId: string | null, expiresAt: number | null) => Promise<string>;
+  ingestRequestUploads: () => Promise<number>;
 }
 
 function decryptFolder(dto: FolderDto, masterKey: Uint8Array): FolderEntry {
@@ -270,6 +274,8 @@ export const useStore = create<StoreState>((set, get) => {
         }
       }
       set({ folders, files, synced: true });
+      // Anything that arrived through a file request gets filed automatically.
+      await get().ingestRequestUploads().catch(() => 0);
     },
 
     refreshUsage: async () => {
@@ -442,5 +448,56 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     dismissReveal: () => set({ reveal: null }),
+
+    createFileRequest: async (label, folderId, expiresAt) => {
+      const { token } = await api.createFileRequest(
+        folderId,
+        encryptJson({ label }, masterKey()),
+        expiresAt,
+      );
+      return token;
+    },
+
+    /**
+     * Files every pending request upload into the vault: unseal the file key
+     * with the account key pair, re-wrap it under the master key, accept. The
+     * sender's device already computed metadata, thumbnail, and search text.
+     */
+    ingestRequestUploads: async () => {
+      const session = get().session;
+      if (!session) {
+        return 0;
+      }
+      const { uploads } = await api.listRequestUploads();
+      const revealItems: RevealItem[] = [];
+      for (const upload of uploads) {
+        try {
+          const fileKey = openSealed(upload.sealedKey, session.publicKey, session.privateKey);
+          const meta = decryptFileMetadata(upload.encryptedMeta, fileKey);
+          const dto = await api.acceptRequestUpload(
+            upload.id,
+            secretBoxSeal(fileKey, session.masterKey),
+            encryptFileMetadata(meta, fileKey),
+          );
+          applyFile(dto);
+          revealItems.push({
+            fileId: dto.id,
+            name: meta.name,
+            category: meta.category ?? "Other",
+            folderId: dto.folderId,
+            folderName: dto.folderId ? (get().folders.get(dto.folderId)?.name ?? null) : null,
+            tags: meta.tags ?? [],
+          });
+        } catch {
+          // Another tab may have filed it first, or the seal does not match;
+          // either way this upload stays pending rather than blocking the rest.
+        }
+      }
+      if (revealItems.length > 0) {
+        set({ reveal: { items: revealItems, at: Date.now() } });
+        await get().refreshUsage();
+      }
+      return revealItems.length;
+    },
   };
 });

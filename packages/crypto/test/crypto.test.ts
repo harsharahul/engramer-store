@@ -20,6 +20,10 @@ import {
   utf8Decode,
   fromB64,
   STREAM_CHUNK_SIZE,
+  protectShareKey,
+  deriveShareAccess,
+  openShareKey,
+  shareAccessDigest,
   type AccountKeys,
 } from "../src/index.js";
 
@@ -199,5 +203,33 @@ describe("sealed boxes for sharing", () => {
     const other = generateKeyPair();
     const sealed = sealToPublicKey(generateKey(), recipient.publicKey);
     expect(() => openSealed(sealed, other.publicKey, other.privateKey)).toThrow();
+  });
+});
+
+describe("password protected share links", () => {
+  it("round-trips the file key through the password", () => {
+    const fileKey = generateKey();
+    const protection = protectShareKey(fileKey, "swordfish festival");
+    const access = deriveShareAccess("swordfish festival", protection.kdf);
+    expect(access.accessKey).toBe(protection.accessKey);
+    expect(shareAccessDigest(access.accessKey)).toBe(protection.accessKeyDigest);
+    expectBytesEqual(openShareKey(protection.wrappedKey, access), fileKey);
+  });
+
+  it("fails closed on a wrong password", () => {
+    const protection = protectShareKey(generateKey(), "right password");
+    const access = deriveShareAccess("wrong password", protection.kdf);
+    expect(shareAccessDigest(access.accessKey)).not.toBe(protection.accessKeyDigest);
+    expect(() => openShareKey(protection.wrappedKey, access)).toThrow();
+  });
+
+  it("keeps the access and wrap subkeys independent", () => {
+    const fileKey = generateKey();
+    const protection = protectShareKey(fileKey, "domain separation");
+    const access = deriveShareAccess("domain separation", protection.kdf);
+    // Knowing the access key (what the server sees) must not open the wrap.
+    expect(() =>
+      openShareKey(protection.wrappedKey, { accessKey: access.accessKey, wrapKey: fromB64(access.accessKey) }),
+    ).toThrow();
   });
 });
