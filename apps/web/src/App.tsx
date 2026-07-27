@@ -23,6 +23,16 @@ export function App() {
         }
       })
       .finally(() => setBooting(false));
+
+    // Back/forward-cache restores resume the page with whatever fetches the
+    // freeze killed; a clean reload puts the state machine back on rails.
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        location.reload();
+      }
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
   }, [startSession, logout]);
 
   return (

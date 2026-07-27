@@ -28,8 +28,8 @@ declare module "fastify" {
 
 declare module "@fastify/jwt" {
   interface FastifyJWT {
-    payload: { uid: number };
-    user: { uid: number };
+    payload: { uid: number; pending?: boolean };
+    user: { uid: number; pending?: boolean };
   }
 }
 
@@ -58,6 +58,12 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     try {
       await request.jwtVerify();
     } catch {
+      await reply.code(401).send({ error: "authentication required" });
+      return;
+    }
+    // A pending token only proves the password step of a two-factor login;
+    // it must never act as a session.
+    if (request.user.pending) {
       await reply.code(401).send({ error: "authentication required" });
     }
   });

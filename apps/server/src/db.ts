@@ -7,6 +7,13 @@ export interface UserRow {
   key_attributes: string;
   last_seq: number;
   created_at: number;
+  /** Base32 TOTP secret once two-factor is enabled, else null. */
+  totp_secret: string | null;
+  totp_enabled: number;
+  /** Highest accepted TOTP step, so a code can never be replayed. */
+  totp_last_step: number;
+  /** JSON array of BLAKE2b digests of unused one-time recovery codes. */
+  recovery_code_digests: string | null;
 }
 
 export interface FolderRow {
@@ -168,6 +175,12 @@ export function openDatabase(path: string): Database.Database {
   // Additive migrations for databases created before these columns existed.
   ensureColumns(db, "files", {
     generation: "INTEGER NOT NULL DEFAULT 0",
+  });
+  ensureColumns(db, "users", {
+    totp_secret: "TEXT",
+    totp_enabled: "INTEGER NOT NULL DEFAULT 0",
+    totp_last_step: "INTEGER NOT NULL DEFAULT 0",
+    recovery_code_digests: "TEXT",
   });
   ensureColumns(db, "shares", {
     expires_at: "INTEGER",

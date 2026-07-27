@@ -3,6 +3,30 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.11.0] - 2026-07-27
+
+### Added
+- Two-factor authentication with any authenticator app (RFC 6238 TOTP,
+  implemented in-tree and pinned by the RFC's test vectors). Enrollment shows
+  a QR code and manual key and requires a first valid code; login becomes two
+  steps, and the account's key material is withheld until the second factor
+  passes. Codes tolerate one step of clock drift and can never be replayed;
+  ten one-time recovery codes are issued once and stored only as digests.
+  The S3 bridge supports two-factor accounts via ENGRAM_TOTP. The design,
+  including what a second factor can and cannot protect in an end-to-end
+  encrypted system, is documented in docs/auth.md alongside the planned
+  bring-your-own OpenID Connect single sign-on.
+- Authentication endpoints now throttle failures per address and identity
+  with exponential backoff and Retry-After, so password and code guessing
+  gets slow fast without affecting anyone else.
+
+### Fixed
+- The interface no longer hangs on "Decrypting your library" when the first
+  sync fails (server briefly unreachable, or a page restored from the
+  browser's back/forward cache): it shows the error with a working retry,
+  keeps the unlocked session, and a single undecryptable item can no longer
+  block the rest of the library from loading.
+
 ## [0.10.0] - 2026-07-27
 
 ### Added
