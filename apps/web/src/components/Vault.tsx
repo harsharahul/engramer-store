@@ -39,6 +39,7 @@ const DocEditor = lazy(() =>
 );
 import { ShareDialog } from "./ShareDialog";
 import { SharedView, NewRequestDialog } from "./SharedView";
+import { TwoFactorDialog } from "./TwoFactorDialog";
 import { UploadTray } from "./UploadTray";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { Confirm, TextPrompt } from "./Dialogs";
@@ -56,6 +57,7 @@ import {
   GridGlyph,
   InboxGlyph,
   InfoGlyph,
+  KeyGlyph,
   Keyhole,
   LayoutGridGlyph,
   LayoutListGlyph,
@@ -185,6 +187,7 @@ export function Vault() {
   const [deleteForeverId, setDeleteForeverId] = useState<string | null>(null);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [requestFolder, setRequestFolder] = useState<{ folderId: string | null } | null>(null);
+  const [securityOpen, setSecurityOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => currentTheme());
@@ -774,6 +777,13 @@ export function Vault() {
         )}
         <div className="account-row">
           <span title={store.session?.email}>{store.session?.email}</span>
+          <button
+            className="icon-btn"
+            title="Two-factor authentication"
+            onClick={() => setSecurityOpen(true)}
+          >
+            <KeyGlyph size={14} />
+          </button>
           <button className="icon-btn" title="Lock and sign out" onClick={lock}>
             <LockGlyph />
           </button>
@@ -995,7 +1005,14 @@ export function Vault() {
               onDeleteForever={(id) => setDeleteForeverId(id)}
             />
           ) : visibleFiles.length === 0 && (view.kind !== "folder" || childFolders.length === 0) ? (
-            <EmptyState view={view} synced={store.synced} onUpload={() => fileInput.current?.click()} onNote={() => setNewNoteOpen(true)} />
+            <EmptyState
+              view={view}
+              synced={store.synced}
+              syncError={store.syncError}
+              onRetry={() => void store.refresh().catch(() => {})}
+              onUpload={() => fileInput.current?.click()}
+              onNote={() => setNewNoteOpen(true)}
+            />
           ) : layout === "list" && view.kind !== "recent" ? (
             <>
               {view.kind === "folder" && childFolders.length > 0 && (
@@ -1207,6 +1224,9 @@ export function Vault() {
           onClose={() => setRequestFolder(null)}
         />
       )}
+      {securityOpen && (
+        <TwoFactorDialog onToast={showToast} onClose={() => setSecurityOpen(false)} />
+      )}
       {shareFile && (
         <ShareDialog file={shareFile} onClose={() => setShareId(null)} onToast={showToast} />
       )}
@@ -1263,10 +1283,27 @@ export function Vault() {
 function EmptyState(props: {
   view: View;
   synced: boolean;
+  syncError: string | null;
+  onRetry: () => void;
   onUpload: () => void;
   onNote: () => void;
 }) {
   if (!props.synced) {
+    // A failed sync surfaces an explicit retry instead of an eternal spinner.
+    if (props.syncError) {
+      return (
+        <div className="empty">
+          <span className="empty-mark">!</span>
+          <h3>Could not reach your vault</h3>
+          <p>{props.syncError}</p>
+          <div className="empty-actions">
+            <button className="btn btn-primary" onClick={props.onRetry}>
+              Try again
+            </button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="empty">
         <span className="empty-mark">⌘</span>

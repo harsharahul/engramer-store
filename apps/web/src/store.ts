@@ -84,6 +84,8 @@ export interface OcrProgress {
 interface StoreState {
   session: Session | null;
   synced: boolean;
+  /** Set when the last sync attempt failed; the UI offers a retry. */
+  syncError: string | null;
   folders: Map<string, FolderEntry>;
   files: Map<string, FileEntry>;
   usage: Usage | null;
@@ -239,6 +241,7 @@ export const useStore = create<StoreState>((set, get) => {
   return {
     session: null,
     synced: false,
+    syncError: null,
     folders: new Map(),
     files: new Map(),
     usage: null,
@@ -246,17 +249,25 @@ export const useStore = create<StoreState>((set, get) => {
     reveal: null,
     ocrProgress: null,
 
+    // A failed first sync must never strand the user on a spinner: the
+    // session (and its keys) are kept, the error is surfaced, and the UI
+    // offers a retry.
     startSession: async (session) => {
       set({
         session,
         synced: false,
+        syncError: null,
         folders: new Map(),
         files: new Map(),
         uploads: [],
         reveal: null,
       });
-      await get().refresh();
-      await get().refreshUsage();
+      try {
+        await get().refresh();
+        await get().refreshUsage();
+      } catch {
+        // refresh() already recorded syncError; nothing else to do here.
+      }
     },
 
     logout: () => {
@@ -274,20 +285,39 @@ export const useStore = create<StoreState>((set, get) => {
 
     refresh: async () => {
       const key = masterKey();
-      const response = await api.sync(0);
+      let response;
+      try {
+        response = await api.sync(0);
+      } catch (err) {
+        set({ syncError: err instanceof Error ? err.message : "could not reach the server" });
+        throw err;
+      }
       const folders = new Map<string, FolderEntry>();
       const files = new Map<string, FileEntry>();
+      let undecryptable = 0;
+      // One corrupt row must never take the whole library down with it.
       for (const dto of response.folders) {
         if (!dto.deleted) {
-          folders.set(dto.id, decryptFolder(dto, key));
+          try {
+            folders.set(dto.id, decryptFolder(dto, key));
+          } catch {
+            undecryptable++;
+          }
         }
       }
       for (const dto of response.files) {
         if (!dto.deleted && dto.uploaded) {
-          files.set(dto.id, decryptFile(dto, key));
+          try {
+            files.set(dto.id, decryptFile(dto, key));
+          } catch {
+            undecryptable++;
+          }
         }
       }
-      set({ folders, files, synced: true });
+      if (undecryptable > 0) {
+        console.warn(`${undecryptable} item(s) could not be decrypted and were skipped`);
+      }
+      set({ folders, files, synced: true, syncError: null });
       // Anything that arrived through a file request gets filed automatically.
       await get().ingestRequestUploads().catch(() => 0);
     },

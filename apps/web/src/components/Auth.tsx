@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { login, registerAccount, type Session } from "../session";
+import { login, registerAccount, type LoginResult, type Session } from "../session";
 import { useStore } from "../store";
 import { BrandMark, Wordmark } from "./FileArt";
 
@@ -13,6 +13,10 @@ export function Auth() {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [twoFactor, setTwoFactor] = useState<Extract<LoginResult, { kind: "two-factor" }> | null>(
+    null,
+  );
+  const [code, setCode] = useState("");
   const [pendingRecovery, setPendingRecovery] = useState<{
     session: Session;
     recoveryKeyHex: string;
@@ -36,9 +40,13 @@ export function Auth() {
         setPendingRecovery(result);
       } else {
         setBusy("Deriving your keys with Argon2id. This is slow on purpose.");
-        const session = await login(email, password);
+        const result = await login(email, password);
+        if (result.kind === "two-factor") {
+          setTwoFactor(result);
+          return;
+        }
         setBusy("Decrypting your library.");
-        await startSession(session);
+        await startSession(result.session);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "something went wrong");
@@ -46,6 +54,68 @@ export function Auth() {
       setBusy(null);
     }
   };
+
+  const submitCode = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!twoFactor || !code.trim()) {
+      return;
+    }
+    setError(null);
+    setBusy("Checking the code.");
+    try {
+      const session = await twoFactor.complete(code.trim());
+      setBusy("Decrypting your library.");
+      await startSession(session);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "that code is not valid");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (twoFactor) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card">
+          <div className="auth-brand">
+            <BrandMark size={64} />
+            <h1>Two-factor check</h1>
+            <p>Enter the 6-digit code from your authenticator app, or a recovery code.</p>
+          </div>
+          <form className="auth-form" onSubmit={submitCode}>
+            <label htmlFor="totp-code">Code</label>
+            <input
+              id="totp-code"
+              autoFocus
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              placeholder="123456 or a recovery code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+            />
+            {error && <div className="error-text">{error}</div>}
+            <button className="btn btn-primary" type="submit" disabled={busy !== null || !code.trim()}>
+              {busy ? <span className="spinner" /> : null}
+              {busy ?? "Verify"}
+            </button>
+          </form>
+          <div className="auth-switch">
+            <a
+              href="#signin"
+              onClick={(e) => {
+                e.preventDefault();
+                setTwoFactor(null);
+                setCode("");
+                setError(null);
+              }}
+            >
+              Back to sign in
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const finishSignup = async () => {
     if (!pendingRecovery) {
