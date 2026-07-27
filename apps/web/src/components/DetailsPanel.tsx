@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { decryptBytes } from "@engramer/crypto";
+import { decryptBytes, decryptFileMetadata } from "@engramer/crypto";
 import { api, type FileVersionInfo } from "../api";
 import { useStore, type FileEntry } from "../store";
 import { thumbnailUrl } from "../thumbs";
@@ -41,7 +41,7 @@ export function DetailsPanel(props: {
   const restoreVersion = useStore((s) => s.restoreVersion);
   const [thumb, setThumb] = useState<string | null>(null);
   const [tagDraft, setTagDraft] = useState("");
-  const [versions, setVersions] = useState<FileVersionInfo[]>([]);
+  const [versions, setVersions] = useState<Array<FileVersionInfo & { contentSize: number }>>([]);
   const [restoring, setRestoring] = useState(false);
 
   useEffect(() => {
@@ -61,7 +61,19 @@ export function DetailsPanel(props: {
         .listVersions(file.id)
         .then(({ versions: list }) => {
           if (!cancelled) {
-            setVersions(list);
+            // Show the content's size, not the ciphertext's: each version
+            // carries its metadata snapshot, decryptable with the file key.
+            setVersions(
+              list.map((v) => {
+                let contentSize = v.size;
+                try {
+                  contentSize = decryptFileMetadata(v.encryptedMeta, file.key).size;
+                } catch {
+                  // Ciphertext size is an acceptable fallback.
+                }
+                return { ...v, contentSize };
+              }),
+            );
           }
         })
         .catch(() => {});
@@ -202,7 +214,7 @@ export function DetailsPanel(props: {
             <div key={version.generation} className="history-row">
               <div className="history-main">
                 <span className="history-when">{formatDate(version.createdAt)}</span>
-                <span className="history-size">{formatBytes(version.size)}</span>
+                <span className="history-size">{formatBytes(version.contentSize)}</span>
               </div>
               <button
                 className="icon-btn"

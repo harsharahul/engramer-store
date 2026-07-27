@@ -113,10 +113,11 @@ export function DocEditor(props: {
     } catch (err) {
       setError(err instanceof Error ? err.message : "save failed");
     } finally {
-      // Let export-time transactions drain before edits count as dirty again.
+      // Export-time editor transactions can land a few ticks after the blob
+      // is produced; keep suppressing dirty until they have drained.
       setTimeout(() => {
         savingRef.current = false;
-      }, 0);
+      }, 500);
       setBusy(false);
     }
   }, [busy, dirty, props]);
