@@ -261,6 +261,38 @@ describe("safety properties", () => {
     expect(await listVersions(doc.id)).toHaveLength(0);
   });
 
+  it("rejects a save that raced a concurrent writer and cleans its blob", async () => {
+    const doc = await createFile("contended.txt", utf8Encode("base"));
+    // Simulate another client completing a save while this request's bytes
+    // stream in: the moment the blob store is asked to write, advance the
+    // file's generation underneath the in-flight request.
+    const original = app.blobs.put.bind(app.blobs);
+    app.blobs.put = async (key, source, maxBytes) => {
+      const written = await original(key, source, maxBytes);
+      app.db.prepare("UPDATE files SET generation = generation + 1 WHERE id = ?").run(doc.id);
+      return written;
+    };
+    try {
+      const response = await app.inject({
+        method: "PUT",
+        url: `/api/files/${doc.id}/data`,
+        headers: { ...authHeader(), "content-type": "application/octet-stream" },
+        payload: Buffer.from(encryptBytes(utf8Encode("late arrival"), doc.fileKey)),
+      });
+      expect(response.statusCode).toBe(409);
+    } finally {
+      app.blobs.put = original;
+      app.db.prepare("UPDATE files SET generation = generation - 1 WHERE id = ?").run(doc.id);
+    }
+    // The loser's blob was cleaned up and no version was recorded.
+    expect(await currentContent(doc)).toEqual(utf8Encode("base"));
+    expect(await listVersions(doc.id)).toHaveLength(0);
+    const leftovers = readdirSync(join(dataDir, "blobs")).filter(
+      (f) => f.startsWith(doc.id) && f.includes(".g"),
+    );
+    expect(leftovers).toEqual([]);
+  });
+
   it("version bytes count against the quota", async () => {
     const before = (await app.inject({ method: "GET", url: "/api/user", headers: authHeader() }))
       .json().usedBytes as number;
