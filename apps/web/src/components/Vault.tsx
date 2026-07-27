@@ -1070,6 +1070,7 @@ export function Vault() {
             clearSelection();
           }}
           onTagClick={searchTag}
+          onToast={showToast}
           onClose={() => {
             setDetailsOpen(false);
             persist("engramer-details", false);

@@ -131,6 +131,25 @@ export const api = {
     return new Uint8Array(await response.arrayBuffer());
   },
 
+  listVersions: (fileId: string) =>
+    request<{ versions: FileVersionInfo[] }>(`/api/files/${fileId}/versions`),
+
+  downloadVersionBlob: async (fileId: string, generation: number): Promise<Uint8Array> => {
+    const response = await fetch(`/api/files/${fileId}/versions/${generation}/data`, {
+      headers: { authorization: `Bearer ${authToken}` },
+    });
+    if (!response.ok) {
+      throw new ApiError(response.status, `download failed (${response.status})`);
+    }
+    return new Uint8Array(await response.arrayBuffer());
+  },
+
+  restoreVersion: (fileId: string, generation: number, encryptedMeta: SecretBox) =>
+    request<FileDto>(`/api/files/${fileId}/versions/${generation}/restore`, {
+      method: "POST",
+      body: JSON.stringify({ encryptedMeta }),
+    }),
+
   createShare: (fileId: string, options?: ShareOptions) =>
     request<{ token: string }>("/api/shares", {
       method: "POST",
@@ -187,6 +206,13 @@ export const api = {
       body: JSON.stringify({ sealedKey, encryptedMeta }),
     }),
 };
+
+export interface FileVersionInfo {
+  generation: number;
+  size: number;
+  encryptedMeta: SecretBox;
+  createdAt: number;
+}
 
 export interface ShareOptions {
   expiresAt?: number | null;

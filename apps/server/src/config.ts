@@ -22,6 +22,8 @@ export interface ServerConfig {
   quotaBytes: number;
   /** Hard cap for a single ciphertext blob in bytes. */
   maxBlobBytes: number;
+  /** Versions kept per file after a content replacement; 0 disables history. */
+  maxVersions: number;
   /** Directory of a built web client to serve, if any. */
   webDistDir: string | null;
   /** When set, ciphertext blobs go to an S3-compatible object store. */
@@ -32,6 +34,7 @@ export interface ConfigOverrides {
   dataDir?: string;
   quotaBytes?: number;
   maxBlobBytes?: number;
+  maxVersions?: number;
   port?: number;
   webDistDir?: string | null;
 }
@@ -52,6 +55,10 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
       overrides.quotaBytes ?? Number(process.env.ENGRAMER_QUOTA_BYTES ?? 10 * 1024 ** 3),
     maxBlobBytes:
       overrides.maxBlobBytes ?? Number(process.env.ENGRAMER_MAX_BLOB_BYTES ?? 20 * 1024 ** 3),
+    maxVersions: Math.max(
+      0,
+      overrides.maxVersions ?? Number(process.env.ENGRAMER_MAX_VERSIONS ?? 10),
+    ),
     webDistDir:
       overrides.webDistDir !== undefined
         ? overrides.webDistDir

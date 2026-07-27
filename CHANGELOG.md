@@ -3,6 +3,23 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.10.0] - 2026-07-27
+
+### Added
+- Version history for every file. Saving new content, from the text editor,
+  the Word editor, or a re-upload, keeps the previous content as a version
+  instead of destroying it. The details panel lists each version with its
+  date and size, offers a decrypted download of any version, and restores
+  with one click; a restored file keeps its current name and tags while its
+  content, size, and search text revert together. Restoring displaces the
+  current content into history too, so a restore can always be undone.
+  The server keeps the last 10 versions per file (`ENGRAMER_MAX_VERSIONS`),
+  counts them against the storage quota, and purges them on permanent delete.
+- The write path behind this is append-only: new content lands in a new blob
+  before any pointer moves, inside a transaction that detects concurrent
+  saves, so an interrupted or failed save can never corrupt a file. Design
+  notes in docs/storage.md.
+
 ## [0.9.0] - 2026-07-27
 
 ### Added
