@@ -1,5 +1,6 @@
 import {
   encryptBytes,
+  utf8Encode,
   decryptBytes,
   encryptFileMetadata,
   generateKey,
@@ -97,6 +98,8 @@ export interface PreparedFile {
   meta: FileMetadata;
   analysis: Analysis;
   thumbnail: Thumbnail | null;
+  /** Extracted search text; uploaded as a separate encrypted index blob. */
+  text?: string;
 }
 
 /**
@@ -130,9 +133,9 @@ export async function analyzeFile(file: File): Promise<PreparedFile> {
     tags: analysis.tags,
     ...(thumbnail ? { width: thumbnail.width, height: thumbnail.height } : {}),
     ...(thumbnail?.blur ? { blur: thumbnail.blur } : {}),
-    ...(text !== undefined ? { text } : {}),
+    ...(text !== undefined ? { hasText: true } : {}),
   };
-  return { meta, analysis, thumbnail };
+  return { meta, analysis, thumbnail, text };
 }
 
 export interface UploadResult {
@@ -160,6 +163,10 @@ export async function encryptAndUpload(
 
   if (prepared.thumbnail) {
     await uploadBlob(dto.id, "thumbnail", encryptBytes(prepared.thumbnail.bytes, fileKey));
+  }
+  if (prepared.text !== undefined) {
+    // Search text travels as its own encrypted blob, keeping sync rows small.
+    await uploadBlob(dto.id, "index", encryptBytes(utf8Encode(prepared.text), fileKey));
   }
 
   const uploadedDto: FileDto = {

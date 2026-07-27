@@ -163,8 +163,8 @@ export function registerRequestRoutes(app: FastifyInstance): void {
       app.db
         .prepare(
           `INSERT INTO files (id, user_id, folder_id, encrypted_key, encrypted_meta, size, thumb_size,
-                              uploaded, update_seq, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+                              index_size, uploaded, update_seq, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
         )
         .run(
           id,
@@ -174,6 +174,7 @@ export function registerRequestRoutes(app: FastifyInstance): void {
           JSON.stringify(body.encryptedMeta),
           upload.size,
           upload.thumb_size,
+          upload.index_size,
           app.nextSeq(uid),
           now,
           now,
@@ -197,6 +198,7 @@ export function registerRequestRoutes(app: FastifyInstance): void {
     app.db.prepare("DELETE FROM request_uploads WHERE id = ?").run(id);
     await app.blobs.remove(blobKey(id, "data"));
     await app.blobs.remove(blobKey(id, "thumb"));
+    await app.blobs.remove(blobKey(id, "index"));
     return reply.code(204).send();
   });
 
@@ -285,7 +287,8 @@ export function registerRequestRoutes(app: FastifyInstance): void {
         .prepare("UPDATE request_uploads SET size = ?, uploaded = 1 WHERE id = ?")
         .run(written, id);
     } else {
-      app.db.prepare("UPDATE request_uploads SET thumb_size = ? WHERE id = ?").run(written, id);
+      const column = kind === "thumb" ? "thumb_size" : "index_size";
+      app.db.prepare(`UPDATE request_uploads SET ${column} = ? WHERE id = ?`).run(written, id);
     }
     return { size: written };
   };
@@ -295,5 +298,8 @@ export function registerRequestRoutes(app: FastifyInstance): void {
   );
   app.put("/api/public/requests/:token/files/:id/thumbnail", (request, reply) =>
     uploadRequestBlob(request, reply, "thumb"),
+  );
+  app.put("/api/public/requests/:token/files/:id/index", (request, reply) =>
+    uploadRequestBlob(request, reply, "index"),
   );
 }
