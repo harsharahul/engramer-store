@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
+import { decryptBytes } from "@engramer/crypto";
+import { api, type FileVersionInfo } from "../api";
 import { useStore, type FileEntry } from "../store";
 import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
+import { triggerDownload } from "../download";
 import { SheetArt } from "./FileArt";
 import {
+  ClockGlyph,
   DownloadGlyph,
   PencilGlyph,
+  RestoreGlyph,
   ShareGlyph,
   StarGlyph,
   TrashGlyph,
@@ -26,18 +31,23 @@ export function DetailsPanel(props: {
   onRename: (id: string) => void;
   onTrash: (id: string) => void;
   onTagClick: (tag: string) => void;
+  onToast: (message: string) => void;
   onClose: () => void;
 }) {
   const { file } = props;
   const folders = useStore((s) => s.folders);
   const setTags = useStore((s) => s.setTags);
   const toggleFavorite = useStore((s) => s.toggleFavorite);
+  const restoreVersion = useStore((s) => s.restoreVersion);
   const [thumb, setThumb] = useState<string | null>(null);
   const [tagDraft, setTagDraft] = useState("");
+  const [versions, setVersions] = useState<FileVersionInfo[]>([]);
+  const [restoring, setRestoring] = useState(false);
 
   useEffect(() => {
     setThumb(null);
     setTagDraft("");
+    setVersions([]);
     let cancelled = false;
     if (file?.hasThumb) {
       void thumbnailUrl(file.id, file.key).then((url) => {
@@ -46,10 +56,21 @@ export function DetailsPanel(props: {
         }
       });
     }
+    if (file && !file.trashed) {
+      void api
+        .listVersions(file.id)
+        .then(({ versions: list }) => {
+          if (!cancelled) {
+            setVersions(list);
+          }
+        })
+        .catch(() => {});
+    }
     return () => {
       cancelled = true;
     };
-  }, [file?.id, file?.hasThumb, file?.key]);
+    // Refetch when the file advances (a save bumps updatedAt).
+  }, [file?.id, file?.hasThumb, file?.key, file?.updatedAt, file?.trashed]);
 
   if (!file) {
     return (
@@ -172,9 +193,71 @@ export function DetailsPanel(props: {
         </div>
       </div>
 
+      {versions.length > 0 && (
+        <div className="details-history">
+          <span className="details-label">
+            <ClockGlyph size={12} /> History
+          </span>
+          {versions.map((version) => (
+            <div key={version.generation} className="history-row">
+              <div className="history-main">
+                <span className="history-when">{formatDate(version.createdAt)}</span>
+                <span className="history-size">{formatBytes(version.size)}</span>
+              </div>
+              <button
+                className="icon-btn"
+                title="Download a copy of this version"
+                onClick={() => {
+                  void api
+                    .downloadVersionBlob(file.id, version.generation)
+                    .then((bytes) => {
+                      const plain = decryptBytes(bytes, file.key);
+                      triggerDownload(
+                        new Blob([plain.slice().buffer as ArrayBuffer], { type: file.mime }),
+                        versionCopyName(file.name, version.createdAt),
+                      );
+                    })
+                    .catch(() => props.onToast("Could not download this version."));
+                }}
+              >
+                <DownloadGlyph size={13} />
+              </button>
+              <button
+                className="icon-btn"
+                title="Restore this version"
+                disabled={restoring}
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      "Restore this version? The current content stays in history, so this can be undone.",
+                    )
+                  ) {
+                    return;
+                  }
+                  setRestoring(true);
+                  void restoreVersion(file.id, version.generation)
+                    .then(() => props.onToast("Version restored. The replaced content is in history."))
+                    .catch(() => props.onToast("Could not restore this version."))
+                    .finally(() => setRestoring(false));
+                }}
+              >
+                <RestoreGlyph size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <button className="btn btn-ghost details-rename" onClick={() => props.onRename(file.id)}>
         <PencilGlyph size={13} /> Rename
       </button>
     </aside>
   );
+}
+
+/** "report.pdf" -> "report (version Jul 27, 2026).pdf" */
+function versionCopyName(name: string, createdAt: number): string {
+  const dot = name.lastIndexOf(".");
+  const stamp = ` (version ${formatDate(createdAt)})`;
+  return dot > 0 ? `${name.slice(0, dot)}${stamp}${name.slice(dot)}` : `${name}${stamp}`;
 }

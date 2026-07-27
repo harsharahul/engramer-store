@@ -36,6 +36,35 @@ Every blob is an XChaCha20-Poly1305 secretstream: each 4 MiB chunk carries an au
 
 Quota enforcement counts bytes during streaming and aborts mid-upload, so a client cannot exceed its quota by lying about content length.
 
+## Version history
+
+Content saves are append-only across generations. A file's current blob lives
+at its bare id (generation 0, which is also every pre-versioning blob) or at
+`<id>.g<N>`; replacing content writes the next generation's blob first and
+only then, inside a single database transaction, records the displaced
+generation as a version, advances the pointer, and bumps the sync sequence.
+The consequences are the properties that matter:
+
+- A crash or failed write at any point leaves the file serving its previous
+  content. The worst possible leftover is an orphaned blob, never a file row
+  that references missing or partial data. No blob a file row points at is
+  ever overwritten in place.
+- A concurrent save is detected by a generation check inside the transaction
+  and rejected with HTTP 409 rather than silently losing an update.
+- Each version snapshots the file's encrypted metadata from that moment, so a
+  restored version has a coherent size, modification time, and search text.
+  Restore itself moves no bytes: it is a pointer swap in one transaction, the
+  displaced current content becomes a version, and the client supplies merged
+  metadata (current name and tags, the version's content facts). Restoring is
+  therefore always undoable.
+- Retention keeps the last N versions per file (`ENGRAMER_MAX_VERSIONS`,
+  default 10; 0 disables history and restores replace-in-place semantics).
+  Version bytes count against the owner's quota, and deleting a file forever
+  removes every generation.
+
+The server sees versions exactly as it sees everything else: opaque
+ciphertext under an opaque key, plus sizes and timestamps.
+
 ## Reliability recipes
 
 **Personal (filesystem backend)**

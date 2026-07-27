@@ -201,6 +201,6 @@ export function registerShareRoutes(app: FastifyInstance): void {
     }
     reply.header("content-type", "application/octet-stream");
     reply.header("content-length", file.size);
-    return reply.send(await app.blobs.get(blobKey(file.id, "data")));
+    return reply.send(await app.blobs.get(blobKey(file.id, "data", file.generation)));
   });
 }

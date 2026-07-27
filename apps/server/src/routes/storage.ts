@@ -3,7 +3,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Readable } from "node:stream";
 import { z } from "zod";
 import { BlobTooLargeError, blobKey, type BlobKind } from "../blobs.js";
-import type { FileRow, FolderRow } from "../db.js";
+import type { FileRow, FileVersionRow, FolderRow } from "../db.js";
+
+/** A concurrent writer advanced the file while this request streamed in. */
+class GenerationConflictError extends Error {
+  constructor() {
+    super("generation conflict");
+  }
+}
 
 const secretBoxSchema = z.object({ ciphertext: z.string(), nonce: z.string() });
 
@@ -192,6 +199,14 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     return reply.code(201).send(fileToDto(row));
   });
 
+  /**
+   * Content writes are append-only: the new bytes land in the NEXT
+   * generation's blob first, and only after that write fully succeeds does a
+   * single transaction snapshot the old generation as a version and advance
+   * the pointer. A failure at any point leaves the file serving its previous
+   * content; the worst possible leftover is an orphaned blob, never a file
+   * row that points at missing or partial data.
+   */
   const uploadBlob = async (
     request: FastifyRequest,
     reply: FastifyReply,
@@ -203,31 +218,95 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     if (!file) {
       return reply.code(404).send({ error: "file not found" });
     }
-    const currentBlobBytes = kind === "data" ? file.size : file.thumb_size;
-    const quotaRoom = app.config.quotaBytes - (app.storageUsed(uid) - currentBlobBytes);
+    const keepsVersions = app.config.maxVersions > 0;
+    const replacesContent = kind === "data" && file.uploaded === 1;
+    // A replaced blob only frees quota when history is off; with versioning
+    // the displaced content keeps occupying space as a version.
+    const reclaimable =
+      kind === "thumb" ? file.thumb_size : replacesContent && !keepsVersions ? file.size : 0;
+    const quotaRoom = app.config.quotaBytes - (app.storageUsed(uid) - reclaimable);
     const maxBytes = Math.min(app.config.maxBlobBytes, quotaRoom);
     const declared = Number(request.headers["content-length"] ?? 0);
     if (maxBytes <= 0 || declared > maxBytes) {
       return reply.code(413).send({ error: "storage quota exceeded" });
     }
+    const nextGen = replacesContent ? file.generation + 1 : file.generation;
+    const targetKey = kind === "data" ? blobKey(id, "data", nextGen) : blobKey(id, "thumb");
     let written: number;
     try {
-      written = await app.blobs.put(blobKey(id, kind), request.body as Readable, maxBytes);
+      written = await app.blobs.put(targetKey, request.body as Readable, maxBytes);
     } catch (err) {
       if (err instanceof BlobTooLargeError) {
         return reply.code(413).send({ error: "storage quota exceeded" });
       }
       throw err;
     }
-    const seq = app.nextSeq(uid);
-    const column = kind === "data" ? "size" : "thumb_size";
-    const uploadedFlag = kind === "data" ? 1 : file.uploaded;
-    app.db
-      .prepare(
-        `UPDATE files SET ${column} = ?, uploaded = ?, update_seq = ?, updated_at = ? WHERE id = ?`,
-      )
-      .run(written, uploadedFlag, seq, Date.now(), id);
+
+    if (kind === "thumb") {
+      app.db
+        .prepare("UPDATE files SET thumb_size = ?, update_seq = ?, updated_at = ? WHERE id = ?")
+        .run(written, app.nextSeq(uid), Date.now(), id);
+      return { size: written };
+    }
+
+    const staleBlobs: string[] = [];
+    try {
+      const swap = app.db.transaction(() => {
+        const current = app.db
+          .prepare("SELECT generation, size, encrypted_meta, updated_at, uploaded FROM files WHERE id = ?")
+          .get(id) as Pick<FileRow, "generation" | "size" | "encrypted_meta" | "updated_at" | "uploaded">;
+        if (current.generation !== file.generation || current.uploaded !== file.uploaded) {
+          throw new GenerationConflictError();
+        }
+        if (replacesContent) {
+          if (keepsVersions) {
+            app.db
+              .prepare(
+                `INSERT INTO file_versions (file_id, user_id, generation, size, encrypted_meta, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+              )
+              .run(id, uid, current.generation, current.size, current.encrypted_meta, current.updated_at);
+          } else {
+            staleBlobs.push(blobKey(id, "data", current.generation));
+          }
+        }
+        app.db
+          .prepare(
+            "UPDATE files SET size = ?, generation = ?, uploaded = 1, update_seq = ?, updated_at = ? WHERE id = ?",
+          )
+          .run(written, nextGen, app.nextSeq(uid), Date.now(), id);
+        staleBlobs.push(...pruneVersions(id, uid));
+      });
+      swap();
+    } catch (err) {
+      if (err instanceof GenerationConflictError) {
+        await app.blobs.remove(targetKey).catch(() => {});
+        return reply.code(409).send({ error: "the file changed while saving; retry" });
+      }
+      throw err;
+    }
+    // Only after the pointer moved is anything discarded, and even this is
+    // best-effort: a leftover blob is garbage, not corruption.
+    for (const key of staleBlobs) {
+      await app.blobs.remove(key).catch(() => {});
+    }
     return { size: written };
+  };
+
+  /** Drops version rows beyond the retention window; returns their blob keys. */
+  const pruneVersions = (fileId: string, uid: number): string[] => {
+    const excess = app.db
+      .prepare(
+        `SELECT generation FROM file_versions WHERE file_id = ? AND user_id = ?
+         ORDER BY generation DESC LIMIT -1 OFFSET ?`,
+      )
+      .all(fileId, uid, app.config.maxVersions) as Array<{ generation: number }>;
+    for (const row of excess) {
+      app.db
+        .prepare("DELETE FROM file_versions WHERE file_id = ? AND generation = ?")
+        .run(fileId, row.generation);
+    }
+    return excess.map((row) => blobKey(fileId, "data", row.generation));
   };
 
   app.put("/api/files/:id/data", auth, (request, reply) => uploadBlob(request, reply, "data"));
@@ -241,7 +320,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     }
     reply.header("content-type", "application/octet-stream");
     reply.header("content-length", kind === "data" ? file.size : file.thumb_size);
-    return reply.send(await app.blobs.get(blobKey(id, kind)));
+    return reply.send(await app.blobs.get(blobKey(id, kind, kind === "data" ? file.generation : 0)));
   };
 
   app.get("/api/files/:id/data", auth, (request, reply) => downloadBlob(request, reply, "data"));
@@ -314,8 +393,12 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     if (!file || !file.trashed) {
       return reply.code(404).send({ error: "file not found in trash" });
     }
+    const versionGens = app.db
+      .prepare("SELECT generation FROM file_versions WHERE file_id = ?")
+      .all(id) as Array<{ generation: number }>;
     const run = app.db.transaction(() => {
       app.db.prepare("DELETE FROM shares WHERE file_id = ?").run(id);
+      app.db.prepare("DELETE FROM file_versions WHERE file_id = ?").run(id);
       app.db
         .prepare(
           "UPDATE files SET deleted = 1, size = 0, thumb_size = 0, uploaded = 0, update_seq = ?, updated_at = ? WHERE id = ?",
@@ -323,9 +406,104 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         .run(app.nextSeq(uid), Date.now(), id);
     });
     run();
-    await app.blobs.remove(blobKey(id, "data"));
-    await app.blobs.remove(blobKey(id, "thumb"));
+    await app.blobs.remove(blobKey(id, "data", file.generation)).catch(() => {});
+    for (const row of versionGens) {
+      await app.blobs.remove(blobKey(id, "data", row.generation)).catch(() => {});
+    }
+    await app.blobs.remove(blobKey(id, "thumb")).catch(() => {});
     return reply.code(204).send();
+  });
+
+  // ----- version history -----
+
+  const versionToDto = (row: FileVersionRow) => ({
+    generation: row.generation,
+    size: row.size,
+    encryptedMeta: JSON.parse(row.encrypted_meta) as unknown,
+    createdAt: row.created_at,
+  });
+
+  app.get("/api/files/:id/versions", auth, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (!getOwnFile(id, request.user.uid)) {
+      return reply.code(404).send({ error: "file not found" });
+    }
+    const rows = app.db
+      .prepare(
+        "SELECT * FROM file_versions WHERE file_id = ? AND user_id = ? ORDER BY generation DESC",
+      )
+      .all(id, request.user.uid) as FileVersionRow[];
+    return { versions: rows.map(versionToDto) };
+  });
+
+  app.get("/api/files/:id/versions/:gen/data", auth, async (request, reply) => {
+    const { id, gen } = request.params as { id: string; gen: string };
+    const uid = request.user.uid;
+    if (!getOwnFile(id, uid)) {
+      return reply.code(404).send({ error: "file not found" });
+    }
+    const version = app.db
+      .prepare("SELECT * FROM file_versions WHERE file_id = ? AND user_id = ? AND generation = ?")
+      .get(id, uid, Number(gen)) as FileVersionRow | undefined;
+    if (!version) {
+      return reply.code(404).send({ error: "version not found" });
+    }
+    reply.header("content-type", "application/octet-stream");
+    reply.header("content-length", version.size);
+    return reply.send(await app.blobs.get(blobKey(id, "data", version.generation)));
+  });
+
+  /**
+   * Restore is a pure pointer swap inside one transaction: the displaced
+   * current content becomes a version itself, so restoring is also undoable,
+   * and no blob is written, moved, or removed. The client supplies merged
+   * metadata (current name and tags, the version's size and search text) so
+   * the row stays coherent with the restored bytes.
+   */
+  app.post("/api/files/:id/versions/:gen/restore", auth, async (request, reply) => {
+    const { id, gen } = request.params as { id: string; gen: string };
+    const uid = request.user.uid;
+    const body = z.object({ encryptedMeta: secretBoxSchema }).parse(request.body);
+    const file = getOwnFile(id, uid);
+    if (!file || !file.uploaded || file.trashed) {
+      return reply.code(404).send({ error: "file not found" });
+    }
+    const generation = Number(gen);
+    const restore = app.db.transaction(() => {
+      const version = app.db
+        .prepare("SELECT * FROM file_versions WHERE file_id = ? AND user_id = ? AND generation = ?")
+        .get(id, uid, generation) as FileVersionRow | undefined;
+      if (!version) {
+        return null;
+      }
+      app.db
+        .prepare(
+          `INSERT INTO file_versions (file_id, user_id, generation, size, encrypted_meta, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(id, uid, file.generation, file.size, file.encrypted_meta, file.updated_at);
+      app.db
+        .prepare("DELETE FROM file_versions WHERE file_id = ? AND generation = ?")
+        .run(id, generation);
+      app.db
+        .prepare(
+          "UPDATE files SET generation = ?, size = ?, encrypted_meta = ?, update_seq = ?, updated_at = ? WHERE id = ?",
+        )
+        .run(
+          generation,
+          version.size,
+          JSON.stringify(body.encryptedMeta),
+          app.nextSeq(uid),
+          Date.now(),
+          id,
+        );
+      return app.db.prepare("SELECT * FROM files WHERE id = ?").get(id) as FileRow;
+    });
+    const row = restore();
+    if (!row) {
+      return reply.code(404).send({ error: "version not found" });
+    }
+    return fileToDto(row);
   });
 
   // Delta sync: everything that changed after the client's cursor, tombstones included.

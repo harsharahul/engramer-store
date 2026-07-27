@@ -1395,6 +1395,51 @@ a {
   padding: 0 1px;
 }
 
+/* ---------- version history ---------- */
+
+.details-history {
+  margin-top: 14px;
+  border-top: 1px solid var(--hairline);
+  padding-top: 12px;
+}
+
+.details-history .details-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 2px;
+  border-radius: var(--radius);
+}
+
+.history-row:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.history-main {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.history-when {
+  font-size: 12.5px;
+  color: var(--paper);
+}
+
+.history-size {
+  font-size: 11px;
+  color: var(--paper-faint);
+}
+
 /* ---------- OCR: sidebar toggle and progress ---------- */
 
 .ocr-toggle {

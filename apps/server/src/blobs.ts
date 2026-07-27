@@ -7,8 +7,17 @@ import { Transform } from "node:stream";
 
 export type BlobKind = "data" | "thumb";
 
-export function blobKey(fileId: string, kind: BlobKind): string {
-  return kind === "data" ? fileId : `${fileId}.thumb`;
+/**
+ * Content blobs are append-only across generations: generation 0 keeps the
+ * legacy bare key (every pre-versioning blob stays valid), generation N lives
+ * at `<id>.g<N>`. A save writes the next generation and only then moves the
+ * pointer, so no blob a file row references is ever overwritten in place.
+ */
+export function blobKey(fileId: string, kind: BlobKind, generation = 0): string {
+  if (kind === "thumb") {
+    return `${fileId}.thumb`;
+  }
+  return generation > 0 ? `${fileId}.g${generation}` : fileId;
 }
 
 export class BlobTooLargeError extends Error {

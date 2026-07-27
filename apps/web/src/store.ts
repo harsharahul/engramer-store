@@ -17,6 +17,7 @@ import { api, uploadBlob, type FileDto, type FolderDto } from "./api";
 import { clearSession, type Session } from "./session";
 import { analyzeFile, downloadAndDecrypt, encryptAndUpload } from "./transfer";
 import { recognizeImage } from "./intel/ocr";
+import { mergeRestoredMeta } from "./versions";
 
 export interface FolderEntry {
   id: string;
@@ -114,6 +115,7 @@ interface StoreState {
   ingestRequestUploads: () => Promise<number>;
   recognizeFile: (id: string) => Promise<boolean>;
   recognizeAllImages: () => Promise<number>;
+  restoreVersion: (id: string, generation: number) => Promise<void>;
 }
 
 function decryptFolder(dto: FolderDto, masterKey: Uint8Array): FolderEntry {
@@ -569,6 +571,29 @@ export const useStore = create<StoreState>((set, get) => {
       }
       set({ ocrProgress: null });
       return found;
+    },
+
+    /**
+     * Brings a previous version's content back. The server swaps ciphertext
+     * pointers; this client merges metadata so the file keeps its current
+     * name and tags while size, times, and search text match the restored
+     * bytes. The displaced content becomes a version, so this is undoable.
+     */
+    restoreVersion: async (id, generation) => {
+      const file = get().files.get(id);
+      if (!file) {
+        throw new Error("file not found");
+      }
+      const { versions } = await api.listVersions(id);
+      const target = versions.find((v) => v.generation === generation);
+      if (!target) {
+        throw new Error("version not found");
+      }
+      const versionMeta = decryptFileMetadata(target.encryptedMeta, file.key);
+      const merged = mergeRestoredMeta(metadataOf(file), versionMeta);
+      const dto = await api.restoreVersion(id, generation, encryptFileMetadata(merged, file.key));
+      applyFile(dto);
+      await get().refreshUsage();
     },
   };
 });
