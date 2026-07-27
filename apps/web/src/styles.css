@@ -1395,6 +1395,30 @@ a {
   padding: 0 1px;
 }
 
+/* ---------- scale: virtualized rendering and placeholders ---------- */
+
+/* Browser-native virtualization: offscreen cards and rows skip layout and
+   paint entirely, keeping folders with thousands of items fluid. */
+.grid .card,
+.rows .row {
+  content-visibility: auto;
+}
+
+.grid .card {
+  contain-intrinsic-size: 200px 208px;
+}
+
+.rows .row {
+  contain-intrinsic-size: auto 52px;
+}
+
+.blur-placeholder {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: saturate(1.05);
+}
+
 /* ---------- two-factor enrollment ---------- */
 
 .totp-enroll {

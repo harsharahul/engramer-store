@@ -12,6 +12,8 @@ export interface FileMetadata {
   mtime: number;
   width?: number;
   height?: number;
+  /** ThumbHash placeholder (base64, ~25 bytes) for instant grid paint. */
+  blur?: string;
   /** Extracted text content for client-side full-text search. */
   text?: string;
   /** Auto-assigned category (client-side analysis; opaque to the server). */

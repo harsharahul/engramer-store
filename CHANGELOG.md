@@ -3,6 +3,23 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.12.0] - 2026-07-27
+
+### Added
+- Folder uploads that keep their shape. Drop a nested folder (or use the new
+  Folder button) and the whole tree is recreated: every path becomes the
+  right folder, files land where they belong, and thousands of small files
+  flow through a bounded parallel pipeline (four transfers at a time, the
+  discipline mass-transfer tools converge on) with aggregate progress and
+  automatic retry with backoff when the server throttles.
+- Instant image grids. Uploads now embed a ~25-byte ThumbHash placeholder in
+  the encrypted metadata, so grids paint a blurred stand-in immediately;
+  real thumbnails load only as cards approach the viewport, through a small
+  concurrency gate that never floods the server.
+- Folders with thousands of items stay fluid: offscreen cards and rows skip
+  rendering entirely (content-visibility), in the grid, the list, and search
+  results alike.
+
 ## [0.11.0] - 2026-07-27
 
 ### Added
