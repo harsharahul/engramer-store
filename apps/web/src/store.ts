@@ -91,6 +91,7 @@ interface StoreState {
   deleteFolder: (id: string) => Promise<void>;
   uploadFiles: (files: File[], folderId: string | null) => Promise<void>;
   saveFileContent: (id: string, text: string) => Promise<void>;
+  saveFileBinary: (id: string, bytes: Uint8Array, searchText?: string) => Promise<void>;
   createNote: (name: string, folderId: string | null) => Promise<string>;
   renameFile: (id: string, name: string) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
@@ -366,6 +367,23 @@ export const useStore = create<StoreState>((set, get) => {
         size: bytes.length,
         mtime: Date.now(),
         text: text.slice(0, 100_000),
+      });
+      await get().refreshUsage();
+    },
+
+    // Binary flavor of the same flow, for document formats where the editor
+    // exports bytes (e.g. .docx). searchText, when the editor can provide it,
+    // keeps the file findable through client-side search.
+    saveFileBinary: async (id, bytes, searchText) => {
+      const file = get().files.get(id);
+      if (!file) {
+        throw new Error("file not found");
+      }
+      await uploadBlob(id, "data", encryptBytes(bytes, file.key));
+      await patchFileMeta(id, {
+        size: bytes.length,
+        mtime: Date.now(),
+        ...(searchText !== undefined ? { text: searchText.slice(0, 100_000) } : {}),
       });
       await get().refreshUsage();
     },

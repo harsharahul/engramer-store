@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FileEntry } from "../store";
 import { downloadAndDecrypt } from "../transfer";
 import { fileKind, formatBytes } from "../format";
@@ -8,6 +8,42 @@ import { DownloadGlyph, PencilGlyph, ShareGlyph, TagGlyph, XGlyph } from "./Icon
 interface Loaded {
   url: string | null;
   text: string | null;
+  docx: Uint8Array | null;
+}
+
+/** Renders decrypted .docx bytes with docx-preview, loaded on demand. */
+function DocxBody(props: { bytes: Uint8Array; name: string }) {
+  const container = useRef<HTMLDivElement>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void import("docx-preview")
+      .then(({ renderAsync }) => {
+        if (cancelled || !container.current) {
+          return;
+        }
+        return renderAsync(
+          props.bytes.slice().buffer as ArrayBuffer,
+          container.current,
+          undefined,
+          { useBase64URL: true, inWrapper: true },
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.bytes]);
+
+  if (failed) {
+    return <div className="preview-fallback">Could not render this document.</div>;
+  }
+  return <div ref={container} className="docx-preview-host" />;
 }
 
 export function Preview(props: {
@@ -34,12 +70,16 @@ export function Preview(props: {
           return;
         }
         if (kind === "text") {
-          setLoaded({ url: null, text: new TextDecoder().decode(bytes) });
+          setLoaded({ url: null, text: new TextDecoder().decode(bytes), docx: null });
+          return;
+        }
+        if (kind === "doc") {
+          setLoaded({ url: null, text: null, docx: bytes });
           return;
         }
         const mime = kind === "pdf" ? "application/pdf" : file.mime;
         url = URL.createObjectURL(new Blob([bytes.slice().buffer as ArrayBuffer], { type: mime }));
-        setLoaded({ url, text: null });
+        setLoaded({ url, text: null, docx: null });
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -112,6 +152,8 @@ export function Preview(props: {
           <audio src={loaded.url} controls autoPlay />
         ) : kind === "pdf" && loaded.url ? (
           <iframe src={loaded.url} title={file.name} />
+        ) : kind === "doc" && loaded.docx ? (
+          <DocxBody bytes={loaded.docx} name={file.name} />
         ) : loaded.text !== null ? (
           <pre>{loaded.text}</pre>
         ) : (

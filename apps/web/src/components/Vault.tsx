@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -28,6 +30,11 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { MoveDialog } from "./MoveDialog";
 import { Preview } from "./Preview";
 import { Editor } from "./Editor";
+
+// The Word editor is heavy (SuperDoc); it loads only when a .docx is opened.
+const DocEditor = lazy(() =>
+  import("./DocEditor").then((m) => ({ default: m.DocEditor })),
+);
 import { ShareDialog } from "./ShareDialog";
 import { SharedView, NewRequestDialog } from "./SharedView";
 import { UploadTray } from "./UploadTray";
@@ -331,7 +338,7 @@ export function Vault() {
 
   const fileMenuItems = (file: FileEntry): MenuItem[] => [
     { id: "open", label: "Open", run: () => openFile(file.id) },
-    ...(fileKind(file.mime, file.name) === "text"
+    ...(["text", "doc"].includes(fileKind(file.mime, file.name))
       ? [{ id: "edit", label: "Edit", icon: <PencilGlyph size={13} />, run: () => setEditorId(file.id) }]
       : []),
     { id: "download", label: "Download", icon: <DownloadGlyph size={13} />, run: () => download(file) },
@@ -975,7 +982,7 @@ export function Vault() {
             inspect(previewFile.id);
           }}
           onEdit={
-            fileKind(previewFile.mime, previewFile.name) === "text"
+            ["text", "doc"].includes(fileKind(previewFile.mime, previewFile.name))
               ? () => {
                   setEditorId(previewFile.id);
                   setPreviewId(null);
@@ -984,13 +991,27 @@ export function Vault() {
           }
         />
       )}
-      {editorFile && (
+      {editorFile && fileKind(editorFile.mime, editorFile.name) === "doc" ? (
+        <Suspense
+          fallback={
+            <div className="preview-shell">
+              <div className="spinner" style={{ margin: "auto" }} />
+            </div>
+          }
+        >
+          <DocEditor
+            file={editorFile}
+            onSave={(bytes) => store.saveFileBinary(editorFile.id, bytes)}
+            onClose={() => setEditorId(null)}
+          />
+        </Suspense>
+      ) : editorFile ? (
         <Editor
           file={editorFile}
           onSave={(content) => store.saveFileContent(editorFile.id, content)}
           onClose={() => setEditorId(null)}
         />
-      )}
+      ) : null}
       {newNoteOpen && (
         <TextPrompt
           title="New note"

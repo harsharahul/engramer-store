@@ -4,9 +4,11 @@ Engram Store edits documents without giving the server plaintext. This page expl
 
 ## The constraint
 
-Self-hosted office suites in the Nextcloud mold (Collabora Online, OnlyOffice Document Server) integrate over WOPI: the storage app hands the document to a suite server, which renders and processes it server-side. That architecture requires plaintext on the server, which is why Nextcloud's own end-to-end encrypted folders cannot be opened by those integrations. Bolting a WOPI suite onto Engram Store would quietly delete its core guarantee.
+Self-hosted office suites in the Nextcloud mold (Collabora Online, OnlyOffice Document Server) integrate over WOPI: the storage app hands the document to a suite server, which renders and processes it server-side. That architecture requires plaintext on the server, which is why Nextcloud's own end-to-end encrypted folders cannot be opened by those integrations; their documentation states plainly that some functions "are inherently incompatible with the threat model of E2EE". Bolting a WOPI suite onto Engram Store would quietly delete its core guarantee.
 
-The constraint is not a dead end. CryptPad ships collaborative documents where the server is a blind relay that stores and orders encrypted patches it cannot read, with all merging done client-side, and Proton Docs delivers Google-Docs-style live co-editing (cursors, presence, comments) fully end-to-end encrypted. Editing under E2EE is a solved product category; it just has to run on the client.
+The direction of travel in the ecosystem supports the client-side answer. Nextcloud, after years of holding that browsers should not handle E2EE keys, shipped browser-based E2EE reading in 2025 and browser-based E2EE management, public links, and encrypted file drops in early 2026; office editing on encrypted folders remains absent, because WOPI cannot provide it. CryptPad ships collaborative documents where the server is a blind relay that stores and orders encrypted patches it cannot read, with all merging done client-side, and Proton Docs delivers Google-Docs-style live co-editing (cursors, presence, comments) fully end-to-end encrypted. Editing under E2EE is a solved product category; it just has to run on the client.
+
+A design note this codebase enforces after studying the published break of Nextcloud's E2EE (EuroS&P 2024): repeated re-encryption of the same document must never reuse a (key, nonce) pair, and key material must arrive authenticated. Engram Store draws a fresh random secretstream header on every save (pinned by a regression test), and file keys only ever travel wrapped in authenticated encryption under the master key.
 
 ## What ships today
 
@@ -15,6 +17,12 @@ An in-app editor for text, Markdown, and code:
 - Open any text file and press Edit, or create a fresh note with "New note" (also in the command palette). Notes are ordinary Markdown files.
 - Content decrypts into the editor in your browser, and re-encrypts with the file's existing key on save (Cmd+S). The replaced blob and refreshed metadata (size, modification time, search text) are all the server ever sees, as ciphertext.
 - Saved edits are immediately searchable, because the search index lives in the encrypted metadata and is rebuilt from the new content at save time.
+
+Word documents (.docx):
+
+- Opening a .docx renders it read-only with docx-preview: the decrypted archive is laid out as pages in the browser, images included, with nothing fetched from anywhere.
+- Edit opens the document in SuperDoc, a browser-native OOXML editor (AGPL-3.0, the same license as this project). Import and export both run entirely in the browser; saving exports a fresh .docx, which is re-encrypted with the file's existing key and replaces the blob, the same flow the text editor uses. The editor loads as a separate code chunk only when a document is opened, and its telemetry is disabled in configuration.
+- Fidelity has the limits of a JavaScript OOXML engine: complex Word constructs (some cropped images, comment anchors, text boxes) may simplify on a round trip. The download action always returns exactly the stored bytes, so nothing is lost until you choose to save an edit.
 
 ## Roadmap: live collaboration
 
@@ -58,9 +66,18 @@ conversion engine. The landscape, as of 2026:
   fully in the browser, so the fidelity ceiling is LibreOffice itself, but it
   loads on the order of a gigabyte and is single-user today. Promising to watch,
   too heavy to ship as the default editor now.
+- **SuperDoc (the shipped editor).** A ProseMirror-based editor that parses
+  OOXML directly into its schema and exports .docx in the browser, keeping
+  styles, tables, images, headers and footers, comments, and tracked changes.
+  AGPL-3.0 (matching this project), with import and export both genuinely
+  client-side and no server component. Fidelity sits between the lightweight
+  stacks and a native OOXML engine: strong for everyday documents, with known
+  simplifications on complex constructs.
 - **Lightweight word-processing (TipTap or ProseMirror with mammoth.js and the
   `docx` library).** Fine for notes, but semantically lossy on real Word files
-  (fonts, borders, tracked changes, comments), so not a path to fidelity.
+  (fonts, borders, tracked changes, comments), so not a path to fidelity. Note
+  also that some commercial conversion extensions in this family run import
+  through a vendor cloud API, which disqualifies them here outright.
 
 The lightweight stacks all lose the same things: tracked changes, comments,
 pivot tables, charts, complex conditional formatting, embedded vector images,
@@ -100,21 +117,31 @@ editor:
 
 There is no permissively licensed, drop-in, high-fidelity option; it is a
 licence-versus-fidelity choice, and because Engram Store is already AGPL-3.0 the
-usual blocker on the fidelity leader does not apply to us. The plan:
+usual blocker on the strongest candidates does not apply to us. The plan, with
+step 1 now shipped:
 
-1. Spike the OnlyOffice client-side editor in the CryptPad style to measure real
-   DOCX and XLSX round-trip fidelity end to end (decrypt in the browser, edit,
-   re-encrypt, store).
-2. In parallel, spike Univer with SheetJS to see how much fidelity a permissive
-   licence would cost, as a fallback.
-3. Wrap the chosen editor in a secsync-style encrypted Yjs relay for real-time
+1. **Shipped:** SuperDoc as the editable-DOCX v1 (browser-native import and
+   export, license-aligned, sized reasonably), with docx-preview for fast
+   read-only rendering. This delivers everyday Word editing under E2EE today.
+2. **Long-term fidelity:** the OnlyOffice client-side engine in the CryptPad
+   style (the editor canvas plus the x2t conversion engine compiled to
+   WebAssembly, all assets self-hosted). It is the only path to native-model
+   fidelity with no server, proven in production by CryptPad; the cost is a
+   large asset payload and a bespoke integration layer, so it is a project,
+   not a dependency swap.
+3. Wrap the editor in a secsync-style encrypted Yjs relay for real-time
    co-editing, encrypted presence, and offline-first, and add client-side AI over
    the decrypted document. That combination is what no incumbent has shipped.
 
 ## References
 
+- SuperDoc, browser-native DOCX editing: https://github.com/superdoc-dev/superdoc
+- docx-preview, client-side DOCX rendering: https://github.com/VolodymyrBaydalka/docxjs
 - OnlyOffice, true WYSIWYG native-model editing: https://www.onlyoffice.com/blog/2026/02/what-is-true-wysiwyg-editing
 - CryptPad, client-side OnlyOffice integration and FAQ: https://docs.cryptpad.org/en/FAQ.html
+- CryptPad's x2t conversion engine compiled to WebAssembly: https://github.com/cryptpad/onlyoffice-x2t-wasm
+- Nextcloud end-to-end encryption (design and limitations): https://github.com/nextcloud/end_to_end_encryption_rfc/blob/master/RFC.md
+- Albrecht, Backendal, Coppola, Paterson: Share with Care, Breaking E2EE in Nextcloud (EuroS&P 2024): https://eprint.iacr.org/2024/546
 - Univer import and export (Pro, server-backed): https://docs.univer.ai/guides/sheets/features/import-export
 - SheetJS documentation (client-side, data-level): https://docs.sheetjs.com/
 - Luckysheet end-of-life notice (redirects to Univer): https://github.com/dream-num/Luckysheet/issues/1454

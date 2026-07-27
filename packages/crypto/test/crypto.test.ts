@@ -206,6 +206,25 @@ describe("sealed boxes for sharing", () => {
   });
 });
 
+describe("re-encryption freshness", () => {
+  // Editing means re-encrypting the same logical document over and over.
+  // Nextcloud's E2EE was broken (EuroS&P 2024) partly because a modified file
+  // was re-encrypted under the same key AND the same nonce. Our secretstream
+  // draws a fresh random header per encryption; this pins that property.
+  it("never repeats the stream header when the same file is saved twice", () => {
+    const fileKey = generateKey();
+    const content = utf8Encode("the same document, saved twice");
+    const first = encryptBytes(content, fileKey);
+    const second = encryptBytes(content, fileKey);
+    // Header (nonce material) differs, and so does every ciphertext byte run.
+    expect(Buffer.from(first.slice(0, 24)).equals(Buffer.from(second.slice(0, 24)))).toBe(false);
+    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(false);
+    // Both still decrypt to the same plaintext.
+    expectBytesEqual(decryptBytes(first, fileKey), content);
+    expectBytesEqual(decryptBytes(second, fileKey), content);
+  });
+});
+
 describe("password protected share links", () => {
   it("round-trips the file key through the password", () => {
     const fileKey = generateKey();
