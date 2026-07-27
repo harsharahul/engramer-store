@@ -36,6 +36,7 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly retryAfterMs?: number,
   ) {
     super(message);
   }
@@ -50,6 +51,29 @@ export function setAuthToken(token: string | null): void {
 
 export function setUnauthorizedHandler(handler: () => void): void {
   onUnauthorized = handler;
+}
+
+const RETRYABLE = new Set([429, 503]);
+const MAX_ATTEMPTS = 5;
+
+/**
+ * Mass transfers must survive throttling: 429/503 responses are retried with
+ * the server's Retry-After when present, otherwise exponential backoff.
+ */
+export async function withRetry<T>(run: () => Promise<T>): Promise<T> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await run();
+    } catch (err) {
+      attempt++;
+      if (!(err instanceof ApiError) || !RETRYABLE.has(err.status) || attempt >= MAX_ATTEMPTS) {
+        throw err;
+      }
+      const wait = err.retryAfterMs ?? Math.min(15_000, 500 * 2 ** attempt);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {

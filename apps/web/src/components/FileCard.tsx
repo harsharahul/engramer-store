@@ -1,6 +1,7 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { FileEntry } from "../store";
 import { thumbnailUrl } from "../thumbs";
+import { blurUrl } from "../intel/blur";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { StarGlyph } from "./Icon";
 import { FolderArt, KIND_ACCENTS, SheetArt } from "./FileArt";
@@ -22,25 +23,42 @@ export function FileCard(props: {
 }) {
   const { file } = props;
   const [thumb, setThumb] = useState<string | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
 
+  // Thumbnails load only when the card approaches the viewport; until then
+  // the ThumbHash placeholder (or the kind art) holds the frame.
   useEffect(() => {
-    let cancelled = false;
-    if (file.hasThumb) {
-      void thumbnailUrl(file.id, file.key).then((url) => {
-        if (!cancelled) {
-          setThumb(url);
-        }
-      });
+    if (!file.hasThumb || !cardRef.current) {
+      return;
     }
+    let cancelled = false;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          observer.disconnect();
+          void thumbnailUrl(file.id, file.key).then((url) => {
+            if (!cancelled) {
+              setThumb(url);
+            }
+          });
+        }
+      },
+      { rootMargin: "400px" },
+    );
+    observer.observe(cardRef.current);
     return () => {
       cancelled = true;
+      observer.disconnect();
     };
   }, [file.id, file.hasThumb, file.key]);
+
+  const placeholder = !thumb && file.blur ? blurUrl(file.blur) : null;
 
   const coarse = window.matchMedia("(pointer: coarse)").matches;
 
   return (
     <div
+      ref={cardRef}
       className={`card${props.selected ? " selected" : ""}${props.fresh ? " fresh" : ""}`}
       style={{ "--i": Math.min(props.index, 20) } as CSSProperties}
       onClick={(e) => (coarse ? props.onOpen() : props.onSelect(e))}
@@ -59,6 +77,8 @@ export function FileCard(props: {
       <div className="art" style={{ color: KIND_ACCENTS[fileKind(file.mime, file.name)] }}>
         {thumb ? (
           <img src={thumb} alt="" loading="lazy" />
+        ) : placeholder ? (
+          <img src={placeholder} alt="" className="blur-placeholder" />
         ) : (
           <SheetArt kind={fileKind(file.mime, file.name)} ext={extension(file.name)} />
         )}

@@ -13,7 +13,8 @@ import {
   utf8Encode,
   type FileMetadata,
 } from "@engramer/crypto";
-import { api, uploadBlob, type FileDto, type FolderDto } from "./api";
+import { api, uploadBlob, withRetry, type FileDto, type FolderDto } from "./api";
+import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { clearSession, type Session } from "./session";
 import { analyzeFile, downloadAndDecrypt, encryptAndUpload } from "./transfer";
 import { recognizeImage } from "./intel/ocr";
@@ -37,6 +38,7 @@ export interface FileEntry {
   mtime: number;
   width?: number;
   height?: number;
+  blur?: string;
   text?: string;
   category?: string;
   tags: string[];
@@ -81,6 +83,14 @@ export interface OcrProgress {
   current: string;
 }
 
+/** Aggregate progress for a large transfer; per-file rows would drown the UI. */
+export interface BatchProgress {
+  done: number;
+  failed: number;
+  total: number;
+  current: string;
+}
+
 interface StoreState {
   session: Session | null;
   synced: boolean;
@@ -92,6 +102,7 @@ interface StoreState {
   uploads: UploadItem[];
   reveal: Reveal | null;
   ocrProgress: OcrProgress | null;
+  batch: BatchProgress | null;
 
   startSession: (session: Session) => Promise<void>;
   logout: () => void;
@@ -101,6 +112,7 @@ interface StoreState {
   renameFolder: (id: string, name: string) => Promise<void>;
   deleteFolder: (id: string) => Promise<void>;
   uploadFiles: (files: File[], folderId: string | null) => Promise<void>;
+  uploadTree: (items: TreeFile[], baseFolderId: string | null) => Promise<void>;
   saveFileContent: (id: string, text: string) => Promise<void>;
   saveFileBinary: (id: string, bytes: Uint8Array, searchText?: string) => Promise<void>;
   createNote: (name: string, folderId: string | null) => Promise<string>;
@@ -145,6 +157,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
     mtime: meta.mtime,
     width: meta.width,
     height: meta.height,
+    blur: meta.blur,
     text: meta.text,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -165,6 +178,7 @@ function metadataOf(file: FileEntry): FileMetadata {
     mtime: file.mtime,
     width: file.width,
     height: file.height,
+    blur: file.blur,
     text: file.text,
     category: file.category,
     tags: file.tags,
@@ -248,6 +262,7 @@ export const useStore = create<StoreState>((set, get) => {
     uploads: [],
     reveal: null,
     ocrProgress: null,
+    batch: null,
 
     // A failed first sync must never strand the user on a spinner: the
     // session (and its keys) are kept, the error is surfaced, and the UI
@@ -391,6 +406,81 @@ export const useStore = create<StoreState>((set, get) => {
           update({ status: "error", error: err instanceof Error ? err.message : "upload failed" });
         }
       }
+      if (revealItems.length > 0) {
+        set({ reveal: { items: revealItems, at: Date.now() } });
+      }
+      await get().refreshUsage();
+    },
+
+    /**
+     * A whole tree at once: recreate the folder structure (deduplicated,
+     * parents first), then push files through a bounded pool. Concurrency
+     * defaults follow transfer-tool practice: modest parallelism beats
+     * hammering, and throttled requests retry with backoff instead of dying.
+     */
+    uploadTree: async (items, baseFolderId) => {
+      const key = masterKey();
+      set({ batch: { done: 0, failed: 0, total: items.length, current: "" } });
+
+      // Folder plan: create every needed path once, parents before children.
+      const folderIds = new Map<string, string | null>();
+      folderIds.set(pathKey([]), baseFolderId);
+      for (const path of folderPlan(items)) {
+        const parent = folderIds.get(pathKey(path.slice(0, -1))) ?? baseFolderId;
+        const name = path[path.length - 1]!;
+        // Reuse an existing subfolder of the same name at the same spot.
+        const existing = [...get().folders.values()].find(
+          (f) => f.parentId === (parent ?? null) && f.name === name,
+        );
+        if (existing) {
+          folderIds.set(pathKey(path), existing.id);
+          continue;
+        }
+        const folderKey = generateKey();
+        const dto = await withRetry(() =>
+          api.createFolder(parent, secretBoxSeal(folderKey, key), encryptFolderMetadata({ name }, folderKey)),
+        );
+        applyFolder(dto);
+        folderIds.set(pathKey(path), dto.id);
+      }
+
+      const revealItems: RevealItem[] = [];
+      await boundedRun(items, 4, async (item) => {
+        const current = get().batch;
+        set({ batch: current ? { ...current, current: item.file.name } : null });
+        try {
+          const prepared = await analyzeFile(item.file);
+          const destination =
+            item.path.length > 0
+              ? (folderIds.get(pathKey(item.path)) ?? baseFolderId)
+              : (baseFolderId ?? (await ensureCategoryFolder(prepared.analysis.category)));
+          const result = await withRetry(() =>
+            encryptAndUpload(item.file, destination, key, prepared, () => {}),
+          );
+          applyFile(result.dto);
+          if (revealItems.length < 3) {
+            revealItems.push({
+              fileId: result.dto.id,
+              name: item.file.name,
+              category: prepared.analysis.category,
+              folderId: destination,
+              folderName: destination ? (get().folders.get(destination)?.name ?? null) : null,
+              tags: prepared.analysis.tags,
+            });
+          }
+          const after = get().batch;
+          if (after) {
+            set({ batch: { ...after, done: after.done + 1 } });
+          }
+        } catch {
+          const after = get().batch;
+          if (after) {
+            set({ batch: { ...after, failed: after.failed + 1 } });
+          }
+        }
+      });
+
+      set({ batch: null });
       if (revealItems.length > 0) {
         set({ reveal: { items: revealItems, at: Date.now() } });
       }
