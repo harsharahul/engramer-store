@@ -9,6 +9,7 @@ import {
 import { api, uploadBlob, type FileDto } from "./api";
 import { categorize, type Analysis } from "./intel/categorize";
 import { extractExif, extractText } from "./intel/extract";
+import { ocrEnabled, recognizeImage } from "./intel/ocr";
 
 const THUMB_SIZE = 512;
 
@@ -97,11 +98,16 @@ export interface PreparedFile {
  * Everything computed here ships only inside encrypted metadata.
  */
 export async function analyzeFile(file: File): Promise<PreparedFile> {
-  const [text, exif, thumbnail] = await Promise.all([
+  let [text, exif, thumbnail] = await Promise.all([
     extractText(file),
     extractExif(file),
     makeThumbnail(file),
   ]);
+  // Opt-in OCR: screenshots and scans become searchable, and the recognized
+  // text sharpens categorization (a photographed invoice files as a receipt).
+  if (text === undefined && file.type.startsWith("image/") && ocrEnabled()) {
+    text = await recognizeImage(file).catch(() => undefined);
+  }
   const analysis = categorize({
     name: file.name,
     mime: file.type || "application/octet-stream",

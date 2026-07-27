@@ -39,6 +39,14 @@ Categories and tags are ordinary metadata fields (`category`, `tags`, `favorite`
 - Plain text and code: read directly (512 KB read cap, 100 KB stored).
 - PDF: text extracted in the browser with pdf.js, capped at 40 pages and 100 KB.
 - Images: EXIF capture date and camera make.
+- Images, with OCR enabled: the text in screenshots, scans, and photos, read on
+  this device by tesseract.js. The worker, WebAssembly engine, and English
+  model are all served from the app's own origin; nothing is fetched from a
+  CDN and no image ever leaves the browser. OCR is opt-in from the sidebar,
+  runs automatically on new image uploads, and can sweep the existing library
+  ("Make images searchable" in the command palette) or a single image from its
+  context menu. Recognized text also sharpens categorization: a photographed
+  invoice files as a receipt.
 
 Extracted text is stored in the encrypted metadata and powers full-text search.
 
@@ -46,10 +54,19 @@ Extracted text is stored in the encrypted metadata and powers full-text search.
 
 One engine serves the top bar and the command palette (Cmd+K or Ctrl+K):
 
-- Fuzzy name matching with tightness scoring.
-- Full-text matches over extracted content with highlighted snippets.
-- Filters composable with free text: `tag:receipts`, `type:image`, `type:pdf`, `in:<folder name>`, `is:favorite`.
-- The palette also surfaces actions (upload, new folder, jump to views) and navigates with arrow keys.
+- Every term must match somewhere: file name, tags, category, the name of any
+  folder on the file's path, or extracted content (including OCR text). Typing
+  a folder's name finds the files inside it, so remembering the folder is as
+  good as remembering the name.
+- Name matches tolerate a one-letter typo; word-prefix and tight subsequence
+  matches rank below exact ones, and fresher files float upward.
+- Results show a thumbnail, the folder path, the category, and a snippet with
+  every match highlighted, in the top bar and the palette alike. Arrow keys
+  move through results and Enter opens straight into the preview.
+- Filters compose with free text: `tag:receipts`, `type:image` (synonyms like
+  `type:photo` work), `in:<folder>`, `is:favorite`, `before:2026-03`,
+  `after:2025`. Focusing the empty search box shows recent searches and
+  clickable operator hints.
 
 Search never issues a network request; the index is the decrypted metadata already in memory.
 
@@ -59,5 +76,5 @@ The sidebar's Library section lists auto-categories with live counts (Photos, Sc
 
 ## Planned
 
-- Optional OCR for screenshots and scans (Tesseract WASM, self-hosted assets, opt-in because of asset size).
 - Semantic image search with an on-device CLIP-family model through transformers.js, following Ente's MobileCLIP approach; embeddings would join the encrypted metadata like every other derived signal.
+- Additional OCR languages beyond English, selectable so only the models you need are downloaded.

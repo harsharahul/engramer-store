@@ -15,7 +15,8 @@ import {
 } from "@engramer/crypto";
 import { api, uploadBlob, type FileDto, type FolderDto } from "./api";
 import { clearSession, type Session } from "./session";
-import { analyzeFile, encryptAndUpload } from "./transfer";
+import { analyzeFile, downloadAndDecrypt, encryptAndUpload } from "./transfer";
+import { recognizeImage } from "./intel/ocr";
 
 export interface FolderEntry {
   id: string;
@@ -73,6 +74,12 @@ export interface Reveal {
   at: number;
 }
 
+export interface OcrProgress {
+  done: number;
+  total: number;
+  current: string;
+}
+
 interface StoreState {
   session: Session | null;
   synced: boolean;
@@ -81,6 +88,7 @@ interface StoreState {
   usage: Usage | null;
   uploads: UploadItem[];
   reveal: Reveal | null;
+  ocrProgress: OcrProgress | null;
 
   startSession: (session: Session) => Promise<void>;
   logout: () => void;
@@ -104,6 +112,8 @@ interface StoreState {
   dismissReveal: () => void;
   createFileRequest: (label: string, folderId: string | null, expiresAt: number | null) => Promise<string>;
   ingestRequestUploads: () => Promise<number>;
+  recognizeFile: (id: string) => Promise<boolean>;
+  recognizeAllImages: () => Promise<number>;
 }
 
 function decryptFolder(dto: FolderDto, masterKey: Uint8Array): FolderEntry {
@@ -232,6 +242,7 @@ export const useStore = create<StoreState>((set, get) => {
     usage: null,
     uploads: [],
     reveal: null,
+    ocrProgress: null,
 
     startSession: async (session) => {
       set({
@@ -516,6 +527,48 @@ export const useStore = create<StoreState>((set, get) => {
         await get().refreshUsage();
       }
       return revealItems.length;
+    },
+
+    /** Runs OCR over one already-stored image and files the text into its
+     * encrypted metadata. Returns whether any text was found. */
+    recognizeFile: async (id) => {
+      const file = get().files.get(id);
+      if (!file || !file.mime.startsWith("image/")) {
+        return false;
+      }
+      const bytes = await downloadAndDecrypt(file.id, file.key);
+      const text = await recognizeImage(
+        new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime }),
+      );
+      if (!text) {
+        return false;
+      }
+      await patchFileMeta(id, { text });
+      return true;
+    },
+
+    /**
+     * Makes the whole image library searchable: every image without text
+     * goes through OCR, one at a time so the tab stays responsive.
+     */
+    recognizeAllImages: async () => {
+      const candidates = [...get().files.values()].filter(
+        (f) => !f.trashed && f.mime.startsWith("image/") && f.text === undefined,
+      );
+      let found = 0;
+      for (let i = 0; i < candidates.length; i++) {
+        const file = candidates[i]!;
+        set({ ocrProgress: { done: i, total: candidates.length, current: file.name } });
+        try {
+          if (await get().recognizeFile(file.id)) {
+            found++;
+          }
+        } catch {
+          // One unreadable image never stops the sweep.
+        }
+      }
+      set({ ocrProgress: null });
+      return found;
     },
   };
 });
