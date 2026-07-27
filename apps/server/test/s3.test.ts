@@ -93,8 +93,9 @@ describe.skipIf(!endpoint)("s3 blob store", () => {
         url: `/api/files/${id}/versions`,
         headers: auth,
       });
-      const [version] = versions.json().versions as Array<{ generation: number; size: number }>;
-      expect(version).toBeTruthy();
+      const versionList = versions.json().versions as Array<{ generation: number; size: number }>;
+      expect(versionList).toHaveLength(1);
+      const version = versionList[0]!;
       const versionData = await app.inject({
         method: "GET",
         url: `/api/files/${id}/versions/${version.generation}/data`,
