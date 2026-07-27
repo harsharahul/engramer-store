@@ -75,7 +75,49 @@ describe.skipIf(!endpoint)("s3 blob store", () => {
       expect(download.statusCode).toBe(200);
       expect(decryptBytes(new Uint8Array(download.rawPayload), fileKey)).toEqual(content);
 
-      // Permanent delete removes the object as well.
+      // Versioning against the object store: replace, then restore, and both
+      // generations serve their exact bytes through S3-backed blobs.
+      const replacement = crypto.getRandomValues(new Uint8Array(32 * 1024));
+      const replaced = await app.inject({
+        method: "PUT",
+        url: `/api/files/${id}/data`,
+        headers: { ...auth, "content-type": "application/octet-stream" },
+        payload: Buffer.from(encryptBytes(replacement, fileKey)),
+      });
+      expect(replaced.statusCode).toBe(200);
+      const current = await app.inject({ method: "GET", url: `/api/files/${id}/data`, headers: auth });
+      expect(decryptBytes(new Uint8Array(current.rawPayload), fileKey)).toEqual(replacement);
+
+      const versions = await app.inject({
+        method: "GET",
+        url: `/api/files/${id}/versions`,
+        headers: auth,
+      });
+      const [version] = versions.json().versions as Array<{ generation: number; size: number }>;
+      expect(version).toBeTruthy();
+      const versionData = await app.inject({
+        method: "GET",
+        url: `/api/files/${id}/versions/${version.generation}/data`,
+        headers: auth,
+      });
+      expect(decryptBytes(new Uint8Array(versionData.rawPayload), fileKey)).toEqual(content);
+
+      const restored = await app.inject({
+        method: "POST",
+        url: `/api/files/${id}/versions/${version.generation}/restore`,
+        headers: auth,
+        payload: {
+          encryptedMeta: encryptFileMetadata(
+            { name: "s3.bin", mime: "application/octet-stream", size: version.size, mtime: 0 },
+            fileKey,
+          ),
+        },
+      });
+      expect(restored.statusCode).toBe(200);
+      const reverted = await app.inject({ method: "GET", url: `/api/files/${id}/data`, headers: auth });
+      expect(decryptBytes(new Uint8Array(reverted.rawPayload), fileKey)).toEqual(content);
+
+      // Permanent delete removes every generation's object as well.
       await app.inject({ method: "DELETE", url: `/api/files/${id}`, headers: auth });
       const gone = await app.inject({ method: "DELETE", url: `/api/trash/${id}`, headers: auth });
       expect(gone.statusCode).toBe(204);
