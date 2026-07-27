@@ -85,15 +85,46 @@ export const api = {
     request<{ kdf: KdfParams }>(`/api/auth/attributes?email=${encodeURIComponent(email)}`),
 
   login: (email: string, loginKey: string) =>
-    request<{ token: string; keyAttributes: KeyAttributes }>("/api/auth/login", {
+    request<{
+      token?: string;
+      keyAttributes?: KeyAttributes;
+      twoFactorRequired?: boolean;
+      pendingToken?: string;
+    }>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, loginKey }),
     }),
 
-  user: () =>
-    request<{ email: string; usedBytes: number; quotaBytes: number; createdAt: number }>(
-      "/api/user",
+  twoFactor: (pendingToken: string, code: string) =>
+    request<{ token: string; keyAttributes: KeyAttributes; recoveryCodesLeft?: number }>(
+      "/api/auth/2fa",
+      { method: "POST", body: JSON.stringify({ pendingToken, code }) },
     ),
+
+  totpSetup: () =>
+    request<{ secret: string; otpauthUri: string }>("/api/auth/totp/setup", { method: "POST", body: "{}" }),
+
+  totpConfirm: (code: string) =>
+    request<{ recoveryCodes: string[] }>("/api/auth/totp/confirm", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+
+  totpDisable: (code: string) =>
+    request<{ disabled: boolean }>("/api/auth/totp/disable", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+
+  user: () =>
+    request<{
+      email: string;
+      usedBytes: number;
+      quotaBytes: number;
+      createdAt: number;
+      totpEnabled: boolean;
+      recoveryCodesLeft: number;
+    }>("/api/user"),
 
   sync: (since: number) => request<SyncResponse>(`/api/sync?since=${since}`),
 

@@ -88,7 +88,31 @@ export class Vault {
     if (!loginRes.ok) {
       throw new Error("login failed: check email and password");
     }
-    const login = (await loginRes.json()) as { token: string; keyAttributes: KeyAttributes };
+    let login = (await loginRes.json()) as {
+      token: string;
+      keyAttributes: KeyAttributes;
+      twoFactorRequired?: boolean;
+      pendingToken?: string;
+    };
+    if (login.twoFactorRequired) {
+      // Accounts with two-factor enabled provide the current authenticator
+      // code (or a recovery code) through ENGRAM_TOTP.
+      const code = process.env.ENGRAM_TOTP;
+      if (!code) {
+        throw new Error(
+          "this account requires a second factor: set ENGRAM_TOTP to a current authenticator code",
+        );
+      }
+      const twoFaRes = await fetch(this.url("/api/auth/2fa"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pendingToken: login.pendingToken, code }),
+      });
+      if (!twoFaRes.ok) {
+        throw new Error("two-factor verification failed: check ENGRAM_TOTP");
+      }
+      login = (await twoFaRes.json()) as { token: string; keyAttributes: KeyAttributes };
+    }
     this.token = login.token;
     this.masterKey = secretBoxOpen(login.keyAttributes.encryptedMasterKey, kek);
     await this.sync();

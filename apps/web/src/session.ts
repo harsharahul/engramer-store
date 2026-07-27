@@ -44,16 +44,38 @@ export async function registerAccount(email: string, password: string): Promise<
   return { session, recoveryKeyHex: account.recoveryKeyHex };
 }
 
-export async function login(email: string, password: string): Promise<Session> {
+export type LoginResult =
+  | { kind: "session"; session: Session }
+  | { kind: "two-factor"; complete: (code: string) => Promise<Session> };
+
+export async function login(email: string, password: string): Promise<LoginResult> {
   await ready();
   const { kdf } = await api.kdfAttributes(email);
   // One derivation covers both authentication and unlocking.
   const { kek } = deriveKeyEncryptionKey(password, kdf);
-  const { token, keyAttributes } = await api.login(email, deriveLoginKey(kek));
-  const masterKey = secretBoxOpen(keyAttributes.encryptedMasterKey, kek);
-  const session = sessionFromKeys(email, token, masterKey, keyAttributes);
-  activate(session);
-  return session;
+  const response = await api.login(email, deriveLoginKey(kek));
+
+  const finish = (token: string, attributes: KeyAttributes): Session => {
+    const masterKey = secretBoxOpen(attributes.encryptedMasterKey, kek);
+    const session = sessionFromKeys(email, token, masterKey, attributes);
+    activate(session);
+    return session;
+  };
+
+  if (response.twoFactorRequired && response.pendingToken) {
+    // The password checked out; the server withholds key material until a
+    // second factor is presented. The derived KEK stays in this closure so
+    // the user never types the password twice.
+    const pendingToken = response.pendingToken;
+    return {
+      kind: "two-factor",
+      complete: async (code: string) => {
+        const done = await api.twoFactor(pendingToken, code);
+        return finish(done.token, done.keyAttributes);
+      },
+    };
+  }
+  return { kind: "session", session: finish(response.token!, response.keyAttributes!) };
 }
 
 function sessionFromKeys(
