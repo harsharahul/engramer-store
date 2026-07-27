@@ -10,6 +10,7 @@ import { api, uploadBlob, type FileDto } from "./api";
 import { categorize, type Analysis } from "./intel/categorize";
 import { extractExif, extractText } from "./intel/extract";
 import { ocrEnabled, recognizeImage } from "./intel/ocr";
+import { computeBlur } from "./intel/blur";
 
 const THUMB_SIZE = 512;
 
@@ -17,6 +18,8 @@ interface Thumbnail {
   bytes: Uint8Array;
   width: number;
   height: number;
+  /** ThumbHash placeholder, painted before any thumbnail request. */
+  blur?: string;
 }
 
 function drawScaled(source: CanvasImageSource, width: number, height: number): Promise<Blob | null> {
@@ -37,11 +40,12 @@ async function imageThumbnail(file: File): Promise<Thumbnail | null> {
     const bitmap = await createImageBitmap(file);
     const { width, height } = bitmap;
     const blob = await drawScaled(bitmap, width, height);
+    const blur = computeBlur(bitmap, width, height);
     bitmap.close();
     if (!blob) {
       return null;
     }
-    return { bytes: new Uint8Array(await blob.arrayBuffer()), width, height };
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), width, height, blur };
   } catch {
     return null;
   }
@@ -60,6 +64,7 @@ async function videoThumbnail(file: File): Promise<Thumbnail | null> {
     video.onseeked = async () => {
       const { videoWidth, videoHeight } = video;
       const blob = await drawScaled(video, videoWidth, videoHeight);
+      const blur = computeBlur(video, videoWidth, videoHeight);
       cleanup();
       if (!blob) {
         return resolve(null);
@@ -68,6 +73,7 @@ async function videoThumbnail(file: File): Promise<Thumbnail | null> {
         bytes: new Uint8Array(await blob.arrayBuffer()),
         width: videoWidth,
         height: videoHeight,
+        blur,
       });
     };
     video.onerror = () => {
@@ -123,6 +129,7 @@ export async function analyzeFile(file: File): Promise<PreparedFile> {
     category: analysis.category,
     tags: analysis.tags,
     ...(thumbnail ? { width: thumbnail.width, height: thumbnail.height } : {}),
+    ...(thumbnail?.blur ? { blur: thumbnail.blur } : {}),
     ...(text !== undefined ? { text } : {}),
   };
   return { meta, analysis, thumbnail };

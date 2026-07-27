@@ -19,6 +19,7 @@ import {
   type ThemeMode,
 } from "../theme";
 import { searchFiles, highlightParts, type SearchHit } from "../search";
+import { collectDropped, fromDirectoryInput } from "../uploader";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
 import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
@@ -199,6 +200,7 @@ export function Vault() {
   const dragDepth = useRef(0);
   const lastSelected = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -544,7 +546,20 @@ export function Vault() {
     event.preventDefault();
     dragDepth.current = 0;
     setDragging(false);
-    uploadTo([...event.dataTransfer.files]);
+    const transfer = event.dataTransfer;
+    void collectDropped(transfer).then((items) => {
+      if (items.length === 0) {
+        return;
+      }
+      // Folder drops and big batches go through the tree pipeline; a couple
+      // of loose files keep the familiar per-file flow.
+      const isTree = items.some((i) => i.path.length > 0) || items.length > 10;
+      if (isTree) {
+        void store.uploadTree(items, currentFolderId);
+      } else {
+        uploadTo(items.map((i) => i.file));
+      }
+    });
   };
 
   const lock = () => {
@@ -873,6 +888,13 @@ export function Vault() {
           <button className="btn" title="New folder" onClick={() => setNewFolderOpen(true)}>
             <PlusGlyph /> <span className="btn-label">New folder</span>
           </button>
+          <button
+            className="btn"
+            title="Upload a whole folder, structure preserved"
+            onClick={() => folderInput.current?.click()}
+          >
+            <FolderGlyph size={14} /> <span className="btn-label">Folder</span>
+          </button>
           <button className="btn btn-primary" onClick={() => fileInput.current?.click()}>
             <UploadGlyph /> Upload
           </button>
@@ -893,6 +915,20 @@ export function Vault() {
             hidden
             onChange={(e) => {
               uploadTo([...(e.target.files ?? [])]);
+              e.target.value = "";
+            }}
+          />
+          <input
+            ref={folderInput}
+            type="file"
+            multiple
+            hidden
+            {...{ webkitdirectory: "" }}
+            onChange={(e) => {
+              const items = fromDirectoryInput([...(e.target.files ?? [])]);
+              if (items.length > 0) {
+                void store.uploadTree(items, currentFolderId);
+              }
               e.target.value = "";
             }}
           />
@@ -1267,6 +1303,14 @@ export function Vault() {
           onConfirm={() => store.deleteForever(deleteForeverId)}
           onClose={() => setDeleteForeverId(null)}
         />
+      )}
+      {store.batch && (
+        <div className="ocr-pill">
+          <span className="spinner" />
+          Uploading {store.batch.current || "…"} · {store.batch.done + store.batch.failed} of{" "}
+          {store.batch.total}
+          {store.batch.failed > 0 ? ` · ${store.batch.failed} failed` : ""}
+        </div>
       )}
       {store.ocrProgress && (
         <div className="ocr-pill">
