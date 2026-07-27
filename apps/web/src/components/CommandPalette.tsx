@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
-import { searchFiles } from "../search";
+import { searchFiles, highlightParts, type Highlight } from "../search";
 import { extension, formatBytes } from "../format";
 import { SearchGlyph } from "./Icon";
 
@@ -13,7 +13,25 @@ export interface PaletteAction {
 
 type Row =
   | { kind: "action"; action: PaletteAction }
-  | { kind: "file"; id: string; name: string; sub: string; snippet: string | null };
+  | {
+      kind: "file";
+      id: string;
+      name: string;
+      nameRanges: Highlight[];
+      sub: string;
+      snippet: string | null;
+      snippetRanges: Highlight[];
+    };
+
+function Marked(props: { value: string; ranges: Highlight[] }) {
+  return (
+    <>
+      {highlightParts(props.value, props.ranges).map((part, i) =>
+        part.hit ? <mark key={i}>{part.text}</mark> : <span key={i}>{part.text}</span>,
+      )}
+    </>
+  );
+}
 
 /**
  * Cmd+K omnisearch. One input drives both actions and the same local search
@@ -40,13 +58,18 @@ export function CommandPalette(props: {
     }
     const fileRows: Row[] = searchFiles(files.values(), trimmed, folders)
       .slice(0, 20)
-      .map((hit) => ({
-        kind: "file",
-        id: hit.file.id,
-        name: hit.file.name,
-        sub: `${extension(hit.file.name) || "FILE"} · ${formatBytes(hit.file.size)}`,
-        snippet: hit.matchedText,
-      }));
+      .map((hit) => {
+        const parent = hit.file.folderId ? folders.get(hit.file.folderId)?.name : null;
+        return {
+          kind: "file" as const,
+          id: hit.file.id,
+          name: hit.file.name,
+          nameRanges: hit.nameRanges,
+          sub: `${parent ?? "All files"} · ${formatBytes(hit.file.size)}`,
+          snippet: hit.matchedText,
+          snippetRanges: hit.textRanges,
+        };
+      });
     return [...fileRows, ...actionRows];
   }, [query, files, folders, props.actions]);
 
@@ -122,8 +145,14 @@ export function CommandPalette(props: {
                   <>
                     <span className="palette-badge">{extension(row.name) || "FILE"}</span>
                     <span className="palette-main">
-                      <span className="palette-name">{row.name}</span>
-                      {row.snippet && <span className="palette-snippet">{row.snippet}</span>}
+                      <span className="palette-name">
+                        <Marked value={row.name} ranges={row.nameRanges} />
+                      </span>
+                      {row.snippet && (
+                        <span className="palette-snippet">
+                          <Marked value={row.snippet} ranges={row.snippetRanges} />
+                        </span>
+                      )}
                     </span>
                     <span className="palette-hint mono">{row.sub}</span>
                   </>
