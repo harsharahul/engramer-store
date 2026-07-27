@@ -29,12 +29,24 @@ export interface FileRow {
   encrypted_meta: string;
   size: number;
   thumb_size: number;
+  /** Which content blob is current: 0 = `<id>`, N = `<id>.g<N>`. */
+  generation: number;
   uploaded: number;
   trashed: number;
   deleted: number;
   update_seq: number;
   created_at: number;
   updated_at: number;
+}
+
+export interface FileVersionRow {
+  file_id: string;
+  user_id: number;
+  generation: number;
+  size: number;
+  /** Snapshot of the file's encrypted metadata when this content was current. */
+  encrypted_meta: string;
+  created_at: number;
 }
 
 export interface ShareRow {
@@ -142,8 +154,21 @@ export function openDatabase(path: string): Database.Database {
       created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS request_uploads_owner ON request_uploads(user_id, uploaded, consumed);
+    CREATE TABLE IF NOT EXISTS file_versions (
+      file_id TEXT NOT NULL REFERENCES files(id),
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      generation INTEGER NOT NULL,
+      size INTEGER NOT NULL,
+      encrypted_meta TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (file_id, generation)
+    );
+    CREATE INDEX IF NOT EXISTS file_versions_owner ON file_versions(user_id);
   `);
   // Additive migrations for databases created before these columns existed.
+  ensureColumns(db, "files", {
+    generation: "INTEGER NOT NULL DEFAULT 0",
+  });
   ensureColumns(db, "shares", {
     expires_at: "INTEGER",
     max_downloads: "INTEGER",
@@ -194,5 +219,8 @@ export function storageUsed(db: Database.Database, userId: number): number {
       "SELECT COALESCE(SUM(size + thumb_size), 0) AS used FROM request_uploads WHERE user_id = ? AND consumed = 0",
     )
     .get(userId) as { used: number };
-  return files.used + pending.used;
+  const versions = db
+    .prepare("SELECT COALESCE(SUM(size), 0) AS used FROM file_versions WHERE user_id = ?")
+    .get(userId) as { used: number };
+  return files.used + pending.used + versions.used;
 }
