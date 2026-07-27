@@ -1263,6 +1263,224 @@ a {
   background: var(--danger, #ef4444);
 }
 
+/* ---------- search: focus panel, rich results, highlights ---------- */
+
+.searchbox {
+  position: relative;
+}
+
+.search-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 220;
+  background: var(--ink-1);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-modal);
+  padding: 10px;
+  animation: scale-in 0.16s ease both;
+}
+
+.search-panel-label {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--paper-faint);
+  margin: 6px 4px 4px;
+}
+
+.search-recent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 8px;
+  border-radius: var(--radius);
+  color: var(--paper);
+  font-size: 13px;
+}
+
+.search-recent:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.search-recent svg {
+  color: var(--paper-faint);
+}
+
+.search-ops {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 4px 4px;
+}
+
+.search-op {
+  font-size: 11.5px;
+  color: var(--accent-bright);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.search-op:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.search-panel-note {
+  font-size: 11px;
+  color: var(--paper-faint);
+  padding: 6px 4px 2px;
+  border-top: 1px solid var(--hairline);
+  margin-top: 6px;
+}
+
+.row.result {
+  align-items: flex-start;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.row.result.cursor {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.result-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  flex-shrink: 0;
+}
+
+.result-where {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--paper-dim);
+  margin-top: 2px;
+}
+
+.result-folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-folder.hit {
+  color: var(--accent-bright);
+}
+
+.result-date {
+  white-space: nowrap;
+  color: var(--paper-faint);
+}
+
+.rows mark,
+.palette mark {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  color: var(--accent-bright);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* ---------- OCR: sidebar toggle and progress ---------- */
+
+.ocr-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  color: var(--paper-dim);
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.ocr-toggle:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.ocr-toggle.on {
+  color: var(--paper);
+}
+
+.ocr-toggle span:first-of-type {
+  flex: 1;
+}
+
+.switch {
+  width: 26px;
+  height: 15px;
+  border-radius: 999px;
+  background: var(--ink-2);
+  border: 1px solid var(--hairline-strong);
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--paper-dim);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.switch.on {
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+  border-color: var(--accent);
+}
+
+.switch.on::after {
+  transform: translateX(11px);
+  background: #fff;
+}
+
+.ocr-pill {
+  position: fixed;
+  bottom: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: var(--ink-1);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  box-shadow: var(--shadow-modal);
+  padding: 8px 16px;
+  font-size: 12.5px;
+  color: var(--paper);
+  max-width: min(80vw, 520px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ocr-pill .spinner {
+  width: 13px;
+  height: 13px;
+}
+
 /* ---------- Word document editor and preview ---------- */
 
 .doc-editor-body {

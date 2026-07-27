@@ -3,6 +3,30 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.9.0] - 2026-07-27
+
+### Added
+- On-device OCR, opt-in from the sidebar. With "Read text in images" on, new
+  screenshots, scans, and photos are read by tesseract.js as they upload, and
+  the recognized text joins the encrypted metadata, making images fully
+  searchable and improving auto-categorization (a photographed invoice files
+  as a receipt). "Make images searchable" in the command palette sweeps the
+  existing library with live progress, and any single image can be read from
+  its context menu. The OCR worker, WebAssembly engine, and English model are
+  all served from the app's own origin; no image, text, or request ever
+  leaves the device.
+- Search rebuilt around finding files you half-remember. Every term now
+  matches names, tags, categories, folder names anywhere on the file's path,
+  and extracted content, so typing a folder's name finds what's inside it.
+  One-letter typos are forgiven, multi-word queries require every word,
+  fresher files rank higher, and `before:`/`after:` date filters join the
+  grammar along with type synonyms like `type:photo`.
+- Search results redesigned: thumbnails, the folder path, category, date, and
+  snippets with every match highlighted, in the top bar and the Cmd+K palette
+  alike. Arrow keys move through results and Enter opens the preview.
+  Focusing the empty search box offers recent searches and clickable
+  operator hints.
+
 ## [0.8.0] - 2026-07-27
 
 ### Added

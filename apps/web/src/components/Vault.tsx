@@ -9,7 +9,7 @@ import {
   type CSSProperties,
   type DragEvent,
 } from "react";
-import { useStore, type FileEntry } from "../store";
+import { useStore, type FileEntry, type FolderEntry } from "../store";
 import {
   ACCENTS,
   applyAccent,
@@ -18,7 +18,9 @@ import {
   currentTheme,
   type ThemeMode,
 } from "../theme";
-import { searchFiles } from "../search";
+import { searchFiles, highlightParts, type SearchHit } from "../search";
+import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
+import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { saveDecryptedFile } from "../download";
 import { clearThumbnailCache } from "../thumbs";
@@ -69,6 +71,7 @@ import {
   PlusGlyph,
   ReceiptGlyph,
   RestoreGlyph,
+  ScanTextGlyph,
   SearchGlyph,
   ShareGlyph,
   SparkGlyph,
@@ -122,6 +125,45 @@ function loadPref<T>(key: string, fallback: T): T {
   }
 }
 
+const RECENT_SEARCHES_KEY = "engram-recent-searches";
+
+function loadRecentSearches(): string[] {
+  return loadPref<string[]>(RECENT_SEARCHES_KEY, []);
+}
+
+function rememberSearch(query: string): string[] {
+  const trimmed = query.trim();
+  const next = [trimmed, ...loadRecentSearches().filter((q) => q !== trimmed)].slice(0, 6);
+  try {
+    localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(next));
+  } catch {
+    // Best-effort.
+  }
+  return next;
+}
+
+/** "Work / Taxes 2025" for a file, walking up the folder tree. */
+function folderPath(
+  folderId: string | null,
+  folders: ReadonlyMap<string, FolderEntry>,
+): string | null {
+  const names: string[] = [];
+  let cursor = folderId;
+  let guard = 0;
+  while (cursor && guard < 32) {
+    const folder = folders.get(cursor);
+    if (!folder) {
+      break;
+    }
+    names.unshift(folder.name);
+    cursor = folder.parentId;
+    guard++;
+  }
+  return names.length > 0 ? names.join(" / ") : null;
+}
+
+const OPERATOR_HINTS = ["tag:", "type:", "in:", "before:", "after:", "is:favorite"];
+
 export function Vault() {
   const store = useStore();
   const [view, setView] = useState<View>({ kind: "folder", id: null });
@@ -147,6 +189,10 @@ export function Vault() {
   const [toast, setToast] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => currentTheme());
   const [accent, setAccent] = useState<string>(() => currentAccent());
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [searchCursor, setSearchCursor] = useState(0);
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => loadRecentSearches());
+  const [ocrOn, setOcrOn] = useState(() => ocrEnabled());
   const dragDepth = useRef(0);
   const lastSelected = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -303,6 +349,7 @@ export function Vault() {
   }, []);
 
   useEffect(() => clearSelection(), [view, query, clearSelection]);
+  useEffect(() => setSearchCursor(0), [query]);
 
   // ----- actions -----
 
@@ -311,6 +358,9 @@ export function Vault() {
   };
 
   const openFile = (id: string) => {
+    if (query.trim()) {
+      setRecentSearches(rememberSearch(query));
+    }
     setPreviewId(id);
     setQuery("");
   };
@@ -340,6 +390,24 @@ export function Vault() {
     { id: "open", label: "Open", run: () => openFile(file.id) },
     ...(["text", "doc"].includes(fileKind(file.mime, file.name))
       ? [{ id: "edit", label: "Edit", icon: <PencilGlyph size={13} />, run: () => setEditorId(file.id) }]
+      : []),
+    ...(file.mime.startsWith("image/") && file.text === undefined
+      ? [
+          {
+            id: "ocr",
+            label: "Read text in image",
+            icon: <ScanTextGlyph size={13} />,
+            run: () => {
+              showToast("Reading text on this device…");
+              void store
+                .recognizeFile(file.id)
+                .then((found) =>
+                  showToast(found ? "Text found. This image is searchable now." : "No text found in this image."),
+                )
+                .catch(() => showToast("Could not read this image."));
+            },
+          },
+        ]
       : []),
     { id: "download", label: "Download", icon: <DownloadGlyph size={13} />, run: () => download(file) },
     { id: "share", label: "Share", icon: <ShareGlyph size={13} />, run: () => setShareId(file.id) },
@@ -493,6 +561,24 @@ export function Vault() {
         hint: "receive, encrypted to you",
         run: () => setRequestFolder({ folderId: null }),
       },
+      {
+        id: "ocr-all",
+        label: "Make images searchable",
+        hint: "on-device OCR",
+        run: () => {
+          if (!ocrEnabled()) {
+            setOcrEnabled(true);
+            setOcrOn(true);
+          }
+          void store.recognizeAllImages().then((found) => {
+            showToast(
+              found > 0
+                ? `Read text in ${found} image${found === 1 ? "" : "s"}. They are searchable now.`
+                : "No new text found in your images.",
+            );
+          });
+        },
+      },
       { id: "go-files", label: "Go to All files", run: () => setView({ kind: "folder", id: null }) },
       { id: "go-recent", label: "Go to Recent", run: () => setView({ kind: "recent" }) },
       { id: "go-favorites", label: "Go to Favorites", run: () => setView({ kind: "favorites" }) },
@@ -628,6 +714,24 @@ export function Vault() {
         )}
 
         <div className="spacer" />
+        <button
+          className={`ocr-toggle${ocrOn ? " on" : ""}`}
+          title="OCR runs entirely on this device; recognized text is stored encrypted"
+          onClick={() => {
+            const next = !ocrOn;
+            setOcrEnabled(next);
+            setOcrOn(next);
+            showToast(
+              next
+                ? "New images will be read on this device. Cmd+K, then “Make images searchable” for existing ones."
+                : "Image reading is off.",
+            );
+          }}
+        >
+          <ScanTextGlyph size={14} />
+          <span>Read text in images</span>
+          <span className={`switch${ocrOn ? " on" : ""}`} />
+        </button>
         <div className="appearance">
           <button
             className="theme-toggle"
@@ -684,10 +788,70 @@ export function Vault() {
             </span>
             <input
               ref={searchInput}
-              placeholder="Search names, contents, tags   /"
+              placeholder="Search names, contents, tags, folders   /"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setTimeout(() => setSearchFocused(false), 150)}
+              onKeyDown={(e) => {
+                if (!searching) {
+                  return;
+                }
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setSearchCursor((c) => Math.min(c + 1, hits.length - 1));
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setSearchCursor((c) => Math.max(c - 1, 0));
+                } else if (e.key === "Enter" && hits[searchCursor]) {
+                  e.preventDefault();
+                  openFile(hits[searchCursor]!.file.id);
+                } else if (e.key === "Escape") {
+                  setQuery("");
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
             />
+            {searchFocused && !searching && (
+              <div className="search-panel" onMouseDown={(e) => e.preventDefault()}>
+                {recentSearches.length > 0 && (
+                  <>
+                    <div className="search-panel-label">Recent</div>
+                    {recentSearches.map((recent) => (
+                      <button
+                        key={recent}
+                        className="search-recent"
+                        onClick={() => {
+                          setQuery(recent);
+                          searchInput.current?.focus();
+                        }}
+                      >
+                        <ClockGlyph size={12} /> {recent}
+                      </button>
+                    ))}
+                  </>
+                )}
+                <div className="search-panel-label">Narrow it down</div>
+                <div className="search-ops">
+                  {OPERATOR_HINTS.map((op) => (
+                    <button
+                      key={op}
+                      className="search-op mono"
+                      onClick={() => {
+                        setQuery((q) => (q ? `${q.trimEnd()} ${op}` : op));
+                        searchInput.current?.focus();
+                      }}
+                    >
+                      {op}
+                    </button>
+                  ))}
+                </div>
+                <div className="search-panel-note">
+                  Search reads names, tags, folder names, and text inside documents
+                  {ocrOn ? " and images" : ""}, decrypted only on this device.
+                </div>
+              </div>
+            )}
           </div>
           <button className="btn btn-ghost palette-trigger" onClick={() => setPaletteOpen(true)}>
             <SparkGlyph size={14} /> <kbd className="mono">⌘K</kbd>
@@ -815,6 +979,8 @@ export function Vault() {
           {searching ? (
             <SearchResults
               hits={hits}
+              folders={store.folders}
+              cursor={searchCursor}
               selection={selection}
               onSelect={select}
               onOpen={openFile}
@@ -1081,6 +1247,13 @@ export function Vault() {
           onClose={() => setDeleteForeverId(null)}
         />
       )}
+      {store.ocrProgress && (
+        <div className="ocr-pill">
+          <span className="spinner" />
+          Reading {store.ocrProgress.current} · {store.ocrProgress.done + 1} of{" "}
+          {store.ocrProgress.total}
+        </div>
+      )}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
@@ -1174,45 +1347,113 @@ function RevealToast(props: { onOpen: (folderId: string | null) => void }) {
   );
 }
 
+function Highlighted(props: { value: string; ranges: SearchHit["nameRanges"] }) {
+  return (
+    <>
+      {highlightParts(props.value, props.ranges).map((part, i) =>
+        part.hit ? <mark key={i}>{part.text}</mark> : <span key={i}>{part.text}</span>,
+      )}
+    </>
+  );
+}
+
+function ResultThumb(props: { file: FileEntry }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (props.file.hasThumb) {
+      void thumbnailUrl(props.file.id, props.file.key).then((u) => {
+        if (!cancelled) {
+          setUrl(u);
+        }
+      });
+    } else {
+      setUrl(null);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [props.file.id, props.file.hasThumb, props.file.key]);
+
+  if (url) {
+    return <img className="result-thumb" src={url} alt="" />;
+  }
+  return <span className="row-glyph">{extension(props.file.name) || "FILE"}</span>;
+}
+
 function SearchResults(props: {
-  hits: ReturnType<typeof searchFiles>;
+  hits: SearchHit[];
+  folders: ReadonlyMap<string, FolderEntry>;
+  cursor: number;
   selection: ReadonlySet<string>;
   onSelect: (id: string, event: React.MouseEvent) => void;
   onOpen: (id: string) => void;
   onContextMenu: (id: string, event: React.MouseEvent) => void;
 }) {
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const active = listRef.current?.querySelector<HTMLElement>("[data-cursor='true']");
+    active?.scrollIntoView({ block: "nearest" });
+  }, [props.cursor]);
+
   if (props.hits.length === 0) {
     return (
       <div className="empty">
         <span className="empty-mark">∅</span>
         <h3>No matches</h3>
         <p>
-          Search covers names, tags, and text inside documents, decrypted only on this device. Try{" "}
-          <code>tag:receipts</code>, <code>type:image</code>, or <code>is:favorite</code>.
+          Search covers names, tags, folder names, and text inside documents, decrypted only on
+          this device. Try <code>tag:receipts</code>, <code>type:image</code>,{" "}
+          <code>before:2026</code>, or a folder's name; one-letter typos are forgiven.
         </p>
       </div>
     );
   }
   return (
-    <div className="rows">
-      {props.hits.map((hit, i) => (
-        <div
-          key={hit.file.id}
-          className={`row${props.selection.has(hit.file.id) ? " selected" : ""}`}
-          style={{ "--i": Math.min(i, 20) } as CSSProperties}
-          onClick={(e) => props.onSelect(hit.file.id, e)}
-          onDoubleClick={() => props.onOpen(hit.file.id)}
-          onContextMenu={(e) => props.onContextMenu(hit.file.id, e)}
-        >
-          <span className="row-glyph">{extension(hit.file.name) || "FILE"}</span>
-          <div className="row-main">
-            <div className="name">{hit.file.name}</div>
-            {hit.matchedText && <div className="snippet">{hit.matchedText}</div>}
+    <div className="rows" ref={listRef}>
+      {props.hits.map((hit, i) => {
+        const path = folderPath(hit.file.folderId, props.folders);
+        return (
+          <div
+            key={hit.file.id}
+            className={`row result${props.selection.has(hit.file.id) ? " selected" : ""}${
+              i === props.cursor ? " cursor" : ""
+            }`}
+            data-cursor={i === props.cursor}
+            style={{ "--i": Math.min(i, 20) } as CSSProperties}
+            onClick={(e) => props.onSelect(hit.file.id, e)}
+            onDoubleClick={() => props.onOpen(hit.file.id)}
+            onContextMenu={(e) => props.onContextMenu(hit.file.id, e)}
+          >
+            <ResultThumb file={hit.file} />
+            <div className="row-main">
+              <div className="name">
+                <Highlighted value={hit.file.name} ranges={hit.nameRanges} />
+              </div>
+              <div className="result-where">
+                {path ? (
+                  <span className={hit.matchedFolder ? "result-folder hit" : "result-folder"}>
+                    <FolderGlyph size={11} /> {path}
+                  </span>
+                ) : (
+                  <span className="result-folder">
+                    <FolderGlyph size={11} /> All files
+                  </span>
+                )}
+                <span className="result-date">{formatDate(hit.file.mtime)}</span>
+              </div>
+              {hit.matchedText && (
+                <div className="snippet">
+                  <Highlighted value={hit.matchedText} ranges={hit.textRanges} />
+                </div>
+              )}
+            </div>
+            {hit.file.category && <span className="row-tag">{hit.file.category}</span>}
+            <span className="row-meta">{formatBytes(hit.file.size)}</span>
           </div>
-          {hit.file.category && <span className="row-tag">{hit.file.category}</span>}
-          <span className="row-meta">{formatBytes(hit.file.size)}</span>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
