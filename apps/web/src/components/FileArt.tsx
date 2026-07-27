@@ -13,6 +13,7 @@ export const KIND_ACCENTS: Record<FileKind | "folder", string> = {
   audio: "#34d399",
   pdf: "#f47272",
   text: "#60a5fa",
+  doc: "#5b8def",
   archive: "#93a4c3",
   other: "#8593ab",
 };
@@ -47,6 +48,8 @@ function kindPictogram(kind: FileKind) {
     case "pdf":
     case "text":
       return <path d="M8.2 9h7.6M8.2 12h7.6M8.2 15h4.8" />;
+    case "doc":
+      return <path d="M8.2 8.4h7.6M8.2 10.9h7.6M8.2 13.4h7.6M8.2 15.9h5.2" />;
     case "archive":
       return (
         <>
