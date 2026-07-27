@@ -57,6 +57,7 @@ export function fileToDto(row: FileRow) {
     encryptedMeta: JSON.parse(row.encrypted_meta) as unknown,
     size: row.size,
     thumbSize: row.thumb_size,
+    indexSize: row.index_size,
     uploaded: row.uploaded === 1,
     trashed: row.trashed === 1,
     deleted: row.deleted === 1,
@@ -221,9 +222,16 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     const keepsVersions = app.config.maxVersions > 0;
     const replacesContent = kind === "data" && file.uploaded === 1;
     // A replaced blob only frees quota when history is off; with versioning
-    // the displaced content keeps occupying space as a version.
+    // the displaced content keeps occupying space as a version. Derived blobs
+    // (thumbnail, search index) always overwrite in place.
     const reclaimable =
-      kind === "thumb" ? file.thumb_size : replacesContent && !keepsVersions ? file.size : 0;
+      kind === "thumb"
+        ? file.thumb_size
+        : kind === "index"
+          ? file.index_size
+          : replacesContent && !keepsVersions
+            ? file.size
+            : 0;
     const quotaRoom = app.config.quotaBytes - (app.storageUsed(uid) - reclaimable);
     const maxBytes = Math.min(app.config.maxBlobBytes, quotaRoom);
     const declared = Number(request.headers["content-length"] ?? 0);
@@ -231,7 +239,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       return reply.code(413).send({ error: "storage quota exceeded" });
     }
     const nextGen = replacesContent ? file.generation + 1 : file.generation;
-    const targetKey = kind === "data" ? blobKey(id, "data", nextGen) : blobKey(id, "thumb");
+    const targetKey = kind === "data" ? blobKey(id, "data", nextGen) : blobKey(id, kind);
     let written: number;
     try {
       written = await app.blobs.put(targetKey, request.body as Readable, maxBytes);
@@ -242,9 +250,10 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       throw err;
     }
 
-    if (kind === "thumb") {
+    if (kind === "thumb" || kind === "index") {
+      const column = kind === "thumb" ? "thumb_size" : "index_size";
       app.db
-        .prepare("UPDATE files SET thumb_size = ?, update_seq = ?, updated_at = ? WHERE id = ?")
+        .prepare(`UPDATE files SET ${column} = ?, update_seq = ?, updated_at = ? WHERE id = ?`)
         .run(written, app.nextSeq(uid), Date.now(), id);
       return { size: written };
     }
@@ -311,20 +320,24 @@ export function registerStorageRoutes(app: FastifyInstance): void {
 
   app.put("/api/files/:id/data", auth, (request, reply) => uploadBlob(request, reply, "data"));
   app.put("/api/files/:id/thumbnail", auth, (request, reply) => uploadBlob(request, reply, "thumb"));
+  app.put("/api/files/:id/index", auth, (request, reply) => uploadBlob(request, reply, "index"));
 
   const downloadBlob = async (request: FastifyRequest, reply: FastifyReply, kind: BlobKind) => {
     const { id } = request.params as { id: string };
     const file = getOwnFile(id, request.user.uid);
-    if (!file || (kind === "data" && !file.uploaded) || (kind === "thumb" && !file.thumb_size)) {
+    const size =
+      kind === "data" ? file?.size : kind === "thumb" ? file?.thumb_size : file?.index_size;
+    if (!file || (kind === "data" && !file.uploaded) || (kind !== "data" && !size)) {
       return reply.code(404).send({ error: "blob not found" });
     }
     reply.header("content-type", "application/octet-stream");
-    reply.header("content-length", kind === "data" ? file.size : file.thumb_size);
+    reply.header("content-length", size);
     return reply.send(await app.blobs.get(blobKey(id, kind, kind === "data" ? file.generation : 0)));
   };
 
   app.get("/api/files/:id/data", auth, (request, reply) => downloadBlob(request, reply, "data"));
   app.get("/api/files/:id/thumbnail", auth, (request, reply) => downloadBlob(request, reply, "thumb"));
+  app.get("/api/files/:id/index", auth, (request, reply) => downloadBlob(request, reply, "index"));
 
   app.patch("/api/files/:id", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -411,6 +424,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       await app.blobs.remove(blobKey(id, "data", row.generation)).catch(() => {});
     }
     await app.blobs.remove(blobKey(id, "thumb")).catch(() => {});
+    await app.blobs.remove(blobKey(id, "index")).catch(() => {});
     return reply.code(204).send();
   });
 

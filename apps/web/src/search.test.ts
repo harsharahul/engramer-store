@@ -13,6 +13,8 @@ function file(partial: Partial<FileEntry>): FileEntry {
     tags: partial.tags ?? [],
     favorite: partial.favorite ?? false,
     text: partial.text,
+    hasText: partial.text !== undefined,
+    inlineText: partial.text !== undefined,
     category: partial.category,
     key: new Uint8Array(),
     hasThumb: false,

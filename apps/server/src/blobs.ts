@@ -5,17 +5,22 @@ import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
 
-export type BlobKind = "data" | "thumb";
+export type BlobKind = "data" | "thumb" | "index";
 
 /**
  * Content blobs are append-only across generations: generation 0 keeps the
  * legacy bare key (every pre-versioning blob stays valid), generation N lives
  * at `<id>.g<N>`. A save writes the next generation and only then moves the
  * pointer, so no blob a file row references is ever overwritten in place.
+ * The index blob holds the file's encrypted search text, kept out of the
+ * metadata row so sync payloads stay small.
  */
 export function blobKey(fileId: string, kind: BlobKind, generation = 0): string {
   if (kind === "thumb") {
     return `${fileId}.thumb`;
+  }
+  if (kind === "index") {
+    return `${fileId}.idx`;
   }
   return generation > 0 ? `${fileId}.g${generation}` : fileId;
 }
