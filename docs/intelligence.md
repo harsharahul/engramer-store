@@ -48,7 +48,7 @@ Categories and tags are ordinary metadata fields (`category`, `tags`, `favorite`
   context menu. Recognized text also sharpens categorization: a photographed
   invoice files as a receipt.
 
-Extracted text is stored in the encrypted metadata and powers full-text search.
+Extracted text is stored as a per-file encrypted index blob (metadata carries only a marker), fetched and decrypted lazily when search is used, so metadata sync stays small no matter how much text a library holds. Legacy libraries migrate to this layout automatically.
 
 ## Search
 

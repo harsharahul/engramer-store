@@ -3,6 +3,7 @@ import { useLocation, useParams } from "react-router";
 import {
   ready,
   encryptBytes,
+  utf8Encode,
   encryptFileMetadata,
   generateKey,
   sealToPublicKey,
@@ -96,6 +97,14 @@ export function RequestView() {
             id,
             "thumbnail",
             encryptBytes(prepared.thumbnail.bytes, fileKey),
+          );
+        }
+        if (prepared.text !== undefined) {
+          await uploadRequestBlob(
+            token!,
+            id,
+            "index",
+            encryptBytes(utf8Encode(prepared.text), fileKey),
           );
         }
         update({ status: "done", progress: 1 });

@@ -18,6 +18,7 @@ export interface FileDto {
   encryptedMeta: SecretBox;
   size: number;
   thumbSize: number;
+  indexSize: number;
   uploaded: boolean;
   trashed: boolean;
   deleted: boolean;
@@ -176,7 +177,7 @@ export const api = {
   restoreFile: (id: string) => request<void>(`/api/trash/${id}/restore`, { method: "POST" }),
   deleteForever: (id: string) => request<void>(`/api/trash/${id}`, { method: "DELETE" }),
 
-  downloadBlob: async (id: string, kind: "data" | "thumbnail"): Promise<Uint8Array> => {
+  downloadBlob: async (id: string, kind: "data" | "thumbnail" | "index"): Promise<Uint8Array> => {
     const response = await fetch(`/api/files/${id}/${kind}`, {
       headers: { authorization: `Bearer ${authToken}` },
     });
@@ -322,7 +323,7 @@ export interface RequestUploadInfo {
 export function uploadRequestBlob(
   requestToken: string,
   uploadId: string,
-  kind: "data" | "thumbnail",
+  kind: "data" | "thumbnail" | "index",
   payload: Uint8Array,
   onProgress?: (fraction: number) => void,
 ): Promise<void> {
@@ -352,7 +353,7 @@ export function uploadRequestBlob(
 /** Upload with real progress reporting; fetch cannot observe upload progress. */
 export function uploadBlob(
   fileId: string,
-  kind: "data" | "thumbnail",
+  kind: "data" | "thumbnail" | "index",
   payload: Uint8Array,
   onProgress?: (fraction: number) => void,
 ): Promise<void> {

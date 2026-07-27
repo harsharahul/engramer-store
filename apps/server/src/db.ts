@@ -36,6 +36,8 @@ export interface FileRow {
   encrypted_meta: string;
   size: number;
   thumb_size: number;
+  /** Size of the encrypted search-text blob, 0 when none. */
+  index_size: number;
   /** Which content blob is current: 0 = `<id>`, N = `<id>.g<N>`. */
   generation: number;
   uploaded: number;
@@ -87,6 +89,7 @@ export interface RequestUploadRow {
   encrypted_meta: string;
   size: number;
   thumb_size: number;
+  index_size: number;
   uploaded: number;
   consumed: number;
   created_at: number;
@@ -175,6 +178,10 @@ export function openDatabase(path: string): Database.Database {
   // Additive migrations for databases created before these columns existed.
   ensureColumns(db, "files", {
     generation: "INTEGER NOT NULL DEFAULT 0",
+    index_size: "INTEGER NOT NULL DEFAULT 0",
+  });
+  ensureColumns(db, "request_uploads", {
+    index_size: "INTEGER NOT NULL DEFAULT 0",
   });
   ensureColumns(db, "users", {
     totp_secret: "TEXT",
@@ -224,12 +231,12 @@ export function nextSeq(db: Database.Database, userId: number): number {
 export function storageUsed(db: Database.Database, userId: number): number {
   const files = db
     .prepare(
-      "SELECT COALESCE(SUM(size + thumb_size), 0) AS used FROM files WHERE user_id = ? AND deleted = 0",
+      "SELECT COALESCE(SUM(size + thumb_size + index_size), 0) AS used FROM files WHERE user_id = ? AND deleted = 0",
     )
     .get(userId) as { used: number };
   const pending = db
     .prepare(
-      "SELECT COALESCE(SUM(size + thumb_size), 0) AS used FROM request_uploads WHERE user_id = ? AND consumed = 0",
+      "SELECT COALESCE(SUM(size + thumb_size + index_size), 0) AS used FROM request_uploads WHERE user_id = ? AND consumed = 0",
     )
     .get(userId) as { used: number };
   const versions = db

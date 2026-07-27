@@ -396,7 +396,7 @@ export function Vault() {
     ...(["text", "doc"].includes(fileKind(file.mime, file.name))
       ? [{ id: "edit", label: "Edit", icon: <PencilGlyph size={13} />, run: () => setEditorId(file.id) }]
       : []),
-    ...(file.mime.startsWith("image/") && file.text === undefined
+    ...(file.mime.startsWith("image/") && !file.hasText
       ? [
           {
             id: "ocr",
@@ -816,7 +816,10 @@ export function Vault() {
               placeholder="Search names, contents, tags, folders   /"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onFocus={() => setSearchFocused(true)}
+              onFocus={() => {
+                setSearchFocused(true);
+                void store.warmSearchIndex();
+              }}
               onBlur={() => setTimeout(() => setSearchFocused(false), 150)}
               onKeyDown={(e) => {
                 if (!searching) {
@@ -967,7 +970,11 @@ export function Vault() {
             )}
             <span className="crumb-note">
               {searching
-                ? `for “${query}”`
+                ? `for “${query}”${
+                    store.indexWarm
+                      ? ` · indexing ${store.indexWarm.done} of ${store.indexWarm.total}`
+                      : ""
+                  }`
                 : view.kind === "shared"
                   ? "links and file requests"
                   : `${visibleFiles.length} file${visibleFiles.length === 1 ? "" : "s"}${

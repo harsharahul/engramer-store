@@ -14,8 +14,11 @@ export interface FileMetadata {
   height?: number;
   /** ThumbHash placeholder (base64, ~25 bytes) for instant grid paint. */
   blur?: string;
-  /** Extracted text content for client-side full-text search. */
+  /** Extracted text content for client-side full-text search (legacy: new
+   * writes keep text in a separate encrypted index blob and set hasText). */
   text?: string;
+  /** Marks that an encrypted search-text blob exists for this file. */
+  hasText?: boolean;
   /** Auto-assigned category (client-side analysis; opaque to the server). */
   category?: string;
   /** Tags, auto-assigned and user-edited alike. */

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import {
+  decryptBytes,
   decryptFileMetadata,
   decryptFolderMetadata,
   encryptBytes,
@@ -39,7 +40,12 @@ export interface FileEntry {
   width?: number;
   height?: number;
   blur?: string;
+  /** In-memory search text (lazily fetched from the index blob). */
   text?: string;
+  /** An encrypted search-text blob exists for this file. */
+  hasText: boolean;
+  /** Legacy row still carrying text inside its metadata. */
+  inlineText: boolean;
   category?: string;
   tags: string[];
   favorite: boolean;
@@ -103,6 +109,8 @@ interface StoreState {
   reveal: Reveal | null;
   ocrProgress: OcrProgress | null;
   batch: BatchProgress | null;
+  /** Search-index warm-up progress; null when idle or complete. */
+  indexWarm: { done: number; total: number } | null;
 
   startSession: (session: Session) => Promise<void>;
   logout: () => void;
@@ -130,6 +138,7 @@ interface StoreState {
   recognizeFile: (id: string) => Promise<boolean>;
   recognizeAllImages: () => Promise<number>;
   restoreVersion: (id: string, generation: number) => Promise<void>;
+  warmSearchIndex: () => Promise<void>;
 }
 
 function decryptFolder(dto: FolderDto, masterKey: Uint8Array): FolderEntry {
@@ -159,6 +168,8 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
     height: meta.height,
     blur: meta.blur,
     text: meta.text,
+    hasText: meta.hasText === true || meta.text !== undefined,
+    inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
     favorite: meta.favorite ?? false,
@@ -179,7 +190,9 @@ function metadataOf(file: FileEntry): FileMetadata {
     width: file.width,
     height: file.height,
     blur: file.blur,
-    text: file.text,
+    // Legacy rows keep their inline text until migrated; split rows carry
+    // only the marker, with text living in the index blob.
+    ...(file.inlineText ? { text: file.text } : file.hasText ? { hasText: true } : {}),
     category: file.category,
     tags: file.tags,
     favorite: file.favorite,
@@ -210,9 +223,31 @@ export const useStore = create<StoreState>((set, get) => {
     if (dto.deleted) {
       files.delete(dto.id);
     } else {
-      files.set(dto.id, decryptFile(dto, masterKey()));
+      const entry = decryptFile(dto, masterKey());
+      // Keep already-warmed search text across metadata updates.
+      const prior = files.get(dto.id);
+      if (entry.text === undefined && entry.hasText && prior?.text !== undefined) {
+        entry.text = prior.text;
+      }
+      files.set(dto.id, entry);
     }
     set({ files });
+  };
+
+
+  /** Replaces one entry's in-memory search text. */
+  const setEntryText = (id: string, text: string | undefined, inlineText?: boolean) => {
+    const files = new Map(get().files);
+    const entry = files.get(id);
+    if (entry) {
+      files.set(id, {
+        ...entry,
+        text,
+        hasText: text !== undefined || entry.hasText,
+        inlineText: inlineText ?? entry.inlineText,
+      });
+      set({ files });
+    }
   };
 
   const patchFileMeta = async (id: string, patch: Partial<FileMetadata>) => {
@@ -263,6 +298,7 @@ export const useStore = create<StoreState>((set, get) => {
     reveal: null,
     ocrProgress: null,
     batch: null,
+    indexWarm: null,
 
     // A failed first sync must never strand the user on a spinner: the
     // session (and its keys) are kept, the error is surfaced, and the UI
@@ -496,11 +532,10 @@ export const useStore = create<StoreState>((set, get) => {
       }
       const bytes = utf8Encode(text);
       await uploadBlob(id, "data", encryptBytes(bytes, file.key));
-      await patchFileMeta(id, {
-        size: bytes.length,
-        mtime: Date.now(),
-        text: text.slice(0, 100_000),
-      });
+      const searchText = text.slice(0, 100_000);
+      await uploadBlob(id, "index", encryptBytes(utf8Encode(searchText), file.key));
+      await patchFileMeta(id, { size: bytes.length, mtime: Date.now(), hasText: true, text: undefined });
+      setEntryText(id, searchText, false);
       await get().refreshUsage();
     },
 
@@ -513,11 +548,17 @@ export const useStore = create<StoreState>((set, get) => {
         throw new Error("file not found");
       }
       await uploadBlob(id, "data", encryptBytes(bytes, file.key));
+      if (searchText !== undefined) {
+        await uploadBlob(id, "index", encryptBytes(utf8Encode(searchText.slice(0, 100_000)), file.key));
+      }
       await patchFileMeta(id, {
         size: bytes.length,
         mtime: Date.now(),
-        ...(searchText !== undefined ? { text: searchText.slice(0, 100_000) } : {}),
+        ...(searchText !== undefined ? { hasText: true, text: undefined } : {}),
       });
+      if (searchText !== undefined) {
+        setEntryText(id, searchText.slice(0, 100_000), false);
+      }
       await get().refreshUsage();
     },
 
@@ -531,7 +572,6 @@ export const useStore = create<StoreState>((set, get) => {
         mtime: Date.now(),
         category: "Notes",
         tags: ["notes", "md", String(new Date().getFullYear())],
-        text: "",
       };
       const dto = await api.createFile(
         folderId,
@@ -665,7 +705,9 @@ export const useStore = create<StoreState>((set, get) => {
       if (!text) {
         return false;
       }
-      await patchFileMeta(id, { text });
+      await uploadBlob(id, "index", encryptBytes(utf8Encode(text), file.key));
+      await patchFileMeta(id, { hasText: true, text: undefined });
+      setEntryText(id, text, false);
       return true;
     },
 
@@ -675,7 +717,7 @@ export const useStore = create<StoreState>((set, get) => {
      */
     recognizeAllImages: async () => {
       const candidates = [...get().files.values()].filter(
-        (f) => !f.trashed && f.mime.startsWith("image/") && f.text === undefined,
+        (f) => !f.trashed && f.mime.startsWith("image/") && !f.hasText,
       );
       let found = 0;
       for (let i = 0; i < candidates.length; i++) {
@@ -714,6 +756,56 @@ export const useStore = create<StoreState>((set, get) => {
       const dto = await api.restoreVersion(id, generation, encryptFileMetadata(merged, file.key));
       applyFile(dto);
       await get().refreshUsage();
+    },
+
+    /**
+     * Warms the client-side search index: fetches and decrypts the index
+     * blob of every file that advertises one, a few at a time, and then
+     * quietly migrates legacy rows (inline text) to the split format so old
+     * libraries converge on small sync rows.
+     */
+    warmSearchIndex: async () => {
+      if (get().indexWarm) {
+        return;
+      }
+      const candidates = [...get().files.values()].filter(
+        (f) => !f.trashed && f.hasText && !f.inlineText && f.text === undefined,
+      );
+      if (candidates.length > 0) {
+        set({ indexWarm: { done: 0, total: candidates.length } });
+        await boundedRun(candidates, 3, async (file) => {
+          try {
+            const bytes = await api.downloadBlob(file.id, "index");
+            const text = new TextDecoder().decode(decryptBytes(bytes, file.key));
+            setEntryText(file.id, text);
+          } catch {
+            // A missing index never blocks the rest; search simply skips it.
+          }
+          const warm = get().indexWarm;
+          if (warm) {
+            set({ indexWarm: { ...warm, done: warm.done + 1 } });
+          }
+        });
+        set({ indexWarm: null });
+      }
+
+      // Legacy migration trickle, bounded per session.
+      const legacy = [...get().files.values()]
+        .filter((f) => !f.trashed && f.inlineText && f.text !== undefined)
+        .slice(0, 150);
+      await boundedRun(legacy, 2, async (file) => {
+        try {
+          await uploadBlob(file.id, "index", encryptBytes(utf8Encode(file.text!), file.key));
+          const meta = { ...metadataOf({ ...file, inlineText: false }), hasText: true };
+          const dto = await api.patchFile(file.id, {
+            encryptedMeta: encryptFileMetadata(meta, file.key),
+          });
+          applyFile(dto);
+          setEntryText(file.id, file.text, false);
+        } catch {
+          // Migration is best-effort; the legacy row keeps working as-is.
+        }
+      });
     },
   };
 });

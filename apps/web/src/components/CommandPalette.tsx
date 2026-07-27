@@ -44,6 +44,10 @@ export function CommandPalette(props: {
 }) {
   const files = useStore((s) => s.files);
   const folders = useStore((s) => s.folders);
+  const warmSearchIndex = useStore((s) => s.warmSearchIndex);
+  useEffect(() => {
+    void warmSearchIndex();
+  }, [warmSearchIndex]);
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);

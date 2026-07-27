@@ -3,6 +3,19 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.13.0] - 2026-07-27
+
+### Changed
+- Search text moved out of the metadata rows into per-file encrypted index
+  blobs. Sync payloads shrink to a few hundred bytes per file regardless of
+  how much text a document or scan contains, which is the structural change
+  that keeps first-load fast as libraries grow toward very large sizes. The
+  client warms its search index on first search intent, fetching and
+  decrypting index blobs a few at a time with a live "indexing n of m" hint,
+  and existing libraries migrate to the new layout automatically in the
+  background, no action needed. File-request uploads carry their index blob
+  too, so received files stay searchable.
+
 ## [0.12.0] - 2026-07-27
 
 ### Added
