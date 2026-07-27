@@ -3,6 +3,26 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.8.0] - 2026-07-27
+
+### Added
+- Word documents, viewed and edited entirely in the browser. Opening a .docx
+  renders it read-only with docx-preview; Edit opens it in SuperDoc, a
+  browser-native OOXML editor licensed AGPL-3.0 like this project. Import and
+  export both run on your device: saving exports a fresh .docx, re-encrypts it
+  with the file's existing key, and replaces the blob, the same flow as text
+  editing. The editor ships as a separate code chunk loaded only when a
+  document is opened, its telemetry is disabled, and no request leaves the
+  device. Design notes and the editor landscape in docs/editing.md.
+- A regression test pinning that saving the same file twice never repeats an
+  encryption nonce, hardening the editing path against the nonce-reuse class
+  of failure documented in published analyses of other E2EE products.
+
+### Security
+- Stubbed out a build tool that SuperDoc lists as a runtime dependency, which
+  dragged an unpatched brace-expansion into the tree (GHSA-mh99-v99m-4gvg).
+  The browser bundle never imports it.
+
 ## [0.7.0] - 2026-07-26
 
 ### Added
