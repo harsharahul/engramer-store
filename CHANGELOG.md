@@ -3,6 +3,28 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.14.0] - 2026-07-27
+
+### Added
+- Instant boot from a per-account device cache. The client now persists the
+  encrypted sync rows it receives in IndexedDB and hydrates the library from
+  them on the next visit, so opening the vault renders in about a second even
+  at 50,000 files; a single delta request (`sync?since=<cursor>`) then
+  reconciles only what changed. The cached rows are the same ciphertext the
+  server already stores, so the cache introduces no new key handling, and
+  signing out deletes it.
+- Offline reads: with the app shell served by the service worker and the
+  library cached, the vault opens and browses even when the server is
+  unreachable, shows a clear notice that it is displaying the device's copy,
+  and recovers with a plain reload once connectivity returns.
+- "Resync library" in the command palette rebuilds the device cache from a
+  full sync, an escape hatch for a copy suspected stale.
+
+### Changed
+- Deletions now prune the device cache through sync tombstones, and cache
+  writes are ordered by sequence number so concurrent tabs can never roll a
+  row back to an older state.
+
 ## [0.13.0] - 2026-07-27
 
 ### Changed

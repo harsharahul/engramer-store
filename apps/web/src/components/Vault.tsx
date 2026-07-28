@@ -223,6 +223,15 @@ export function Vault() {
   const currentFolderId = view.kind === "folder" ? view.id : null;
   const searching = query.trim().length > 0;
 
+  // A warm boot shows the library from this device's cache even when the
+  // server is unreachable; the failed background sync surfaces as a toast
+  // instead of tearing the library down.
+  useEffect(() => {
+    if (store.syncError && store.synced) {
+      showToast("Could not refresh from the server. Showing this device's copy.");
+    }
+  }, [store.syncError, store.synced, showToast]);
+
   const liveFiles = useMemo(
     () => [...store.files.values()].filter((f) => !f.trashed),
     [store.files],
@@ -595,6 +604,17 @@ export function Vault() {
                 : "No new text found in your images.",
             );
           });
+        },
+      },
+      {
+        id: "resync",
+        label: "Resync library",
+        hint: "rebuild this device's cache",
+        run: () => {
+          void store
+            .resyncLibrary()
+            .then(() => showToast("Library resynced from the server."))
+            .catch(() => showToast("Could not resync. Check your connection."));
         },
       },
       { id: "go-files", label: "Go to All files", run: () => setView({ kind: "folder", id: null }) },
