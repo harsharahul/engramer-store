@@ -337,6 +337,64 @@ describe("file requests", () => {
     expect(drained.json().uploads).toHaveLength(0);
   });
 
+
+  it("carries the sender's index blob through accept so arrivals stay searchable", async () => {
+    const requestToken = await createRequest();
+    const info = await app.inject({ method: "GET", url: `/api/public/requests/${requestToken}` });
+    const { publicKey } = info.json() as { publicKey: string };
+    const fileKey = generateKey();
+    const created = await app.inject({
+      method: "POST",
+      url: `/api/public/requests/${requestToken}/files`,
+      payload: {
+        sealedKey: sealToPublicKey(fileKey, publicKey),
+        encryptedMeta: encryptFileMetadata(
+          { name: "searchable.txt", mime: "text/plain", size: 5, mtime: Date.now(), hasText: true } as never,
+          fileKey,
+        ),
+      },
+    });
+    const id = created.json().id as string;
+    await app.inject({
+      method: "PUT",
+      url: `/api/public/requests/${requestToken}/files/${id}/data`,
+      headers: { "content-type": "application/octet-stream" },
+      payload: Buffer.from(encryptBytes(utf8Encode("hello"), fileKey)),
+    });
+    const indexText = utf8Encode("the arrival's searchable words");
+    const putIdx = await app.inject({
+      method: "PUT",
+      url: `/api/public/requests/${requestToken}/files/${id}/index`,
+      headers: { "content-type": "application/octet-stream" },
+      payload: Buffer.from(encryptBytes(indexText, fileKey)),
+    });
+    expect(putIdx.statusCode).toBe(200);
+
+    const accepted = await app.inject({
+      method: "POST",
+      url: `/api/requests/uploads/${id}/accept`,
+      headers: authHeader(),
+      payload: {
+        encryptedKey: secretBoxSeal(fileKey, account.masterKey),
+        encryptedMeta: encryptFileMetadata(
+          { name: "searchable.txt", mime: "text/plain", size: 5, mtime: Date.now(), hasText: true } as never,
+          fileKey,
+        ),
+      },
+    });
+    expect(accepted.statusCode).toBe(201);
+    expect(accepted.json().indexSize).toBeGreaterThan(0);
+
+    // The owner reads the index blob through the normal authenticated route.
+    const got = await app.inject({
+      method: "GET",
+      url: `/api/files/${id}/index`,
+      headers: authHeader(),
+    });
+    expect(got.statusCode).toBe(200);
+    expect(decryptBytes(new Uint8Array(got.rawPayload), fileKey)).toEqual(indexText);
+  });
+
   it("counts pending uploads against the owner's quota", async () => {
     const before = await app.inject({ method: "GET", url: "/api/user", headers: authHeader() });
     const usedBefore = before.json().usedBytes as number;
