@@ -65,6 +65,32 @@ The consequences are the properties that matter:
 The server sees versions exactly as it sees everything else: opaque
 ciphertext under an opaque key, plus sizes and timestamps.
 
+## Delta sync and the device cache
+
+Every metadata mutation gets the next value of a per-account monotonic
+sequence number, and `GET /api/sync?since=<seq>` returns exactly the rows
+that changed after that cursor, tombstones included. Change discovery is one
+indexed query whose cost scales with what changed, not with library size; a
+client that is up to date pays for an empty response no matter how many
+files it stores.
+
+The web client persists the sync rows it receives, verbatim, in IndexedDB,
+one cache per account. The rows are already ciphertext plus the structure
+the server sees (ids, sizes, timestamps, tree shape), so the cache adds no
+additional key handling and stores nothing the server does not already hold;
+decryption still happens only in memory, with keys that live in the session.
+On the next visit the library decrypts and renders from the cache first, at
+50,000 files in roughly a second, and a single delta request then reconciles
+whatever changed. Tombstones prune cached rows; a row is only ever replaced
+by a strictly newer one, so concurrent tabs cannot roll the cache back; sign
+out deletes the cache database.
+
+Because the app shell is a service worker and the library is cached, a
+device that cannot reach the server still opens the vault read-only and says
+so, and recovers with a plain reload once the server is back. "Resync
+library" in the command palette rebuilds the cache from a full sync at any
+time.
+
 ## Reliability recipes
 
 **Personal (filesystem backend)**
