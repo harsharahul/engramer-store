@@ -1,6 +1,6 @@
 {
   "name": "@engramer/web",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Web client for Engram Store",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -31,6 +31,7 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.3",
+    "fake-indexeddb": "6.2.5",
     "typescript": "7.0.2",
     "vite": "8.1.5",
     "vite-plugin-pwa": "1.3.0",

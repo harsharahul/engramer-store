@@ -15,6 +15,7 @@ import {
   type FileMetadata,
 } from "@engramer/crypto";
 import { api, uploadBlob, withRetry, type FileDto, type FolderDto } from "./api";
+import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { clearSession, type Session } from "./session";
 import { analyzeFile, downloadAndDecrypt, encryptAndUpload } from "./transfer";
@@ -115,6 +116,7 @@ interface StoreState {
   startSession: (session: Session) => Promise<void>;
   logout: () => void;
   refresh: () => Promise<void>;
+  resyncLibrary: () => Promise<void>;
   refreshUsage: () => Promise<void>;
   createFolder: (name: string, parentId: string | null) => Promise<void>;
   renameFolder: (id: string, name: string) => Promise<void>;
@@ -206,6 +208,47 @@ export const useStore = create<StoreState>((set, get) => {
       throw new Error("not signed in");
     }
     return session.masterKey;
+  };
+
+  /** The last sync sequence applied in this tab; 0 forces a full sync. */
+  let syncCursor = 0;
+
+  /** Decrypts a complete row set into fresh maps, skipping tombstones and
+   * pending uploads, and carrying warmed search text over from the current
+   * entries. One corrupt row must never take the whole library down. */
+  const buildLibrary = (folderDtos: FolderDto[], fileDtos: FileDto[]) => {
+    const key = masterKey();
+    const prior = get().files;
+    const folders = new Map<string, FolderEntry>();
+    const files = new Map<string, FileEntry>();
+    let undecryptable = 0;
+    for (const dto of folderDtos) {
+      if (!dto.deleted) {
+        try {
+          folders.set(dto.id, decryptFolder(dto, key));
+        } catch {
+          undecryptable++;
+        }
+      }
+    }
+    for (const dto of fileDtos) {
+      if (!dto.deleted && dto.uploaded) {
+        try {
+          const entry = decryptFile(dto, key);
+          const before = prior.get(dto.id);
+          if (entry.text === undefined && entry.hasText && before?.text !== undefined) {
+            entry.text = before.text;
+          }
+          files.set(dto.id, entry);
+        } catch {
+          undecryptable++;
+        }
+      }
+    }
+    if (undecryptable > 0) {
+      console.warn(`${undecryptable} item(s) could not be decrypted and were skipped`);
+    }
+    return { folders, files };
   };
 
   const applyFolder = (dto: FolderDto) => {
@@ -304,6 +347,7 @@ export const useStore = create<StoreState>((set, get) => {
     // session (and its keys) are kept, the error is surfaced, and the UI
     // offers a retry.
     startSession: async (session) => {
+      syncCursor = 0;
       set({
         session,
         synced: false,
@@ -322,6 +366,11 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     logout: () => {
+      const account = get().session?.email;
+      if (account) {
+        void clearCache(account);
+      }
+      syncCursor = 0;
       clearSession();
       set({
         session: null,
@@ -335,42 +384,89 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     refresh: async () => {
-      const key = masterKey();
+      const account = get().session?.email;
+      if (!account) {
+        throw new Error("not signed in");
+      }
+      // Warm boot: the rows cached on this device (ciphertext, exactly as the
+      // server sent them) put the library on screen before the network answers.
+      if (!get().synced && syncCursor === 0) {
+        const cached = await loadCache(account);
+        if (cached) {
+          const { folders, files } = buildLibrary(cached.folders, cached.files);
+          syncCursor = cached.seq;
+          set({ folders, files, synced: true, syncError: null });
+        }
+      }
       let response;
       try {
-        response = await api.sync(0);
+        response = await api.sync(syncCursor);
       } catch (err) {
         set({ syncError: err instanceof Error ? err.message : "could not reach the server" });
         throw err;
       }
-      const folders = new Map<string, FolderEntry>();
-      const files = new Map<string, FileEntry>();
-      let undecryptable = 0;
-      // One corrupt row must never take the whole library down with it.
-      for (const dto of response.folders) {
-        if (!dto.deleted) {
+      if (syncCursor === 0) {
+        const { folders, files } = buildLibrary(response.folders, response.files);
+        set({ folders, files, synced: true, syncError: null });
+      } else if (response.folders.length > 0 || response.files.length > 0) {
+        // Delta on top of what is already showing: tombstones prune, live
+        // rows replace. A row that fails to decrypt keeps its prior entry.
+        const key = masterKey();
+        const folders = new Map(get().folders);
+        const files = new Map(get().files);
+        for (const dto of response.folders) {
+          if (dto.deleted) {
+            folders.delete(dto.id);
+            continue;
+          }
           try {
             folders.set(dto.id, decryptFolder(dto, key));
           } catch {
-            undecryptable++;
+            // keep the prior entry
           }
         }
-      }
-      for (const dto of response.files) {
-        if (!dto.deleted && dto.uploaded) {
+        for (const dto of response.files) {
+          if (dto.deleted) {
+            files.delete(dto.id);
+            continue;
+          }
+          if (!dto.uploaded) {
+            continue; // created but not yet uploaded; nothing to show
+          }
           try {
-            files.set(dto.id, decryptFile(dto, key));
+            const entry = decryptFile(dto, key);
+            const before = files.get(dto.id);
+            if (entry.text === undefined && entry.hasText && before?.text !== undefined) {
+              entry.text = before.text;
+            }
+            files.set(dto.id, entry);
           } catch {
-            undecryptable++;
+            // keep the prior entry
           }
         }
+        set({ folders, files, synced: true, syncError: null });
+      } else {
+        set({ synced: true, syncError: null });
       }
-      if (undecryptable > 0) {
-        console.warn(`${undecryptable} item(s) could not be decrypted and were skipped`);
-      }
-      set({ folders, files, synced: true, syncError: null });
+      syncCursor = response.seq;
+      void storeSyncRows(account, response);
       // Anything that arrived through a file request gets filed automatically.
       await get().ingestRequestUploads().catch(() => 0);
+    },
+
+    /** Escape hatch: full sync from the server and an exact cache rebuild,
+     * for when this device's copy is suspected stale or corrupt. */
+    resyncLibrary: async () => {
+      const account = get().session?.email;
+      if (!account) {
+        throw new Error("not signed in");
+      }
+      const response = await api.sync(0);
+      const { folders, files } = buildLibrary(response.folders, response.files);
+      syncCursor = response.seq;
+      set({ folders, files, synced: true, syncError: null });
+      await storeSyncRows(account, response, true);
+      await get().refreshUsage();
     },
 
     refreshUsage: async () => {
