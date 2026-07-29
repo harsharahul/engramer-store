@@ -70,6 +70,21 @@ recovery key is the only way back into an account. For deployments behind an
 identity-aware proxy, the standard pattern of forward authentication in
 front of the ingress composes cleanly with all of this.
 
+## Browser hardening
+
+Every response carries a Content Security Policy that is deny-by-default:
+scripts and connections are restricted to this origin, `object-src` is
+`none`, and framing is refused. This matters more here than in an ordinary
+app because the master key lives in the page, so any script execution in
+this origin would be total compromise; the policy means a compromised
+dependency has nowhere to send anything. WebAssembly is allowed because
+on-device OCR needs it; plain `eval` is not. The client's inline
+theme-before-paint script is permitted by a hash computed from the served
+page at startup, so the policy never needs `unsafe-inline` for scripts.
+Cross-origin browser access is off unless origins are listed explicitly,
+and the pre-login endpoint returns a stable decoy salt for unknown
+addresses so it cannot be used to discover who has an account.
+
 ## Planned: bring-your-own SSO (OpenID Connect)
 
 The design, so self-hosters can front the vault with their own identity
