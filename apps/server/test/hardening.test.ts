@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ready, generateAccountKeys } from "@engramer/crypto";
 import { buildApp } from "../src/app.js";
+import { loadConfig } from "../src/config.js";
 import { totpAt } from "../src/totp.js";
 
 /** Regression cover for the hardening a public deployment depends on. */
@@ -126,5 +127,45 @@ describe("public-exposure hardening", () => {
       headers: { origin: "https://evil.example" },
     });
     expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+});
+
+describe("trusted proxy attribution", () => {
+  let dataDir: string;
+
+  beforeAll(() => {
+    dataDir = mkdtempSync(join(tmpdir(), "engramer-proxies-"));
+  });
+
+  afterAll(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const trustFor = (value: string | undefined) => {
+    if (value === undefined) {
+      delete process.env.ENGRAMER_TRUSTED_PROXIES;
+    } else {
+      process.env.ENGRAMER_TRUSTED_PROXIES = value;
+    }
+    try {
+      return loadConfig({ dataDir }).trustedProxies;
+    } finally {
+      delete process.env.ENGRAMER_TRUSTED_PROXIES;
+    }
+  };
+
+  it("ignores forwarded headers unless trust is declared", () => {
+    expect(trustFor(undefined)).toBe(false);
+    expect(trustFor("")).toBe(false);
+    expect(trustFor("0")).toBe(false);
+  });
+
+  it("accepts a hop count", () => {
+    expect(trustFor("2")).toBe(2);
+  });
+
+  it("accepts an allowlist of addresses and ranges", () => {
+    const proxies = "10.42.0.0/16,192.168.7.0/24,127.0.0.1";
+    expect(trustFor(proxies)).toBe(proxies);
   });
 });
