@@ -8,12 +8,22 @@ import { generateTotpSecret, otpauthUri, verifyTotp } from "../totp.js";
 
 const secretBoxSchema = z.object({ ciphertext: z.string(), nonce: z.string() });
 
+/** Base64url, so a malformed value fails validation instead of throwing
+ * inside the digest helper and surfacing as a server error. */
+const base64Key = z.string().min(1).max(512).regex(/^[A-Za-z0-9_-]+={0,2}$/);
+
+
+// Mirrors the client-side floor: an account must never be created with
+// password-hashing parameters weaker than the OWASP minimum, whatever the
+// client claims.
+const kdfSchema = z.object({
+  salt: z.string().min(16),
+  opsLimit: z.number().int().min(2),
+  memLimit: z.number().int().min(19 * 1024 * 1024),
+});
+
 const keyAttributesSchema = z.object({
-  kdf: z.object({
-    salt: z.string(),
-    opsLimit: z.number().int().positive(),
-    memLimit: z.number().int().positive(),
-  }),
+  kdf: kdfSchema,
   encryptedMasterKey: secretBoxSchema,
   masterKeyEncryptedWithRecoveryKey: secretBoxSchema,
   recoveryKeyEncryptedWithMasterKey: secretBoxSchema,
@@ -23,14 +33,14 @@ const keyAttributesSchema = z.object({
 
 const registerSchema = z.object({
   email: z.string().email().toLowerCase(),
-  loginKey: z.string().min(1),
+  loginKey: base64Key,
   keyAttributes: keyAttributesSchema,
   inviteToken: z.string().min(1).optional(),
 });
 
 const loginSchema = z.object({
   email: z.string().email().toLowerCase(),
-  loginKey: z.string().min(1),
+  loginKey: base64Key,
 });
 
 const twoFactorSchema = z.object({
@@ -74,8 +84,9 @@ function hashRecoveryCode(code: string): string {
 function generateRecoveryCodes(): { codes: string[]; digests: string[] } {
   const codes: string[] = [];
   for (let i = 0; i < RECOVERY_CODE_COUNT; i++) {
-    const raw = randomBytes(5).toString("hex");
-    codes.push(`${raw.slice(0, 5)}-${raw.slice(5)}`);
+    // 128 bits: a stolen digest list must not be searchable offline.
+    const raw = randomBytes(16).toString("hex");
+    codes.push(`${raw.slice(0, 8)}-${raw.slice(8, 16)}-${raw.slice(16, 24)}-${raw.slice(24)}`);
   }
   return { codes, digests: codes.map(hashRecoveryCode) };
 }
@@ -270,8 +281,16 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
   // ----- enrollment (an authenticated session manages its own 2FA) -----
 
-  app.post("/api/auth/totp/setup", auth, async (request) => {
+  app.post("/api/auth/totp/setup", auth, async (request, reply) => {
     const user = await getUser(request.user.uid);
+    // Enrolment must never be a way to turn two-factor OFF: a session token
+    // alone would otherwise strip it silently. Disabling has its own route
+    // and demands a current code.
+    if (user.totp_enabled === 1) {
+      return reply
+        .code(409)
+        .send({ error: "two-factor is already enabled; disable it first" });
+    }
     const secret = generateTotpSecret();
     // Stored but not enabled until a code proves the authenticator has it.
     await app.db.run(

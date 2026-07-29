@@ -35,6 +35,8 @@ export interface ServerConfig {
   registration: "open" | "invite" | "closed";
   /** Extra browser origins allowed to call the API; empty means same-origin only. */
   corsOrigins: string[];
+  /** Reverse proxies in front of this server; 0 means it is directly exposed. */
+  trustedProxyHops: number;
   /** Lowercased emails that are administrators and may always register. */
   adminEmails: string[];
   /** When set, ciphertext blobs go to an S3-compatible object store. */
@@ -86,6 +88,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
         ? overrides.databaseUrl
         : (process.env.ENGRAMER_DATABASE_URL ?? null),
     registration: registrationMode(process.env.ENGRAMER_REGISTRATION),
+    trustedProxyHops: positiveOrZero(process.env.ENGRAMER_TRUSTED_PROXY_HOPS),
     corsOrigins: (process.env.ENGRAMER_CORS_ORIGINS ?? "")
       .split(",")
       .map((origin) => origin.trim())

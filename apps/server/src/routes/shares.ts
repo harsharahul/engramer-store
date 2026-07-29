@@ -4,13 +4,14 @@ import { z } from "zod";
 import { shareAccessDigest } from "@engramer/crypto";
 import { blobKey } from "../blobs.js";
 import type { FileRow, ShareRow } from "../db.js";
+import { AuthThrottle } from "../ratelimit.js";
 
 const secretBoxSchema = z.object({ ciphertext: z.string(), nonce: z.string() });
 
 const kdfSchema = z.object({
-  salt: z.string(),
-  opsLimit: z.number().int().positive(),
-  memLimit: z.number().int().positive(),
+  salt: z.string().min(16),
+  opsLimit: z.number().int().min(2),
+  memLimit: z.number().int().min(19 * 1024 * 1024),
 });
 
 const createShareSchema = z.object({
@@ -55,6 +56,11 @@ function shareToDto(row: ShareRow) {
  */
 export function registerShareRoutes(app: FastifyInstance): void {
   const auth = { preHandler: [app.authenticate] };
+  // Guessing a link password is an offline-strength attack made online;
+  // it gets the same escalating backoff as a sign-in.
+  const throttle = new AuthThrottle(app.db);
+  const throttleKey = (request: FastifyRequest, token: string) =>
+    `${request.ip}|share:${token}`;
 
   app.post("/api/shares", auth, async (request, reply) => {
     const body = createShareSchema.parse(request.body);
@@ -121,10 +127,19 @@ export function registerShareRoutes(app: FastifyInstance): void {
       return { code: 404, error: "this link is no longer available" };
     }
     const file = await app.db.get<FileRow>(
-      "SELECT * FROM files WHERE id = ? AND deleted = 0 AND trashed = 0 AND uploaded = 1",
+      "SELECT * FROM files WHERE id = ? AND user_id = ? AND deleted = 0 AND trashed = 0 AND uploaded = 1",
       share.file_id,
+      share.user_id,
     );
     if (!file) {
+      return { code: 404, error: "this link is no longer available" };
+    }
+    // A disabled account's links stop serving, same as its sessions.
+    const owner = await app.db.get<{ disabled: number }>(
+      "SELECT disabled FROM users WHERE id = ?",
+      share.user_id,
+    );
+    if (!owner || owner.disabled === 1) {
       return { code: 404, error: "this link is no longer available" };
     }
     if (share.expires_at !== null && share.expires_at <= Date.now()) {
@@ -141,7 +156,10 @@ export function registerShareRoutes(app: FastifyInstance): void {
    * presented access key digests to the stored value, "denied" for a wrong
    * key, and "required" when the link is protected and no key was presented.
    */
-  const gate = (share: ShareRow, request: FastifyRequest): "open" | "granted" | "denied" | "required" => {
+  const passwordGate = (
+    share: ShareRow,
+    request: FastifyRequest,
+  ): "open" | "granted" | "denied" | "required" => {
     if (share.password_digest === null) {
       return "open";
     }
@@ -161,9 +179,20 @@ export function registerShareRoutes(app: FastifyInstance): void {
       return reply.code(loaded.code).send({ error: loaded.error });
     }
     const { share, file } = loaded;
-    const access = gate(share, request);
+    const blockedFor = await throttle.check(throttleKey(request, token));
+    if (!blockedFor.allowed) {
+      return reply
+        .code(429)
+        .header("retry-after", Math.ceil(blockedFor.retryAfterMs / 1000))
+        .send({ error: "too many attempts" });
+    }
+    const access = passwordGate(share, request);
     if (access === "denied") {
+      await throttle.fail(throttleKey(request, token));
       return reply.code(403).send({ error: "wrong password" });
+    }
+    if (access === "granted") {
+      await throttle.succeed(throttleKey(request, token));
     }
     if (access === "required") {
       return { protected: true, kdf: JSON.parse(share.password_kdf!) as unknown };
@@ -183,8 +212,18 @@ export function registerShareRoutes(app: FastifyInstance): void {
       return reply.code(loaded.code).send({ error: loaded.error });
     }
     const { share, file } = loaded;
-    const access = gate(share, request);
+    const blockedFor = await throttle.check(throttleKey(request, token));
+    if (!blockedFor.allowed) {
+      return reply
+        .code(429)
+        .header("retry-after", Math.ceil(blockedFor.retryAfterMs / 1000))
+        .send({ error: "too many attempts" });
+    }
+    const access = passwordGate(share, request);
     if (access === "denied" || access === "required") {
+      if (access === "denied") {
+        await throttle.fail(throttleKey(request, token));
+      }
       return reply.code(403).send({ error: "wrong password" });
     }
     // Atomic claim: the count only advances while below the limit, so two
