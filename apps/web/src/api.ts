@@ -100,11 +100,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  register: (email: string, loginKey: string, keyAttributes: KeyAttributes) =>
+  register: (email: string, loginKey: string, keyAttributes: KeyAttributes, inviteToken?: string) =>
     request<{ token: string }>("/api/auth/register", {
       method: "POST",
-      body: JSON.stringify({ email, loginKey, keyAttributes }),
+      body: JSON.stringify({ email, loginKey, keyAttributes, ...(inviteToken ? { inviteToken } : {}) }),
     }),
+
+  registration: () => request<{ mode: "open" | "invite" | "closed" }>("/api/auth/registration"),
 
   kdfAttributes: (email: string) =>
     request<{ kdf: KdfParams }>(`/api/auth/attributes?email=${encodeURIComponent(email)}`),
@@ -149,7 +151,29 @@ export const api = {
       createdAt: number;
       totpEnabled: boolean;
       recoveryCodesLeft: number;
+      isAdmin: boolean;
     }>("/api/user"),
+
+  adminListUsers: () =>
+    request<{ users: AdminUserInfo[]; registration: "open" | "invite" | "closed" }>(
+      "/api/admin/users",
+    ),
+  adminCreateInvite: () =>
+    request<{ token: string }>("/api/admin/invites", { method: "POST", body: "{}" }),
+  adminListInvites: () => request<{ invites: AdminInviteInfo[] }>("/api/admin/invites"),
+  adminRevokeInvite: (token: string) =>
+    request<void>(`/api/admin/invites/${token}`, { method: "DELETE" }),
+  adminSetDisabled: (id: number, disabled: boolean) =>
+    request<void>(`/api/admin/users/${id}/${disabled ? "disable" : "enable"}`, {
+      method: "POST",
+      body: "{}",
+    }),
+  adminSetQuota: (id: number, quotaBytes: number | null) =>
+    request<void>(`/api/admin/users/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ quotaBytes }),
+    }),
+  adminDeleteUser: (id: number) => request<void>(`/api/admin/users/${id}`, { method: "DELETE" }),
 
   sync: (since: number) => request<SyncResponse>(`/api/sync?since=${since}`),
 
@@ -262,6 +286,26 @@ export const api = {
       body: JSON.stringify({ sealedKey, encryptedMeta }),
     }),
 };
+
+export interface AdminUserInfo {
+  id: number;
+  email: string;
+  createdAt: number;
+  usedBytes: number;
+  quotaBytes: number;
+  quotaOverride: boolean;
+  totpEnabled: boolean;
+  disabled: boolean;
+  isAdmin: boolean;
+}
+
+export interface AdminInviteInfo {
+  token: string;
+  createdAt: number;
+  expiresAt: number | null;
+  used: boolean;
+  usedAt: number | null;
+}
 
 export interface FileVersionInfo {
   generation: number;

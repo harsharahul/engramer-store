@@ -31,6 +31,10 @@ export interface ServerConfig {
   webDistDir: string | null;
   /** PostgreSQL connection string; unset means embedded SQLite. */
   databaseUrl: string | null;
+  /** Who may create accounts: open (default), invite, or closed. */
+  registration: "open" | "invite" | "closed";
+  /** Lowercased emails that are administrators and may always register. */
+  adminEmails: string[];
   /** When set, ciphertext blobs go to an S3-compatible object store. */
   s3: S3Settings | null;
   /** Separate destination for derived blobs (thumbnails, search indexes). */
@@ -79,6 +83,11 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
       overrides.databaseUrl !== undefined
         ? overrides.databaseUrl
         : (process.env.ENGRAMER_DATABASE_URL ?? null),
+    registration: registrationMode(process.env.ENGRAMER_REGISTRATION),
+    adminEmails: (process.env.ENGRAMER_ADMIN_EMAILS ?? "")
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
     s3,
     s3Derived: loadDerivedS3Settings(s3),
     blobCacheBytes: positiveOrZero(process.env.ENGRAMER_BLOB_CACHE_BYTES),
@@ -106,6 +115,10 @@ function loadS3Settings(): S3Settings | null {
     maxTps: positiveOrZero(process.env.ENGRAMER_S3_MAX_TPS),
     maxConcurrent: positiveOrZero(process.env.ENGRAMER_S3_MAX_CONCURRENT),
   };
+}
+
+function registrationMode(raw: string | undefined): "open" | "invite" | "closed" {
+  return raw === "invite" || raw === "closed" ? raw : "open";
 }
 
 /** Opt-in numeric knob: absent, empty, or non-positive all mean "off". */

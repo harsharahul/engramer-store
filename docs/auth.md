@@ -53,6 +53,23 @@ sessionStorage, scoped to the tab and cleared on lock. A failed first sync
 after unlock surfaces an explicit retry rather than blocking the interface,
 and pages restored from the browser's back/forward cache reload cleanly.
 
+## Registration policy and administration
+
+`ENGRAMER_REGISTRATION` controls who may create accounts: `open` (default),
+`invite` (a single-use invite link minted by an administrator), or `closed`.
+Administrators are declared by the operator through `ENGRAMER_ADMIN_EMAILS`
+and may always register, which bootstraps a fresh locked-down server without
+a special first-run flow.
+
+Administrators manage what the server actually controls: accounts (usage,
+status, per-user quota overrides, disable and delete), and invites. A
+disabled account loses its existing sessions immediately, not just future
+logins, and deleting an account removes every byte it stored. There is
+deliberately no password reset: the server never holds key material, so the
+recovery key is the only way back into an account. For deployments behind an
+identity-aware proxy, the standard pattern of forward authentication in
+front of the ingress composes cleanly with all of this.
+
 ## Planned: bring-your-own SSO (OpenID Connect)
 
 The design, so self-hosters can front the vault with their own identity

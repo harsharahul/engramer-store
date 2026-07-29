@@ -3,6 +3,22 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.18.0] - 2026-07-29
+
+### Added
+- Registration policy (`ENGRAMER_REGISTRATION`): `open` (default), `invite`
+  (accounts require a single-use invite link), or `closed`. The sign-up form
+  adapts to the server's policy automatically.
+- Server administration. Administrators are declared by the operator through
+  `ENGRAMER_ADMIN_EMAILS` (they may always register, which also bootstraps a
+  fresh locked-down server) and get an admin panel: list accounts with usage
+  and status, mint and revoke invite links, set per-user quota overrides,
+  disable and re-enable accounts, and permanently delete an account with all
+  of its stored data. Disabling cuts existing sessions immediately, not just
+  future logins. There is deliberately no password reset: the server holds
+  no key material, so the recovery key remains the only way back into an
+  account.
+
 ## [0.17.0] - 2026-07-28
 
 ### Added
