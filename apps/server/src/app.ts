@@ -8,6 +8,7 @@ import { ZodError } from "zod";
 import { ready } from "@engramer/crypto";
 import { loadConfig, type ConfigOverrides, type ServerConfig } from "./config.js";
 import { FsBlobStore, type BlobStore } from "./blobs.js";
+import { DiskCachedBlobStore } from "./blobcache.js";
 import { S3BlobStore } from "./s3.js";
 import { nextSeq, openDatabase, storageUsed } from "./db.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -44,7 +45,13 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   if (config.s3) {
     const s3 = new S3BlobStore(config.s3);
     await s3.init();
-    blobs = s3;
+    // Opt-in hot tier: derived blobs (thumbnails, search indexes) served
+    // from local disk instead of a round trip per request. Pointless over
+    // the local filesystem store, so it only ever wraps S3.
+    blobs =
+      config.blobCacheBytes > 0
+        ? new DiskCachedBlobStore(s3, config.blobCacheDir, config.blobCacheBytes)
+        : s3;
   } else {
     blobs = new FsBlobStore(config.blobDir);
   }

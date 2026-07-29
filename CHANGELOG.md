@@ -3,6 +3,26 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.15.0] - 2026-07-28
+
+### Added
+- Opt-in local hot tier for S3 backends (`ENGRAMER_BLOB_CACHE_BYTES`): the
+  server keeps recently used thumbnails and search-index blobs on local disk
+  and serves repeats without a round trip to the object store. Entries are
+  written atomically, evicted least-recently-used within the configured
+  budget, and durably invalidated on overwrite or delete, so a stale entry
+  can never be served, even across a restart. Content blobs always stream
+  from the object store.
+- Opt-in request budget for rate-limited object stores
+  (`ENGRAMER_S3_MAX_TPS`, `ENGRAMER_S3_MAX_CONCURRENT`): requests toward the
+  S3 backend are paced first-in-first-out with no burst accumulation and
+  capped in flight, enforced inside the S3 client so multipart upload parts
+  and retries are budgeted too. A budget delays requests rather than
+  rejecting them.
+
+Both knobs are off by default; an unset variable means exactly the previous
+behavior, and the filesystem backend is unaffected.
+
 ## [0.14.0] - 2026-07-27
 
 ### Added

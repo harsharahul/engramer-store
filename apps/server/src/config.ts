@@ -9,6 +9,9 @@ export interface S3Settings {
   accessKeyId: string;
   secretAccessKey: string;
   forcePathStyle: boolean;
+  /** Request-budget knobs for rate-limited backing stores; 0 = unlimited. */
+  maxTps: number;
+  maxConcurrent: number;
 }
 
 export interface ServerConfig {
@@ -28,6 +31,9 @@ export interface ServerConfig {
   webDistDir: string | null;
   /** When set, ciphertext blobs go to an S3-compatible object store. */
   s3: S3Settings | null;
+  /** Disk budget for the derived-blob cache in front of S3; 0 disables it. */
+  blobCacheBytes: number;
+  blobCacheDir: string;
 }
 
 export interface ConfigOverrides {
@@ -64,6 +70,8 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
         ? overrides.webDistDir
         : (process.env.ENGRAMER_WEB_DIST ?? null),
     s3: loadS3Settings(),
+    blobCacheBytes: positiveOrZero(process.env.ENGRAMER_BLOB_CACHE_BYTES),
+    blobCacheDir: join(dataDir, "blob-cache"),
   };
 }
 
@@ -84,7 +92,15 @@ function loadS3Settings(): S3Settings | null {
     accessKeyId,
     secretAccessKey,
     forcePathStyle: process.env.ENGRAMER_S3_FORCE_PATH_STYLE !== "false",
+    maxTps: positiveOrZero(process.env.ENGRAMER_S3_MAX_TPS),
+    maxConcurrent: positiveOrZero(process.env.ENGRAMER_S3_MAX_CONCURRENT),
   };
+}
+
+/** Opt-in numeric knob: absent, empty, or non-positive all mean "off". */
+function positiveOrZero(raw: string | undefined): number {
+  const value = Number(raw ?? 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function loadOrCreateJwtSecret(dataDir: string): string {
