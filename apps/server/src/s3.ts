@@ -8,6 +8,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { byteLimiter, type BlobStore } from "./blobs.js";
+import { attachBudget } from "./budget.js";
 
 export interface S3Config {
   endpoint?: string;
@@ -16,6 +17,9 @@ export interface S3Config {
   accessKeyId: string;
   secretAccessKey: string;
   forcePathStyle: boolean;
+  /** Optional request budget; 0 or absent means unlimited. */
+  maxTps?: number;
+  maxConcurrent?: number;
 }
 
 /**
@@ -35,6 +39,12 @@ export class S3BlobStore implements BlobStore {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,
       },
+    });
+    // Budget lives at the client so every HTTP attempt pays it, multipart
+    // parts and SDK retries included; see budget.ts.
+    attachBudget(this.client, {
+      maxTps: config.maxTps,
+      maxConcurrent: config.maxConcurrent,
     });
   }
 
