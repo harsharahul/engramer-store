@@ -41,8 +41,11 @@ unset means exactly the previous behavior.
 | Variable | What it enables |
 |---|---|
 | `ENGRAMER_BLOB_CACHE_BYTES` | Local hot tier for derived blobs, with this disk budget |
+| `ENGRAMER_BLOB_CACHE_DIR` | Hot-tier location, when it should live on separate fast storage |
 | `ENGRAMER_S3_MAX_TPS` | Cap on request starts per second toward the object store |
 | `ENGRAMER_S3_MAX_CONCURRENT` | Cap on in-flight requests toward the object store |
+| `ENGRAMER_S3_DERIVED_BUCKET` | Separate destination for thumbnails and search indexes |
+| `ENGRAMER_S3_DERIVED_*` | Endpoint, region, credentials, path style, and budget for it |
 
 **Hot tier**: thumbnails and search-index blobs dominate request counts (a
 grid paint or a search warm touches hundreds of them) while being a tiny
@@ -65,6 +68,25 @@ part of a multipart upload, and retries alike. The pacer is strictly FIFO
 with no burst accumulation, which is the discipline mass-transfer tools
 converge on for fragile backends. A budget only ever delays requests, never
 rejects them, so clients see slower responses rather than errors.
+
+**Split destinations**: content blobs and derived blobs have opposite
+storage economics. Originals are byte-heavy and request-light, so they suit
+cheap, durable, possibly rate-limited storage; thumbnails and search
+indexes are byte-light and request-heavy, so they suit a fast, unmetered
+store close to the server, and forcing both through one bucket lets a
+library scroll be rate-limited by the store holding the originals. Setting
+`ENGRAMER_S3_DERIVED_BUCKET` routes derived blobs to their own backend,
+which can be a second bucket on the same store (one variable, connection
+settings inherit from the primary) or a different store entirely, such as a
+local MinIO for derived data with the originals on a budget provider. The
+derived backend gets its own request budget and deliberately does not
+inherit the primary's, since the usual point of the split is that the
+derived store has no rate limit. Enabling the split on an existing install
+needs no migration: a derived blob still sitting in the primary bucket is
+served from there on first read and copied to the derived backend on the
+way out, so the layout heals itself as the library is used. Deletes always
+purge both locations. Since derived blobs are recomputable by clients, the
+derived bucket also needs less durability than the originals.
 
 ## Integrity
 

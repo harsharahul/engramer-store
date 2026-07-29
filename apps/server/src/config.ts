@@ -31,6 +31,8 @@ export interface ServerConfig {
   webDistDir: string | null;
   /** When set, ciphertext blobs go to an S3-compatible object store. */
   s3: S3Settings | null;
+  /** Separate destination for derived blobs (thumbnails, search indexes). */
+  s3Derived: S3Settings | null;
   /** Disk budget for the derived-blob cache in front of S3; 0 disables it. */
   blobCacheBytes: number;
   blobCacheDir: string;
@@ -49,6 +51,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
   const dataDir = overrides.dataDir ?? process.env.ENGRAMER_DATA_DIR ?? "data";
   const blobDir = join(dataDir, "blobs");
   mkdirSync(blobDir, { recursive: true });
+  const s3 = loadS3Settings();
 
   return {
     port: overrides.port ?? Number(process.env.ENGRAMER_PORT ?? 3080),
@@ -69,9 +72,10 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
       overrides.webDistDir !== undefined
         ? overrides.webDistDir
         : (process.env.ENGRAMER_WEB_DIST ?? null),
-    s3: loadS3Settings(),
+    s3,
+    s3Derived: loadDerivedS3Settings(s3),
     blobCacheBytes: positiveOrZero(process.env.ENGRAMER_BLOB_CACHE_BYTES),
-    blobCacheDir: join(dataDir, "blob-cache"),
+    blobCacheDir: process.env.ENGRAMER_BLOB_CACHE_DIR || join(dataDir, "blob-cache"),
   };
 }
 
@@ -103,7 +107,42 @@ function positiveOrZero(raw: string | undefined): number {
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
+/**
+ * Derived blobs (thumbnails, search indexes) can live on their own backend:
+ * request-heavy tiny objects want a fast unmetered store while the
+ * originals sit on cheap, possibly rate-limited storage. Setting
+ * ENGRAMER_S3_DERIVED_BUCKET enables the split; connection settings fall
+ * back to the primary's so a second bucket on the same store is one
+ * variable. The request budget deliberately does NOT fall back: the whole
+ * point is that the derived store is usually the one WITHOUT a rate limit.
+ */
+function loadDerivedS3Settings(primary: S3Settings | null): S3Settings | null {
+  const bucket = process.env.ENGRAMER_S3_DERIVED_BUCKET;
+  if (!bucket || !primary) {
+    return null;
+  }
+  return {
+    endpoint: process.env.ENGRAMER_S3_DERIVED_ENDPOINT || primary.endpoint,
+    region: process.env.ENGRAMER_S3_DERIVED_REGION ?? primary.region,
+    bucket,
+    accessKeyId: process.env.ENGRAMER_S3_DERIVED_ACCESS_KEY ?? primary.accessKeyId,
+    secretAccessKey: process.env.ENGRAMER_S3_DERIVED_SECRET_KEY ?? primary.secretAccessKey,
+    forcePathStyle:
+      process.env.ENGRAMER_S3_DERIVED_FORCE_PATH_STYLE !== undefined
+        ? process.env.ENGRAMER_S3_DERIVED_FORCE_PATH_STYLE !== "false"
+        : primary.forcePathStyle,
+    maxTps: positiveOrZero(process.env.ENGRAMER_S3_DERIVED_MAX_TPS),
+    maxConcurrent: positiveOrZero(process.env.ENGRAMER_S3_DERIVED_MAX_CONCURRENT),
+  };
+}
+
 function loadOrCreateJwtSecret(dataDir: string): string {
+  // An explicit secret wins: replicas must share one signing key, and in
+  // Kubernetes that means a Secret in the environment, not a per-pod file.
+  const fromEnv = process.env.ENGRAMER_JWT_SECRET?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
   const path = join(dataDir, "jwt-secret");
   if (existsSync(path)) {
     return readFileSync(path, "utf8").trim();
