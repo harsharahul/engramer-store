@@ -6,6 +6,7 @@ import { BlobTooLargeError, blobKey, type BlobKind } from "../blobs.js";
 import {
   nextSeq,
   storageUsed,
+  userQuota,
   type Db,
   type FileRow,
   type FileVersionRow,
@@ -241,7 +242,8 @@ export function registerStorageRoutes(app: FastifyInstance): void {
           : replacesContent && !keepsVersions
             ? file.size
             : 0;
-    const quotaRoom = app.config.quotaBytes - ((await storageUsed(app.db, uid)) - reclaimable);
+    const quota = await userQuota(app.db, uid, app.config.quotaBytes);
+    const quotaRoom = quota - ((await storageUsed(app.db, uid)) - reclaimable);
     const maxBytes = Math.min(app.config.maxBlobBytes, quotaRoom);
     const declared = Number(request.headers["content-length"] ?? 0);
     if (maxBytes <= 0 || declared > maxBytes) {

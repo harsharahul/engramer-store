@@ -12,6 +12,7 @@ import { RoutedBlobStore } from "./routed.js";
 import { S3BlobStore } from "./s3.js";
 import { openDatabase, type Db } from "./db.js";
 import { PostgresDb } from "./pgdb.js";
+import { registerAdminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerStorageRoutes } from "./routes/storage.js";
 import { registerShareRoutes } from "./routes/shares.js";
@@ -89,6 +90,16 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     // it must never act as a session.
     if (request.user.pending) {
       await reply.code(401).send({ error: "authentication required" });
+      return;
+    }
+    // Disabling an account must cut off its existing sessions too, not just
+    // future logins; a token alone is never enough.
+    const state = await db.get<{ disabled: number }>(
+      "SELECT disabled FROM users WHERE id = ?",
+      request.user.uid,
+    );
+    if (!state || state.disabled === 1) {
+      await reply.code(403).send({ error: "this account is disabled" });
     }
   });
 
@@ -110,6 +121,7 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   await app.register(jwt, { secret: config.jwtSecret, sign: { expiresIn: "30d" } });
 
   registerAuthRoutes(app);
+  registerAdminRoutes(app);
   registerStorageRoutes(app);
   registerShareRoutes(app);
   registerRequestRoutes(app);

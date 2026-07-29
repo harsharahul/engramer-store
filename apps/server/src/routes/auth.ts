@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { loginKeyDigest } from "@engramer/crypto";
-import { storageUsed, type UserRow } from "../db.js";
+import { storageUsed, userQuota, type UserRow } from "../db.js";
 import { AuthThrottle } from "../ratelimit.js";
 import { generateTotpSecret, otpauthUri, verifyTotp } from "../totp.js";
 
@@ -25,6 +25,7 @@ const registerSchema = z.object({
   email: z.string().email().toLowerCase(),
   loginKey: z.string().min(1),
   keyAttributes: keyAttributesSchema,
+  inviteToken: z.string().min(1).optional(),
 });
 
 const loginSchema = z.object({
@@ -40,6 +41,9 @@ const twoFactorSchema = z.object({
 const codeSchema = z.object({ code: z.string().min(1).max(64) });
 
 const RECOVERY_CODE_COUNT = 10;
+
+/** The presented invite was missing, used, expired, or revoked. */
+class InviteInvalidError extends Error {}
 
 function digestsMatch(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -82,26 +86,63 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     keyAttributes: JSON.parse(user.key_attributes) as unknown,
   });
 
+  /** Lets the client adapt its sign-up form to this server's policy. */
+  app.get("/api/auth/registration", async () => ({ mode: app.config.registration }));
+
   app.post("/api/auth/register", async (request, reply) => {
     const body = registerSchema.parse(request.body);
     const retryAfter = await gate(request, body.email);
     if (retryAfter !== null) {
       return reply.code(429).header("retry-after", retryAfter).send({ error: "too many attempts" });
     }
+    // Operator-declared administrators may always register; everyone else is
+    // subject to the server's registration policy.
+    const isAdminEmail = app.config.adminEmails.includes(body.email);
+    if (!isAdminEmail && app.config.registration === "closed") {
+      return reply.code(403).send({ error: "registration is disabled on this server" });
+    }
+    if (!isAdminEmail && app.config.registration === "invite" && !body.inviteToken) {
+      return reply.code(403).send({ error: "registration requires an invite" });
+    }
     const existing = await app.db.get("SELECT id FROM users WHERE email = ?", body.email);
     if (existing) {
       await throttle.fail(throttleKey(request, body.email));
       return reply.code(409).send({ error: "an account with this email already exists" });
     }
-    const created = await app.db.get<{ id: number }>(
-      "INSERT INTO users (email, login_key_digest, key_attributes, created_at) VALUES (?, ?, ?, ?) RETURNING id",
-      body.email,
-      loginKeyDigest(body.loginKey),
-      JSON.stringify(body.keyAttributes),
-      Date.now(),
-    );
-    const token = app.jwt.sign({ uid: created!.id });
-    return reply.code(201).send({ token });
+    try {
+      const created = await app.db.tx(async (t) => {
+        const user = await t.get<{ id: number }>(
+          "INSERT INTO users (email, login_key_digest, key_attributes, created_at) VALUES (?, ?, ?, ?) RETURNING id",
+          body.email,
+          loginKeyDigest(body.loginKey),
+          JSON.stringify(body.keyAttributes),
+          Date.now(),
+        );
+        if (!isAdminEmail && app.config.registration === "invite") {
+          // One invite, one account: the conditional update wins exactly once.
+          const consumed = await t.run(
+            `UPDATE invites SET used_by = ?, used_at = ?
+             WHERE token = ? AND used_by IS NULL AND (expires_at IS NULL OR expires_at > ?)`,
+            user!.id,
+            Date.now(),
+            body.inviteToken,
+            Date.now(),
+          );
+          if (consumed.changes === 0) {
+            throw new InviteInvalidError();
+          }
+        }
+        return user!;
+      });
+      const token = app.jwt.sign({ uid: created.id });
+      return reply.code(201).send({ token });
+    } catch (err) {
+      if (err instanceof InviteInvalidError) {
+        await throttle.fail(throttleKey(request, body.email));
+        return reply.code(403).send({ error: "that invite is not valid" });
+      }
+      throw err;
+    }
   });
 
   // Pre-login: the client needs the KDF salt and parameters to derive its keys.
@@ -128,6 +169,9 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     if (!user || !digestsMatch(loginKeyDigest(body.loginKey), user.login_key_digest)) {
       await throttle.fail(throttleKey(request, body.email));
       return reply.code(401).send({ error: "invalid email or password" });
+    }
+    if (user.disabled === 1) {
+      return reply.code(403).send({ error: "this account is disabled" });
     }
     await throttle.succeed(throttleKey(request, body.email));
     if (user.totp_enabled === 1) {
@@ -250,7 +294,8 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       email: user.email,
       createdAt: user.created_at,
       usedBytes: await storageUsed(app.db, request.user.uid),
-      quotaBytes: app.config.quotaBytes,
+      quotaBytes: await userQuota(app.db, request.user.uid, app.config.quotaBytes),
+      isAdmin: app.config.adminEmails.includes(user.email),
       totpEnabled: user.totp_enabled === 1,
       recoveryCodesLeft: user.totp_enabled === 1 ? digests.length : 0,
     };

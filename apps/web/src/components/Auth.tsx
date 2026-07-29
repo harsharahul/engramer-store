@@ -1,9 +1,11 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { api } from "../api";
 import { login, registerAccount, type LoginResult, type Session } from "../session";
 import { useStore } from "../store";
 import { BrandMark, Wordmark } from "./FileArt";
 
 type Mode = "signin" | "signup";
+type RegistrationMode = "open" | "invite" | "closed";
 
 export function Auth() {
   const startSession = useStore((s) => s.startSession);
@@ -11,6 +13,23 @@ export function Auth() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [registration, setRegistration] = useState<RegistrationMode>("open");
+  const [invite, setInvite] = useState(
+    () => new URLSearchParams(location.search).get("invite") ?? "",
+  );
+
+  useEffect(() => {
+    api
+      .registration()
+      .then(({ mode: serverMode }) => {
+        setRegistration(serverMode);
+        // Arriving with an invite link goes straight to the sign-up form.
+        if (serverMode === "invite" && new URLSearchParams(location.search).get("invite")) {
+          setMode("signup");
+        }
+      })
+      .catch(() => {});
+  }, []);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [twoFactor, setTwoFactor] = useState<Extract<LoginResult, { kind: "two-factor" }> | null>(
@@ -36,7 +55,7 @@ export function Auth() {
           return;
         }
         setBusy("Deriving your keys with Argon2id. This is slow on purpose.");
-        const result = await registerAccount(email, password);
+        const result = await registerAccount(email, password, invite.trim() || undefined);
         setPendingRecovery(result);
       } else {
         setBusy("Deriving your keys with Argon2id. This is slow on purpose.");
@@ -171,6 +190,22 @@ export function Auth() {
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
               />
+              {registration === "invite" && (
+                <>
+                  <label htmlFor="invite">Invite code</label>
+                  <input
+                    id="invite"
+                    value={invite}
+                    onChange={(e) => setInvite(e.target.value)}
+                    placeholder="From this server's administrator"
+                  />
+                </>
+              )}
+              {registration === "closed" && (
+                <div className="auth-note">
+                  Registration is disabled on this server. Contact the administrator.
+                </div>
+              )}
             </>
           )}
           {error && <div className="error-text">{error}</div>}

@@ -41,6 +41,7 @@ const DocEditor = lazy(() =>
 import { ShareDialog } from "./ShareDialog";
 import { SharedView, NewRequestDialog } from "./SharedView";
 import { TwoFactorDialog } from "./TwoFactorDialog";
+import { AdminPanel } from "./AdminPanel";
 import { UploadTray } from "./UploadTray";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { Confirm, TextPrompt } from "./Dialogs";
@@ -189,6 +190,7 @@ export function Vault() {
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [requestFolder, setRequestFolder] = useState<{ folderId: string | null } | null>(null);
   const [securityOpen, setSecurityOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => currentTheme());
@@ -812,6 +814,13 @@ export function Vault() {
         )}
         <div className="account-row">
           <span title={store.session?.email}>{store.session?.email}</span>
+          {store.isAdmin && (
+            <button className="icon-btn" title="Server administration" onClick={() => setAdminOpen(true)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6l8-3z" />
+              </svg>
+            </button>
+          )}
           <button
             className="icon-btn"
             title="Two-factor authentication"
@@ -1290,6 +1299,7 @@ export function Vault() {
       {securityOpen && (
         <TwoFactorDialog onToast={showToast} onClose={() => setSecurityOpen(false)} />
       )}
+      {adminOpen && <AdminPanel onToast={showToast} onClose={() => setAdminOpen(false)} />}
       {shareFile && (
         <ShareDialog file={shareFile} onClose={() => setShareId(null)} onToast={showToast} />
       )}

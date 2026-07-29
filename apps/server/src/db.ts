@@ -14,6 +14,19 @@ export interface UserRow {
   totp_last_step: number;
   /** JSON array of BLAKE2b digests of unused one-time recovery codes. */
   recovery_code_digests: string | null;
+  /** A disabled account cannot sign in or use its sessions. */
+  disabled: number;
+  /** Per-user quota override in bytes; null means the server default. */
+  quota_bytes: number | null;
+}
+
+export interface InviteRow {
+  token: string;
+  created_by: number;
+  created_at: number;
+  expires_at: number | null;
+  used_by: number | null;
+  used_at: number | null;
 }
 
 export interface FolderRow {
@@ -130,6 +143,8 @@ export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; type: str
   { table: "users", column: "totp_enabled", type: "BIGINT NOT NULL DEFAULT 0" },
   { table: "users", column: "totp_last_step", type: "BIGINT NOT NULL DEFAULT 0" },
   { table: "users", column: "recovery_code_digests", type: "TEXT" },
+  { table: "users", column: "disabled", type: "BIGINT NOT NULL DEFAULT 0" },
+  { table: "users", column: "quota_bytes", type: "BIGINT" },
   { table: "shares", column: "expires_at", type: "BIGINT" },
   { table: "shares", column: "max_downloads", type: "BIGINT" },
   { table: "shares", column: "download_count", type: "BIGINT NOT NULL DEFAULT 0" },
@@ -217,6 +232,14 @@ export const COMMON_SCHEMA = `
       blocked_until BIGINT NOT NULL DEFAULT 0,
       last_failure BIGINT NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS invites (
+      token TEXT PRIMARY KEY,
+      created_by BIGINT NOT NULL REFERENCES users(id),
+      created_at BIGINT NOT NULL,
+      expires_at BIGINT,
+      used_by BIGINT,
+      used_at BIGINT
+    );
 `;
 
 /** Embedded SQLite behind the async facade; every call is synchronous
@@ -301,6 +324,15 @@ export async function nextSeq(db: Db, userId: number): Promise<number> {
     userId,
   );
   return row!.last_seq;
+}
+
+/** The user's effective quota: their override, or the server default. */
+export async function userQuota(db: Db, userId: number, defaultQuota: number): Promise<number> {
+  const row = await db.get<{ quota_bytes: number | null }>(
+    "SELECT quota_bytes FROM users WHERE id = ?",
+    userId,
+  );
+  return row?.quota_bytes ?? defaultQuota;
 }
 
 /**
