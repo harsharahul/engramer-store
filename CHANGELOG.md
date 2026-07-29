@@ -3,6 +3,27 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.17.0] - 2026-07-28
+
+### Added
+- PostgreSQL metadata backend (`ENGRAMER_DATABASE_URL`): metadata can live
+  in a shared PostgreSQL database instead of embedded SQLite, the foundation
+  for replicated deployments where server instances hold no local state.
+  SQLite remains the default and the single-binary experience is unchanged.
+  Every correctness mechanism carries over: the per-user change sequence,
+  version snapshots and restores in real transactions, the atomic
+  download-limit claim, and the append-only content invariants.
+- The login-failure throttle now lives in the database, so every server
+  instance enforces the same counters instead of each keeping its own.
+
+### Changed
+- Query audit for large libraries: added the missing indexes for folder
+  tree recursion, per-folder file listings, share lookups by owner and by
+  file, and file-request listings. Existing SQLite databases pick these up
+  automatically on the next start.
+- CI now runs the full product flow against a real PostgreSQL service on
+  every push, alongside the SQLite suites.
+
 ## [0.16.0] - 2026-07-28
 
 ### Added

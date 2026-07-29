@@ -29,6 +29,8 @@ export interface ServerConfig {
   maxVersions: number;
   /** Directory of a built web client to serve, if any. */
   webDistDir: string | null;
+  /** PostgreSQL connection string; unset means embedded SQLite. */
+  databaseUrl: string | null;
   /** When set, ciphertext blobs go to an S3-compatible object store. */
   s3: S3Settings | null;
   /** Separate destination for derived blobs (thumbnails, search indexes). */
@@ -40,6 +42,7 @@ export interface ServerConfig {
 
 export interface ConfigOverrides {
   dataDir?: string;
+  databaseUrl?: string | null;
   quotaBytes?: number;
   maxBlobBytes?: number;
   maxVersions?: number;
@@ -72,6 +75,10 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
       overrides.webDistDir !== undefined
         ? overrides.webDistDir
         : (process.env.ENGRAMER_WEB_DIST ?? null),
+    databaseUrl:
+      overrides.databaseUrl !== undefined
+        ? overrides.databaseUrl
+        : (process.env.ENGRAMER_DATABASE_URL ?? null),
     s3,
     s3Derived: loadDerivedS3Settings(s3),
     blobCacheBytes: positiveOrZero(process.env.ENGRAMER_BLOB_CACHE_BYTES),
