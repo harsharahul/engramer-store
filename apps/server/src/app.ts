@@ -50,7 +50,16 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     db = openDatabase(config.dbPath);
   }
 
-  const app = Fastify({ bodyLimit: 16 * 1024 * 1024 });
+  // Behind a reverse proxy every request otherwise carries the proxy's
+  // address, which collapses the failure throttle into one global bucket
+  // per account (a stranger could lock a user out) and blinds any per-IP
+  // limiting. Enabled only when the operator declares the hop count, since
+  // trusting a forwarded header unconditionally is worse than not trusting
+  // it at all.
+  const app = Fastify({
+    bodyLimit: 16 * 1024 * 1024,
+    trustProxy: config.trustedProxyHops > 0 ? config.trustedProxyHops : false,
+  });
 
   let blobs: BlobStore;
   if (config.s3) {

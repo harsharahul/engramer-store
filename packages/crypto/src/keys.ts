@@ -52,12 +52,37 @@ const LOGIN_KDF_CONTEXT = "es-login";
  * it. Whatever succeeded is recorded in KdfParams, so every later derivation
  * for that account repeats exactly the same cost.
  */
+/**
+ * Floor for accepted Argon2id work, at the OWASP minimum. Parameters
+ * arrive from the server before login, so a hostile or compromised server
+ * could otherwise hand back trivial ones, watch the client derive a
+ * cheap login key, and crack the password offline in seconds. Refusing
+ * anything below the floor makes that attack fail loudly instead of
+ * silently. It is also the floor for local degradation: memory hardness
+ * IS the defense, so there is no acceptable "weaker but faster" fallback.
+ */
+export const MIN_OPS_LIMIT = 2;
+export const MIN_MEM_LIMIT = 19 * 1024 * 1024;
+
+export class WeakKdfError extends Error {
+  constructor() {
+    super("this server offered unsafe password-hashing parameters");
+  }
+}
+
 export function deriveKeyEncryptionKey(
   password: string,
   kdf?: KdfParams,
 ): { kek: Uint8Array; kdf: KdfParams } {
   const s = sodium();
   if (kdf) {
+    if (
+      kdf.opsLimit < MIN_OPS_LIMIT ||
+      kdf.memLimit < MIN_MEM_LIMIT ||
+      fromB64(kdf.salt).length !== s.crypto_pwhash_SALTBYTES
+    ) {
+      throw new WeakKdfError();
+    }
     const kek = s.crypto_pwhash(
       s.crypto_secretbox_KEYBYTES,
       password,
@@ -84,9 +109,13 @@ export function deriveKeyEncryptionKey(
       );
       return { kek, kdf: { salt: toB64(salt), opsLimit, memLimit } };
     } catch (err) {
+      // Halving memory while doubling passes keeps total work roughly
+      // constant but throws away the memory hardness that actually
+      // resists cracking hardware, so the retry stops at the floor and
+      // fails rather than persisting weak parameters forever.
       memLimit = Math.floor(memLimit / 2);
       opsLimit = opsLimit * 2;
-      if (memLimit < s.crypto_pwhash_MEMLIMIT_MIN) {
+      if (memLimit < MIN_MEM_LIMIT) {
         throw err;
       }
     }

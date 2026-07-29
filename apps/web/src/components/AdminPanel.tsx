@@ -48,7 +48,8 @@ export function AdminPanel(props: { onClose: () => void; onToast: (message: stri
   const mintInvite = () =>
     act(async () => {
       const { token } = await api.adminCreateInvite();
-      const url = `${location.origin}/?invite=${token}`;
+      // Fragment, not query: the token never reaches a server log.
+      const url = `${location.origin}/#invite=${token}`;
       await navigator.clipboard.writeText(url).catch(() => {});
       props.onToast("Invite link copied. It works once and expires in 7 days.");
     });
@@ -161,7 +162,7 @@ export function AdminPanel(props: { onClose: () => void; onToast: (message: stri
                   <button
                     className="btn"
                     onClick={() => {
-                      void navigator.clipboard.writeText(`${location.origin}/?invite=${invite.token}`);
+                      void navigator.clipboard.writeText(`${location.origin}/#invite=${invite.token}`);
                       props.onToast("Invite link copied.");
                     }}
                   >

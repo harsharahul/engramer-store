@@ -24,6 +24,8 @@ import {
   deriveShareAccess,
   openShareKey,
   shareAccessDigest,
+  deriveKeyEncryptionKey,
+  WeakKdfError,
   type AccountKeys,
 } from "../src/index.js";
 
@@ -250,5 +252,25 @@ describe("password protected share links", () => {
     expect(() =>
       openShareKey(protection.wrappedKey, { accessKey: access.accessKey, wrapKey: fromB64(access.accessKey) }),
     ).toThrow();
+  });
+});
+
+describe("key derivation floor", () => {
+  it("refuses password-hashing parameters below the OWASP floor", async () => {
+    await ready();
+    const account = generateAccountKeys("a floor test password");
+    // A hostile server could otherwise answer the pre-login request with
+    // trivial parameters, watch a cheap derivation, and crack offline.
+    expect(() =>
+      deriveKeyEncryptionKey("a floor test password", {
+        ...account.keyAttributes.kdf,
+        opsLimit: 1,
+        memLimit: 8192,
+      }),
+    ).toThrow(WeakKdfError);
+    // The real parameters still work.
+    expect(() =>
+      deriveKeyEncryptionKey("a floor test password", account.keyAttributes.kdf),
+    ).not.toThrow();
   });
 });

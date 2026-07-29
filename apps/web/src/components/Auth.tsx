@@ -7,6 +7,12 @@ import { BrandMark, Wordmark } from "./FileArt";
 type Mode = "signin" | "signup";
 type RegistrationMode = "open" | "invite" | "closed";
 
+/** Reads an invite token from the fragment, falling back to the query. */
+function readInviteToken(): string {
+  const fragment = new URLSearchParams(location.hash.replace(/^#/, ""));
+  return fragment.get("invite") ?? new URLSearchParams(location.search).get("invite") ?? "";
+}
+
 export function Auth() {
   const startSession = useStore((s) => s.startSession);
   const [mode, setMode] = useState<Mode>("signin");
@@ -14,21 +20,29 @@ export function Auth() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [registration, setRegistration] = useState<RegistrationMode>("open");
-  const [invite, setInvite] = useState(
-    () => new URLSearchParams(location.search).get("invite") ?? "",
-  );
+  // Invite links carry the token in the URL fragment, which browsers never
+  // put on the wire, and it is wiped from the address bar once read so it
+  // does not linger in history. A token from the query string is still
+  // accepted for links already handed out, and scrubbed the same way.
+  const [invite, setInvite] = useState(() => readInviteToken());
 
   useEffect(() => {
+    const arrived = invite.length > 0;
+    if (arrived) {
+      history.replaceState(null, "", location.pathname);
+    }
     api
       .registration()
       .then(({ mode: serverMode }) => {
         setRegistration(serverMode);
         // Arriving with an invite link goes straight to the sign-up form.
-        if (serverMode === "invite" && new URLSearchParams(location.search).get("invite")) {
+        if (serverMode === "invite" && arrived) {
           setMode("signup");
         }
       })
       .catch(() => {});
+    // Runs once on mount; `invite` is the value read from the URL there.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

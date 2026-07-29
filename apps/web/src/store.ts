@@ -374,6 +374,13 @@ export const useStore = create<StoreState>((set, get) => {
       }
       syncCursor = 0;
       clearSession();
+      try {
+        // Recent searches are plaintext fragments of the library; they
+        // must not outlive the session on a shared device.
+        localStorage.removeItem("engram-recent-searches");
+      } catch {
+        // Storage may be unavailable; nothing else to do.
+      }
       set({
         session: null,
         synced: false,

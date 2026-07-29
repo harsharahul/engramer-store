@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ready, generateAccountKeys } from "@engramer/crypto";
 import { buildApp } from "../src/app.js";
+import { totpAt } from "../src/totp.js";
 
 /** Regression cover for the hardening a public deployment depends on. */
 describe("public-exposure hardening", () => {
@@ -60,6 +61,52 @@ describe("public-exposure hardening", () => {
     // Stable across calls, so repeated probing cannot distinguish either.
     const again = await app.inject({ method: "GET", url: "/api/auth/attributes?email=nobody@example.com" });
     expect((again.json().kdf as { salt: string }).salt).toBe(unknownKdf.salt);
+  });
+
+  it("refuses to enrol two-factor over an already-enabled account", async () => {
+    const keys = generateAccountKeys("a two factor password");
+    const registered = await app.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      payload: { email: "tfa@example.com", loginKey: keys.loginKey, keyAttributes: keys.keyAttributes },
+    });
+    const auth = { authorization: `Bearer ${registered.json().token as string}` };
+    const setup = await app.inject({ method: "POST", url: "/api/auth/totp/setup", headers: auth, payload: {} });
+    const secret = setup.json().secret as string;
+    await app.inject({
+      method: "POST",
+      url: "/api/auth/totp/confirm",
+      headers: auth,
+      payload: { code: totpAt(secret, Date.now()) },
+    });
+    // A session token alone must not be able to strip the second factor.
+    const again = await app.inject({ method: "POST", url: "/api/auth/totp/setup", headers: auth, payload: {} });
+    expect(again.statusCode).toBe(409);
+    const me = await app.inject({ method: "GET", url: "/api/user", headers: auth });
+    expect(me.json().totpEnabled).toBe(true);
+  });
+
+  it("rejects accounts created with weak password-hashing parameters", async () => {
+    const keys = generateAccountKeys("a weak kdf password");
+    const weak = {
+      ...keys.keyAttributes,
+      kdf: { ...keys.keyAttributes.kdf, opsLimit: 1, memLimit: 8192 },
+    };
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      payload: { email: "weak@example.com", loginKey: keys.loginKey, keyAttributes: weak },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("rejects malformed key material without a server error", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "known@example.com", loginKey: "***not base64***" },
+    });
+    expect(response.statusCode).toBe(400);
   });
 
   it("keeps validation errors opaque", async () => {

@@ -27,7 +27,13 @@ function DocxBody(props: { bytes: Uint8Array; name: string }) {
           props.bytes.slice().buffer as ArrayBuffer,
           container.current,
           undefined,
-          { useBase64URL: true, inWrapper: true },
+          { useBase64URL: true,
+          // A .docx may embed an "altChunk" part that this renderer would
+          // place in a same-origin iframe via srcdoc, executing whatever it
+          // contains inside the vault's origin. Nothing here needs the
+          // feature, and a document can arrive from a stranger through a
+          // file request, so it stays off.
+          renderAltChunks: false, inWrapper: true },
         );
       })
       .catch(() => {

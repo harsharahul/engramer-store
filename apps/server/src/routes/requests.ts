@@ -14,7 +14,16 @@ import {
 } from "../db.js";
 import { fileToDto } from "./storage.js";
 
-const secretBoxSchema = z.object({ ciphertext: z.string(), nonce: z.string() });
+// Anonymous senders reach these routes, so every field they control is
+// bounded: metadata is small by construction and an unbounded string is a
+// free write into the metadata database.
+const secretBoxSchema = z.object({
+  ciphertext: z.string().max(64 * 1024),
+  nonce: z.string().max(128),
+});
+
+/** Un-uploaded rows a single request link may hold at once. */
+const MAX_PENDING_UPLOADS = 50;
 
 const createRequestSchema = z.object({
   folderId: z.string().nullable().optional(),
@@ -23,7 +32,7 @@ const createRequestSchema = z.object({
 });
 
 const createUploadSchema = z.object({
-  sealedKey: z.string().min(1),
+  sealedKey: z.string().min(1).max(1024),
   encryptedMeta: secretBoxSchema,
 });
 
@@ -222,6 +231,15 @@ export function registerRequestRoutes(app: FastifyInstance): void {
     if (!row || row.revoked === 1) {
       return { code: 404, error: "this request is no longer accepting files" };
     }
+    // Disabling an account must stop its public links too, not only its
+    // own sessions.
+    const owner = await app.db.get<{ disabled: number }>(
+      "SELECT disabled FROM users WHERE id = ?",
+      row.user_id,
+    );
+    if (!owner || owner.disabled === 1) {
+      return { code: 404, error: "this request is no longer accepting files" };
+    }
     if (row.expires_at !== null && row.expires_at <= Date.now()) {
       return { code: 410, error: "this request has expired" };
     }
@@ -254,6 +272,15 @@ export function registerRequestRoutes(app: FastifyInstance): void {
       return reply.code(loaded.code).send({ error: loaded.error });
     }
     const body = createUploadSchema.parse(request.body);
+    const pending = await app.db.get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM request_uploads WHERE request_token = ? AND uploaded = 0",
+      token,
+    );
+    if ((pending?.count ?? 0) >= MAX_PENDING_UPLOADS) {
+      return reply
+        .code(429)
+        .send({ error: "too many uploads in flight; finish or retry shortly" });
+    }
     const id = randomUUID();
     await app.db.run(
       `INSERT INTO request_uploads (id, request_token, user_id, sealed_key, encrypted_meta, created_at)
