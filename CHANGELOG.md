@@ -3,6 +3,17 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.21.0] - 2026-07-29
+
+### Changed
+- `ENGRAMER_TRUSTED_PROXIES` replaces `ENGRAMER_TRUSTED_PROXY_HOPS`. It
+  accepts a comma-separated allowlist of proxy addresses and CIDR ranges
+  (preferred, since it keeps working when a proxy layer is added or
+  removed) or a plain hop count. Forwarded client addresses are only
+  believed when they were set by a listed proxy, so an arbitrary caller
+  cannot spoof its address to the failure throttle. Unset means the
+  server is directly exposed and forwarded headers are ignored.
+
 ## [0.20.0] - 2026-07-29
 
 ### Security
