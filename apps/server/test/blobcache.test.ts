@@ -127,6 +127,11 @@ describe("disk cached blob store", () => {
       await cache.get("b.thumb");
       await cache.get("a.thumb"); // a is now most recently used
       await cache.get("c.thumb"); // 300 bytes cached > 250: b (LRU) evicted
+      // Eviction unlinks lazily (evicted bytes are never stale, so the file
+      // removal does not need to block the read); wait for it to land.
+      for (let i = 0; i < 50 && readdirSync(dir).length > 2; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
       const cached = readdirSync(dir).sort();
       expect(cached).toEqual(["a.thumb", "c.thumb"]);
       backing.blobs.delete("a.thumb"); // prove the next read is a cache hit

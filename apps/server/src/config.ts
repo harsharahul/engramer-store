@@ -33,6 +33,8 @@ export interface ServerConfig {
   databaseUrl: string | null;
   /** Who may create accounts: open (default), invite, or closed. */
   registration: "open" | "invite" | "closed";
+  /** Extra browser origins allowed to call the API; empty means same-origin only. */
+  corsOrigins: string[];
   /** Lowercased emails that are administrators and may always register. */
   adminEmails: string[];
   /** When set, ciphertext blobs go to an S3-compatible object store. */
@@ -84,6 +86,10 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
         ? overrides.databaseUrl
         : (process.env.ENGRAMER_DATABASE_URL ?? null),
     registration: registrationMode(process.env.ENGRAMER_REGISTRATION),
+    corsOrigins: (process.env.ENGRAMER_CORS_ORIGINS ?? "")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean),
     adminEmails: (process.env.ENGRAMER_ADMIN_EMAILS ?? "")
       .split(",")
       .map((email) => email.trim().toLowerCase())
