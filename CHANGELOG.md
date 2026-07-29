@@ -3,6 +3,35 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.20.0] - 2026-07-29
+
+### Security
+- A document can no longer carry script into the app. The .docx renderer
+  places "alternative content" parts in a same-origin frame, which a
+  document arriving from a stranger through a file request could use to
+  reach the keys held in the page; the feature is now off.
+- Two-factor enrolment can no longer be used to switch two-factor off. A
+  session alone could previously call setup and silently clear an enabled
+  second factor; that now requires the disable route and a current code.
+- Password-hashing parameters have a hard floor on both sides. A hostile
+  server could otherwise return trivial parameters before login, watch a
+  cheap derivation, and attack the password offline; parameters below the
+  OWASP minimum are refused, and local memory pressure now fails rather
+  than silently recording weaker parameters forever.
+- Share-link password attempts are throttled with the same escalating
+  backoff as sign-in, and anonymous file-request uploads are bounded in
+  both field size and rows in flight.
+- Disabling an account now also stops its share links and file requests,
+  not only its sessions.
+- Recovery codes carry 128 bits of entropy instead of 40.
+- Invite links carry their token in the URL fragment, so it never reaches
+  a server log, and it is cleared from the address bar once read.
+- `ENGRAMER_TRUSTED_PROXY_HOPS` makes the failure throttle see real client
+  addresses behind a reverse proxy; without it every request shares the
+  proxy's address, which turns a per-account throttle into a way for a
+  stranger to lock someone out.
+- Recent searches, which are plaintext, are cleared on sign-out.
+
 ## [0.19.0] - 2026-07-29
 
 ### Security
