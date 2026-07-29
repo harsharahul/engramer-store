@@ -18,6 +18,12 @@
           }
           document.documentElement.dataset.theme = t;
           document.documentElement.dataset.accent = localStorage.getItem("engram-accent") || "ocean";
+          if (t === "light") {
+            var meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) {
+              meta.setAttribute("content", "#eff3fa");
+            }
+          }
         } catch (e) {
           document.documentElement.dataset.theme = "dark";
           document.documentElement.dataset.accent = "ocean";

@@ -3,6 +3,31 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.22.0] - 2026-07-29
+
+### Added
+- The app is now usable end to end on a phone. A bottom tab bar carries
+  the primary views (Files, Recent, Favorites) plus a center add button
+  whose action sheet covers uploading files, taking a photo with the
+  device camera, uploading a folder, and creating folders and notes. The
+  full sidebar (categories, appearance, image text reading, usage, and
+  account actions) opens as a drawer behind the More tab.
+- File and folder actions are reachable on touch: a long-press or the new
+  per-item actions button opens the menu, which renders as a bottom action
+  sheet on phones. The details inspector, dialogs, and previews open as
+  bottom sheets or full-screen views sized to the safe areas of notched
+  devices.
+- Touch ergonomics: larger tap targets on coarse pointers, inputs sized to
+  avoid focus zoom on iOS, a denser two-column grid, and list columns
+  trimmed to fit narrow screens.
+- The browser theme color now follows the day and night setting.
+
+### Changed
+- Buttons across the app share a fixed control height with an explicit
+  line height, crisper icon sizing, a visible keyboard focus ring, and a
+  cleaner primary style: the label shadow and sheen gradient are gone in
+  favor of a uniform accent fill with a crisp edge.
+
 ## [0.21.0] - 2026-07-29
 
 ### Changed

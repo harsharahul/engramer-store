@@ -20,6 +20,8 @@ import {
 } from "../theme";
 import { searchFiles, highlightParts, type SearchHit } from "../search";
 import { collectDropped, fromDirectoryInput } from "../uploader";
+import { MOBILE_QUERY, useMediaQuery } from "../media";
+import { useLongPress } from "../longpress";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
 import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
@@ -50,6 +52,7 @@ import {
   AudioGlyph,
   BookGlyph,
   BoxGlyph,
+  CameraGlyph,
   ClockGlyph,
   CodeGlyph,
   DocGlyph,
@@ -65,6 +68,7 @@ import {
   LayoutListGlyph,
   LinkGlyph,
   LockGlyph,
+  MenuGlyph,
   MonitorGlyph,
   MoonGlyph,
   MoveGlyph,
@@ -176,7 +180,14 @@ export function Vault() {
   const [sort, setSort] = useState<SortState>(() => loadPref("engramer-sort", { key: "name", dir: 1 }));
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
   const [detailsOpen, setDetailsOpen] = useState(() => loadPref("engramer-details", true));
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [detailsSheet, setDetailsSheet] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number;
+    y: number;
+    items: MenuItem[];
+    title?: string;
+  } | null>(null);
   const [moveIds, setMoveIds] = useState<string[] | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
@@ -199,10 +210,12 @@ export function Vault() {
   const [searchCursor, setSearchCursor] = useState(0);
   const [recentSearches, setRecentSearches] = useState<string[]>(() => loadRecentSearches());
   const [ocrOn, setOcrOn] = useState(() => ocrEnabled());
+  const isMobile = useMediaQuery(MOBILE_QUERY);
   const dragDepth = useRef(0);
   const lastSelected = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -391,6 +404,8 @@ export function Vault() {
     lastSelected.current = id;
     setDetailsOpen(true);
     persist("engramer-details", true);
+    // On phones the inspector is an on-demand bottom sheet, not a pane.
+    setDetailsSheet(true);
   };
 
   const uploadTo = useCallback(
@@ -455,8 +470,7 @@ export function Vault() {
     },
   ];
 
-  const openFileMenu = (id: string, event: React.MouseEvent) => {
-    event.preventDefault();
+  const openFileMenu = (id: string, x: number, y: number) => {
     const file = store.files.get(id);
     if (!file) {
       return;
@@ -465,14 +479,15 @@ export function Vault() {
       setSelection(new Set([id]));
       lastSelected.current = id;
     }
-    setCtxMenu({ x: event.clientX, y: event.clientY, items: fileMenuItems(file) });
+    // Selecting for a menu must not resurface the phone details sheet.
+    setDetailsSheet(false);
+    setCtxMenu({ x, y, items: fileMenuItems(file) });
   };
 
-  const openFolderMenu = (folderId: string, event: React.MouseEvent) => {
-    event.preventDefault();
+  const openFolderMenu = (folderId: string, x: number, y: number) => {
     setCtxMenu({
-      x: event.clientX,
-      y: event.clientY,
+      x,
+      y,
       items: [
         { id: "open", label: "Open", run: () => setView({ kind: "folder", id: folderId }) },
         { id: "rename", label: "Rename", icon: <PencilGlyph size={13} />, run: () => setRenameFolderId(folderId) },
@@ -528,13 +543,15 @@ export function Vault() {
       } else if (event.key === "/" && !typing && !paletteOpen) {
         event.preventDefault();
         searchInput.current?.focus();
+      } else if (event.key === "Escape" && drawerOpen) {
+        setDrawerOpen(false);
       } else if (event.key === "Escape" && !typing && selection.size > 0 && !previewId && !editorId && !ctxMenu) {
         clearSelection();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [paletteOpen, selection, previewId, editorId, ctxMenu, clearSelection]);
+  }, [paletteOpen, selection, previewId, editorId, ctxMenu, drawerOpen, clearSelection]);
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
@@ -576,6 +593,28 @@ export function Vault() {
   const lock = () => {
     clearThumbnailCache();
     store.logout();
+  };
+
+  // The tab bar's center [+]: one sheet absorbs every create/upload action
+  // that the phone topbar has no room for.
+  const openAddSheet = () => {
+    setCtxMenu({
+      x: 0,
+      y: 0,
+      title: "Add to your vault",
+      items: [
+        { id: "upload", label: "Upload files", icon: <UploadGlyph size={15} />, run: () => fileInput.current?.click() },
+        { id: "camera", label: "Take photo", icon: <CameraGlyph size={15} />, run: () => cameraInput.current?.click() },
+        {
+          id: "tree",
+          label: "Upload folder",
+          icon: <FolderGlyph size={15} />,
+          run: () => folderInput.current?.click(),
+        },
+        { id: "new-folder", label: "New folder", icon: <PlusGlyph size={15} />, run: () => setNewFolderOpen(true) },
+        { id: "new-note", label: "New note", icon: <NoteGlyph size={15} />, run: () => setNewNoteOpen(true) },
+      ],
+    });
   };
 
   const paletteActions = useMemo<PaletteAction[]>(
@@ -680,6 +719,7 @@ export function Vault() {
       className={`nav-item${active && !searching ? " active" : ""}`}
       onClick={() => {
         setQuery("");
+        setDrawerOpen(false);
         onClick();
       }}
     >
@@ -690,7 +730,7 @@ export function Vault() {
 
   return (
     <div
-      className={`frame${dragging ? " dropzone-active" : ""}${detailsOpen ? " with-details" : ""}`}
+      className={`frame${dragging ? " dropzone-active" : ""}${detailsOpen ? " with-details" : ""}${drawerOpen ? " drawer" : ""}`}
       onDragEnter={(e) => {
         if (e.dataTransfer.types.includes("Files") && !e.dataTransfer.types.includes(DRAG_TYPE)) {
           e.preventDefault();
@@ -707,6 +747,7 @@ export function Vault() {
       onDragOver={(e) => e.preventDefault()}
       onDrop={onOsDrop}
     >
+      {drawerOpen && <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} />}
       <aside className="sidebar">
         <div className="brand">
           <BrandMark size={26} />
@@ -740,6 +781,7 @@ export function Vault() {
                     }`}
                     onClick={() => {
                       setQuery("");
+                      setDrawerOpen(false);
                       setView({ kind: "category", name });
                     }}
                   >
@@ -815,7 +857,14 @@ export function Vault() {
         <div className="account-row">
           <span title={store.session?.email}>{store.session?.email}</span>
           {store.isAdmin && (
-            <button className="icon-btn" title="Server administration" onClick={() => setAdminOpen(true)}>
+            <button
+              className="icon-btn"
+              title="Server administration"
+              onClick={() => {
+                setDrawerOpen(false);
+                setAdminOpen(true);
+              }}
+            >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6l8-3z" />
               </svg>
@@ -824,7 +873,10 @@ export function Vault() {
           <button
             className="icon-btn"
             title="Two-factor authentication"
-            onClick={() => setSecurityOpen(true)}
+            onClick={() => {
+              setDrawerOpen(false);
+              setSecurityOpen(true);
+            }}
           >
             <KeyGlyph size={14} />
           </button>
@@ -842,7 +894,7 @@ export function Vault() {
             </span>
             <input
               ref={searchInput}
-              placeholder="Search names, contents, tags, folders   /"
+              placeholder={isMobile ? "Search your vault" : "Search names, contents, tags, folders   /"}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onFocus={() => {
@@ -964,6 +1016,17 @@ export function Vault() {
               e.target.value = "";
             }}
           />
+          <input
+            ref={cameraInput}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+            onChange={(e) => {
+              uploadTo([...(e.target.files ?? [])]);
+              e.target.value = "";
+            }}
+          />
         </div>
 
         <div className="viewbar">
@@ -1066,7 +1129,7 @@ export function Vault() {
               selection={selection}
               onSelect={select}
               onOpen={openFile}
-              onContextMenu={openFileMenu}
+              onMenu={openFileMenu}
             />
           ) : view.kind === "shared" ? (
             <SharedView onToast={showToast} />
@@ -1096,7 +1159,7 @@ export function Vault() {
                       count={folderCounts.get(folder.id) ?? 0}
                       index={i}
                       onOpen={() => setView({ kind: "folder", id: folder.id })}
-                      onContextMenu={(e) => openFolderMenu(folder.id, e)}
+                      onMenu={(x, y) => openFolderMenu(folder.id, x, y)}
                       onDropFiles={(e) => dropOnFolder(folder.id, e)}
                     />
                   ))}
@@ -1109,7 +1172,7 @@ export function Vault() {
                 onSort={onSort}
                 onSelect={select}
                 onOpen={openFile}
-                onContextMenu={openFileMenu}
+                onMenu={openFileMenu}
                 onDragStart={startFileDrag}
               />
             </>
@@ -1123,7 +1186,7 @@ export function Vault() {
                     count={folderCounts.get(folder.id) ?? 0}
                     index={i}
                     onOpen={() => setView({ kind: "folder", id: folder.id })}
-                    onContextMenu={(e) => openFolderMenu(folder.id, e)}
+                    onMenu={(x, y) => openFolderMenu(folder.id, x, y)}
                     onDropFiles={(e) => dropOnFolder(folder.id, e)}
                   />
                 ))}
@@ -1136,7 +1199,7 @@ export function Vault() {
                   fresh={freshIds.has(file.id)}
                   onSelect={(e) => select(file.id, e)}
                   onOpen={() => openFile(file.id)}
-                  onContextMenu={(e) => openFileMenu(file.id, e)}
+                  onMenu={(x, y) => openFileMenu(file.id, x, y)}
                   onDragStart={(e) => startFileDrag(file.id, e)}
                 />
               ))}
@@ -1145,27 +1208,33 @@ export function Vault() {
         </div>
       </main>
 
-      {detailsOpen && view.kind !== "trash" && view.kind !== "shared" && (
-        <DetailsPanel
-          file={selectedFile}
-          selectionCount={selection.size}
-          onOpen={openFile}
-          onEdit={(id) => setEditorId(id)}
-          onDownload={download}
-          onShare={(id) => setShareId(id)}
-          onRename={(id) => setRenameFileId(id)}
-          onTrash={(id) => {
-            void store.trashFile(id);
-            clearSelection();
-          }}
-          onTagClick={searchTag}
-          onToast={showToast}
-          onClose={() => {
-            setDetailsOpen(false);
-            persist("engramer-details", false);
-          }}
-        />
-      )}
+      {(isMobile ? detailsSheet && selectedFile !== null : detailsOpen) &&
+        view.kind !== "trash" &&
+        view.kind !== "shared" && (
+          <DetailsPanel
+            file={selectedFile}
+            selectionCount={selection.size}
+            onOpen={openFile}
+            onEdit={(id) => setEditorId(id)}
+            onDownload={download}
+            onShare={(id) => setShareId(id)}
+            onRename={(id) => setRenameFileId(id)}
+            onTrash={(id) => {
+              void store.trashFile(id);
+              clearSelection();
+            }}
+            onTagClick={searchTag}
+            onToast={showToast}
+            onClose={() => {
+              if (isMobile) {
+                setDetailsSheet(false);
+                return;
+              }
+              setDetailsOpen(false);
+              persist("engramer-details", false);
+            }}
+          />
+        )}
 
       {selection.size > 1 && (
         <div className="bulk-bar">
@@ -1199,6 +1268,49 @@ export function Vault() {
           </button>
         </div>
       )}
+
+      <nav className="tabbar">
+        <button
+          className={`tab${view.kind === "folder" && !drawerOpen ? " active" : ""}`}
+          onClick={() => {
+            setQuery("");
+            setDrawerOpen(false);
+            setView({ kind: "folder", id: null });
+          }}
+        >
+          <FolderGlyph size={19} />
+          <span>Files</span>
+        </button>
+        <button
+          className={`tab${view.kind === "recent" && !drawerOpen ? " active" : ""}`}
+          onClick={() => {
+            setQuery("");
+            setDrawerOpen(false);
+            setView({ kind: "recent" });
+          }}
+        >
+          <ClockGlyph size={19} />
+          <span>Recent</span>
+        </button>
+        <button className="tab tab-add" aria-label="Add" onClick={openAddSheet}>
+          <PlusGlyph size={22} />
+        </button>
+        <button
+          className={`tab${view.kind === "favorites" && !drawerOpen ? " active" : ""}`}
+          onClick={() => {
+            setQuery("");
+            setDrawerOpen(false);
+            setView({ kind: "favorites" });
+          }}
+        >
+          <StarGlyph size={19} />
+          <span>Favorites</span>
+        </button>
+        <button className={`tab${drawerOpen ? " active" : ""}`} onClick={() => setDrawerOpen(true)}>
+          <MenuGlyph size={19} />
+          <span>More</span>
+        </button>
+      </nav>
 
       <UploadTray />
       {store.reveal && (
@@ -1500,6 +1612,62 @@ function ResultThumb(props: { file: FileEntry }) {
   return <span className="row-glyph">{extension(props.file.name) || "FILE"}</span>;
 }
 
+function ResultRow(props: {
+  hit: SearchHit;
+  path: string | null;
+  index: number;
+  cursor: boolean;
+  selected: boolean;
+  onSelect: (event: React.MouseEvent) => void;
+  onOpen: () => void;
+  onMenu: (x: number, y: number) => void;
+}) {
+  const { hit } = props;
+  const longPress = useLongPress(props.onMenu);
+  const coarse = window.matchMedia("(pointer: coarse)").matches;
+
+  return (
+    <div
+      className={`row result${props.selected ? " selected" : ""}${props.cursor ? " cursor" : ""}`}
+      data-cursor={props.cursor}
+      style={{ "--i": Math.min(props.index, 20) } as CSSProperties}
+      onClick={(e) => (coarse ? props.onOpen() : props.onSelect(e))}
+      onDoubleClick={props.onOpen}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        props.onMenu(e.clientX, e.clientY);
+      }}
+      {...longPress}
+    >
+      <ResultThumb file={hit.file} />
+      <div className="row-main">
+        <div className="name">
+          <Highlighted value={hit.file.name} ranges={hit.nameRanges} />
+        </div>
+        <div className="result-where">
+          {props.path ? (
+            <span className={hit.matchedFolder ? "result-folder hit" : "result-folder"}>
+              <FolderGlyph size={11} /> {props.path}
+            </span>
+          ) : (
+            <span className="result-folder">
+              <FolderGlyph size={11} /> All files
+            </span>
+          )}
+          <span className="result-date">{formatDate(hit.file.mtime)}</span>
+        </div>
+        {hit.matchedText && (
+          <div className="snippet">
+            <Highlighted value={hit.matchedText} ranges={hit.textRanges} />
+          </div>
+        )}
+      </div>
+      {hit.file.category && <span className="row-tag">{hit.file.category}</span>}
+      <span className="row-meta">{formatBytes(hit.file.size)}</span>
+    </div>
+  );
+}
+
 function SearchResults(props: {
   hits: SearchHit[];
   folders: ReadonlyMap<string, FolderEntry>;
@@ -1507,7 +1675,7 @@ function SearchResults(props: {
   selection: ReadonlySet<string>;
   onSelect: (id: string, event: React.MouseEvent) => void;
   onOpen: (id: string) => void;
-  onContextMenu: (id: string, event: React.MouseEvent) => void;
+  onMenu: (id: string, x: number, y: number) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -1531,48 +1699,19 @@ function SearchResults(props: {
   }
   return (
     <div className="rows" ref={listRef}>
-      {props.hits.map((hit, i) => {
-        const path = folderPath(hit.file.folderId, props.folders);
-        return (
-          <div
-            key={hit.file.id}
-            className={`row result${props.selection.has(hit.file.id) ? " selected" : ""}${
-              i === props.cursor ? " cursor" : ""
-            }`}
-            data-cursor={i === props.cursor}
-            style={{ "--i": Math.min(i, 20) } as CSSProperties}
-            onClick={(e) => props.onSelect(hit.file.id, e)}
-            onDoubleClick={() => props.onOpen(hit.file.id)}
-            onContextMenu={(e) => props.onContextMenu(hit.file.id, e)}
-          >
-            <ResultThumb file={hit.file} />
-            <div className="row-main">
-              <div className="name">
-                <Highlighted value={hit.file.name} ranges={hit.nameRanges} />
-              </div>
-              <div className="result-where">
-                {path ? (
-                  <span className={hit.matchedFolder ? "result-folder hit" : "result-folder"}>
-                    <FolderGlyph size={11} /> {path}
-                  </span>
-                ) : (
-                  <span className="result-folder">
-                    <FolderGlyph size={11} /> All files
-                  </span>
-                )}
-                <span className="result-date">{formatDate(hit.file.mtime)}</span>
-              </div>
-              {hit.matchedText && (
-                <div className="snippet">
-                  <Highlighted value={hit.matchedText} ranges={hit.textRanges} />
-                </div>
-              )}
-            </div>
-            {hit.file.category && <span className="row-tag">{hit.file.category}</span>}
-            <span className="row-meta">{formatBytes(hit.file.size)}</span>
-          </div>
-        );
-      })}
+      {props.hits.map((hit, i) => (
+        <ResultRow
+          key={hit.file.id}
+          hit={hit}
+          path={folderPath(hit.file.folderId, props.folders)}
+          index={i}
+          cursor={i === props.cursor}
+          selected={props.selection.has(hit.file.id)}
+          onSelect={(e) => props.onSelect(hit.file.id, e)}
+          onOpen={() => props.onOpen(hit.file.id)}
+          onMenu={(x, y) => props.onMenu(hit.file.id, x, y)}
+        />
+      ))}
     </div>
   );
 }

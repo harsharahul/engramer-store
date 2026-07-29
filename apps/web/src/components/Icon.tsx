@@ -312,3 +312,24 @@ export const MoonGlyph = ({ size = 16 }: IconProps) => (
     <path d="M19 14.5A8 8 0 0 1 9.5 5a7 7 0 1 0 9.5 9.5Z" />
   </Svg>
 );
+
+export const CameraGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <path d="M4.5 8h3l1.5-2.5h6L16.5 8h3A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-8A1.5 1.5 0 0 1 4.5 8Z" />
+    <circle cx="12" cy="13" r="3.4" />
+  </Svg>
+);
+
+export const MenuGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <path d="M4 7h16M4 12h16M4 17h16" />
+  </Svg>
+);
+
+export const DotsGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <circle cx="5.5" cy="12" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="18.5" cy="12" r="1.2" fill="currentColor" stroke="none" />
+  </Svg>
+);

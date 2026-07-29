@@ -27,6 +27,13 @@ export const ACCENTS: Accent[] = [
 const THEME_KEY = "engram-theme";
 const ACCENT_KEY = "engram-accent";
 
+/* Matches --ink-0 in styles.css for each mode; keeps the browser chrome and
+   installed-app title bar on the app's background color. */
+const THEME_COLORS: Record<ThemeMode, string> = {
+  dark: "#0a0e1a",
+  light: "#eff3fa",
+};
+
 export function currentTheme(): ThemeMode {
   return document.documentElement.dataset.theme === "light" ? "light" : "dark";
 }
@@ -37,6 +44,7 @@ export function currentAccent(): string {
 
 export function applyTheme(mode: ThemeMode): void {
   document.documentElement.dataset.theme = mode;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME_COLORS[mode]);
   try {
     localStorage.setItem(THEME_KEY, mode);
   } catch {
