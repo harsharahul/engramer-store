@@ -6,6 +6,7 @@ import { BlobTooLargeError, blobKey, type BlobKind } from "../blobs.js";
 import {
   nextSeq,
   storageUsed,
+  userQuota,
   type FileRequestRow,
   type FileRow,
   type RequestUploadRow,
@@ -238,7 +239,8 @@ export function registerRequestRoutes(app: FastifyInstance): void {
       loaded.user_id,
     ))!;
     const { publicKey } = JSON.parse(owner.key_attributes) as { publicKey: string };
-    const quotaRoom = app.config.quotaBytes - (await storageUsed(app.db, loaded.user_id));
+    const quota = await userQuota(app.db, loaded.user_id, app.config.quotaBytes);
+    const quotaRoom = quota - (await storageUsed(app.db, loaded.user_id));
     return {
       publicKey,
       maxBytes: Math.max(0, Math.min(app.config.maxBlobBytes, quotaRoom)),
@@ -285,7 +287,8 @@ export function registerRequestRoutes(app: FastifyInstance): void {
     if (!upload || (kind === "data" && upload.uploaded === 1)) {
       return reply.code(404).send({ error: "upload not found" });
     }
-    const quotaRoom = app.config.quotaBytes - (await storageUsed(app.db, loaded.user_id));
+    const quota = await userQuota(app.db, loaded.user_id, app.config.quotaBytes);
+    const quotaRoom = quota - (await storageUsed(app.db, loaded.user_id));
     const maxBytes = Math.min(app.config.maxBlobBytes, quotaRoom);
     const declared = Number(request.headers["content-length"] ?? 0);
     if (maxBytes <= 0 || declared > maxBytes) {

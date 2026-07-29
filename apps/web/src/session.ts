@@ -26,13 +26,17 @@ export interface Session {
  */
 const SESSION_KEY = "engramer-session";
 
-export async function registerAccount(email: string, password: string): Promise<{
+export async function registerAccount(
+  email: string,
+  password: string,
+  inviteToken?: string,
+): Promise<{
   session: Session;
   recoveryKeyHex: string;
 }> {
   await ready();
   const account = generateAccountKeys(password);
-  const { token } = await api.register(email, account.loginKey, account.keyAttributes);
+  const { token } = await api.register(email, account.loginKey, account.keyAttributes, inviteToken);
   const session: Session = {
     email,
     token,

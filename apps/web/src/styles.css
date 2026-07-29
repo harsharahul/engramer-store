@@ -2874,3 +2874,55 @@ button.tag:hover {
 .accent-dot.on {
   box-shadow: 0 0 0 2px var(--ink-1), 0 0 0 3.5px var(--accent);
 }
+
+/* ----- server administration panel ----- */
+.tab-row {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+.admin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.admin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.admin-row-main {
+  min-width: 0;
+}
+.admin-row-sub {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+.admin-badges {
+  margin-left: 8px;
+}
+.admin-row-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.badge-warn {
+  color: #b45309;
+  border-color: color-mix(in srgb, #b45309 45%, transparent);
+}
+.quota-input {
+  width: 64px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+}

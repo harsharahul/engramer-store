@@ -106,6 +106,7 @@ interface StoreState {
   folders: Map<string, FolderEntry>;
   files: Map<string, FileEntry>;
   usage: Usage | null;
+  isAdmin: boolean;
   uploads: UploadItem[];
   reveal: Reveal | null;
   ocrProgress: OcrProgress | null;
@@ -337,6 +338,7 @@ export const useStore = create<StoreState>((set, get) => {
     folders: new Map(),
     files: new Map(),
     usage: null,
+    isAdmin: false,
     uploads: [],
     reveal: null,
     ocrProgress: null,
@@ -471,7 +473,10 @@ export const useStore = create<StoreState>((set, get) => {
 
     refreshUsage: async () => {
       const user = await api.user();
-      set({ usage: { usedBytes: user.usedBytes, quotaBytes: user.quotaBytes } });
+      set({
+        usage: { usedBytes: user.usedBytes, quotaBytes: user.quotaBytes },
+        isAdmin: user.isAdmin === true,
+      });
     },
 
     createFolder: async (name, parentId) => {
