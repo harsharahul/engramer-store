@@ -1,8 +1,14 @@
+import type { Db } from "./db.js";
+
 /**
- * In-memory failure throttle for authentication endpoints. After a burst of
- * failures the key (address plus claimed identity) must wait, with the wait
- * doubling per further failure up to a cap. Success clears the slate. State
- * is per-process, which matches the single-binary deployment model.
+ * Failure throttle for authentication endpoints, backed by the metadata
+ * database so every server replica sees the same counters: N pods must not
+ * hand an attacker N times the failure budget. After a burst of failures the
+ * key (address plus claimed identity) must wait, with the wait doubling per
+ * further failure up to a cap. Success clears the slate.
+ *
+ * On embedded SQLite this behaves exactly like the previous in-process
+ * throttle; the table is tiny and rows are pruned as they go stale.
  */
 
 const FREE_FAILURES = 5;
@@ -10,51 +16,64 @@ const BASE_DELAY_MS = 2_000;
 const MAX_DELAY_MS = 15 * 60_000;
 const FORGET_AFTER_MS = 60 * 60_000;
 
-interface Entry {
+interface ThrottleRow {
   failures: number;
-  blockedUntil: number;
-  lastFailure: number;
+  blocked_until: number;
+  last_failure: number;
 }
 
 export class AuthThrottle {
-  private entries = new Map<string, Entry>();
+  constructor(private readonly db: Db) {}
 
-  check(key: string, now = Date.now()): { allowed: boolean; retryAfterMs: number } {
-    const entry = this.entries.get(key);
-    if (!entry) {
+  async check(key: string, now = Date.now()): Promise<{ allowed: boolean; retryAfterMs: number }> {
+    const row = await this.db.get<ThrottleRow>(
+      "SELECT failures, blocked_until, last_failure FROM auth_throttle WHERE key = ?",
+      key,
+    );
+    if (!row) {
       return { allowed: true, retryAfterMs: 0 };
     }
-    if (now - entry.lastFailure > FORGET_AFTER_MS) {
-      this.entries.delete(key);
+    if (now - row.last_failure > FORGET_AFTER_MS) {
+      await this.db.run("DELETE FROM auth_throttle WHERE key = ?", key);
       return { allowed: true, retryAfterMs: 0 };
     }
-    if (entry.blockedUntil > now) {
-      return { allowed: false, retryAfterMs: entry.blockedUntil - now };
+    if (row.blocked_until > now) {
+      return { allowed: false, retryAfterMs: row.blocked_until - now };
     }
     return { allowed: true, retryAfterMs: 0 };
   }
 
-  fail(key: string, now = Date.now()): void {
-    const entry = this.entries.get(key) ?? { failures: 0, blockedUntil: 0, lastFailure: now };
-    entry.failures += 1;
-    entry.lastFailure = now;
-    if (entry.failures > FREE_FAILURES) {
-      const exponent = entry.failures - FREE_FAILURES - 1;
-      entry.blockedUntil = now + Math.min(MAX_DELAY_MS, BASE_DELAY_MS * 2 ** exponent);
+  async fail(key: string, now = Date.now()): Promise<void> {
+    // Single-statement upsert so concurrent failures across replicas count
+    // correctly; the block window is derived from the returned count.
+    const row = await this.db.get<{ failures: number }>(
+      `INSERT INTO auth_throttle (key, failures, blocked_until, last_failure)
+       VALUES (?, 1, 0, ?)
+       ON CONFLICT (key) DO UPDATE SET
+         failures = auth_throttle.failures + 1,
+         last_failure = ?
+       RETURNING failures`,
+      key,
+      now,
+      now,
+    );
+    const failures = row!.failures;
+    if (failures > FREE_FAILURES) {
+      const exponent = failures - FREE_FAILURES - 1;
+      const blockedUntil = now + Math.min(MAX_DELAY_MS, BASE_DELAY_MS * 2 ** exponent);
+      await this.db.run(
+        "UPDATE auth_throttle SET blocked_until = ? WHERE key = ?",
+        blockedUntil,
+        key,
+      );
     }
-    this.entries.set(key, entry);
-    // Bound the table; oldest entries are the least interesting.
-    if (this.entries.size > 10_000) {
-      const oldest = [...this.entries.entries()].sort(
-        (a, b) => a[1].lastFailure - b[1].lastFailure,
-      )[0];
-      if (oldest) {
-        this.entries.delete(oldest[0]);
-      }
+    // Opportunistic prune keeps the table bounded without a scheduler.
+    if (failures % 25 === 0) {
+      await this.db.run("DELETE FROM auth_throttle WHERE last_failure < ?", now - FORGET_AFTER_MS);
     }
   }
 
-  succeed(key: string): void {
-    this.entries.delete(key);
+  async succeed(key: string): Promise<void> {
+    await this.db.run("DELETE FROM auth_throttle WHERE key = ?", key);
   }
 }

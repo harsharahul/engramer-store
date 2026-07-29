@@ -3,7 +3,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Readable } from "node:stream";
 import { z } from "zod";
 import { BlobTooLargeError, blobKey, type BlobKind } from "../blobs.js";
-import type { FileRow, FileVersionRow, FolderRow } from "../db.js";
+import {
+  nextSeq,
+  storageUsed,
+  type Db,
+  type FileRow,
+  type FileVersionRow,
+  type FolderRow,
+} from "../db.js";
 
 /** A concurrent writer advanced the file while this request streamed in. */
 class GenerationConflictError extends Error {
@@ -70,41 +77,42 @@ export function fileToDto(row: FileRow) {
 export function registerStorageRoutes(app: FastifyInstance): void {
   const auth = { preHandler: [app.authenticate] };
 
-  const getOwnFolder = (id: string, uid: number): FolderRow | undefined =>
-    app.db
-      .prepare("SELECT * FROM folders WHERE id = ? AND user_id = ? AND deleted = 0")
-      .get(id, uid) as FolderRow | undefined;
+  const getOwnFolder = (id: string, uid: number): Promise<FolderRow | undefined> =>
+    app.db.get<FolderRow>(
+      "SELECT * FROM folders WHERE id = ? AND user_id = ? AND deleted = 0",
+      id,
+      uid,
+    );
 
-  const getOwnFile = (id: string, uid: number): FileRow | undefined =>
-    app.db
-      .prepare("SELECT * FROM files WHERE id = ? AND user_id = ? AND deleted = 0")
-      .get(id, uid) as FileRow | undefined;
+  const getOwnFile = (id: string, uid: number): Promise<FileRow | undefined> =>
+    app.db.get<FileRow>(
+      "SELECT * FROM files WHERE id = ? AND user_id = ? AND deleted = 0",
+      id,
+      uid,
+    );
 
   app.post("/api/folders", auth, async (request, reply) => {
     const body = createFolderSchema.parse(request.body);
     const uid = request.user.uid;
-    if (body.parentId && !getOwnFolder(body.parentId, uid)) {
+    if (body.parentId && !(await getOwnFolder(body.parentId, uid))) {
       return reply.code(404).send({ error: "parent folder not found" });
     }
     const now = Date.now();
     const id = randomUUID();
-    const seq = app.nextSeq(uid);
-    app.db
-      .prepare(
-        `INSERT INTO folders (id, user_id, parent_id, encrypted_key, encrypted_meta, update_seq, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        uid,
-        body.parentId ?? null,
-        JSON.stringify(body.encryptedKey),
-        JSON.stringify(body.encryptedMeta),
-        seq,
-        now,
-        now,
-      );
-    const row = app.db.prepare("SELECT * FROM folders WHERE id = ?").get(id) as FolderRow;
+    const seq = await nextSeq(app.db, uid);
+    await app.db.run(
+      `INSERT INTO folders (id, user_id, parent_id, encrypted_key, encrypted_meta, update_seq, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      uid,
+      body.parentId ?? null,
+      JSON.stringify(body.encryptedKey),
+      JSON.stringify(body.encryptedMeta),
+      seq,
+      now,
+      now,
+    );
+    const row = (await app.db.get<FolderRow>("SELECT * FROM folders WHERE id = ?", id))!;
     return reply.code(201).send(folderToDto(row));
   });
 
@@ -112,35 +120,32 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     const { id } = request.params as { id: string };
     const uid = request.user.uid;
     const body = patchFolderSchema.parse(request.body);
-    const folder = getOwnFolder(id, uid);
+    const folder = await getOwnFolder(id, uid);
     if (!folder) {
       return reply.code(404).send({ error: "folder not found" });
     }
     if (body.parentId !== undefined && body.parentId !== null) {
-      if (body.parentId === id || !getOwnFolder(body.parentId, uid)) {
+      if (body.parentId === id || !(await getOwnFolder(body.parentId, uid))) {
         return reply.code(400).send({ error: "invalid destination folder" });
       }
-      if (isDescendant(app, uid, body.parentId, id)) {
+      if (await isDescendant(app, uid, body.parentId, id)) {
         return reply.code(400).send({ error: "cannot move a folder into its own subtree" });
       }
     }
-    const seq = app.nextSeq(uid);
-    app.db
-      .prepare(
-        `UPDATE folders SET
-           parent_id = COALESCE(?, parent_id),
-           encrypted_meta = COALESCE(?, encrypted_meta),
-           update_seq = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(
-        body.parentId !== undefined ? body.parentId : null,
-        body.encryptedMeta ? JSON.stringify(body.encryptedMeta) : null,
-        seq,
-        Date.now(),
-        id,
-      );
-    const row = app.db.prepare("SELECT * FROM folders WHERE id = ?").get(id) as FolderRow;
+    const seq = await nextSeq(app.db, uid);
+    await app.db.run(
+      `UPDATE folders SET
+         parent_id = COALESCE(?, parent_id),
+         encrypted_meta = COALESCE(?, encrypted_meta),
+         update_seq = ?, updated_at = ?
+       WHERE id = ?`,
+      body.parentId !== undefined ? body.parentId : null,
+      body.encryptedMeta ? JSON.stringify(body.encryptedMeta) : null,
+      seq,
+      Date.now(),
+      id,
+    );
+    const row = (await app.db.get<FolderRow>("SELECT * FROM folders WHERE id = ?", id))!;
     return folderToDto(row);
   });
 
@@ -148,55 +153,59 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   app.delete("/api/folders/:id", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
     const uid = request.user.uid;
-    if (!getOwnFolder(id, uid)) {
+    if (!(await getOwnFolder(id, uid))) {
       return reply.code(404).send({ error: "folder not found" });
     }
-    const subtree = folderSubtreeIds(app, uid, id);
+    const subtree = await folderSubtreeIds(app, uid, id);
     const now = Date.now();
-    const run = app.db.transaction(() => {
+    await app.db.tx(async (t) => {
       for (const folderId of subtree) {
-        app.db
-          .prepare("UPDATE folders SET deleted = 1, update_seq = ?, updated_at = ? WHERE id = ?")
-          .run(app.nextSeq(uid), now, folderId);
-        const files = app.db
-          .prepare("SELECT id FROM files WHERE folder_id = ? AND user_id = ? AND deleted = 0 AND trashed = 0")
-          .all(folderId, uid) as Array<{ id: string }>;
+        await t.run(
+          "UPDATE folders SET deleted = 1, update_seq = ?, updated_at = ? WHERE id = ?",
+          await nextSeq(t, uid),
+          now,
+          folderId,
+        );
+        const files = await t.all<{ id: string }>(
+          "SELECT id FROM files WHERE folder_id = ? AND user_id = ? AND deleted = 0 AND trashed = 0",
+          folderId,
+          uid,
+        );
         for (const file of files) {
-          app.db
-            .prepare("UPDATE files SET trashed = 1, update_seq = ?, updated_at = ? WHERE id = ?")
-            .run(app.nextSeq(uid), now, file.id);
+          await t.run(
+            "UPDATE files SET trashed = 1, update_seq = ?, updated_at = ? WHERE id = ?",
+            await nextSeq(t, uid),
+            now,
+            file.id,
+          );
         }
       }
     });
-    run();
     return reply.code(204).send();
   });
 
   app.post("/api/files", auth, async (request, reply) => {
     const body = createFileSchema.parse(request.body);
     const uid = request.user.uid;
-    if (body.folderId && !getOwnFolder(body.folderId, uid)) {
+    if (body.folderId && !(await getOwnFolder(body.folderId, uid))) {
       return reply.code(404).send({ error: "folder not found" });
     }
     const now = Date.now();
     const id = randomUUID();
-    const seq = app.nextSeq(uid);
-    app.db
-      .prepare(
-        `INSERT INTO files (id, user_id, folder_id, encrypted_key, encrypted_meta, update_seq, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        uid,
-        body.folderId ?? null,
-        JSON.stringify(body.encryptedKey),
-        JSON.stringify(body.encryptedMeta),
-        seq,
-        now,
-        now,
-      );
-    const row = app.db.prepare("SELECT * FROM files WHERE id = ?").get(id) as FileRow;
+    const seq = await nextSeq(app.db, uid);
+    await app.db.run(
+      `INSERT INTO files (id, user_id, folder_id, encrypted_key, encrypted_meta, update_seq, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      uid,
+      body.folderId ?? null,
+      JSON.stringify(body.encryptedKey),
+      JSON.stringify(body.encryptedMeta),
+      seq,
+      now,
+      now,
+    );
+    const row = (await app.db.get<FileRow>("SELECT * FROM files WHERE id = ?", id))!;
     return reply.code(201).send(fileToDto(row));
   });
 
@@ -215,7 +224,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   ) => {
     const { id } = request.params as { id: string };
     const uid = request.user.uid;
-    const file = getOwnFile(id, uid);
+    const file = await getOwnFile(id, uid);
     if (!file) {
       return reply.code(404).send({ error: "file not found" });
     }
@@ -232,7 +241,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
           : replacesContent && !keepsVersions
             ? file.size
             : 0;
-    const quotaRoom = app.config.quotaBytes - (app.storageUsed(uid) - reclaimable);
+    const quotaRoom = app.config.quotaBytes - ((await storageUsed(app.db, uid)) - reclaimable);
     const maxBytes = Math.min(app.config.maxBlobBytes, quotaRoom);
     const declared = Number(request.headers["content-length"] ?? 0);
     if (maxBytes <= 0 || declared > maxBytes) {
@@ -252,41 +261,54 @@ export function registerStorageRoutes(app: FastifyInstance): void {
 
     if (kind === "thumb" || kind === "index") {
       const column = kind === "thumb" ? "thumb_size" : "index_size";
-      app.db
-        .prepare(`UPDATE files SET ${column} = ?, update_seq = ?, updated_at = ? WHERE id = ?`)
-        .run(written, app.nextSeq(uid), Date.now(), id);
+      await app.db.run(
+        `UPDATE files SET ${column} = ?, update_seq = ?, updated_at = ? WHERE id = ?`,
+        written,
+        await nextSeq(app.db, uid),
+        Date.now(),
+        id,
+      );
       return { size: written };
     }
 
     const staleBlobs: string[] = [];
     try {
-      const swap = app.db.transaction(() => {
-        const current = app.db
-          .prepare("SELECT generation, size, encrypted_meta, updated_at, uploaded FROM files WHERE id = ?")
-          .get(id) as Pick<FileRow, "generation" | "size" | "encrypted_meta" | "updated_at" | "uploaded">;
+      await app.db.tx(async (t) => {
+        const current = (await t.get<
+          Pick<FileRow, "generation" | "size" | "encrypted_meta" | "updated_at" | "uploaded">
+        >(
+          "SELECT generation, size, encrypted_meta, updated_at, uploaded FROM files WHERE id = ?",
+          id,
+        ))!;
         if (current.generation !== file.generation || current.uploaded !== file.uploaded) {
           throw new GenerationConflictError();
         }
         if (replacesContent) {
           if (keepsVersions) {
-            app.db
-              .prepare(
-                `INSERT INTO file_versions (file_id, user_id, generation, size, encrypted_meta, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-              )
-              .run(id, uid, current.generation, current.size, current.encrypted_meta, current.updated_at);
+            await t.run(
+              `INSERT INTO file_versions (file_id, user_id, generation, size, encrypted_meta, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              id,
+              uid,
+              current.generation,
+              current.size,
+              current.encrypted_meta,
+              current.updated_at,
+            );
           } else {
             staleBlobs.push(blobKey(id, "data", current.generation));
           }
         }
-        app.db
-          .prepare(
-            "UPDATE files SET size = ?, generation = ?, uploaded = 1, update_seq = ?, updated_at = ? WHERE id = ?",
-          )
-          .run(written, nextGen, app.nextSeq(uid), Date.now(), id);
-        staleBlobs.push(...pruneVersions(id, uid));
+        await t.run(
+          "UPDATE files SET size = ?, generation = ?, uploaded = 1, update_seq = ?, updated_at = ? WHERE id = ?",
+          written,
+          nextGen,
+          await nextSeq(t, uid),
+          Date.now(),
+          id,
+        );
+        staleBlobs.push(...(await pruneVersions(t, id, uid)));
       });
-      swap();
     } catch (err) {
       if (err instanceof GenerationConflictError) {
         await app.blobs.remove(targetKey).catch(() => {});
@@ -303,17 +325,19 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   };
 
   /** Drops version rows beyond the retention window; returns their blob keys. */
-  const pruneVersions = (fileId: string, uid: number): string[] => {
-    const excess = app.db
-      .prepare(
-        `SELECT generation FROM file_versions WHERE file_id = ? AND user_id = ?
-         ORDER BY generation DESC LIMIT -1 OFFSET ?`,
-      )
-      .all(fileId, uid, app.config.maxVersions) as Array<{ generation: number }>;
+  const pruneVersions = async (t: Db, fileId: string, uid: number): Promise<string[]> => {
+    const rows = await t.all<{ generation: number }>(
+      "SELECT generation FROM file_versions WHERE file_id = ? AND user_id = ? ORDER BY generation DESC",
+      fileId,
+      uid,
+    );
+    const excess = rows.slice(app.config.maxVersions);
     for (const row of excess) {
-      app.db
-        .prepare("DELETE FROM file_versions WHERE file_id = ? AND generation = ?")
-        .run(fileId, row.generation);
+      await t.run(
+        "DELETE FROM file_versions WHERE file_id = ? AND generation = ?",
+        fileId,
+        row.generation,
+      );
     }
     return excess.map((row) => blobKey(fileId, "data", row.generation));
   };
@@ -324,7 +348,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
 
   const downloadBlob = async (request: FastifyRequest, reply: FastifyReply, kind: BlobKind) => {
     const { id } = request.params as { id: string };
-    const file = getOwnFile(id, request.user.uid);
+    const file = await getOwnFile(id, request.user.uid);
     const size =
       kind === "data" ? file?.size : kind === "thumb" ? file?.thumb_size : file?.index_size;
     if (!file || (kind === "data" && !file.uploaded) || (kind !== "data" && !size)) {
@@ -343,82 +367,89 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     const { id } = request.params as { id: string };
     const uid = request.user.uid;
     const body = patchFileSchema.parse(request.body);
-    if (!getOwnFile(id, uid)) {
+    if (!(await getOwnFile(id, uid))) {
       return reply.code(404).send({ error: "file not found" });
     }
-    if (body.folderId !== undefined && body.folderId !== null && !getOwnFolder(body.folderId, uid)) {
+    if (
+      body.folderId !== undefined &&
+      body.folderId !== null &&
+      !(await getOwnFolder(body.folderId, uid))
+    ) {
       return reply.code(404).send({ error: "destination folder not found" });
     }
-    app.db
-      .prepare(
-        `UPDATE files SET
-           folder_id = CASE WHEN ? THEN ? ELSE folder_id END,
-           encrypted_meta = COALESCE(?, encrypted_meta),
-           update_seq = ?, updated_at = ?
-         WHERE id = ?`,
-      )
-      .run(
-        body.folderId !== undefined ? 1 : 0,
-        body.folderId ?? null,
-        body.encryptedMeta ? JSON.stringify(body.encryptedMeta) : null,
-        app.nextSeq(uid),
-        Date.now(),
-        id,
-      );
-    const row = app.db.prepare("SELECT * FROM files WHERE id = ?").get(id) as FileRow;
+    await app.db.run(
+      `UPDATE files SET
+         folder_id = CASE WHEN ? = 1 THEN ? ELSE folder_id END,
+         encrypted_meta = COALESCE(?, encrypted_meta),
+         update_seq = ?, updated_at = ?
+       WHERE id = ?`,
+      body.folderId !== undefined ? 1 : 0,
+      body.folderId ?? null,
+      body.encryptedMeta ? JSON.stringify(body.encryptedMeta) : null,
+      await nextSeq(app.db, uid),
+      Date.now(),
+      id,
+    );
+    const row = (await app.db.get<FileRow>("SELECT * FROM files WHERE id = ?", id))!;
     return fileToDto(row);
   });
 
   app.delete("/api/files/:id", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
     const uid = request.user.uid;
-    const file = getOwnFile(id, uid);
+    const file = await getOwnFile(id, uid);
     if (!file) {
       return reply.code(404).send({ error: "file not found" });
     }
-    app.db
-      .prepare("UPDATE files SET trashed = 1, update_seq = ?, updated_at = ? WHERE id = ?")
-      .run(app.nextSeq(uid), Date.now(), id);
+    await app.db.run(
+      "UPDATE files SET trashed = 1, update_seq = ?, updated_at = ? WHERE id = ?",
+      await nextSeq(app.db, uid),
+      Date.now(),
+      id,
+    );
     return reply.code(204).send();
   });
 
   app.post("/api/trash/:id/restore", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
     const uid = request.user.uid;
-    const file = getOwnFile(id, uid);
+    const file = await getOwnFile(id, uid);
     if (!file || !file.trashed) {
       return reply.code(404).send({ error: "file not found in trash" });
     }
     // If the original folder was deleted, the file comes back at the root.
-    const folderAlive = file.folder_id ? Boolean(getOwnFolder(file.folder_id, uid)) : true;
-    app.db
-      .prepare(
-        "UPDATE files SET trashed = 0, folder_id = ?, update_seq = ?, updated_at = ? WHERE id = ?",
-      )
-      .run(folderAlive ? file.folder_id : null, app.nextSeq(uid), Date.now(), id);
+    const folderAlive = file.folder_id ? Boolean(await getOwnFolder(file.folder_id, uid)) : true;
+    await app.db.run(
+      "UPDATE files SET trashed = 0, folder_id = ?, update_seq = ?, updated_at = ? WHERE id = ?",
+      folderAlive ? file.folder_id : null,
+      await nextSeq(app.db, uid),
+      Date.now(),
+      id,
+    );
     return reply.code(204).send();
   });
 
   app.delete("/api/trash/:id", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
     const uid = request.user.uid;
-    const file = getOwnFile(id, uid);
+    const file = await getOwnFile(id, uid);
     if (!file || !file.trashed) {
       return reply.code(404).send({ error: "file not found in trash" });
     }
-    const versionGens = app.db
-      .prepare("SELECT generation FROM file_versions WHERE file_id = ?")
-      .all(id) as Array<{ generation: number }>;
-    const run = app.db.transaction(() => {
-      app.db.prepare("DELETE FROM shares WHERE file_id = ?").run(id);
-      app.db.prepare("DELETE FROM file_versions WHERE file_id = ?").run(id);
-      app.db
-        .prepare(
-          "UPDATE files SET deleted = 1, size = 0, thumb_size = 0, uploaded = 0, update_seq = ?, updated_at = ? WHERE id = ?",
-        )
-        .run(app.nextSeq(uid), Date.now(), id);
+    const versionGens = await app.db.all<{ generation: number }>(
+      "SELECT generation FROM file_versions WHERE file_id = ?",
+      id,
+    );
+    await app.db.tx(async (t) => {
+      await t.run("DELETE FROM shares WHERE file_id = ?", id);
+      await t.run("DELETE FROM file_versions WHERE file_id = ?", id);
+      await t.run(
+        "UPDATE files SET deleted = 1, size = 0, thumb_size = 0, uploaded = 0, update_seq = ?, updated_at = ? WHERE id = ?",
+        await nextSeq(t, uid),
+        Date.now(),
+        id,
+      );
     });
-    run();
     await app.blobs.remove(blobKey(id, "data", file.generation)).catch(() => {});
     for (const row of versionGens) {
       await app.blobs.remove(blobKey(id, "data", row.generation)).catch(() => {});
@@ -439,26 +470,29 @@ export function registerStorageRoutes(app: FastifyInstance): void {
 
   app.get("/api/files/:id/versions", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
-    if (!getOwnFile(id, request.user.uid)) {
+    if (!(await getOwnFile(id, request.user.uid))) {
       return reply.code(404).send({ error: "file not found" });
     }
-    const rows = app.db
-      .prepare(
-        "SELECT * FROM file_versions WHERE file_id = ? AND user_id = ? ORDER BY generation DESC",
-      )
-      .all(id, request.user.uid) as FileVersionRow[];
+    const rows = await app.db.all<FileVersionRow>(
+      "SELECT * FROM file_versions WHERE file_id = ? AND user_id = ? ORDER BY generation DESC",
+      id,
+      request.user.uid,
+    );
     return { versions: rows.map(versionToDto) };
   });
 
   app.get("/api/files/:id/versions/:gen/data", auth, async (request, reply) => {
     const { id, gen } = request.params as { id: string; gen: string };
     const uid = request.user.uid;
-    if (!getOwnFile(id, uid)) {
+    if (!(await getOwnFile(id, uid))) {
       return reply.code(404).send({ error: "file not found" });
     }
-    const version = app.db
-      .prepare("SELECT * FROM file_versions WHERE file_id = ? AND user_id = ? AND generation = ?")
-      .get(id, uid, Number(gen)) as FileVersionRow | undefined;
+    const version = await app.db.get<FileVersionRow>(
+      "SELECT * FROM file_versions WHERE file_id = ? AND user_id = ? AND generation = ?",
+      id,
+      uid,
+      Number(gen),
+    );
     if (!version) {
       return reply.code(404).send({ error: "version not found" });
     }
@@ -478,42 +512,43 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     const { id, gen } = request.params as { id: string; gen: string };
     const uid = request.user.uid;
     const body = z.object({ encryptedMeta: secretBoxSchema }).parse(request.body);
-    const file = getOwnFile(id, uid);
+    const file = await getOwnFile(id, uid);
     if (!file || !file.uploaded || file.trashed) {
       return reply.code(404).send({ error: "file not found" });
     }
     const generation = Number(gen);
-    const restore = app.db.transaction(() => {
-      const version = app.db
-        .prepare("SELECT * FROM file_versions WHERE file_id = ? AND user_id = ? AND generation = ?")
-        .get(id, uid, generation) as FileVersionRow | undefined;
+    const row = await app.db.tx(async (t) => {
+      const version = await t.get<FileVersionRow>(
+        "SELECT * FROM file_versions WHERE file_id = ? AND user_id = ? AND generation = ?",
+        id,
+        uid,
+        generation,
+      );
       if (!version) {
         return null;
       }
-      app.db
-        .prepare(
-          `INSERT INTO file_versions (file_id, user_id, generation, size, encrypted_meta, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .run(id, uid, file.generation, file.size, file.encrypted_meta, file.updated_at);
-      app.db
-        .prepare("DELETE FROM file_versions WHERE file_id = ? AND generation = ?")
-        .run(id, generation);
-      app.db
-        .prepare(
-          "UPDATE files SET generation = ?, size = ?, encrypted_meta = ?, update_seq = ?, updated_at = ? WHERE id = ?",
-        )
-        .run(
-          generation,
-          version.size,
-          JSON.stringify(body.encryptedMeta),
-          app.nextSeq(uid),
-          Date.now(),
-          id,
-        );
-      return app.db.prepare("SELECT * FROM files WHERE id = ?").get(id) as FileRow;
+      await t.run(
+        `INSERT INTO file_versions (file_id, user_id, generation, size, encrypted_meta, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        id,
+        uid,
+        file.generation,
+        file.size,
+        file.encrypted_meta,
+        file.updated_at,
+      );
+      await t.run("DELETE FROM file_versions WHERE file_id = ? AND generation = ?", id, generation);
+      await t.run(
+        "UPDATE files SET generation = ?, size = ?, encrypted_meta = ?, update_seq = ?, updated_at = ? WHERE id = ?",
+        generation,
+        version.size,
+        JSON.stringify(body.encryptedMeta),
+        await nextSeq(t, uid),
+        Date.now(),
+        id,
+      );
+      return (await t.get<FileRow>("SELECT * FROM files WHERE id = ?", id))!;
     });
-    const row = restore();
     if (!row) {
       return reply.code(404).send({ error: "version not found" });
     }
@@ -524,15 +559,20 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   app.get("/api/sync", auth, async (request) => {
     const uid = request.user.uid;
     const since = Number((request.query as { since?: string }).since ?? 0);
-    const folders = app.db
-      .prepare("SELECT * FROM folders WHERE user_id = ? AND update_seq > ? ORDER BY update_seq")
-      .all(uid, since) as FolderRow[];
-    const files = app.db
-      .prepare("SELECT * FROM files WHERE user_id = ? AND update_seq > ? ORDER BY update_seq")
-      .all(uid, since) as FileRow[];
-    const user = app.db
-      .prepare("SELECT last_seq FROM users WHERE id = ?")
-      .get(uid) as { last_seq: number };
+    const folders = await app.db.all<FolderRow>(
+      "SELECT * FROM folders WHERE user_id = ? AND update_seq > ? ORDER BY update_seq",
+      uid,
+      since,
+    );
+    const files = await app.db.all<FileRow>(
+      "SELECT * FROM files WHERE user_id = ? AND update_seq > ? ORDER BY update_seq",
+      uid,
+      since,
+    );
+    const user = (await app.db.get<{ last_seq: number }>(
+      "SELECT last_seq FROM users WHERE id = ?",
+      uid,
+    ))!;
     return {
       seq: user.last_seq,
       folders: folders.map(folderToDto),
@@ -541,25 +581,30 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   });
 }
 
-function folderSubtreeIds(app: FastifyInstance, uid: number, rootId: string): string[] {
-  const rows = app.db
-    .prepare(
-      `WITH RECURSIVE subtree(id) AS (
-         SELECT id FROM folders WHERE id = ? AND user_id = ? AND deleted = 0
-         UNION ALL
-         SELECT f.id FROM folders f JOIN subtree s ON f.parent_id = s.id
-         WHERE f.user_id = ? AND f.deleted = 0
-       ) SELECT id FROM subtree`,
-    )
-    .all(rootId, uid, uid) as Array<{ id: string }>;
+async function folderSubtreeIds(
+  app: FastifyInstance,
+  uid: number,
+  rootId: string,
+): Promise<string[]> {
+  const rows = await app.db.all<{ id: string }>(
+    `WITH RECURSIVE subtree(id) AS (
+       SELECT id FROM folders WHERE id = ? AND user_id = ? AND deleted = 0
+       UNION ALL
+       SELECT f.id FROM folders f JOIN subtree s ON f.parent_id = s.id
+       WHERE f.user_id = ? AND f.deleted = 0
+     ) SELECT id FROM subtree`,
+    rootId,
+    uid,
+    uid,
+  );
   return rows.map((r) => r.id);
 }
 
-function isDescendant(
+async function isDescendant(
   app: FastifyInstance,
   uid: number,
   candidateId: string,
   ancestorId: string,
-): boolean {
-  return folderSubtreeIds(app, uid, ancestorId).includes(candidateId);
+): Promise<boolean> {
+  return (await folderSubtreeIds(app, uid, ancestorId)).includes(candidateId);
 }

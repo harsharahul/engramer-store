@@ -1,5 +1,28 @@
 # Storage architecture and reliability
 
+## Metadata backends
+
+Metadata lives in embedded SQLite by default: one file, no external
+services, the right shape for personal self-hosting. Setting
+`ENGRAMER_DATABASE_URL` to a PostgreSQL connection string moves the
+metadata to a shared database instead, which is the foundation for
+replicated deployments: server instances become stateless once metadata is
+in PostgreSQL, blobs are in an object store, and the session-signing secret
+comes from `ENGRAMER_JWT_SECRET`.
+
+Every correctness mechanism is identical on both backends because it was
+designed on single-row atomics: the per-user change sequence that drives
+delta sync is one `UPDATE ... RETURNING` that PostgreSQL serializes with a
+row lock, version snapshots and restores run inside real transactions, and
+the download-limit claim on share links is a single conditional update. The
+login-failure throttle is a database table, so every instance sees the same
+counters. Queries are indexed for large libraries on both backends,
+including the folder-tree recursion and per-folder listings.
+
+Run one server instance per deployment for now; that remains the supported
+topology, and the PostgreSQL backend is what makes restarts and rescheduling
+instant since no instance-local state matters anymore.
+
 ## Where bytes live
 
 Engram Store separates two very different kinds of data:

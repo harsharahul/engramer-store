@@ -59,11 +59,11 @@ export function registerShareRoutes(app: FastifyInstance): void {
   app.post("/api/shares", auth, async (request, reply) => {
     const body = createShareSchema.parse(request.body);
     const uid = request.user.uid;
-    const file = app.db
-      .prepare(
-        "SELECT id FROM files WHERE id = ? AND user_id = ? AND deleted = 0 AND trashed = 0 AND uploaded = 1",
-      )
-      .get(body.fileId, uid);
+    const file = await app.db.get(
+      "SELECT id FROM files WHERE id = ? AND user_id = ? AND deleted = 0 AND trashed = 0 AND uploaded = 1",
+      body.fileId,
+      uid,
+    );
     if (!file) {
       return reply.code(404).send({ error: "file not found" });
     }
@@ -71,38 +71,38 @@ export function registerShareRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: "expiry must be in the future" });
     }
     const token = randomBytes(16).toString("base64url");
-    app.db
-      .prepare(
-        `INSERT INTO shares (token, user_id, file_id, created_at, expires_at, max_downloads,
-                             download_count, password_digest, password_kdf, wrapped_key)
-         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-      )
-      .run(
-        token,
-        uid,
-        body.fileId,
-        Date.now(),
-        body.expiresAt ?? null,
-        body.maxDownloads ?? null,
-        body.password?.digest ?? null,
-        body.password ? JSON.stringify(body.password.kdf) : null,
-        body.password ? JSON.stringify(body.password.wrappedKey) : null,
-      );
+    await app.db.run(
+      `INSERT INTO shares (token, user_id, file_id, created_at, expires_at, max_downloads,
+                           download_count, password_digest, password_kdf, wrapped_key)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+      token,
+      uid,
+      body.fileId,
+      Date.now(),
+      body.expiresAt ?? null,
+      body.maxDownloads ?? null,
+      body.password?.digest ?? null,
+      body.password ? JSON.stringify(body.password.kdf) : null,
+      body.password ? JSON.stringify(body.password.wrappedKey) : null,
+    );
     return reply.code(201).send({ token });
   });
 
   app.get("/api/shares", auth, async (request) => {
-    const rows = app.db
-      .prepare("SELECT * FROM shares WHERE user_id = ? ORDER BY created_at DESC")
-      .all(request.user.uid) as ShareRow[];
+    const rows = await app.db.all<ShareRow>(
+      "SELECT * FROM shares WHERE user_id = ? ORDER BY created_at DESC",
+      request.user.uid,
+    );
     return { shares: rows.map(shareToDto) };
   });
 
   app.delete("/api/shares/:token", auth, async (request, reply) => {
     const { token } = request.params as { token: string };
-    const result = app.db
-      .prepare("DELETE FROM shares WHERE token = ? AND user_id = ?")
-      .run(token, request.user.uid);
+    const result = await app.db.run(
+      "DELETE FROM shares WHERE token = ? AND user_id = ?",
+      token,
+      request.user.uid,
+    );
     if (result.changes === 0) {
       return reply.code(404).send({ error: "share not found" });
     }
@@ -115,16 +115,15 @@ export function registerShareRoutes(app: FastifyInstance): void {
   }
 
   /** Resolves a token to a live share, or a status/message pair for the visitor. */
-  const loadShare = (token: string): LoadedShare | { code: number; error: string } => {
-    const share = app.db.prepare("SELECT * FROM shares WHERE token = ?").get(token) as
-      | ShareRow
-      | undefined;
+  const loadShare = async (token: string): Promise<LoadedShare | { code: number; error: string }> => {
+    const share = await app.db.get<ShareRow>("SELECT * FROM shares WHERE token = ?", token);
     if (!share) {
       return { code: 404, error: "this link is no longer available" };
     }
-    const file = app.db
-      .prepare("SELECT * FROM files WHERE id = ? AND deleted = 0 AND trashed = 0 AND uploaded = 1")
-      .get(share.file_id) as FileRow | undefined;
+    const file = await app.db.get<FileRow>(
+      "SELECT * FROM files WHERE id = ? AND deleted = 0 AND trashed = 0 AND uploaded = 1",
+      share.file_id,
+    );
     if (!file) {
       return { code: 404, error: "this link is no longer available" };
     }
@@ -157,7 +156,7 @@ export function registerShareRoutes(app: FastifyInstance): void {
 
   app.get("/api/public/:token/meta", async (request, reply) => {
     const { token } = request.params as { token: string };
-    const loaded = loadShare(token);
+    const loaded = await loadShare(token);
     if ("code" in loaded) {
       return reply.code(loaded.code).send({ error: loaded.error });
     }
@@ -179,7 +178,7 @@ export function registerShareRoutes(app: FastifyInstance): void {
 
   app.get("/api/public/:token/data", async (request, reply) => {
     const { token } = request.params as { token: string };
-    const loaded = loadShare(token);
+    const loaded = await loadShare(token);
     if ("code" in loaded) {
       return reply.code(loaded.code).send({ error: loaded.error });
     }
@@ -190,12 +189,11 @@ export function registerShareRoutes(app: FastifyInstance): void {
     }
     // Atomic claim: the count only advances while below the limit, so two
     // simultaneous downloads can never both take the last slot.
-    const claimed = app.db
-      .prepare(
-        `UPDATE shares SET download_count = download_count + 1
-         WHERE token = ? AND (max_downloads IS NULL OR download_count < max_downloads)`,
-      )
-      .run(token);
+    const claimed = await app.db.run(
+      `UPDATE shares SET download_count = download_count + 1
+       WHERE token = ? AND (max_downloads IS NULL OR download_count < max_downloads)`,
+      token,
+    );
     if (claimed.changes === 0) {
       return reply.code(410).send({ error: "this link has reached its download limit" });
     }

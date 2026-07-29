@@ -3,7 +3,6 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import fastifyStatic from "@fastify/static";
-import type Database from "better-sqlite3";
 import { ZodError } from "zod";
 import { ready } from "@engramer/crypto";
 import { loadConfig, type ConfigOverrides, type ServerConfig } from "./config.js";
@@ -11,7 +10,8 @@ import { FsBlobStore, type BlobStore } from "./blobs.js";
 import { DiskCachedBlobStore } from "./blobcache.js";
 import { RoutedBlobStore } from "./routed.js";
 import { S3BlobStore } from "./s3.js";
-import { nextSeq, openDatabase, storageUsed } from "./db.js";
+import { openDatabase, type Db } from "./db.js";
+import { PostgresDb } from "./pgdb.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerStorageRoutes } from "./routes/storage.js";
 import { registerShareRoutes } from "./routes/shares.js";
@@ -20,11 +20,9 @@ import { registerRequestRoutes } from "./routes/requests.js";
 declare module "fastify" {
   interface FastifyInstance {
     config: ServerConfig;
-    db: Database.Database;
+    db: Db;
     blobs: BlobStore;
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
-    nextSeq: (userId: number) => number;
-    storageUsed: (userId: number) => number;
   }
 }
 
@@ -38,7 +36,16 @@ declare module "@fastify/jwt" {
 export async function buildApp(overrides: ConfigOverrides = {}): Promise<FastifyInstance> {
   await ready();
   const config = loadConfig(overrides);
-  const db = openDatabase(config.dbPath);
+  // Embedded SQLite is the single-binary default; a connection string moves
+  // the metadata to PostgreSQL so replicated deployments share one store.
+  let db: Db;
+  if (config.databaseUrl) {
+    const postgres = new PostgresDb(config.databaseUrl);
+    await postgres.migrate();
+    db = postgres;
+  } else {
+    db = openDatabase(config.dbPath);
+  }
 
   const app = Fastify({ bodyLimit: 16 * 1024 * 1024 });
 
@@ -68,8 +75,9 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   app.decorate("config", config);
   app.decorate("blobs", blobs);
   app.decorate("db", db);
-  app.decorate("nextSeq", (userId: number) => nextSeq(db, userId));
-  app.decorate("storageUsed", (userId: number) => storageUsed(db, userId));
+  app.addHook("onClose", async () => {
+    await db.close();
+  });
   app.decorate("authenticate", async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       await request.jwtVerify();
