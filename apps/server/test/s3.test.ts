@@ -1,7 +1,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { describe, expect, it } from "vitest";
 import {
   ready,
@@ -222,6 +228,115 @@ describe.skipIf(!endpoint)("s3 blob store", () => {
       delete process.env.ENGRAMER_S3_SECRET_KEY;
       delete process.env.ENGRAMER_BLOB_CACHE_BYTES;
       delete process.env.ENGRAMER_S3_MAX_TPS;
+    }
+  });
+
+  it("splits derived blobs into their own bucket, heals pre-split blobs, and purges both", async () => {
+    await ready();
+    const stamp = Date.now();
+    process.env.ENGRAMER_S3_ENDPOINT = endpoint;
+    process.env.ENGRAMER_S3_BUCKET = `engramer-split-main-${stamp}`;
+    process.env.ENGRAMER_S3_ACCESS_KEY = process.env.ENGRAMER_TEST_S3_KEY ?? "minioadmin";
+    process.env.ENGRAMER_S3_SECRET_KEY = process.env.ENGRAMER_TEST_S3_SECRET ?? "minioadmin";
+    process.env.ENGRAMER_S3_DERIVED_BUCKET = `engramer-split-derived-${stamp}`;
+
+    const raw = new S3Client({
+      endpoint,
+      region: "us-east-1",
+      forcePathStyle: true,
+      credentials: {
+        accessKeyId: process.env.ENGRAMER_S3_ACCESS_KEY!,
+        secretAccessKey: process.env.ENGRAMER_S3_SECRET_KEY!,
+      },
+    });
+    const exists = async (bucket: string, key: string): Promise<boolean> => {
+      try {
+        await raw.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const main = process.env.ENGRAMER_S3_BUCKET!;
+    const derived = process.env.ENGRAMER_S3_DERIVED_BUCKET!;
+
+    const dataDir = mkdtempSync(join(tmpdir(), "engramer-s3-split-"));
+    const app = await buildApp({ dataDir, webDistDir: null });
+    try {
+      const keys = generateAccountKeys("an s3 split test password");
+      const registered = await app.inject({
+        method: "POST",
+        url: "/api/auth/register",
+        payload: { email: "s3split@example.com", loginKey: keys.loginKey, keyAttributes: keys.keyAttributes },
+      });
+      const token = registered.json().token as string;
+      const auth = { authorization: `Bearer ${token}` };
+
+      const fileKey = generateKey();
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/files",
+        headers: auth,
+        payload: {
+          encryptedKey: secretBoxSeal(fileKey, keys.masterKey),
+          encryptedMeta: encryptFileMetadata(
+            { name: "split.jpg", mime: "image/jpeg", size: 4, mtime: 0 },
+            fileKey,
+          ),
+        },
+      });
+      const id = created.json().id as string;
+      const putBlob = (kind: string, payload: Buffer) =>
+        app.inject({
+          method: "PUT",
+          url: `/api/files/${id}/${kind}`,
+          headers: { ...auth, "content-type": "application/octet-stream" },
+          payload,
+        });
+      await putBlob("data", Buffer.from(encryptBytes(new Uint8Array([9, 9, 9]), fileKey)));
+      await putBlob("thumbnail", Buffer.from(encryptBytes(new Uint8Array(1024).fill(1), fileKey)));
+      const indexText = new TextEncoder().encode("searchable words");
+      await putBlob("index", Buffer.from(encryptBytes(indexText, fileKey)));
+
+      // Placement: content in the main bucket, derived blobs in theirs.
+      expect(await exists(main, id)).toBe(true);
+      expect(await exists(derived, id)).toBe(false);
+      expect(await exists(derived, `${id}.thumb`)).toBe(true);
+      expect(await exists(main, `${id}.thumb`)).toBe(false);
+      expect(await exists(derived, `${id}.idx`)).toBe(true);
+
+      // Pre-split simulation: move the index blob back to the main bucket,
+      // as it would be for an install that enabled the split later. The read
+      // must fall back, serve, and heal it into the derived bucket.
+      const legacyBytes = (
+        await raw.send(new GetObjectCommand({ Bucket: derived, Key: `${id}.idx` }))
+      ).Body;
+      const legacyBuffer = Buffer.from(await legacyBytes!.transformToByteArray());
+      await raw.send(new DeleteObjectCommand({ Bucket: derived, Key: `${id}.idx` }));
+      await raw.send(new PutObjectCommand({ Bucket: main, Key: `${id}.idx`, Body: legacyBuffer }));
+      const healedRead = await app.inject({ method: "GET", url: `/api/files/${id}/index`, headers: auth });
+      expect(healedRead.statusCode).toBe(200);
+      expect(new TextDecoder().decode(decryptBytes(new Uint8Array(healedRead.rawPayload), fileKey))).toBe(
+        "searchable words",
+      );
+      expect(await exists(derived, `${id}.idx`)).toBe(true); // healed
+
+      // Permanent delete purges every copy from both buckets.
+      await app.inject({ method: "DELETE", url: `/api/files/${id}`, headers: auth });
+      const gone = await app.inject({ method: "DELETE", url: `/api/trash/${id}`, headers: auth });
+      expect(gone.statusCode).toBe(204);
+      expect(await exists(main, id)).toBe(false);
+      expect(await exists(main, `${id}.idx`)).toBe(false);
+      expect(await exists(derived, `${id}.thumb`)).toBe(false);
+      expect(await exists(derived, `${id}.idx`)).toBe(false);
+    } finally {
+      await app.close();
+      rmSync(dataDir, { recursive: true, force: true });
+      delete process.env.ENGRAMER_S3_ENDPOINT;
+      delete process.env.ENGRAMER_S3_BUCKET;
+      delete process.env.ENGRAMER_S3_ACCESS_KEY;
+      delete process.env.ENGRAMER_S3_SECRET_KEY;
+      delete process.env.ENGRAMER_S3_DERIVED_BUCKET;
     }
   });
 });

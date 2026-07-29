@@ -3,6 +3,7 @@ import { rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import type { BlobStore } from "./blobs.js";
+import { bufferUpTo } from "./streams.js";
 
 /**
  * Read-through disk cache in front of a remote blob store, for the small
@@ -122,38 +123,13 @@ export class DiskCachedBlobStore implements BlobStore {
     }
     const source = await this.backing.get(key);
     // Derived blobs are small; buffer up to the cap so the bytes can be both
-    // served and admitted. Past the cap, hand back what was read plus the
-    // rest of the stream and skip admission. The iterator is advanced by
-    // hand because exiting a for-await destroys the underlying stream.
-    const iterator = source[Symbol.asyncIterator]();
-    const chunks: Buffer[] = [];
-    let buffered = 0;
-    for (;;) {
-      const step = await iterator.next();
-      if (step.done) {
-        break;
-      }
-      const piece = Buffer.isBuffer(step.value) ? step.value : Buffer.from(step.value);
-      chunks.push(piece);
-      buffered += piece.length;
-      if (buffered > this.perEntryCap) {
-        return Readable.from(
-          (async function* () {
-            yield* chunks;
-            for (;;) {
-              const rest = await iterator.next();
-              if (rest.done) {
-                break;
-              }
-              yield rest.value;
-            }
-          })(),
-        );
-      }
+    // served and admitted. Past the cap, serve straight through, no admission.
+    const result = await bufferUpTo(source, this.perEntryCap);
+    if (result.kind === "stream") {
+      return result.stream;
     }
-    const bytes = Buffer.concat(chunks);
-    await this.admit(key, bytes);
-    return Readable.from(bytes);
+    await this.admit(key, result.bytes);
+    return Readable.from(result.bytes);
   }
 
   async put(key: string, source: Readable, maxBytes: number): Promise<number> {

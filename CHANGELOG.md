@@ -3,6 +3,25 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.16.0] - 2026-07-28
+
+### Added
+- Split blob destinations (`ENGRAMER_S3_DERIVED_BUCKET` and the
+  `ENGRAMER_S3_DERIVED_*` family): thumbnails and search indexes can live on
+  their own S3 backend, separate from the originals. Request-heavy tiny
+  objects go to a fast unmetered store (for example a local MinIO) while the
+  byte-heavy originals stay on cheap or rate-limited storage. Connection
+  settings inherit from the primary so a second bucket on the same store is
+  one variable; the derived backend gets its own request budget and never
+  inherits the primary's. Enabling the split on an existing install needs no
+  migration: pre-split derived blobs are served from the primary on first
+  read and copied over on the way out, and deletes purge both locations.
+- `ENGRAMER_BLOB_CACHE_DIR` points the disk hot tier at separate fast local
+  storage, useful when the data directory lives on slower disks.
+- `ENGRAMER_JWT_SECRET` supplies the session-signing secret from the
+  environment, so replicated deployments can share one signing key instead
+  of each generating a per-instance file.
+
 ## [0.15.0] - 2026-07-28
 
 ### Added
