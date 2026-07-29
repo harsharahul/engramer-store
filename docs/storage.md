@@ -30,6 +30,42 @@ The blob store is pluggable, selected by configuration at startup:
 | `ENGRAMER_S3_ACCESS_KEY` / `ENGRAMER_S3_SECRET_KEY` | Credentials |
 | `ENGRAMER_S3_FORCE_PATH_STYLE` | Default `true` (right for MinIO and friends); set `false` for AWS |
 
+## Scale knobs for S3 backends (all opt-in)
+
+The default deployment needs none of this: a small self-hosted install on the
+filesystem backend is already a single binary with nothing to tune. The knobs
+below exist for S3-backed installs that grow into them, in the spirit of a
+capability ladder: each is off until its environment variable is set, and
+unset means exactly the previous behavior.
+
+| Variable | What it enables |
+|---|---|
+| `ENGRAMER_BLOB_CACHE_BYTES` | Local hot tier for derived blobs, with this disk budget |
+| `ENGRAMER_S3_MAX_TPS` | Cap on request starts per second toward the object store |
+| `ENGRAMER_S3_MAX_CONCURRENT` | Cap on in-flight requests toward the object store |
+
+**Hot tier**: thumbnails and search-index blobs dominate request counts (a
+grid paint or a search warm touches hundreds of them) while being a tiny
+fraction of stored bytes. With a cache budget set, the server keeps the most
+recently used of them on local disk (`data/blob-cache/`) and serves repeats
+without a round trip. Content blobs always stream from the object store.
+Entries are written atomically and evicted least-recently-used; the
+directory is disposable state that is re-indexed at startup, and since
+everything in it is ciphertext it needs no more protection than the rest of
+`data/`. Correctness rule: derived blobs are the one blob class overwritten
+in place, so any overwrite or delete durably invalidates the cache entry
+before the operation completes; a stale entry can never be served, even
+across a crash and restart.
+
+**Request budget**: consumer object stores and rate-limited gateways
+throttle hard past their transaction or connection caps, and staying just
+under a cap is faster than triggering the penalty. The budget is enforced
+inside the S3 client, so every HTTP attempt pays it: plain requests, each
+part of a multipart upload, and retries alike. The pacer is strictly FIFO
+with no burst accumulation, which is the discipline mass-transfer tools
+converge on for fragile backends. A budget only ever delays requests, never
+rejects them, so clients see slower responses rather than errors.
+
 ## Integrity
 
 Every blob is an XChaCha20-Poly1305 secretstream: each 4 MiB chunk carries an authentication tag, and the final chunk carries a terminal tag. Any bit flip, truncation, or reordering anywhere in a blob fails decryption loudly on the client. Silent corruption cannot masquerade as valid data; the storage layer does not need its own checksum scheme to detect it.
