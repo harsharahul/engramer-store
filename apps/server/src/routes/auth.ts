@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { loginKeyDigest } from "@engramer/crypto";
-import type { UserRow } from "../db.js";
+import { storageUsed, type UserRow } from "../db.js";
 import { AuthThrottle } from "../ratelimit.js";
 import { generateTotpSecret, otpauthUri, verifyTotp } from "../totp.js";
 
@@ -62,19 +62,19 @@ function generateRecoveryCodes(): { codes: string[]; digests: string[] } {
 
 export function registerAuthRoutes(app: FastifyInstance): void {
   const auth = { preHandler: [app.authenticate] };
-  const throttle = new AuthThrottle();
+  const throttle = new AuthThrottle(app.db);
 
   const throttleKey = (request: FastifyRequest, identity: string) =>
     `${request.ip}|${identity.toLowerCase()}`;
 
   /** 429 with Retry-After when the caller has been failing too often. */
-  const gate = (request: FastifyRequest, identity: string) => {
-    const { allowed, retryAfterMs } = throttle.check(throttleKey(request, identity));
+  const gate = async (request: FastifyRequest, identity: string) => {
+    const { allowed, retryAfterMs } = await throttle.check(throttleKey(request, identity));
     return allowed ? null : Math.ceil(retryAfterMs / 1000);
   };
 
-  const getUser = (id: number): UserRow =>
-    app.db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow;
+  const getUser = async (id: number): Promise<UserRow> =>
+    (await app.db.get<UserRow>("SELECT * FROM users WHERE id = ?", id))!;
 
   /** The full session response; only ever issued after every factor passed. */
   const sessionResponse = (user: UserRow) => ({
@@ -84,30 +84,33 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
   app.post("/api/auth/register", async (request, reply) => {
     const body = registerSchema.parse(request.body);
-    const retryAfter = gate(request, body.email);
+    const retryAfter = await gate(request, body.email);
     if (retryAfter !== null) {
       return reply.code(429).header("retry-after", retryAfter).send({ error: "too many attempts" });
     }
-    const existing = app.db.prepare("SELECT id FROM users WHERE email = ?").get(body.email);
+    const existing = await app.db.get("SELECT id FROM users WHERE email = ?", body.email);
     if (existing) {
-      throttle.fail(throttleKey(request, body.email));
+      await throttle.fail(throttleKey(request, body.email));
       return reply.code(409).send({ error: "an account with this email already exists" });
     }
-    const result = app.db
-      .prepare(
-        "INSERT INTO users (email, login_key_digest, key_attributes, created_at) VALUES (?, ?, ?, ?)",
-      )
-      .run(body.email, loginKeyDigest(body.loginKey), JSON.stringify(body.keyAttributes), Date.now());
-    const token = app.jwt.sign({ uid: Number(result.lastInsertRowid) });
+    const created = await app.db.get<{ id: number }>(
+      "INSERT INTO users (email, login_key_digest, key_attributes, created_at) VALUES (?, ?, ?, ?) RETURNING id",
+      body.email,
+      loginKeyDigest(body.loginKey),
+      JSON.stringify(body.keyAttributes),
+      Date.now(),
+    );
+    const token = app.jwt.sign({ uid: created!.id });
     return reply.code(201).send({ token });
   });
 
   // Pre-login: the client needs the KDF salt and parameters to derive its keys.
   app.get("/api/auth/attributes", async (request, reply) => {
     const email = z.string().email().toLowerCase().parse((request.query as { email?: string }).email);
-    const user = app.db
-      .prepare("SELECT key_attributes FROM users WHERE email = ?")
-      .get(email) as Pick<UserRow, "key_attributes"> | undefined;
+    const user = await app.db.get<Pick<UserRow, "key_attributes">>(
+      "SELECT key_attributes FROM users WHERE email = ?",
+      email,
+    );
     if (!user) {
       return reply.code(404).send({ error: "no account with this email" });
     }
@@ -117,18 +120,16 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
   app.post("/api/auth/login", async (request, reply) => {
     const body = loginSchema.parse(request.body);
-    const retryAfter = gate(request, body.email);
+    const retryAfter = await gate(request, body.email);
     if (retryAfter !== null) {
       return reply.code(429).header("retry-after", retryAfter).send({ error: "too many attempts" });
     }
-    const user = app.db.prepare("SELECT * FROM users WHERE email = ?").get(body.email) as
-      | UserRow
-      | undefined;
+    const user = await app.db.get<UserRow>("SELECT * FROM users WHERE email = ?", body.email);
     if (!user || !digestsMatch(loginKeyDigest(body.loginKey), user.login_key_digest)) {
-      throttle.fail(throttleKey(request, body.email));
+      await throttle.fail(throttleKey(request, body.email));
       return reply.code(401).send({ error: "invalid email or password" });
     }
-    throttle.succeed(throttleKey(request, body.email));
+    await throttle.succeed(throttleKey(request, body.email));
     if (user.totp_enabled === 1) {
       // The password checked out, but key material stays withheld until the
       // second factor passes; the pending token can only be used for that.
@@ -152,8 +153,8 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     if (!payload.pending) {
       return reply.code(401).send({ error: "sign in again" });
     }
-    const user = getUser(payload.uid);
-    const retryAfter = gate(request, user.email);
+    const user = await getUser(payload.uid);
+    const retryAfter = await gate(request, user.email);
     if (retryAfter !== null) {
       return reply.code(429).header("retry-after", retryAfter).send({ error: "too many attempts" });
     }
@@ -163,8 +164,8 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
     const totp = verifyTotp(user.totp_secret, body.code, Date.now());
     if (totp.valid && totp.step > user.totp_last_step) {
-      app.db.prepare("UPDATE users SET totp_last_step = ? WHERE id = ?").run(totp.step, user.id);
-      throttle.succeed(throttleKey(request, user.email));
+      await app.db.run("UPDATE users SET totp_last_step = ? WHERE id = ?", totp.step, user.id);
+      await throttle.succeed(throttleKey(request, user.email));
       return sessionResponse(user);
     }
 
@@ -174,32 +175,36 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     const index = digests.findIndex((d) => digestsMatch(d, presented));
     if (index >= 0) {
       digests.splice(index, 1);
-      app.db
-        .prepare("UPDATE users SET recovery_code_digests = ? WHERE id = ?")
-        .run(JSON.stringify(digests), user.id);
-      throttle.succeed(throttleKey(request, user.email));
+      await app.db.run(
+        "UPDATE users SET recovery_code_digests = ? WHERE id = ?",
+        JSON.stringify(digests),
+        user.id,
+      );
+      await throttle.succeed(throttleKey(request, user.email));
       return { ...sessionResponse(user), recoveryCodesLeft: digests.length };
     }
 
-    throttle.fail(throttleKey(request, user.email));
+    await throttle.fail(throttleKey(request, user.email));
     return reply.code(401).send({ error: "that code is not valid" });
   });
 
   // ----- enrollment (an authenticated session manages its own 2FA) -----
 
   app.post("/api/auth/totp/setup", auth, async (request) => {
-    const user = getUser(request.user.uid);
+    const user = await getUser(request.user.uid);
     const secret = generateTotpSecret();
     // Stored but not enabled until a code proves the authenticator has it.
-    app.db
-      .prepare("UPDATE users SET totp_secret = ?, totp_enabled = 0, totp_last_step = 0 WHERE id = ?")
-      .run(secret, user.id);
+    await app.db.run(
+      "UPDATE users SET totp_secret = ?, totp_enabled = 0, totp_last_step = 0 WHERE id = ?",
+      secret,
+      user.id,
+    );
     return { secret, otpauthUri: otpauthUri(secret, user.email) };
   });
 
   app.post("/api/auth/totp/confirm", auth, async (request, reply) => {
     const body = codeSchema.parse(request.body);
-    const user = getUser(request.user.uid);
+    const user = await getUser(request.user.uid);
     if (!user.totp_secret || user.totp_enabled === 1) {
       return reply.code(400).send({ error: "two-factor setup is not in progress" });
     }
@@ -208,18 +213,19 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       return reply.code(401).send({ error: "that code is not valid" });
     }
     const { codes, digests } = generateRecoveryCodes();
-    app.db
-      .prepare(
-        "UPDATE users SET totp_enabled = 1, totp_last_step = ?, recovery_code_digests = ? WHERE id = ?",
-      )
-      .run(totp.step, JSON.stringify(digests), user.id);
+    await app.db.run(
+      "UPDATE users SET totp_enabled = 1, totp_last_step = ?, recovery_code_digests = ? WHERE id = ?",
+      totp.step,
+      JSON.stringify(digests),
+      user.id,
+    );
     // The only time recovery codes ever exist in plaintext on the wire.
     return { recoveryCodes: codes };
   });
 
   app.post("/api/auth/totp/disable", auth, async (request, reply) => {
     const body = codeSchema.parse(request.body);
-    const user = getUser(request.user.uid);
+    const user = await getUser(request.user.uid);
     if (user.totp_enabled !== 1 || !user.totp_secret) {
       return reply.code(400).send({ error: "two-factor is not enabled" });
     }
@@ -230,21 +236,20 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     if (!(totp.valid && totp.step > user.totp_last_step) && !recoveryMatch) {
       return reply.code(401).send({ error: "that code is not valid" });
     }
-    app.db
-      .prepare(
-        "UPDATE users SET totp_secret = NULL, totp_enabled = 0, totp_last_step = 0, recovery_code_digests = NULL WHERE id = ?",
-      )
-      .run(user.id);
+    await app.db.run(
+      "UPDATE users SET totp_secret = NULL, totp_enabled = 0, totp_last_step = 0, recovery_code_digests = NULL WHERE id = ?",
+      user.id,
+    );
     return { disabled: true };
   });
 
   app.get("/api/user", auth, async (request) => {
-    const user = getUser(request.user.uid);
+    const user = await getUser(request.user.uid);
     const digests = JSON.parse(user.recovery_code_digests ?? "[]") as string[];
     return {
       email: user.email,
       createdAt: user.created_at,
-      usedBytes: app.storageUsed(request.user.uid),
+      usedBytes: await storageUsed(app.db, request.user.uid),
       quotaBytes: app.config.quotaBytes,
       totpEnabled: user.totp_enabled === 1,
       recoveryCodesLeft: user.totp_enabled === 1 ? digests.length : 0,

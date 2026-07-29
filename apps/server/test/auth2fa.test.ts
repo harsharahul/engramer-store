@@ -5,6 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ready, generateAccountKeys, type AccountKeys } from "@engramer/crypto";
 import { buildApp } from "../src/app.js";
+import { openDatabase } from "../src/db.js";
 import { base32Decode, base32Encode, totpAt, verifyTotp } from "../src/totp.js";
 import { AuthThrottle } from "../src/ratelimit.js";
 
@@ -43,21 +44,28 @@ describe("totp primitives", () => {
 });
 
 describe("auth throttle", () => {
-  it("blocks after repeated failures with growing delays and clears on success", () => {
-    const throttle = new AuthThrottle();
-    const t0 = 1_000_000;
-    for (let i = 0; i < 5; i++) {
-      throttle.fail("k", t0);
-      expect(throttle.check("k", t0).allowed).toBe(true);
+  it("blocks after repeated failures with growing delays and clears on success", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "engramer-throttle-"));
+    const db = openDatabase(join(dir, "throttle.db"));
+    try {
+      const throttle = new AuthThrottle(db);
+      const t0 = 1_000_000;
+      for (let i = 0; i < 5; i++) {
+        await throttle.fail("k", t0);
+        expect((await throttle.check("k", t0)).allowed).toBe(true);
+      }
+      await throttle.fail("k", t0); // sixth failure starts blocking
+      const first = await throttle.check("k", t0);
+      expect(first.allowed).toBe(false);
+      await throttle.fail("k", t0 + first.retryAfterMs);
+      const second = await throttle.check("k", t0 + first.retryAfterMs);
+      expect(second.retryAfterMs).toBeGreaterThan(first.retryAfterMs);
+      await throttle.succeed("k");
+      expect((await throttle.check("k", t0)).allowed).toBe(true);
+    } finally {
+      await db.close();
+      rmSync(dir, { recursive: true, force: true });
     }
-    throttle.fail("k", t0); // sixth failure starts blocking
-    const first = throttle.check("k", t0);
-    expect(first.allowed).toBe(false);
-    throttle.fail("k", t0 + first.retryAfterMs);
-    const second = throttle.check("k", t0 + first.retryAfterMs);
-    expect(second.retryAfterMs).toBeGreaterThan(first.retryAfterMs);
-    throttle.succeed("k");
-    expect(throttle.check("k", t0).allowed).toBe(true);
   });
 });
 

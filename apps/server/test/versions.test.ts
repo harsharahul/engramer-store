@@ -269,7 +269,7 @@ describe("safety properties", () => {
     const original = app.blobs.put.bind(app.blobs);
     app.blobs.put = async (key, source, maxBytes) => {
       const written = await original(key, source, maxBytes);
-      app.db.prepare("UPDATE files SET generation = generation + 1 WHERE id = ?").run(doc.id);
+      await app.db.run("UPDATE files SET generation = generation + 1 WHERE id = ?", doc.id);
       return written;
     };
     try {
@@ -282,7 +282,7 @@ describe("safety properties", () => {
       expect(response.statusCode).toBe(409);
     } finally {
       app.blobs.put = original;
-      app.db.prepare("UPDATE files SET generation = generation - 1 WHERE id = ?").run(doc.id);
+      await app.db.run("UPDATE files SET generation = generation - 1 WHERE id = ?", doc.id);
     }
     // The loser's blob was cleaned up and no version was recorded.
     expect(await currentContent(doc)).toEqual(utf8Encode("base"));

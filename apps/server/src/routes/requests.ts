@@ -3,7 +3,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Readable } from "node:stream";
 import { z } from "zod";
 import { BlobTooLargeError, blobKey, type BlobKind } from "../blobs.js";
-import type { FileRequestRow, FileRow, RequestUploadRow, UserRow } from "../db.js";
+import {
+  nextSeq,
+  storageUsed,
+  type FileRequestRow,
+  type FileRow,
+  type RequestUploadRow,
+  type UserRow,
+} from "../db.js";
 import { fileToDto } from "./storage.js";
 
 const secretBoxSchema = z.object({ ciphertext: z.string(), nonce: z.string() });
@@ -63,9 +70,11 @@ export function registerRequestRoutes(app: FastifyInstance): void {
     const body = createRequestSchema.parse(request.body);
     const uid = request.user.uid;
     if (body.folderId) {
-      const folder = app.db
-        .prepare("SELECT id FROM folders WHERE id = ? AND user_id = ? AND deleted = 0")
-        .get(body.folderId, uid);
+      const folder = await app.db.get(
+        "SELECT id FROM folders WHERE id = ? AND user_id = ? AND deleted = 0",
+        body.folderId,
+        uid,
+      );
       if (!folder) {
         return reply.code(404).send({ error: "folder not found" });
       }
@@ -74,35 +83,32 @@ export function registerRequestRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: "expiry must be in the future" });
     }
     const token = randomBytes(16).toString("base64url");
-    app.db
-      .prepare(
-        `INSERT INTO file_requests (token, user_id, folder_id, encrypted_meta, expires_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        token,
-        uid,
-        body.folderId ?? null,
-        JSON.stringify(body.encryptedMeta),
-        body.expiresAt ?? null,
-        Date.now(),
-      );
+    await app.db.run(
+      `INSERT INTO file_requests (token, user_id, folder_id, encrypted_meta, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      token,
+      uid,
+      body.folderId ?? null,
+      JSON.stringify(body.encryptedMeta),
+      body.expiresAt ?? null,
+      Date.now(),
+    );
     return reply.code(201).send({ token });
   });
 
   app.get("/api/requests", auth, async (request) => {
     const uid = request.user.uid;
-    const rows = app.db
-      .prepare("SELECT * FROM file_requests WHERE user_id = ? ORDER BY created_at DESC")
-      .all(uid) as FileRequestRow[];
-    const counts = app.db
-      .prepare(
-        `SELECT request_token,
-                SUM(uploaded) AS received,
-                SUM(CASE WHEN uploaded = 1 AND consumed = 0 THEN 1 ELSE 0 END) AS pending
-         FROM request_uploads WHERE user_id = ? GROUP BY request_token`,
-      )
-      .all(uid) as Array<{ request_token: string; received: number; pending: number }>;
+    const rows = await app.db.all<FileRequestRow>(
+      "SELECT * FROM file_requests WHERE user_id = ? ORDER BY created_at DESC",
+      uid,
+    );
+    const counts = await app.db.all<{ request_token: string; received: number; pending: number }>(
+      `SELECT request_token,
+              SUM(uploaded) AS received,
+              SUM(CASE WHEN uploaded = 1 AND consumed = 0 THEN 1 ELSE 0 END) AS pending
+       FROM request_uploads WHERE user_id = ? GROUP BY request_token`,
+      uid,
+    );
     const byToken = new Map(counts.map((c) => [c.request_token, c]));
     return {
       requests: rows.map((row) =>
@@ -113,9 +119,11 @@ export function registerRequestRoutes(app: FastifyInstance): void {
 
   app.delete("/api/requests/:token", auth, async (request, reply) => {
     const { token } = request.params as { token: string };
-    const result = app.db
-      .prepare("UPDATE file_requests SET revoked = 1 WHERE token = ? AND user_id = ?")
-      .run(token, request.user.uid);
+    const result = await app.db.run(
+      "UPDATE file_requests SET revoked = 1 WHERE token = ? AND user_id = ?",
+      token,
+      request.user.uid,
+    );
     if (result.changes === 0) {
       return reply.code(404).send({ error: "request not found" });
     }
@@ -124,11 +132,10 @@ export function registerRequestRoutes(app: FastifyInstance): void {
 
   /** Uploads that arrived and are waiting for the owner's client to file them. */
   app.get("/api/requests/uploads", auth, async (request) => {
-    const rows = app.db
-      .prepare(
-        "SELECT * FROM request_uploads WHERE user_id = ? AND uploaded = 1 AND consumed = 0 ORDER BY created_at",
-      )
-      .all(request.user.uid) as RequestUploadRow[];
+    const rows = await app.db.all<RequestUploadRow>(
+      "SELECT * FROM request_uploads WHERE user_id = ? AND uploaded = 1 AND consumed = 0 ORDER BY created_at",
+      request.user.uid,
+    );
     return { uploads: rows.map(uploadToDto) };
   });
 
@@ -141,61 +148,62 @@ export function registerRequestRoutes(app: FastifyInstance): void {
     const { id } = request.params as { id: string };
     const uid = request.user.uid;
     const body = acceptSchema.parse(request.body);
-    const upload = app.db
-      .prepare(
-        "SELECT * FROM request_uploads WHERE id = ? AND user_id = ? AND uploaded = 1 AND consumed = 0",
-      )
-      .get(id, uid) as RequestUploadRow | undefined;
+    const upload = await app.db.get<RequestUploadRow>(
+      "SELECT * FROM request_uploads WHERE id = ? AND user_id = ? AND uploaded = 1 AND consumed = 0",
+      id,
+      uid,
+    );
     if (!upload) {
       return reply.code(404).send({ error: "upload not found" });
     }
-    const req = app.db
-      .prepare("SELECT folder_id FROM file_requests WHERE token = ?")
-      .get(upload.request_token) as Pick<FileRequestRow, "folder_id"> | undefined;
+    const req = await app.db.get<Pick<FileRequestRow, "folder_id">>(
+      "SELECT folder_id FROM file_requests WHERE token = ?",
+      upload.request_token,
+    );
     // If the destination folder is gone the file lands at the root.
     const folderAlive =
       req?.folder_id &&
-      app.db
-        .prepare("SELECT id FROM folders WHERE id = ? AND user_id = ? AND deleted = 0")
-        .get(req.folder_id, uid);
+      (await app.db.get(
+        "SELECT id FROM folders WHERE id = ? AND user_id = ? AND deleted = 0",
+        req.folder_id,
+        uid,
+      ));
     const now = Date.now();
-    const run = app.db.transaction(() => {
-      app.db
-        .prepare(
-          `INSERT INTO files (id, user_id, folder_id, encrypted_key, encrypted_meta, size, thumb_size,
-                              index_size, uploaded, update_seq, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-        )
-        .run(
-          id,
-          uid,
-          folderAlive ? req!.folder_id : null,
-          JSON.stringify(body.encryptedKey),
-          JSON.stringify(body.encryptedMeta),
-          upload.size,
-          upload.thumb_size,
-          upload.index_size,
-          app.nextSeq(uid),
-          now,
-          now,
-        );
-      app.db.prepare("UPDATE request_uploads SET consumed = 1 WHERE id = ?").run(id);
+    await app.db.tx(async (t) => {
+      await t.run(
+        `INSERT INTO files (id, user_id, folder_id, encrypted_key, encrypted_meta, size, thumb_size,
+                            index_size, uploaded, update_seq, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+        id,
+        uid,
+        folderAlive ? req!.folder_id : null,
+        JSON.stringify(body.encryptedKey),
+        JSON.stringify(body.encryptedMeta),
+        upload.size,
+        upload.thumb_size,
+        upload.index_size,
+        await nextSeq(t, uid),
+        now,
+        now,
+      );
+      await t.run("UPDATE request_uploads SET consumed = 1 WHERE id = ?", id);
     });
-    run();
-    const row = app.db.prepare("SELECT * FROM files WHERE id = ?").get(id) as FileRow;
+    const row = (await app.db.get<FileRow>("SELECT * FROM files WHERE id = ?", id))!;
     return reply.code(201).send(fileToDto(row));
   });
 
   /** Discards an upload without filing it; the ciphertext is deleted. */
   app.delete("/api/requests/uploads/:id", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const upload = app.db
-      .prepare("SELECT * FROM request_uploads WHERE id = ? AND user_id = ? AND consumed = 0")
-      .get(id, request.user.uid) as RequestUploadRow | undefined;
+    const upload = await app.db.get<RequestUploadRow>(
+      "SELECT * FROM request_uploads WHERE id = ? AND user_id = ? AND consumed = 0",
+      id,
+      request.user.uid,
+    );
     if (!upload) {
       return reply.code(404).send({ error: "upload not found" });
     }
-    app.db.prepare("DELETE FROM request_uploads WHERE id = ?").run(id);
+    await app.db.run("DELETE FROM request_uploads WHERE id = ?", id);
     await app.blobs.remove(blobKey(id, "data"));
     await app.blobs.remove(blobKey(id, "thumb"));
     await app.blobs.remove(blobKey(id, "index"));
@@ -203,10 +211,13 @@ export function registerRequestRoutes(app: FastifyInstance): void {
   });
 
   /** Resolves a token to a live request, or a status/message for the sender. */
-  const loadRequest = (token: string): FileRequestRow | { code: number; error: string } => {
-    const row = app.db.prepare("SELECT * FROM file_requests WHERE token = ?").get(token) as
-      | FileRequestRow
-      | undefined;
+  const loadRequest = async (
+    token: string,
+  ): Promise<FileRequestRow | { code: number; error: string }> => {
+    const row = await app.db.get<FileRequestRow>(
+      "SELECT * FROM file_requests WHERE token = ?",
+      token,
+    );
     if (!row || row.revoked === 1) {
       return { code: 404, error: "this request is no longer accepting files" };
     }
@@ -218,15 +229,16 @@ export function registerRequestRoutes(app: FastifyInstance): void {
 
   app.get("/api/public/requests/:token", async (request, reply) => {
     const { token } = request.params as { token: string };
-    const loaded = loadRequest(token);
+    const loaded = await loadRequest(token);
     if ("code" in loaded) {
       return reply.code(loaded.code).send({ error: loaded.error });
     }
-    const owner = app.db
-      .prepare("SELECT key_attributes FROM users WHERE id = ?")
-      .get(loaded.user_id) as Pick<UserRow, "key_attributes">;
+    const owner = (await app.db.get<Pick<UserRow, "key_attributes">>(
+      "SELECT key_attributes FROM users WHERE id = ?",
+      loaded.user_id,
+    ))!;
     const { publicKey } = JSON.parse(owner.key_attributes) as { publicKey: string };
-    const quotaRoom = app.config.quotaBytes - app.storageUsed(loaded.user_id);
+    const quotaRoom = app.config.quotaBytes - (await storageUsed(app.db, loaded.user_id));
     return {
       publicKey,
       maxBytes: Math.max(0, Math.min(app.config.maxBlobBytes, quotaRoom)),
@@ -235,18 +247,22 @@ export function registerRequestRoutes(app: FastifyInstance): void {
 
   app.post("/api/public/requests/:token/files", async (request, reply) => {
     const { token } = request.params as { token: string };
-    const loaded = loadRequest(token);
+    const loaded = await loadRequest(token);
     if ("code" in loaded) {
       return reply.code(loaded.code).send({ error: loaded.error });
     }
     const body = createUploadSchema.parse(request.body);
     const id = randomUUID();
-    app.db
-      .prepare(
-        `INSERT INTO request_uploads (id, request_token, user_id, sealed_key, encrypted_meta, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(id, token, loaded.user_id, body.sealedKey, JSON.stringify(body.encryptedMeta), Date.now());
+    await app.db.run(
+      `INSERT INTO request_uploads (id, request_token, user_id, sealed_key, encrypted_meta, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      id,
+      token,
+      loaded.user_id,
+      body.sealedKey,
+      JSON.stringify(body.encryptedMeta),
+      Date.now(),
+    );
     return reply.code(201).send({ id });
   });
 
@@ -256,18 +272,20 @@ export function registerRequestRoutes(app: FastifyInstance): void {
     kind: BlobKind,
   ) => {
     const { token, id } = request.params as { token: string; id: string };
-    const loaded = loadRequest(token);
+    const loaded = await loadRequest(token);
     if ("code" in loaded) {
       return reply.code(loaded.code).send({ error: loaded.error });
     }
-    const upload = app.db
-      .prepare("SELECT * FROM request_uploads WHERE id = ? AND request_token = ? AND consumed = 0")
-      .get(id, token) as RequestUploadRow | undefined;
+    const upload = await app.db.get<RequestUploadRow>(
+      "SELECT * FROM request_uploads WHERE id = ? AND request_token = ? AND consumed = 0",
+      id,
+      token,
+    );
     // Data can only be written once; a finished upload is immutable.
     if (!upload || (kind === "data" && upload.uploaded === 1)) {
       return reply.code(404).send({ error: "upload not found" });
     }
-    const quotaRoom = app.config.quotaBytes - app.storageUsed(loaded.user_id);
+    const quotaRoom = app.config.quotaBytes - (await storageUsed(app.db, loaded.user_id));
     const maxBytes = Math.min(app.config.maxBlobBytes, quotaRoom);
     const declared = Number(request.headers["content-length"] ?? 0);
     if (maxBytes <= 0 || declared > maxBytes) {
@@ -283,12 +301,10 @@ export function registerRequestRoutes(app: FastifyInstance): void {
       throw err;
     }
     if (kind === "data") {
-      app.db
-        .prepare("UPDATE request_uploads SET size = ?, uploaded = 1 WHERE id = ?")
-        .run(written, id);
+      await app.db.run("UPDATE request_uploads SET size = ?, uploaded = 1 WHERE id = ?", written, id);
     } else {
       const column = kind === "thumb" ? "thumb_size" : "index_size";
-      app.db.prepare(`UPDATE request_uploads SET ${column} = ? WHERE id = ?`).run(written, id);
+      await app.db.run(`UPDATE request_uploads SET ${column} = ? WHERE id = ?`, written, id);
     }
     return { size: written };
   };
