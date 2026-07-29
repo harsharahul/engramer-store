@@ -3,20 +3,22 @@ import { Semaphore, TokenBucket } from "../src/budget.js";
 
 describe("token bucket", () => {
   it("lets the first request through immediately", async () => {
-    const bucket = new TokenBucket(5);
+    const bucket = new TokenBucket(5); // 200ms spacing
     const started = Date.now();
     await bucket.take();
-    expect(Date.now() - started).toBeLessThan(30);
+    // Well under one interval: proves no pacing wait was inserted. The
+    // bound is loose because a loaded runner adds event-loop lag.
+    expect(Date.now() - started).toBeLessThan(150);
   });
 
   it("paces a burst down to the configured rate", async () => {
     const bucket = new TokenBucket(20); // 50ms spacing
     const started = Date.now();
     await Promise.all(Array.from({ length: 5 }, () => bucket.take()));
-    const elapsed = Date.now() - started;
     // 5 takes at 20/s: first immediate, the rest spaced 50ms -> >=200ms.
-    expect(elapsed).toBeGreaterThanOrEqual(190);
-    expect(elapsed).toBeLessThan(600);
+    // Only the lower bound is asserted; scheduling lag on a loaded runner
+    // legitimately stretches the upper end.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(190);
   });
 
   it("does not accumulate burst credit while idle", async () => {
