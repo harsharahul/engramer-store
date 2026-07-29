@@ -45,6 +45,22 @@ const RECOVERY_CODE_COUNT = 10;
 /** The presented invite was missing, used, expired, or revoked. */
 class InviteInvalidError extends Error {}
 
+/** Argon2id parameters for an email with no account: indistinguishable
+ * from a real one, stable across calls, and derived so no state is kept. */
+function decoyKdf(email: string, serverSecret: string): {
+  salt: string;
+  opsLimit: number;
+  memLimit: number;
+} {
+  const salt = createHash("sha256")
+    .update(`engram-decoy-kdf|${serverSecret}|${email}`)
+    .digest()
+    .subarray(0, 16)
+    .toString("base64");
+  // The MODERATE profile every account is created with.
+  return { salt, opsLimit: 3, memLimit: 268435456 };
+}
+
 function digestsMatch(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
   const bufB = Buffer.from(b);
@@ -145,15 +161,35 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     }
   });
 
-  // Pre-login: the client needs the KDF salt and parameters to derive its keys.
+  /**
+   * Pre-login: the client needs the KDF salt and parameters to derive its
+   * keys. An unknown email gets a stable decoy instead of an error, so this
+   * endpoint cannot be used to discover who has an account on a public
+   * server. The decoy salt is derived from the email under the server's
+   * secret, so it is deterministic per email (a real account's salt is
+   * stable too) and reveals nothing. The login attempt that follows fails
+   * on the digest either way, at the same cost.
+   */
   app.get("/api/auth/attributes", async (request, reply) => {
-    const email = z.string().email().toLowerCase().parse((request.query as { email?: string }).email);
+    const parsed = z
+      .string()
+      .email()
+      .toLowerCase()
+      .safeParse((request.query as { email?: string }).email);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid request" });
+    }
+    const email = parsed.data;
+    const retryAfter = await gate(request, email);
+    if (retryAfter !== null) {
+      return reply.code(429).header("retry-after", retryAfter).send({ error: "too many attempts" });
+    }
     const user = await app.db.get<Pick<UserRow, "key_attributes">>(
       "SELECT key_attributes FROM users WHERE email = ?",
       email,
     );
     if (!user) {
-      return reply.code(404).send({ error: "no account with this email" });
+      return { kdf: decoyKdf(email, app.config.jwtSecret) };
     }
     const attributes = JSON.parse(user.key_attributes) as { kdf: unknown };
     return { kdf: attributes.kdf };

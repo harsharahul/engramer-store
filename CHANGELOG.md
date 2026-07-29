@@ -3,6 +3,25 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.19.0] - 2026-07-29
+
+### Security
+- Content Security Policy and companion headers on every response. The
+  policy is deny-by-default and allows only what the app uses: no external
+  origin is reachable, so even a compromised dependency cannot exfiltrate
+  decrypted content, and `object-src` and `frame-ancestors` are closed.
+  WebAssembly is permitted for on-device OCR but plain `eval` is not, and
+  the client's inline theme script is allowed by hash computed from the
+  served page at startup rather than by weakening the policy.
+- The pre-login endpoint no longer reveals which emails have accounts. An
+  unknown address receives a stable decoy key-derivation salt derived under
+  the server's secret, indistinguishable from a real one, and the endpoint
+  is now covered by the same failure throttle as sign-in.
+- Cross-origin browser access is disabled by default (the client is served
+  from the same origin); `ENGRAMER_CORS_ORIGINS` allows listing origins
+  explicitly for deployments that need it.
+- Validation failures no longer echo the expected payload shape.
+
 ## [0.18.0] - 2026-07-29
 
 ### Added
