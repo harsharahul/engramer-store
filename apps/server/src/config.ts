@@ -35,8 +35,14 @@ export interface ServerConfig {
   registration: "open" | "invite" | "closed";
   /** Extra browser origins allowed to call the API; empty means same-origin only. */
   corsOrigins: string[];
-  /** Reverse proxies in front of this server; 0 means it is directly exposed. */
-  trustedProxyHops: number;
+  /**
+   * Who is allowed to speak for the client address. Either a hop count
+   * ("2") or, preferably, a comma-separated list of proxy addresses and
+   * CIDR ranges, which keeps working when a layer is added or removed.
+   * Empty means this server is directly exposed and forwarded headers are
+   * ignored entirely.
+   */
+  trustedProxies: string | number | false;
   /** Lowercased emails that are administrators and may always register. */
   adminEmails: string[];
   /** When set, ciphertext blobs go to an S3-compatible object store. */
@@ -88,7 +94,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
         ? overrides.databaseUrl
         : (process.env.ENGRAMER_DATABASE_URL ?? null),
     registration: registrationMode(process.env.ENGRAMER_REGISTRATION),
-    trustedProxyHops: positiveOrZero(process.env.ENGRAMER_TRUSTED_PROXY_HOPS),
+    trustedProxies: parseTrustedProxies(process.env.ENGRAMER_TRUSTED_PROXIES),
     corsOrigins: (process.env.ENGRAMER_CORS_ORIGINS ?? "")
       .split(",")
       .map((origin) => origin.trim())
@@ -124,6 +130,25 @@ function loadS3Settings(): S3Settings | null {
     maxTps: positiveOrZero(process.env.ENGRAMER_S3_MAX_TPS),
     maxConcurrent: positiveOrZero(process.env.ENGRAMER_S3_MAX_CONCURRENT),
   };
+}
+
+/**
+ * A forwarded client address is only as trustworthy as the hop that set
+ * it, so this is opt-in: unset means every request is attributed to its
+ * direct peer. A numeric value trusts that many hops; anything else is
+ * passed through as a proxy allowlist (addresses, CIDRs, or the shorthands
+ * the underlying parser understands, such as "loopback" or "uniquelocal").
+ */
+function parseTrustedProxies(raw: string | undefined): string | number | false {
+  const value = raw?.trim();
+  if (!value) {
+    return false;
+  }
+  const hops = Number(value);
+  if (Number.isInteger(hops)) {
+    return hops > 0 ? hops : false;
+  }
+  return value;
 }
 
 function registrationMode(raw: string | undefined): "open" | "invite" | "closed" {
