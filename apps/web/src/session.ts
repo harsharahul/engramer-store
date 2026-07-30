@@ -9,6 +9,7 @@ import {
   type KeyAttributes,
 } from "@engramer/crypto";
 import { api, setAuthToken } from "./api";
+import { clearUnlockRecord, deviceUnlock, updateUnlockToken } from "./unlock";
 
 export interface Session {
   email: string;
@@ -99,6 +100,8 @@ function sessionFromKeys(
 
 function activate(session: Session): void {
   setAuthToken(session.token);
+  // A fresh login renews the device-unlock record's 30-day token window.
+  updateUnlockToken(session.email, session.token);
   sessionStorage.setItem(
     SESSION_KEY,
     JSON.stringify({
@@ -142,5 +145,20 @@ export async function restoreSession(): Promise<Session | null> {
 
 export function clearSession(): void {
   sessionStorage.removeItem(SESSION_KEY);
+  // Signing out is the revocation gesture: the passkey-wrapped session
+  // must not outlive it.
+  clearUnlockRecord();
   setAuthToken(null);
+}
+
+/** Restores a session via the device passkey (Touch ID); null if dismissed. */
+export async function restoreDeviceSession(): Promise<Session | null> {
+  await ready();
+  const unlocked = await deviceUnlock();
+  if (!unlocked) {
+    return null;
+  }
+  const session: Session = unlocked;
+  activate(session);
+  return session;
 }

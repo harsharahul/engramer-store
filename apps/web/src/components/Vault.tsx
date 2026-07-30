@@ -22,6 +22,14 @@ import { searchFiles, highlightParts, type SearchHit } from "../search";
 import { collectDropped, fromDirectoryInput } from "../uploader";
 import { MOBILE_QUERY, useMediaQuery } from "../media";
 import { useLongPress } from "../longpress";
+import {
+  clearUnlockRecord,
+  deviceUnlockSupported,
+  enrollDeviceUnlock,
+  hasDeviceUnlock,
+  markUnlockDeclined,
+  unlockDeclined,
+} from "../unlock";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
 import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
@@ -202,6 +210,7 @@ export function Vault() {
   const [requestFolder, setRequestFolder] = useState<{ folderId: string | null } | null>(null);
   const [securityOpen, setSecurityOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [unlockPromptOpen, setUnlockPromptOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => currentTheme());
@@ -598,6 +607,42 @@ export function Vault() {
     store.logout();
   };
 
+  // One-time offer: skip the password next launch. Only on capable
+  // browsers, only until enrolled or declined once.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (hasDeviceUnlock() || unlockDeclined()) {
+        return;
+      }
+      if ((await deviceUnlockSupported()) && !cancelled) {
+        setUnlockPromptOpen(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const enrollUnlock = async () => {
+    const session = store.session;
+    if (!session) {
+      return;
+    }
+    try {
+      const result = await enrollDeviceUnlock(session);
+      if (result === "enrolled") {
+        showToast("Device unlock is on. Next time, one touch opens the vault.");
+      } else if (result === "unsupported") {
+        markUnlockDeclined();
+        showToast("This browser cannot unlock with a passkey.");
+      }
+      // "cancelled" keeps the offer available from the command palette.
+    } catch {
+      showToast("Device unlock was not set up.");
+    }
+  };
+
   // The tab bar's center [+]: one sheet absorbs every create/upload action
   // that the phone topbar has no room for.
   const openAddSheet = () => {
@@ -666,6 +711,27 @@ export function Vault() {
       { id: "go-favorites", label: "Go to Favorites", run: () => setView({ kind: "favorites" }) },
       { id: "go-shared", label: "Go to Shared", run: () => setView({ kind: "shared" }) },
       { id: "go-trash", label: "Go to Trash", run: () => setView({ kind: "trash" }) },
+      {
+        id: "unlock-enable",
+        label: "Enable device unlock",
+        hint: "Touch ID or passkey instead of the password",
+        run: () => {
+          if (hasDeviceUnlock()) {
+            showToast("Device unlock is already on for this device.");
+            return;
+          }
+          void enrollUnlock();
+        },
+      },
+      {
+        id: "unlock-disable",
+        label: "Disable device unlock",
+        hint: "require the password on this device",
+        run: () => {
+          clearUnlockRecord();
+          showToast("Device unlock removed. Your password is required next time.");
+        },
+      },
       { id: "lock", label: "Lock vault and sign out", run: lock },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1477,6 +1543,20 @@ export function Vault() {
           Reading {store.ocrProgress.current} · {store.ocrProgress.done + 1} of{" "}
           {store.ocrProgress.total}
         </div>
+      )}
+      {unlockPromptOpen && (
+        <Confirm
+          title="Unlock with Touch ID next time?"
+          sub="Skip the password on this device: your vault key stays wrapped under a key only this device's screen-lock passkey can release. Signing out removes it, and you can disable it anytime from the command palette."
+          confirmLabel="Enable"
+          onConfirm={enrollUnlock}
+          onClose={() => {
+            setUnlockPromptOpen(false);
+            if (!hasDeviceUnlock()) {
+              markUnlockDeclined();
+            }
+          }}
+        />
       )}
       {toast && <div className="toast">{toast}</div>}
     </div>
