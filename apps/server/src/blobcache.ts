@@ -2,7 +2,7 @@ import { createReadStream, existsSync, mkdirSync, readdirSync, statSync } from "
 import { rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import type { BlobStore } from "./blobs.js";
+import type { BlobStore, PartReceipt } from "./blobs.js";
 import { bufferUpTo } from "./streams.js";
 
 /**
@@ -145,5 +145,30 @@ export class DiskCachedBlobStore implements BlobStore {
     if (this.cacheable(key)) {
       await this.drop(key);
     }
+  }
+
+  // Part sessions only ever carry content blobs, which this cache never
+  // holds; they pass straight through.
+
+  beginParts(key: string): Promise<string> {
+    return this.backing.beginParts(key);
+  }
+
+  putPart(
+    key: string,
+    handle: string,
+    partNo: number,
+    source: Readable,
+    length: number,
+  ): Promise<PartReceipt> {
+    return this.backing.putPart(key, handle, partNo, source, length);
+  }
+
+  completeParts(key: string, handle: string, parts: { partNo: number; etag?: string }[]): Promise<void> {
+    return this.backing.completeParts(key, handle, parts);
+  }
+
+  abortParts(key: string, handle: string): Promise<void> {
+    return this.backing.abortParts(key, handle);
   }
 }

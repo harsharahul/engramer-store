@@ -394,6 +394,56 @@ export function uploadRequestBlob(
   });
 }
 
+// ----- part uploads: large content in bounded requests -----
+
+/** Opens a part-upload session; the size is the exact ciphertext length. */
+export function beginPartUpload(fileId: string, size: number): Promise<{ session: string }> {
+  return request(`/api/files/${fileId}/data/parts`, {
+    method: "POST",
+    body: JSON.stringify({ size }),
+  });
+}
+
+export function completePartUpload(fileId: string, session: string): Promise<{ size: number }> {
+  return request(`/api/files/${fileId}/data/parts/${session}/complete`, { method: "POST" });
+}
+
+export function abortPartUpload(fileId: string, session: string): Promise<void> {
+  return request(`/api/files/${fileId}/data/parts/${session}`, { method: "DELETE" });
+}
+
+/** Uploads one numbered part with progress; parts are retryable in place. */
+export function uploadPart(
+  fileId: string,
+  session: string,
+  partNo: number,
+  payload: Uint8Array,
+  onProgress?: (fraction: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", `/api/files/${fileId}/data/parts/${session}/${partNo}`);
+    xhr.setRequestHeader("content-type", "application/octet-stream");
+    if (authToken) {
+      xhr.setRequestHeader("authorization", `Bearer ${authToken}`);
+    }
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        onProgress(event.loaded / event.total);
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new ApiError(xhr.status, `part upload failed (${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(0, "network error during upload"));
+    xhr.send(payload.slice().buffer as ArrayBuffer);
+  });
+}
+
 /** Upload with real progress reporting; fetch cannot observe upload progress. */
 export function uploadBlob(
   fileId: string,

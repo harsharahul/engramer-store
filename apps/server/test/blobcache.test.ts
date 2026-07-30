@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { byteLimiter, type BlobStore } from "../src/blobs.js";
+import { byteLimiter, type BlobStore, type PartReceipt } from "../src/blobs.js";
 import { DiskCachedBlobStore } from "../src/blobcache.js";
 
 /** In-memory backing store that counts round trips. */
@@ -32,6 +32,51 @@ class CountingStore implements BlobStore {
 
   async remove(key: string): Promise<void> {
     this.blobs.delete(key);
+  }
+
+  readonly parts = new Map<string, Buffer>();
+
+  async beginParts(_key: string): Promise<string> {
+    return "fake-handle";
+  }
+
+  async putPart(
+    key: string,
+    handle: string,
+    partNo: number,
+    source: Readable,
+    length: number,
+  ): Promise<PartReceipt> {
+    const limiter = byteLimiter(length);
+    const chunks: Buffer[] = [];
+    for await (const chunk of source.pipe(limiter.transform)) {
+      chunks.push(chunk as Buffer);
+    }
+    this.parts.set(`${key}:${handle}:${partNo}`, Buffer.concat(chunks));
+    return { bytes: limiter.written() };
+  }
+
+  async completeParts(
+    key: string,
+    handle: string,
+    parts: { partNo: number; etag?: string }[],
+  ): Promise<void> {
+    const ordered = [...parts].sort((a, b) => a.partNo - b.partNo);
+    this.blobs.set(
+      key,
+      Buffer.concat(ordered.map((p) => this.parts.get(`${key}:${handle}:${p.partNo}`)!)),
+    );
+    for (const p of ordered) {
+      this.parts.delete(`${key}:${handle}:${p.partNo}`);
+    }
+  }
+
+  async abortParts(key: string, handle: string): Promise<void> {
+    for (const k of [...this.parts.keys()]) {
+      if (k.startsWith(`${key}:${handle}:`)) {
+        this.parts.delete(k);
+      }
+    }
   }
 }
 
