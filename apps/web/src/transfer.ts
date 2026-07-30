@@ -21,8 +21,8 @@ import {
   type FileDto,
 } from "./api";
 import { categorize, type Analysis } from "./intel/categorize";
-import { extractExif, extractText } from "./intel/extract";
-import { ocrEnabled, recognizeImage } from "./intel/ocr";
+import { extractExif, extractText, isPdf } from "./intel/extract";
+import { ocrEnabled, recognizeImage, recognizePdf } from "./intel/ocr";
 import { computeBlur } from "./intel/blur";
 
 const THUMB_SIZE = 512;
@@ -128,6 +128,10 @@ export async function analyzeFile(file: File): Promise<PreparedFile> {
   // text sharpens categorization (a photographed invoice files as a receipt).
   if (text === undefined && file.type.startsWith("image/") && ocrEnabled()) {
     text = await recognizeImage(file).catch(() => undefined);
+  }
+  // A PDF with no text layer is a scan; its pages read like photos.
+  if (text === undefined && isPdf(file.name, file.type) && ocrEnabled()) {
+    text = await recognizePdf(file).catch(() => undefined);
   }
   const analysis = categorize({
     name: file.name,

@@ -3,6 +3,27 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.23.0] - 2026-07-29
+
+### Added
+- Unlock with a device passkey. After a one-time opt-in following login,
+  reopening the app takes a single Touch ID, Face ID, or Windows Hello
+  prompt instead of the full password. The vault key rests on this device
+  only as ciphertext, wrapped under a key that solely the platform
+  authenticator can release; a fresh password login renews the session
+  window, signing out removes the enrollment, and the password path
+  always remains.
+- Large files upload reliably. Content over 64 MiB of ciphertext travels
+  in resumable parts, so uploads pass through proxies with request-size
+  limits, a network failure retries one part instead of restarting the
+  file, and memory use during upload stays small and constant regardless
+  of file size. On S3-compatible storage, parts stream through native
+  multipart uploads.
+- Scanned documents become searchable. PDFs without a text layer go
+  through the same on-device text recognition as photos, page by page,
+  when image reading is enabled; a "Read text in document" action covers
+  already-stored scans, and the bulk sweep now includes them.
+
 ## [0.22.1] - 2026-07-29
 
 ### Fixed
