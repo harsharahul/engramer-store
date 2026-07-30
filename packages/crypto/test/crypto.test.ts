@@ -22,6 +22,16 @@ import {
   STREAM_CHUNK_SIZE,
   StreamEncryptor,
   streamCiphertextSize,
+  CHUNKED_CHUNK_SIZE,
+  chunkedEncrypt,
+  chunkedDecrypt,
+  chunkedCiphertextSize,
+  isChunkedFormat,
+  readChunkedHeader,
+  chunkSpanForRange,
+  decryptChunkRange,
+  decryptContent,
+  streamPlaintextSize,
   protectShareKey,
   deriveShareAccess,
   openShareKey,
@@ -352,5 +362,103 @@ describe("stream size accounting and grouped encryption", () => {
     }
     expect(assembled.length).toBe(streamCiphertextSize(plaintext.length));
     expect(Buffer.from(decryptBytes(assembled, key)).equals(Buffer.from(plaintext))).toBe(true);
+  });
+});
+
+describe("chunked media format", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  function makePlain(size: number): Uint8Array {
+    const bytes = new Uint8Array(size);
+    for (let i = 0; i < size; i += 977) {
+      bytes[i] = (i / 977) % 251;
+    }
+    return bytes;
+  }
+
+  it("round-trips across chunk boundaries and predicts its size", () => {
+    const key = generateKey();
+    for (const size of [1, CHUNKED_CHUNK_SIZE, CHUNKED_CHUNK_SIZE + 1, Math.floor(2.5 * CHUNKED_CHUNK_SIZE)]) {
+      const plain = makePlain(size);
+      const sealed = chunkedEncrypt(plain, key);
+      expect(sealed.length).toBe(chunkedCiphertextSize(size));
+      const opened = chunkedDecrypt(sealed, key);
+      expect(Buffer.from(opened).equals(Buffer.from(plain))).toBe(true);
+    }
+  });
+
+  it("is detectable against the sequential stream format", () => {
+    const key = generateKey();
+    const chunked = chunkedEncrypt(makePlain(64), key);
+    const stream = encryptBytes(makePlain(64), key);
+    expect(isChunkedFormat(chunked)).toBe(true);
+    expect(isChunkedFormat(stream)).toBe(false);
+  });
+
+  it("decrypts a single chunk in isolation for random access", () => {
+    const key = generateKey();
+    const plain = makePlain(Math.floor(2.5 * CHUNKED_CHUNK_SIZE));
+    const sealed = chunkedEncrypt(plain, key);
+    const header = readChunkedHeader(sealed);
+    expect(header.plainSize).toBe(plain.length);
+    const span = chunkSpanForRange(header, CHUNKED_CHUNK_SIZE + 5, CHUNKED_CHUNK_SIZE + 100);
+    expect(span.firstChunk).toBe(1);
+    expect(span.lastChunk).toBe(1);
+    const chunkBytes = sealed.subarray(span.ciphertextStart, span.ciphertextEnd + 1);
+    const opened = decryptChunkRange(header, key, chunkBytes, span);
+    expect(
+      Buffer.from(opened).equals(
+        Buffer.from(plain.subarray(CHUNKED_CHUNK_SIZE, 2 * CHUNKED_CHUNK_SIZE)),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects chunks moved to another position", () => {
+    const key = generateKey();
+    const plain = makePlain(2 * CHUNKED_CHUNK_SIZE);
+    const sealed = chunkedEncrypt(plain, key);
+    const header = readChunkedHeader(sealed);
+    const a = chunkSpanForRange(header, 0, 0);
+    const b = chunkSpanForRange(header, CHUNKED_CHUNK_SIZE, CHUNKED_CHUNK_SIZE);
+    // Present chunk 1's ciphertext as if it were chunk 0.
+    const moved = sealed.subarray(b.ciphertextStart, b.ciphertextEnd + 1);
+    expect(() => decryptChunkRange(header, key, moved, a)).toThrow();
+  });
+
+  it("rejects a tampered header", () => {
+    const key = generateKey();
+    const sealed = chunkedEncrypt(makePlain(64), key);
+    const corrupted = new Uint8Array(sealed);
+    corrupted[8] = corrupted[8]! ^ 0xff; // inside the salt
+    expect(() => chunkedDecrypt(corrupted, key)).toThrow();
+  });
+
+  it("uses distinct salts per encryption so re-saves never reuse nonces", () => {
+    const key = generateKey();
+    const plain = makePlain(64);
+    const first = chunkedEncrypt(plain, key);
+    const second = chunkedEncrypt(plain, key);
+    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(false);
+  });
+});
+
+describe("content helpers", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  it("decryptContent handles both formats transparently", () => {
+    const key = generateKey();
+    const plain = new Uint8Array(4096).fill(9);
+    expect(Buffer.from(decryptContent(encryptBytes(plain, key), key)).equals(Buffer.from(plain))).toBe(true);
+    expect(Buffer.from(decryptContent(chunkedEncrypt(plain, key), key)).equals(Buffer.from(plain))).toBe(true);
+  });
+
+  it("streamPlaintextSize inverts streamCiphertextSize", () => {
+    for (const size of [0, 1, STREAM_CHUNK_SIZE - 1, STREAM_CHUNK_SIZE, STREAM_CHUNK_SIZE + 1, 3 * STREAM_CHUNK_SIZE + 12345]) {
+      expect(streamPlaintextSize(streamCiphertextSize(size))).toBe(size);
+    }
   });
 });

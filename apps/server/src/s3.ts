@@ -11,7 +11,7 @@ import {
   UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
-import { byteLimiter, type BlobStore, type PartReceipt } from "./blobs.js";
+import { byteLimiter, type BlobRange, type BlobStore, type PartReceipt } from "./blobs.js";
 import { attachBudget } from "./budget.js";
 
 export interface S3Config {
@@ -80,9 +80,13 @@ export class S3BlobStore implements BlobStore {
     }
   }
 
-  async get(key: string): Promise<Readable> {
+  async get(key: string, range?: BlobRange): Promise<Readable> {
     const result = await this.client.send(
-      new GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
+      new GetObjectCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+        ...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}),
+      }),
     );
     return result.Body as Readable;
   }

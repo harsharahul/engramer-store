@@ -28,6 +28,15 @@ export function streamCiphertextSize(plainSize: number): number {
   return streamHeaderBytes() + plainSize + chunks * streamOverheadBytes();
 }
 
+/** The inverse: plaintext length recovered from a stream blob's size. */
+export function streamPlaintextSize(ciphertextSize: number): number {
+  const body = ciphertextSize - streamHeaderBytes();
+  const sealedChunk = STREAM_CHUNK_SIZE + streamOverheadBytes();
+  const fullChunks = Math.floor(body / sealedChunk);
+  const remainder = body - fullChunks * sealedChunk;
+  return fullChunks * STREAM_CHUNK_SIZE + Math.max(0, remainder - streamOverheadBytes());
+}
+
 export class StreamEncryptor {
   readonly header: Uint8Array;
   private readonly state: unknown;

@@ -71,6 +71,9 @@ export default defineConfig({
     react(),
     ocrAssets(),
     VitePWA({
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       registerType: "autoUpdate",
       includeAssets: ["icon.svg", "apple-touch-icon.png"],
       manifest: {
@@ -90,16 +93,17 @@ export default defineConfig({
           { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ],
       },
-      workbox: {
+      injectManifest: {
+        // The worker registers as a classic script; the bundle must be too.
+        rollupFormat: "iife",
         // App shell only. Encrypted blobs and API responses are never cached:
         // ciphertext belongs on the server, plaintext belongs in memory.
+        // Navigation fallback and the media bridge live in src/sw.ts.
         globPatterns: ["**/*.{js,css,html,woff2,svg,png}"],
         // The OCR runtime and language model are megabytes and fetched only
         // when OCR actually runs; they never belong in the app-shell cache.
         globIgnores: ["ocr/**"],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-        navigateFallbackDenylist: [/^\/api\//],
-        runtimeCaching: [],
       },
     }),
   ],

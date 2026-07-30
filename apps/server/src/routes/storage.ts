@@ -565,6 +565,32 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     return reply.code(204).send();
   });
 
+  /** Parses a single-range `bytes=` header against a known size. */
+  const parseRange = (header: string, size: number): { start: number; end: number } | null => {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+    if (!match || (match[1] === "" && match[2] === "")) {
+      return null;
+    }
+    let start: number;
+    let end: number;
+    if (match[1] === "") {
+      // Suffix range: the last N bytes.
+      const suffix = Number(match[2]);
+      if (suffix === 0) {
+        return null;
+      }
+      start = Math.max(0, size - suffix);
+      end = size - 1;
+    } else {
+      start = Number(match[1]);
+      end = match[2] === "" ? size - 1 : Math.min(Number(match[2]), size - 1);
+    }
+    if (start >= size || start > end) {
+      return null;
+    }
+    return { start, end };
+  };
+
   const downloadBlob = async (request: FastifyRequest, reply: FastifyReply, kind: BlobKind) => {
     const { id } = request.params as { id: string };
     const file = await getOwnFile(id, request.user.uid);
@@ -573,9 +599,28 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     if (!file || (kind === "data" && !file.uploaded) || (kind !== "data" && !size)) {
       return reply.code(404).send({ error: "blob not found" });
     }
+    const key = blobKey(id, kind, kind === "data" ? file.generation : 0);
+    // Content ranges let media players seek; the ciphertext itself is
+    // random-access when the blob uses the chunked format.
+    if (kind === "data") {
+      reply.header("accept-ranges", "bytes");
+      const rangeHeader = request.headers.range;
+      if (typeof rangeHeader === "string" && rangeHeader.length > 0) {
+        const range = parseRange(rangeHeader, Number(size));
+        if (!range) {
+          reply.header("content-range", `bytes */${size}`);
+          return reply.code(416).send({ error: "range not satisfiable" });
+        }
+        reply.code(206);
+        reply.header("content-type", "application/octet-stream");
+        reply.header("content-range", `bytes ${range.start}-${range.end}/${size}`);
+        reply.header("content-length", range.end - range.start + 1);
+        return reply.send(await app.blobs.get(key, range));
+      }
+    }
     reply.header("content-type", "application/octet-stream");
     reply.header("content-length", size);
-    return reply.send(await app.blobs.get(blobKey(id, kind, kind === "data" ? file.generation : 0)));
+    return reply.send(await app.blobs.get(key));
   };
 
   app.get("/api/files/:id/data", auth, (request, reply) => downloadBlob(request, reply, "data"));

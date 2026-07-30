@@ -37,6 +37,12 @@ export interface PartReceipt {
   etag?: string;
 }
 
+/** Inclusive byte range of a blob's content. */
+export interface BlobRange {
+  start: number;
+  end: number;
+}
+
 /**
  * Where ciphertext lives. The metadata database never holds blob bytes; a
  * store implementation only needs streaming put/get/remove of opaque keys,
@@ -46,7 +52,8 @@ export interface PartReceipt {
 export interface BlobStore {
   /** Streams a blob in, enforcing maxBytes; resolves to the byte count. */
   put(key: string, source: Readable, maxBytes: number): Promise<number>;
-  get(key: string): Promise<Readable>;
+  /** Streams a blob out, optionally only the given inclusive byte range. */
+  get(key: string, range?: BlobRange): Promise<Readable>;
   remove(key: string): Promise<void>;
   /** Opens a part session targeting the key; returns a backend handle. */
   beginParts(key: string): Promise<string>;
@@ -106,8 +113,10 @@ export class FsBlobStore implements BlobStore {
     }
   }
 
-  async get(key: string): Promise<Readable> {
-    return createReadStream(this.path(key));
+  async get(key: string, range?: BlobRange): Promise<Readable> {
+    return range
+      ? createReadStream(this.path(key), { start: range.start, end: range.end })
+      : createReadStream(this.path(key));
   }
 
   async remove(key: string): Promise<void> {

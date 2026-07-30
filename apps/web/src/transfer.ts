@@ -1,13 +1,16 @@
 import {
   encryptBytes,
   utf8Encode,
-  decryptBytes,
+  decryptContent,
   encryptFileMetadata,
   generateKey,
   secretBoxSeal,
   streamCiphertextSize,
   StreamEncryptor,
   STREAM_CHUNK_SIZE,
+  ChunkedEncryptor,
+  chunkedEncrypt,
+  chunkedCiphertextSize,
   type FileMetadata,
 } from "@engramer/crypto";
 import {
@@ -196,16 +199,27 @@ async function sendPartWithRetry(
  * The assembled server-side blob is byte-identical to a single-request
  * upload of the same file.
  */
+function isMediaFile(file: File): boolean {
+  return file.type.startsWith("video/") || file.type.startsWith("audio/");
+}
+
+/** Media uses the random-access chunked format so playback can seek. */
+export function contentCiphertextSize(file: File): number {
+  return isMediaFile(file) ? chunkedCiphertextSize(file.size) : streamCiphertextSize(file.size);
+}
+
 async function uploadInParts(
   file: File,
   fileId: string,
   fileKey: Uint8Array,
   onProgress: (fraction: number) => void,
 ): Promise<number> {
-  const total = streamCiphertextSize(file.size);
+  const total = contentCiphertextSize(file);
   const { session } = await beginPartUpload(fileId, total);
   try {
-    const encryptor = new StreamEncryptor(fileKey);
+    const encryptor = isMediaFile(file)
+      ? new ChunkedEncryptor(fileKey, file.size)
+      : new StreamEncryptor(fileKey);
     const chunkCount = Math.max(1, Math.ceil(file.size / STREAM_CHUNK_SIZE));
     let pieces: Uint8Array[] = [encryptor.header];
     let pieceBytes = encryptor.header.length;
@@ -214,7 +228,11 @@ async function uploadInParts(
     for (let i = 0; i < chunkCount; i++) {
       const start = i * STREAM_CHUNK_SIZE;
       const slice = file.slice(start, Math.min(start + STREAM_CHUNK_SIZE, file.size));
-      const sealed = encryptor.push(new Uint8Array(await slice.arrayBuffer()), i === chunkCount - 1);
+      const plainChunk = new Uint8Array(await slice.arrayBuffer());
+      const sealed =
+        encryptor instanceof ChunkedEncryptor
+          ? encryptor.seal(i, plainChunk)
+          : encryptor.push(plainChunk, i === chunkCount - 1);
       pieces.push(sealed);
       pieceBytes += sealed.length;
       if ((i + 1) % CHUNKS_PER_PART === 0 || i === chunkCount - 1) {
@@ -256,12 +274,14 @@ export async function encryptAndUpload(
   const encryptedKey = secretBoxSeal(fileKey, masterKey);
   const dto = await api.createFile(folderId, encryptedKey, encryptedMeta);
 
-  const totalCiphertext = streamCiphertextSize(file.size);
+  const totalCiphertext = contentCiphertextSize(file);
   if (totalCiphertext > PART_THRESHOLD) {
     await uploadInParts(file, dto.id, fileKey, onProgress);
   } else {
     const plaintext = new Uint8Array(await file.arrayBuffer());
-    const ciphertext = encryptBytes(plaintext, fileKey);
+    const ciphertext = isMediaFile(file)
+      ? chunkedEncrypt(plaintext, fileKey)
+      : encryptBytes(plaintext, fileKey);
     await uploadBlob(dto.id, "data", ciphertext, onProgress);
   }
 
@@ -284,10 +304,10 @@ export async function encryptAndUpload(
 
 export async function downloadAndDecrypt(fileId: string, fileKey: Uint8Array): Promise<Uint8Array> {
   const ciphertext = await api.downloadBlob(fileId, "data");
-  return decryptBytes(ciphertext, fileKey);
+  return decryptContent(ciphertext, fileKey);
 }
 
 export async function downloadThumbnail(fileId: string, fileKey: Uint8Array): Promise<Uint8Array> {
   const ciphertext = await api.downloadBlob(fileId, "thumbnail");
-  return decryptBytes(ciphertext, fileKey);
+  return decryptContent(ciphertext, fileKey);
 }

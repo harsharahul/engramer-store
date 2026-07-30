@@ -37,9 +37,23 @@ export {
   streamOverheadBytes,
   encryptedChunkSize,
   streamCiphertextSize,
-  encryptBytes,
-  decryptBytes,
+  streamPlaintextSize,
 } from "./stream.js";
+export {
+  CHUNKED_CHUNK_SIZE,
+  type ChunkedHeader,
+  type ChunkSpan,
+  ChunkedEncryptor,
+  chunkedEncrypt,
+  chunkedDecrypt,
+  chunkedCiphertextSize,
+  isChunkedFormat,
+  readChunkedHeader,
+  chunkSpanForRange,
+  decryptChunkRange,
+  decryptContent,
+} from "./chunked.js";
+export { encryptBytes, decryptBytes } from "./stream.js";
 export {
   type FileMetadata,
   type FolderMetadata,
