@@ -23,6 +23,7 @@ export {
   MIN_MEM_LIMIT,
   deriveLoginKey,
   loginKeyDigest,
+  deriveUnlockKey,
   generateAccountKeys,
   unlockWithPassword,
   unlockWithRecoveryKey,
