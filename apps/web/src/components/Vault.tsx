@@ -434,20 +434,20 @@ export function Vault() {
     ...(["text", "doc"].includes(fileKind(file.mime, file.name))
       ? [{ id: "edit", label: "Edit", icon: <PencilGlyph size={13} />, run: () => setEditorId(file.id) }]
       : []),
-    ...(file.mime.startsWith("image/") && !file.hasText
+    ...((file.mime.startsWith("image/") || file.mime === "application/pdf") && !file.hasText
       ? [
           {
             id: "ocr",
-            label: "Read text in image",
+            label: file.mime.startsWith("image/") ? "Read text in image" : "Read text in document",
             icon: <ScanTextGlyph size={13} />,
             run: () => {
               showToast("Reading text on this device…");
               void store
                 .recognizeFile(file.id)
                 .then((found) =>
-                  showToast(found ? "Text found. This image is searchable now." : "No text found in this image."),
+                  showToast(found ? "Text found. This file is searchable now." : "No text found in this file."),
                 )
-                .catch(() => showToast("Could not read this image."));
+                .catch(() => showToast("Could not read this file."));
             },
           },
         ]
@@ -679,8 +679,8 @@ export function Vault() {
       },
       {
         id: "ocr-all",
-        label: "Make images searchable",
-        hint: "on-device OCR",
+        label: "Make images and scans searchable",
+        hint: "on-device OCR, PDFs included",
         run: () => {
           if (!ocrEnabled()) {
             setOcrEnabled(true);

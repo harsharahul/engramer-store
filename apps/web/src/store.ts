@@ -19,7 +19,8 @@ import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { clearSession, type Session } from "./session";
 import { analyzeFile, downloadAndDecrypt, encryptAndUpload } from "./transfer";
-import { recognizeImage } from "./intel/ocr";
+import { recognizeImage, recognizePdf } from "./intel/ocr";
+import { isPdf } from "./intel/extract";
 import { mergeRestoredMeta } from "./versions";
 
 export interface FolderEntry {
@@ -799,17 +800,20 @@ export const useStore = create<StoreState>((set, get) => {
       return revealItems.length;
     },
 
-    /** Runs OCR over one already-stored image and files the text into its
-     * encrypted metadata. Returns whether any text was found. */
+    /** Runs OCR over one already-stored image or scanned PDF and files the
+     * text into its encrypted metadata. Returns whether any text was found. */
     recognizeFile: async (id) => {
       const file = get().files.get(id);
-      if (!file || !file.mime.startsWith("image/")) {
+      const scannable =
+        file && (file.mime.startsWith("image/") || isPdf(file.name, file.mime));
+      if (!file || !scannable) {
         return false;
       }
       const bytes = await downloadAndDecrypt(file.id, file.key);
-      const text = await recognizeImage(
-        new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime }),
-      );
+      const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime });
+      const text = file.mime.startsWith("image/")
+        ? await recognizeImage(blob)
+        : await recognizePdf(blob);
       if (!text) {
         return false;
       }
@@ -820,12 +824,14 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     /**
-     * Makes the whole image library searchable: every image without text
-     * goes through OCR, one at a time so the tab stays responsive.
+     * Makes the whole library of images and scanned PDFs searchable: every
+     * candidate without text goes through OCR, one at a time so the tab
+     * stays responsive.
      */
     recognizeAllImages: async () => {
       const candidates = [...get().files.values()].filter(
-        (f) => !f.trashed && f.mime.startsWith("image/") && !f.hasText,
+        (f) =>
+          !f.trashed && !f.hasText && (f.mime.startsWith("image/") || isPdf(f.name, f.mime)),
       );
       let found = 0;
       for (let i = 0; i < candidates.length; i++) {

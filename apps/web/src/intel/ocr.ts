@@ -106,3 +106,55 @@ export async function recognizeImage(image: Blob): Promise<string | undefined> {
     scheduleShutdown();
   }
 }
+
+const MAX_PDF_BYTES = 50 * 1024 * 1024;
+const MAX_OCR_PAGES = 20;
+const PDF_RENDER_WIDTH = 1600;
+
+/**
+ * Recognizes text in a scanned PDF: pages render to canvas and go through
+ * the same on-device engine as photos. Documents with a real text layer
+ * never reach this path (their text extracts directly); this exists for
+ * the scans and faxes of the world, which are images in a PDF wrapper.
+ */
+export async function recognizePdf(pdf: Blob): Promise<string | undefined> {
+  if (pdf.size === 0 || pdf.size > MAX_PDF_BYTES) {
+    return undefined;
+  }
+  const pdfjs = await import("pdfjs-dist");
+  const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+  const loadingTask = pdfjs.getDocument({ data: await pdf.arrayBuffer() });
+  const parts: string[] = [];
+  try {
+    const doc = await loadingTask.promise;
+    const pages = Math.min(doc.numPages, MAX_OCR_PAGES);
+    let total = 0;
+    for (let i = 1; i <= pages && total < TEXT_STORE_LIMIT; i++) {
+      const page = await doc.getPage(i);
+      const base = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: Math.max(1, PDF_RENDER_WIDTH / base.width) });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        break;
+      }
+      await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) {
+        continue;
+      }
+      const text = await recognizeImage(blob);
+      if (text) {
+        parts.push(text);
+        total += text.length;
+      }
+    }
+  } finally {
+    await loadingTask.destroy();
+  }
+  const text = parts.join("\n").trim();
+  return text.length >= 3 ? text.slice(0, TEXT_STORE_LIMIT) : undefined;
+}
