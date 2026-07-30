@@ -319,3 +319,65 @@ describe("part uploads", () => {
     expect((versions.json().versions as unknown[]).length).toBe(1);
   });
 });
+
+describe("ranged content downloads", () => {
+  async function uploaded(): Promise<{ id: string; ciphertext: Buffer }> {
+    const { id, fileKey } = await createFileRow("ranged.mp4");
+    const ciphertext = Buffer.from(encryptBytes(payload(64 * 1024), fileKey));
+    await app.inject({
+      method: "PUT",
+      url: `/api/files/${id}/data`,
+      headers: { ...authHeader(), "content-type": "application/octet-stream" },
+      payload: ciphertext,
+    });
+    return { id, ciphertext };
+  }
+
+  async function ranged(id: string, range: string) {
+    return app.inject({
+      method: "GET",
+      url: `/api/files/${id}/data`,
+      headers: { ...authHeader(), range },
+    });
+  }
+
+  it("serves an inner range with 206 and correct bytes", async () => {
+    const { id, ciphertext } = await uploaded();
+    const response = await ranged(id, "bytes=100-299");
+    expect(response.statusCode).toBe(206);
+    expect(response.headers["content-range"]).toBe(`bytes 100-299/${ciphertext.length}`);
+    expect(response.headers["accept-ranges"]).toBe("bytes");
+    expect(Buffer.from(response.rawPayload).equals(ciphertext.subarray(100, 300))).toBe(true);
+  });
+
+  it("serves open-ended and suffix ranges", async () => {
+    const { id, ciphertext } = await uploaded();
+    const open = await ranged(id, `bytes=${ciphertext.length - 50}-`);
+    expect(open.statusCode).toBe(206);
+    expect(Buffer.from(open.rawPayload).equals(ciphertext.subarray(ciphertext.length - 50))).toBe(true);
+    const suffix = await ranged(id, "bytes=-32");
+    expect(suffix.statusCode).toBe(206);
+    expect(Buffer.from(suffix.rawPayload).equals(ciphertext.subarray(ciphertext.length - 32))).toBe(true);
+  });
+
+  it("clamps an overlong end and rejects an unsatisfiable start", async () => {
+    const { id, ciphertext } = await uploaded();
+    const clamped = await ranged(id, `bytes=0-${ciphertext.length * 2}`);
+    expect(clamped.statusCode).toBe(206);
+    expect(clamped.rawPayload.length).toBe(ciphertext.length);
+    const beyond = await ranged(id, `bytes=${ciphertext.length}-`);
+    expect(beyond.statusCode).toBe(416);
+    expect(beyond.headers["content-range"]).toBe(`bytes */${ciphertext.length}`);
+  });
+
+  it("still serves the whole blob without a range header", async () => {
+    const { id, ciphertext } = await uploaded();
+    const whole = await app.inject({
+      method: "GET",
+      url: `/api/files/${id}/data`,
+      headers: authHeader(),
+    });
+    expect(whole.statusCode).toBe(200);
+    expect(Buffer.from(whole.rawPayload).equals(ciphertext)).toBe(true);
+  });
+});

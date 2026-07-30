@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import type { BlobStore, PartReceipt } from "./blobs.js";
+import type { BlobRange, BlobStore, PartReceipt } from "./blobs.js";
 import { bufferUpTo } from "./streams.js";
 
 /**
@@ -36,7 +36,12 @@ export class RoutedBlobStore implements BlobStore {
       : this.primary.put(key, source, maxBytes);
   }
 
-  async get(key: string): Promise<Readable> {
+  async get(key: string, range?: BlobRange): Promise<Readable> {
+    if (range) {
+      // Ranged reads are a content-blob affair; they route directly and
+      // never trigger the derived-heal copy.
+      return this.backendFor(key).get(key, range);
+    }
     if (!this.isDerived(key)) {
       return this.primary.get(key);
     }

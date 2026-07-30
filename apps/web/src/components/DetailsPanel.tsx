@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { decryptBytes, decryptFileMetadata } from "@engramer/crypto";
+import { decryptContent, decryptFileMetadata } from "@engramer/crypto";
 import { api, type FileVersionInfo } from "../api";
 import { useStore, type FileEntry } from "../store";
 import { thumbnailUrl } from "../thumbs";
@@ -223,7 +223,7 @@ export function DetailsPanel(props: {
                   void api
                     .downloadVersionBlob(file.id, version.generation)
                     .then((bytes) => {
-                      const plain = decryptBytes(bytes, file.key);
+                      const plain = decryptContent(bytes, file.key);
                       triggerDownload(
                         new Blob([plain.slice().buffer as ArrayBuffer], { type: file.mime }),
                         versionCopyName(file.name, version.createdAt),

@@ -4,7 +4,7 @@ import {
   deriveKeyEncryptionKey,
   deriveLoginKey,
   secretBoxOpen,
-  decryptBytes,
+  decryptContent,
   decryptFileMetadata,
   decryptFolderMetadata,
   type KeyAttributes,
@@ -163,7 +163,7 @@ export class Vault {
       throw new Error(`download failed (${res.status})`);
     }
     const ciphertext = new Uint8Array(await res.arrayBuffer());
-    return decryptBytes(ciphertext, file.key);
+    return decryptContent(ciphertext, file.key);
   }
 }
 
