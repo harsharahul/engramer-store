@@ -390,7 +390,7 @@ export function uploadRequestBlob(
       }
     };
     xhr.onerror = () => reject(new ApiError(0, "network error during upload"));
-    xhr.send(payload.slice().buffer as ArrayBuffer);
+    xhr.send(sendable(payload));
   });
 }
 
@@ -440,8 +440,16 @@ export function uploadPart(
       }
     };
     xhr.onerror = () => reject(new ApiError(0, "network error during upload"));
-    xhr.send(payload.slice().buffer as ArrayBuffer);
+    xhr.send(sendable(payload));
   });
+}
+
+/** Sends without copying when the array owns its whole buffer, which is the
+ * case for freshly encrypted payloads; a view into a larger buffer is sliced. */
+function sendable(payload: Uint8Array): ArrayBuffer {
+  return payload.byteOffset === 0 && payload.byteLength === payload.buffer.byteLength
+    ? (payload.buffer as ArrayBuffer)
+    : (payload.slice().buffer as ArrayBuffer);
 }
 
 /** Upload with real progress reporting; fetch cannot observe upload progress. */
@@ -473,6 +481,6 @@ export function uploadBlob(
       }
     };
     xhr.onerror = () => reject(new ApiError(0, "network error during upload"));
-    xhr.send(payload.slice().buffer as ArrayBuffer);
+    xhr.send(sendable(payload));
   });
 }
