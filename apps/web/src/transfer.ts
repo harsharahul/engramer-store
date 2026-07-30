@@ -67,35 +67,79 @@ async function imageThumbnail(file: File): Promise<Thumbnail | null> {
   }
 }
 
+/**
+ * Analysis is a nicety; an upload must never wait on it forever. Mobile
+ * browsers in particular can leave media decoding pending indefinitely, so
+ * every step runs under a deadline and simply yields nothing when it lapses.
+ */
+export function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(undefined), ms);
+    void work
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        resolve(undefined);
+      });
+  });
+}
+
+const THUMB_DEADLINE_MS = 10_000;
+const ANALYSIS_DEADLINE_MS = 20_000;
+
 async function videoThumbnail(file: File): Promise<Thumbnail | null> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const video = document.createElement("video");
-    video.muted = true;
-    video.src = url;
-    const cleanup = () => URL.revokeObjectURL(url);
-    video.onloadeddata = () => {
-      video.currentTime = Math.min(0.5, video.duration || 0);
+    let settled = false;
+    const finish = (result: Thumbnail | null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      URL.revokeObjectURL(url);
+      video.removeAttribute("src");
+      video.load();
+      resolve(result);
     };
-    video.onseeked = async () => {
+    // iOS refuses to decode a video that is not marked inline, and defers
+    // loading entirely without an explicit preload hint; without both, the
+    // data events never fire and this promise would hang the upload.
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.setAttribute("playsinline", "");
+    video.setAttribute("muted", "");
+    video.src = url;
+    const capture = async () => {
       const { videoWidth, videoHeight } = video;
+      if (!videoWidth || !videoHeight) {
+        return finish(null);
+      }
       const blob = await drawScaled(video, videoWidth, videoHeight);
       const blur = computeBlur(video, videoWidth, videoHeight);
-      cleanup();
       if (!blob) {
-        return resolve(null);
+        return finish(null);
       }
-      resolve({
+      finish({
         bytes: new Uint8Array(await blob.arrayBuffer()),
         width: videoWidth,
         height: videoHeight,
         blur,
       });
     };
-    video.onerror = () => {
-      cleanup();
-      resolve(null);
+    video.onloadedmetadata = () => {
+      // Seeking a hair into the clip avoids a black opening frame; some
+      // browsers only paint after a seek completes, others right away.
+      video.currentTime = Math.min(0.5, Number.isFinite(video.duration) ? video.duration / 2 : 0);
     };
+    video.onloadeddata = () => void capture();
+    video.onseeked = () => void capture();
+    video.onerror = () => finish(null);
+    setTimeout(() => finish(null), THUMB_DEADLINE_MS);
   });
 }
 
@@ -123,18 +167,18 @@ export interface PreparedFile {
  */
 export async function analyzeFile(file: File): Promise<PreparedFile> {
   let [text, exif, thumbnail] = await Promise.all([
-    extractText(file),
-    extractExif(file),
-    makeThumbnail(file),
+    withDeadline(extractText(file), ANALYSIS_DEADLINE_MS),
+    withDeadline(extractExif(file), ANALYSIS_DEADLINE_MS),
+    withDeadline(makeThumbnail(file), THUMB_DEADLINE_MS + 2_000).then((t) => t ?? null),
   ]);
   // Opt-in OCR: screenshots and scans become searchable, and the recognized
   // text sharpens categorization (a photographed invoice files as a receipt).
   if (text === undefined && file.type.startsWith("image/") && ocrEnabled()) {
-    text = await recognizeImage(file).catch(() => undefined);
+    text = await withDeadline(recognizeImage(file), ANALYSIS_DEADLINE_MS * 3);
   }
   // A PDF with no text layer is a scan; its pages read like photos.
   if (text === undefined && isPdf(file.name, file.type) && ocrEnabled()) {
-    text = await recognizePdf(file).catch(() => undefined);
+    text = await withDeadline(recognizePdf(file), ANALYSIS_DEADLINE_MS * 6);
   }
   const analysis = categorize({
     name: file.name,
@@ -165,9 +209,11 @@ export interface UploadResult {
 
 // Content larger than this (as ciphertext) travels in numbered parts, so no
 // proxy body ceiling applies and a network blip costs one part, not the
-// file. Eight stream chunks per part keeps every request near 32 MiB.
-const PART_THRESHOLD = 64 * 1024 * 1024;
-const CHUNKS_PER_PART = 8;
+// file. The single-request path holds the whole file and its ciphertext in
+// memory at once, which phones cannot afford, so the threshold stays low
+// and the streaming path does the heavy lifting.
+const PART_THRESHOLD = 12 * 1024 * 1024;
+const CHUNKS_PER_PART = 4;
 const PART_RETRYABLE = new Set([0, 429, 503]);
 const PART_MAX_ATTEMPTS = 5;
 
