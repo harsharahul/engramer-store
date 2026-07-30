@@ -57,6 +57,10 @@ export function Auth() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    // Dismiss the keyboard now: key derivation takes seconds, and a mobile
+    // viewport still sized for the keyboard when the vault mounts leaves its
+    // fixed chrome floating above the real bottom edge.
+    (document.activeElement as HTMLElement | null)?.blur?.();
     setError(null);
     try {
       if (mode === "signup") {
