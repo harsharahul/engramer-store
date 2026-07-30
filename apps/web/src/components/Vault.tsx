@@ -612,6 +612,12 @@ export function Vault() {
   // re-supplies file keys for as long as the vault is open.
   useEffect(() => installMediaKeyResponder(), []);
 
+  // Belt to the Auth blur's braces: landing here with a keyboard-stale
+  // viewport (iOS) misplaces fixed chrome until something forces relayout.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
   // One-time offer: skip the password next launch. Only on capable
   // browsers, only until enrolled or declined once.
   useEffect(() => {

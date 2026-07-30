@@ -216,6 +216,7 @@ const PART_THRESHOLD = 12 * 1024 * 1024;
 const CHUNKS_PER_PART = 4;
 const PART_RETRYABLE = new Set([0, 429, 503]);
 const PART_MAX_ATTEMPTS = 5;
+const PART_BLOCK_COOLDOWN_MS = 60_000;
 
 async function sendPartWithRetry(
   fileId: string,
@@ -225,12 +226,24 @@ async function sendPartWithRetry(
   onProgress: (fraction: number) => void,
 ): Promise<void> {
   let attempt = 0;
+  let blockRetried = false;
   for (;;) {
     try {
       return await uploadPart(fileId, session, partNo, payload, onProgress);
     } catch (err) {
+      if (!(err instanceof ApiError)) {
+        throw err;
+      }
+      // Edge protections in front of a server sometimes reject a client
+      // temporarily (address reputation, remediation windows). One patient
+      // retry rescues a long upload; hammering would only entrench a block.
+      if (err.status === 403 && !blockRetried) {
+        blockRetried = true;
+        await new Promise((resolve) => setTimeout(resolve, PART_BLOCK_COOLDOWN_MS));
+        continue;
+      }
       attempt++;
-      if (!(err instanceof ApiError) || !PART_RETRYABLE.has(err.status) || attempt >= PART_MAX_ATTEMPTS) {
+      if (!PART_RETRYABLE.has(err.status) || attempt >= PART_MAX_ATTEMPTS) {
         throw err;
       }
       const wait = err.retryAfterMs ?? Math.min(15_000, 500 * 2 ** attempt);
