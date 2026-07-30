@@ -3,6 +3,26 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.24.0] - 2026-07-30
+
+### Added
+- Video and audio stream instead of downloading first. Media now uploads
+  in a random-access encrypted format, and a service worker serves it to
+  the player by byte range, decrypting only the pieces playback touches:
+  videos start immediately and seeking anywhere is instant, with memory
+  use bounded by a single chunk. Files stored before this release play
+  progressively as they decrypt, with a visible progress readout, and
+  regain instant seeking when re-uploaded.
+
+### Fixed
+- Uploads no longer stall on phones. Preparing a video's thumbnail could
+  wait forever on mobile browsers and silently hold the entire upload;
+  thumbnailing now follows mobile decoding requirements and every
+  analysis step runs under a deadline, so uploads always proceed.
+- Mid-size files upload within phone memory limits: the streaming part
+  path now takes over at 12 MB, and a redundant in-memory copy of every
+  upload is gone.
+
 ## [0.23.0] - 2026-07-29
 
 ### Added
