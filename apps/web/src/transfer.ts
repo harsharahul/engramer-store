@@ -5,9 +5,21 @@ import {
   encryptFileMetadata,
   generateKey,
   secretBoxSeal,
+  streamCiphertextSize,
+  StreamEncryptor,
+  STREAM_CHUNK_SIZE,
   type FileMetadata,
 } from "@engramer/crypto";
-import { api, uploadBlob, type FileDto } from "./api";
+import {
+  api,
+  abortPartUpload,
+  ApiError,
+  beginPartUpload,
+  completePartUpload,
+  uploadBlob,
+  uploadPart,
+  type FileDto,
+} from "./api";
 import { categorize, type Analysis } from "./intel/categorize";
 import { extractExif, extractText } from "./intel/extract";
 import { ocrEnabled, recognizeImage } from "./intel/ocr";
@@ -144,6 +156,89 @@ export interface UploadResult {
   meta: FileMetadata;
 }
 
+// Content larger than this (as ciphertext) travels in numbered parts, so no
+// proxy body ceiling applies and a network blip costs one part, not the
+// file. Eight stream chunks per part keeps every request near 32 MiB.
+const PART_THRESHOLD = 64 * 1024 * 1024;
+const CHUNKS_PER_PART = 8;
+const PART_RETRYABLE = new Set([0, 429, 503]);
+const PART_MAX_ATTEMPTS = 5;
+
+async function sendPartWithRetry(
+  fileId: string,
+  session: string,
+  partNo: number,
+  payload: Uint8Array,
+  onProgress: (fraction: number) => void,
+): Promise<void> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await uploadPart(fileId, session, partNo, payload, onProgress);
+    } catch (err) {
+      attempt++;
+      if (!(err instanceof ApiError) || !PART_RETRYABLE.has(err.status) || attempt >= PART_MAX_ATTEMPTS) {
+        throw err;
+      }
+      const wait = err.retryAfterMs ?? Math.min(15_000, 500 * 2 ** attempt);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+}
+
+/**
+ * Streams a large file through encryption and out in parts: at most one
+ * part's ciphertext is in memory, and every request stays a bounded size.
+ * The assembled server-side blob is byte-identical to a single-request
+ * upload of the same file.
+ */
+async function uploadInParts(
+  file: File,
+  fileId: string,
+  fileKey: Uint8Array,
+  onProgress: (fraction: number) => void,
+): Promise<number> {
+  const total = streamCiphertextSize(file.size);
+  const { session } = await beginPartUpload(fileId, total);
+  try {
+    const encryptor = new StreamEncryptor(fileKey);
+    const chunkCount = Math.max(1, Math.ceil(file.size / STREAM_CHUNK_SIZE));
+    let pieces: Uint8Array[] = [encryptor.header];
+    let pieceBytes = encryptor.header.length;
+    let sent = 0;
+    let partNo = 0;
+    for (let i = 0; i < chunkCount; i++) {
+      const start = i * STREAM_CHUNK_SIZE;
+      const slice = file.slice(start, Math.min(start + STREAM_CHUNK_SIZE, file.size));
+      const sealed = encryptor.push(new Uint8Array(await slice.arrayBuffer()), i === chunkCount - 1);
+      pieces.push(sealed);
+      pieceBytes += sealed.length;
+      if ((i + 1) % CHUNKS_PER_PART === 0 || i === chunkCount - 1) {
+        const body = new Uint8Array(pieceBytes);
+        let offset = 0;
+        for (const piece of pieces) {
+          body.set(piece, offset);
+          offset += piece.length;
+        }
+        pieces = [];
+        pieceBytes = 0;
+        partNo += 1;
+        const base = sent;
+        await sendPartWithRetry(fileId, session, partNo, body, (fraction) =>
+          onProgress((base + fraction * body.length) / total),
+        );
+        sent += body.length;
+      }
+    }
+    await completePartUpload(fileId, session);
+    return total;
+  } catch (err) {
+    // Free the server-side session; the error still surfaces in the tray.
+    void abortPartUpload(fileId, session).catch(() => {});
+    throw err;
+  }
+}
+
 /** Encrypts a prepared file and uploads content plus thumbnail. */
 export async function encryptAndUpload(
   file: File,
@@ -157,9 +252,14 @@ export async function encryptAndUpload(
   const encryptedKey = secretBoxSeal(fileKey, masterKey);
   const dto = await api.createFile(folderId, encryptedKey, encryptedMeta);
 
-  const plaintext = new Uint8Array(await file.arrayBuffer());
-  const ciphertext = encryptBytes(plaintext, fileKey);
-  await uploadBlob(dto.id, "data", ciphertext, onProgress);
+  const totalCiphertext = streamCiphertextSize(file.size);
+  if (totalCiphertext > PART_THRESHOLD) {
+    await uploadInParts(file, dto.id, fileKey, onProgress);
+  } else {
+    const plaintext = new Uint8Array(await file.arrayBuffer());
+    const ciphertext = encryptBytes(plaintext, fileKey);
+    await uploadBlob(dto.id, "data", ciphertext, onProgress);
+  }
 
   if (prepared.thumbnail) {
     await uploadBlob(dto.id, "thumbnail", encryptBytes(prepared.thumbnail.bytes, fileKey));
@@ -172,7 +272,7 @@ export async function encryptAndUpload(
   const uploadedDto: FileDto = {
     ...dto,
     uploaded: true,
-    size: ciphertext.length,
+    size: totalCiphertext,
     thumbSize: prepared.thumbnail ? 1 : 0,
   };
   return { dto: uploadedDto, fileKey, meta: prepared.meta };

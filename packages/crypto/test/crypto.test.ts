@@ -20,6 +20,8 @@ import {
   utf8Decode,
   fromB64,
   STREAM_CHUNK_SIZE,
+  StreamEncryptor,
+  streamCiphertextSize,
   protectShareKey,
   deriveShareAccess,
   openShareKey,
@@ -309,5 +311,46 @@ describe("device unlock key derivation", () => {
     const opened = secretBoxOpen(wrapped, deriveUnlockKey(secret));
     expect(Buffer.from(opened).equals(Buffer.from(masterKey))).toBe(true);
     expect(() => secretBoxOpen(wrapped, deriveUnlockKey(generateKey()))).toThrow();
+  });
+});
+
+describe("stream size accounting and grouped encryption", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  it("predicts the exact ciphertext size for any plaintext length", () => {
+    const sizes = [0, 1, 17, STREAM_CHUNK_SIZE - 1, STREAM_CHUNK_SIZE, STREAM_CHUNK_SIZE + 1, Math.floor(2.5 * STREAM_CHUNK_SIZE)];
+    const key = generateKey();
+    for (const size of sizes) {
+      const plaintext = new Uint8Array(size).fill(3);
+      expect(streamCiphertextSize(size)).toBe(encryptBytes(plaintext, key).length);
+    }
+  });
+
+  it("produces an identical stream when chunks are pushed in grouped parts", () => {
+    const key = generateKey();
+    const plaintext = new Uint8Array(Math.floor(2.5 * STREAM_CHUNK_SIZE));
+    for (let i = 0; i < plaintext.length; i += 4096) {
+      plaintext[i] = (i / 4096) % 251;
+    }
+    // Group encryption exactly the way the part uploader does: header plus
+    // sealed chunks, concatenated across arbitrary part boundaries.
+    const encryptor = new StreamEncryptor(key);
+    const pieces: Uint8Array[] = [encryptor.header];
+    const chunkCount = Math.max(1, Math.ceil(plaintext.length / STREAM_CHUNK_SIZE));
+    for (let i = 0; i < chunkCount; i++) {
+      const chunk = plaintext.subarray(i * STREAM_CHUNK_SIZE, Math.min((i + 1) * STREAM_CHUNK_SIZE, plaintext.length));
+      pieces.push(encryptor.push(chunk, i === chunkCount - 1));
+    }
+    const total = pieces.reduce((n, p) => n + p.length, 0);
+    const assembled = new Uint8Array(total);
+    let offset = 0;
+    for (const piece of pieces) {
+      assembled.set(piece, offset);
+      offset += piece.length;
+    }
+    expect(assembled.length).toBe(streamCiphertextSize(plaintext.length));
+    expect(Buffer.from(decryptBytes(assembled, key)).equals(Buffer.from(plaintext))).toBe(true);
   });
 });

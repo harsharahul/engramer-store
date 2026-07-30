@@ -273,6 +273,26 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       return { size: written };
     }
 
+    return commitData(reply, uid, id, file, nextGen, targetKey, written);
+  };
+
+  /**
+   * The single commit point for content bytes, whether they arrived as one
+   * request or were assembled from parts: snapshot or discard the displaced
+   * generation, advance the pointer, prune history. A generation conflict
+   * removes the fresh blob and yields 409; the row never moves.
+   */
+  const commitData = async (
+    reply: FastifyReply,
+    uid: number,
+    id: string,
+    file: Pick<FileRow, "generation" | "uploaded">,
+    nextGen: number,
+    targetKey: string,
+    written: number,
+  ) => {
+    const keepsVersions = app.config.maxVersions > 0;
+    const replacesContent = file.uploaded === 1;
     const staleBlobs: string[] = [];
     try {
       await app.db.tx(async (t) => {
@@ -347,6 +367,203 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   app.put("/api/files/:id/data", auth, (request, reply) => uploadBlob(request, reply, "data"));
   app.put("/api/files/:id/thumbnail", auth, (request, reply) => uploadBlob(request, reply, "thumb"));
   app.put("/api/files/:id/index", auth, (request, reply) => uploadBlob(request, reply, "index"));
+
+  // ----- part uploads: large content in bounded requests -----
+  //
+  // Big blobs arrive as numbered parts inside a session, so any proxy body
+  // ceiling stops mattering and one lost part costs one part, not the file.
+  // The assembled blob is byte-identical to a single PUT and goes through
+  // the same commit, so versions, shares, and downloads never know.
+
+  interface UploadSessionRow {
+    id: string;
+    user_id: number;
+    file_id: string;
+    blob_key: string;
+    handle: string;
+    declared_bytes: number;
+    base_generation: number;
+    base_uploaded: number;
+    created_at: number;
+  }
+
+  const partBeginSchema = z.object({ size: z.number().int().positive() });
+  const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+  const MAX_PARTS = 10_000;
+
+  const dropSession = async (session: UploadSessionRow) => {
+    await app.blobs.abortParts(session.blob_key, session.handle).catch(() => {});
+    await app.db.run("DELETE FROM upload_parts WHERE session_id = ?", session.id);
+    await app.db.run("DELETE FROM upload_sessions WHERE id = ?", session.id);
+  };
+
+  const getOwnSession = async (
+    sessionId: string,
+    fileId: string,
+    uid: number,
+  ): Promise<UploadSessionRow | undefined> =>
+    app.db.get<UploadSessionRow>(
+      "SELECT * FROM upload_sessions WHERE id = ? AND file_id = ? AND user_id = ?",
+      sessionId,
+      fileId,
+      uid,
+    );
+
+  app.post("/api/files/:id/data/parts", auth, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const uid = request.user.uid;
+    const file = await getOwnFile(id, uid);
+    if (!file) {
+      return reply.code(404).send({ error: "file not found" });
+    }
+    const body = partBeginSchema.parse(request.body);
+
+    const keepsVersions = app.config.maxVersions > 0;
+    const replacesContent = file.uploaded === 1;
+    const reclaimable = replacesContent && !keepsVersions ? file.size : 0;
+    const quota = await userQuota(app.db, uid, app.config.quotaBytes);
+    const quotaRoom = quota - ((await storageUsed(app.db, uid)) - reclaimable);
+    const maxBytes = Math.min(app.config.maxBlobBytes, quotaRoom);
+    if (maxBytes <= 0 || body.size > maxBytes) {
+      return reply.code(413).send({ error: "storage quota exceeded" });
+    }
+
+    // One session per file: a fresh begin supersedes anything stale, and
+    // sessions abandoned by closed tabs get swept opportunistically.
+    for (const stale of await app.db.all<UploadSessionRow>(
+      "SELECT * FROM upload_sessions WHERE file_id = ?",
+      id,
+    )) {
+      await dropSession(stale);
+    }
+    for (const abandoned of await app.db.all<UploadSessionRow>(
+      "SELECT * FROM upload_sessions WHERE created_at < ?",
+      Date.now() - SESSION_TTL_MS,
+    )) {
+      await dropSession(abandoned);
+    }
+
+    const nextGen = replacesContent ? file.generation + 1 : file.generation;
+    const targetKey = blobKey(id, "data", nextGen);
+    const handle = await app.blobs.beginParts(targetKey);
+    const sessionId = randomUUID();
+    await app.db.run(
+      `INSERT INTO upload_sessions (id, user_id, file_id, blob_key, handle, declared_bytes, base_generation, base_uploaded, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      sessionId,
+      uid,
+      id,
+      targetKey,
+      handle,
+      body.size,
+      file.generation,
+      file.uploaded,
+      Date.now(),
+    );
+    return reply.code(201).send({ session: sessionId });
+  });
+
+  app.put("/api/files/:id/data/parts/:session/:part", auth, async (request, reply) => {
+    const { id, session, part } = request.params as { id: string; session: string; part: string };
+    const uid = request.user.uid;
+    const row = await getOwnSession(session, id, uid);
+    if (!row) {
+      return reply.code(404).send({ error: "upload session not found" });
+    }
+    const partNo = Number(part);
+    if (!Number.isInteger(partNo) || partNo < 1 || partNo > MAX_PARTS) {
+      return reply.code(400).send({ error: "invalid part number" });
+    }
+    const length = Number(request.headers["content-length"] ?? 0);
+    if (!Number.isInteger(length) || length <= 0) {
+      return reply.code(400).send({ error: "content-length required" });
+    }
+    const others = await app.db.get<{ total: number | null }>(
+      "SELECT SUM(bytes) AS total FROM upload_parts WHERE session_id = ? AND part_no != ?",
+      row.id,
+      partNo,
+    );
+    if (Number(others?.total ?? 0) + length > Number(row.declared_bytes)) {
+      return reply.code(413).send({ error: "parts exceed the declared size" });
+    }
+    let receipt;
+    try {
+      receipt = await app.blobs.putPart(
+        row.blob_key,
+        row.handle,
+        partNo,
+        request.body as Readable,
+        length,
+      );
+    } catch (err) {
+      if (err instanceof BlobTooLargeError) {
+        return reply.code(413).send({ error: "part exceeds its declared length" });
+      }
+      throw err;
+    }
+    await app.db.run(
+      `INSERT INTO upload_parts (session_id, part_no, etag, bytes) VALUES (?, ?, ?, ?)
+       ON CONFLICT (session_id, part_no) DO UPDATE SET etag = excluded.etag, bytes = excluded.bytes`,
+      row.id,
+      partNo,
+      receipt.etag ?? null,
+      receipt.bytes,
+    );
+    return { part: partNo, size: receipt.bytes };
+  });
+
+  app.post("/api/files/:id/data/parts/:session/complete", auth, async (request, reply) => {
+    const { id, session } = request.params as { id: string; session: string };
+    const uid = request.user.uid;
+    const row = await getOwnSession(session, id, uid);
+    if (!row) {
+      return reply.code(404).send({ error: "upload session not found" });
+    }
+    const parts = await app.db.all<{ part_no: number; etag: string | null; bytes: number }>(
+      "SELECT part_no, etag, bytes FROM upload_parts WHERE session_id = ? ORDER BY part_no",
+      row.id,
+    );
+    const total = parts.reduce((sum, p) => sum + Number(p.bytes), 0);
+    const contiguous = parts.every((p, i) => Number(p.part_no) === i + 1);
+    if (parts.length === 0 || !contiguous || total !== Number(row.declared_bytes)) {
+      return reply.code(400).send({ error: "upload incomplete" });
+    }
+    const file = await getOwnFile(id, uid);
+    if (!file) {
+      await dropSession(row);
+      return reply.code(404).send({ error: "file not found" });
+    }
+    // Fail before assembly when another writer moved the file meanwhile;
+    // commitData re-checks the same condition transactionally.
+    if (
+      file.generation !== Number(row.base_generation) ||
+      file.uploaded !== Number(row.base_uploaded)
+    ) {
+      await dropSession(row);
+      return reply.code(409).send({ error: "the file changed while saving; retry" });
+    }
+    await app.blobs.completeParts(
+      row.blob_key,
+      row.handle,
+      parts.map((p) => ({ partNo: Number(p.part_no), etag: p.etag ?? undefined })),
+    );
+    const nextGen = file.uploaded === 1 ? file.generation + 1 : file.generation;
+    const result = await commitData(reply, uid, id, file, nextGen, row.blob_key, total);
+    await app.db.run("DELETE FROM upload_parts WHERE session_id = ?", row.id);
+    await app.db.run("DELETE FROM upload_sessions WHERE id = ?", row.id);
+    return result;
+  });
+
+  app.delete("/api/files/:id/data/parts/:session", auth, async (request, reply) => {
+    const { id, session } = request.params as { id: string; session: string };
+    const uid = request.user.uid;
+    const row = await getOwnSession(session, id, uid);
+    if (!row) {
+      return reply.code(404).send({ error: "upload session not found" });
+    }
+    await dropSession(row);
+    return reply.code(204).send();
+  });
 
   const downloadBlob = async (request: FastifyRequest, reply: FastifyReply, kind: BlobKind) => {
     const { id } = request.params as { id: string };

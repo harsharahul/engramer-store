@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import type { BlobStore } from "./blobs.js";
+import type { BlobStore, PartReceipt } from "./blobs.js";
 import { bufferUpTo } from "./streams.js";
 
 /**
@@ -70,6 +70,33 @@ export class RoutedBlobStore implements BlobStore {
       return;
     }
     await this.primary.remove(key);
+  }
+
+  // Part sessions follow the same placement rule as put().
+  private backendFor(key: string): BlobStore {
+    return this.isDerived(key) ? this.derived : this.primary;
+  }
+
+  beginParts(key: string): Promise<string> {
+    return this.backendFor(key).beginParts(key);
+  }
+
+  putPart(
+    key: string,
+    handle: string,
+    partNo: number,
+    source: Readable,
+    length: number,
+  ): Promise<PartReceipt> {
+    return this.backendFor(key).putPart(key, handle, partNo, source, length);
+  }
+
+  completeParts(key: string, handle: string, parts: { partNo: number; etag?: string }[]): Promise<void> {
+    return this.backendFor(key).completeParts(key, handle, parts);
+  }
+
+  abortParts(key: string, handle: string): Promise<void> {
+    return this.backendFor(key).abortParts(key, handle);
   }
 }
 

@@ -1,5 +1,6 @@
 import { createReadStream, createWriteStream, existsSync, unlinkSync } from "node:fs";
-import { rename, unlink } from "node:fs/promises";
+import { readdir, rename, unlink } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -31,15 +32,37 @@ export class BlobTooLargeError extends Error {
   }
 }
 
+export interface PartReceipt {
+  bytes: number;
+  etag?: string;
+}
+
 /**
  * Where ciphertext lives. The metadata database never holds blob bytes; a
- * store implementation only needs streaming put/get/remove of opaque keys.
+ * store implementation only needs streaming put/get/remove of opaque keys,
+ * plus a part-upload session so large blobs can arrive in bounded requests
+ * and still land as one ordinary blob under the final key.
  */
 export interface BlobStore {
   /** Streams a blob in, enforcing maxBytes; resolves to the byte count. */
   put(key: string, source: Readable, maxBytes: number): Promise<number>;
   get(key: string): Promise<Readable>;
   remove(key: string): Promise<void>;
+  /** Opens a part session targeting the key; returns a backend handle. */
+  beginParts(key: string): Promise<string>;
+  /** Stores one part (1-based). Re-sending a part number replaces it. The
+   * body must be exactly `length` bytes; anything else fails the part. */
+  putPart(
+    key: string,
+    handle: string,
+    partNo: number,
+    source: Readable,
+    length: number,
+  ): Promise<PartReceipt>;
+  /** Assembles the session's parts into the final blob at the key. */
+  completeParts(key: string, handle: string, parts: { partNo: number; etag?: string }[]): Promise<void>;
+  /** Discards a session's parts; safe to call on unknown handles. */
+  abortParts(key: string, handle: string): Promise<void>;
 }
 
 /** Counts bytes flowing through and aborts the stream past maxBytes. */
@@ -90,6 +113,75 @@ export class FsBlobStore implements BlobStore {
   async remove(key: string): Promise<void> {
     if (existsSync(this.path(key))) {
       unlinkSync(this.path(key));
+    }
+  }
+
+  private partPath(key: string, handle: string, partNo: number): string {
+    return this.path(`${key}.parts-${handle}.${partNo}`);
+  }
+
+  async beginParts(_key: string): Promise<string> {
+    return randomBytes(8).toString("hex");
+  }
+
+  async putPart(
+    key: string,
+    handle: string,
+    partNo: number,
+    source: Readable,
+    length: number,
+  ): Promise<PartReceipt> {
+    const destination = this.partPath(key, handle, partNo);
+    const tmp = `${destination}.upload-${process.pid}-${Date.now()}`;
+    const limiter = byteLimiter(length);
+    try {
+      await pipeline(source, limiter.transform, createWriteStream(tmp, { mode: 0o600 }));
+      if (limiter.written() !== length) {
+        throw new BlobTooLargeError();
+      }
+      await rename(tmp, destination);
+      return { bytes: limiter.written() };
+    } catch (err) {
+      await unlink(tmp).catch(() => {});
+      throw err;
+    }
+  }
+
+  async completeParts(
+    key: string,
+    handle: string,
+    parts: { partNo: number; etag?: string }[],
+  ): Promise<void> {
+    const destination = this.path(key);
+    const tmp = `${destination}.upload-${process.pid}-${Date.now()}`;
+    const ordered = [...parts].sort((a, b) => a.partNo - b.partNo);
+    try {
+      const sink = createWriteStream(tmp, { mode: 0o600 });
+      for (const part of ordered) {
+        await pipeline(createReadStream(this.partPath(key, handle, part.partNo)), sink, {
+          end: false,
+        });
+      }
+      await new Promise<void>((resolve, reject) => {
+        sink.end((err?: Error | null) => (err ? reject(err) : resolve()));
+      });
+      await rename(tmp, destination);
+    } catch (err) {
+      await unlink(tmp).catch(() => {});
+      throw err;
+    }
+    for (const part of ordered) {
+      await unlink(this.partPath(key, handle, part.partNo)).catch(() => {});
+    }
+  }
+
+  async abortParts(key: string, handle: string): Promise<void> {
+    const prefix = `${key}.parts-${handle}.`;
+    const names = await readdir(this.dir).catch(() => [] as string[]);
+    for (const name of names) {
+      if (name.startsWith(prefix)) {
+        await unlink(this.path(name)).catch(() => {});
+      }
     }
   }
 }

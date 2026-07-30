@@ -21,6 +21,13 @@ export function encryptedChunkSize(plainChunkSize: number): number {
   return plainChunkSize + streamOverheadBytes();
 }
 
+/** Exact stream-format ciphertext size for a plaintext of the given length,
+ * so an uploader can declare the total before encrypting a single chunk. */
+export function streamCiphertextSize(plainSize: number): number {
+  const chunks = Math.max(1, Math.ceil(plainSize / STREAM_CHUNK_SIZE));
+  return streamHeaderBytes() + plainSize + chunks * streamOverheadBytes();
+}
+
 export class StreamEncryptor {
   readonly header: Uint8Array;
   private readonly state: unknown;
