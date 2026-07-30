@@ -1,13 +1,17 @@
 import type { Readable } from "node:stream";
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
   CreateBucketCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
   S3Client,
+  UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
-import { byteLimiter, type BlobStore } from "./blobs.js";
+import { byteLimiter, type BlobStore, type PartReceipt } from "./blobs.js";
 import { attachBudget } from "./budget.js";
 
 export interface S3Config {
@@ -86,6 +90,64 @@ export class S3BlobStore implements BlobStore {
   async remove(key: string): Promise<void> {
     await this.client
       .send(new DeleteObjectCommand({ Bucket: this.config.bucket, Key: key }))
+      .catch(() => {});
+  }
+
+  // Part sessions map straight onto S3 multipart uploads, so large blobs
+  // stream through without ever touching the server's disk.
+
+  async beginParts(key: string): Promise<string> {
+    const result = await this.client.send(
+      new CreateMultipartUploadCommand({ Bucket: this.config.bucket, Key: key }),
+    );
+    return result.UploadId!;
+  }
+
+  async putPart(
+    key: string,
+    handle: string,
+    partNo: number,
+    source: Readable,
+    length: number,
+  ): Promise<PartReceipt> {
+    const limiter = byteLimiter(length);
+    const result = await this.client.send(
+      new UploadPartCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+        UploadId: handle,
+        PartNumber: partNo,
+        Body: source.pipe(limiter.transform),
+        ContentLength: length,
+      }),
+    );
+    return { bytes: limiter.written(), etag: result.ETag };
+  }
+
+  async completeParts(
+    key: string,
+    handle: string,
+    parts: { partNo: number; etag?: string }[],
+  ): Promise<void> {
+    await this.client.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+        UploadId: handle,
+        MultipartUpload: {
+          Parts: [...parts]
+            .sort((a, b) => a.partNo - b.partNo)
+            .map((part) => ({ PartNumber: part.partNo, ETag: part.etag })),
+        },
+      }),
+    );
+  }
+
+  async abortParts(key: string, handle: string): Promise<void> {
+    await this.client
+      .send(
+        new AbortMultipartUploadCommand({ Bucket: this.config.bucket, Key: key, UploadId: handle }),
+      )
       .catch(() => {});
   }
 }

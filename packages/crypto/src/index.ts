@@ -36,6 +36,7 @@ export {
   streamHeaderBytes,
   streamOverheadBytes,
   encryptedChunkSize,
+  streamCiphertextSize,
   encryptBytes,
   decryptBytes,
 } from "./stream.js";

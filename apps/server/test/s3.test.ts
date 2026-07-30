@@ -339,4 +339,99 @@ describe.skipIf(!endpoint)("s3 blob store", () => {
       delete process.env.ENGRAMER_S3_DERIVED_BUCKET;
     }
   });
+
+  it("assembles part uploads through real S3 multipart", async () => {
+    await ready();
+    process.env.ENGRAMER_S3_ENDPOINT = endpoint;
+    process.env.ENGRAMER_S3_BUCKET = `engramer-parts-${Date.now()}`;
+    process.env.ENGRAMER_S3_ACCESS_KEY = process.env.ENGRAMER_TEST_S3_KEY ?? "minioadmin";
+    process.env.ENGRAMER_S3_SECRET_KEY = process.env.ENGRAMER_TEST_S3_SECRET ?? "minioadmin";
+
+    const dataDir = mkdtempSync(join(tmpdir(), "engramer-s3-parts-"));
+    const app = await buildApp({ dataDir, quotaBytes: 64 * 1024 * 1024, webDistDir: null });
+    try {
+      const keys = generateAccountKeys("an s3 parts password");
+      const registered = await app.inject({
+        method: "POST",
+        url: "/api/auth/register",
+        payload: {
+          email: "s3parts@example.com",
+          loginKey: keys.loginKey,
+          keyAttributes: keys.keyAttributes,
+        },
+      });
+      const token = registered.json().token as string;
+      const authHeader = { authorization: `Bearer ${token}` };
+
+      const fileKey = generateKey();
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/files",
+        headers: authHeader,
+        payload: {
+          folderId: null,
+          encryptedKey: secretBoxSeal(fileKey, keys.masterKey),
+          encryptedMeta: encryptFileMetadata(
+            { name: "big.bin", mime: "application/octet-stream", size: 0, mtime: Date.now() },
+            fileKey,
+          ),
+        },
+      });
+      const id = created.json().id as string;
+
+      // Two parts of >=5MiB (the S3 floor for non-final parts) plus a tail.
+      const content = new Uint8Array(11 * 1024 * 1024);
+      for (let i = 0; i < content.length; i += 4096) {
+        content[i] = (i / 4096) % 251;
+      }
+      const ciphertext = Buffer.from(encryptBytes(content, fileKey));
+      const cut = 5 * 1024 * 1024;
+      const parts = [
+        ciphertext.subarray(0, cut),
+        ciphertext.subarray(cut, 2 * cut),
+        ciphertext.subarray(2 * cut),
+      ];
+
+      const beginResponse = await app.inject({
+        method: "POST",
+        url: `/api/files/${id}/data/parts`,
+        headers: authHeader,
+        payload: { size: ciphertext.length },
+      });
+      expect(beginResponse.statusCode).toBe(201);
+      const session = beginResponse.json().session as string;
+      for (const [i, part] of parts.entries()) {
+        const put = await app.inject({
+          method: "PUT",
+          url: `/api/files/${id}/data/parts/${session}/${i + 1}`,
+          headers: { ...authHeader, "content-type": "application/octet-stream" },
+          payload: part,
+        });
+        expect(put.statusCode).toBe(200);
+      }
+      const done = await app.inject({
+        method: "POST",
+        url: `/api/files/${id}/data/parts/${session}/complete`,
+        headers: authHeader,
+      });
+      expect(done.statusCode).toBe(200);
+      expect(done.json().size).toBe(ciphertext.length);
+
+      const downloaded = await app.inject({
+        method: "GET",
+        url: `/api/files/${id}/data`,
+        headers: authHeader,
+      });
+      expect(downloaded.statusCode).toBe(200);
+      const roundTripped = decryptBytes(new Uint8Array(downloaded.rawPayload), fileKey);
+      expect(Buffer.from(roundTripped).equals(Buffer.from(content))).toBe(true);
+    } finally {
+      await app.close();
+      rmSync(dataDir, { recursive: true, force: true });
+      delete process.env.ENGRAMER_S3_ENDPOINT;
+      delete process.env.ENGRAMER_S3_BUCKET;
+      delete process.env.ENGRAMER_S3_ACCESS_KEY;
+      delete process.env.ENGRAMER_S3_SECRET_KEY;
+    }
+  });
 });

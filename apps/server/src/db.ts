@@ -240,6 +240,25 @@ export const COMMON_SCHEMA = `
       used_by BIGINT,
       used_at BIGINT
     );
+    CREATE TABLE IF NOT EXISTS upload_sessions (
+      id TEXT PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id),
+      file_id TEXT NOT NULL,
+      blob_key TEXT NOT NULL,
+      handle TEXT NOT NULL,
+      declared_bytes BIGINT NOT NULL,
+      base_generation BIGINT NOT NULL,
+      base_uploaded BIGINT NOT NULL,
+      created_at BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS upload_sessions_file ON upload_sessions(file_id);
+    CREATE TABLE IF NOT EXISTS upload_parts (
+      session_id TEXT NOT NULL REFERENCES upload_sessions(id),
+      part_no BIGINT NOT NULL,
+      etag TEXT,
+      bytes BIGINT NOT NULL,
+      PRIMARY KEY (session_id, part_no)
+    );
 `;
 
 /** Embedded SQLite behind the async facade; every call is synchronous
