@@ -38,6 +38,7 @@ export interface AccountKeys {
 }
 
 const LOGIN_KDF_CONTEXT = "es-login";
+const UNLOCK_KDF_CONTEXT = "es-unlck";
 
 /**
  * Derives the key encryption key with Argon2id.
@@ -132,6 +133,18 @@ export function deriveLoginKey(kek: Uint8Array): string {
 export function loginKeyDigest(loginKey: string): string {
   const s = sodium();
   return toB64(s.crypto_generichash(32, fromB64(loginKey), null));
+}
+
+/**
+ * Derives the master-key wrapping key for device unlock from an
+ * authenticator-held secret (the WebAuthn PRF output). The secret is hashed
+ * first so any input length is accepted, then domain-separated through the
+ * KDF so it can never collide with the login key derivation.
+ */
+export function deriveUnlockKey(secret: Uint8Array): Uint8Array {
+  const s = sodium();
+  const seed = s.crypto_generichash(32, secret, null);
+  return s.crypto_kdf_derive_from_key(32, 1, UNLOCK_KDF_CONTEXT, seed);
 }
 
 /** Runs the full signup key ceremony on the client. */

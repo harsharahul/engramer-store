@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Route, Routes } from "react-router";
 import { setUnauthorizedHandler } from "./api";
 import { restoreSession } from "./session";
+import { hasDeviceUnlock } from "./unlock";
 import { useStore } from "./store";
 import { Auth } from "./components/Auth";
+import { UnlockGate } from "./components/UnlockGate";
 import { Vault } from "./components/Vault";
 import { ShareView } from "./components/ShareView";
 import { RequestView } from "./components/RequestView";
@@ -13,6 +15,7 @@ export function App() {
   const startSession = useStore((s) => s.startSession);
   const logout = useStore((s) => s.logout);
   const [booting, setBooting] = useState(true);
+  const [locked, setLocked] = useState(false);
 
   useEffect(() => {
     setUnauthorizedHandler(() => logout());
@@ -20,6 +23,10 @@ export function App() {
       .then(async (restored) => {
         if (restored) {
           await startSession(restored);
+        } else {
+          // No live tab session, but this device may hold a passkey-wrapped
+          // one: offer Touch ID before falling back to the password form.
+          setLocked(hasDeviceUnlock());
         }
       })
       .finally(() => setBooting(false));
@@ -48,6 +55,10 @@ export function App() {
             </div>
           ) : session ? (
             <Vault />
+          ) : locked && hasDeviceUnlock() ? (
+            // Re-checked each render: signing out purges the record, and the
+            // gate must fall away with it.
+            <UnlockGate onUsePassword={() => setLocked(false)} />
           ) : (
             <Auth />
           )

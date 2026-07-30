@@ -25,6 +25,7 @@ import {
   openShareKey,
   shareAccessDigest,
   deriveKeyEncryptionKey,
+  deriveUnlockKey,
   WeakKdfError,
   type AccountKeys,
 } from "../src/index.js";
@@ -272,5 +273,41 @@ describe("key derivation floor", () => {
     expect(() =>
       deriveKeyEncryptionKey("a floor test password", account.keyAttributes.kdf),
     ).not.toThrow();
+  });
+});
+
+describe("device unlock key derivation", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  it("derives a stable 32-byte key from a PRF secret", () => {
+    const secret = generateKey();
+    const first = deriveUnlockKey(secret);
+    const second = deriveUnlockKey(secret);
+    expect(first.length).toBe(32);
+    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
+    expect(Buffer.from(first).equals(Buffer.from(secret))).toBe(false);
+  });
+
+  it("derives distinct keys from distinct secrets", () => {
+    const a = deriveUnlockKey(generateKey());
+    const b = deriveUnlockKey(generateKey());
+    expect(Buffer.from(a).equals(Buffer.from(b))).toBe(false);
+  });
+
+  it("accepts secrets of any length", () => {
+    const long = new Uint8Array(64).fill(7);
+    const key = deriveUnlockKey(long);
+    expect(key.length).toBe(32);
+  });
+
+  it("wraps and unwraps a master key with the derived key", () => {
+    const secret = generateKey();
+    const masterKey = generateKey();
+    const wrapped = secretBoxSeal(masterKey, deriveUnlockKey(secret));
+    const opened = secretBoxOpen(wrapped, deriveUnlockKey(secret));
+    expect(Buffer.from(opened).equals(Buffer.from(masterKey))).toBe(true);
+    expect(() => secretBoxOpen(wrapped, deriveUnlockKey(generateKey()))).toThrow();
   });
 });
