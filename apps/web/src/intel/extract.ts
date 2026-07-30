@@ -11,6 +11,10 @@ function isTextual(file: File): boolean {
   return file.type.startsWith("text/") || TEXTUAL_EXTENSIONS.test(file.name);
 }
 
+export function isPdf(name: string, mime: string): boolean {
+  return mime === "application/pdf" || /\.pdf$/i.test(name);
+}
+
 /**
  * Extracts searchable text on the client: plain text and code directly,
  * PDF through pdf.js (lazy-loaded so the viewer never pays for it upfront).
@@ -21,7 +25,7 @@ export async function extractText(file: File): Promise<string | undefined> {
       const text = await file.text();
       return text.slice(0, TEXT_STORE_LIMIT) || undefined;
     }
-    if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+    if (isPdf(file.name, file.type)) {
       return await extractPdfText(file);
     }
   } catch {
