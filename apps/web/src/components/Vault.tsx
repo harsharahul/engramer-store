@@ -377,7 +377,10 @@ export function Vault() {
     lastSelected.current = null;
   }, []);
 
-  useEffect(() => clearSelection(), [view, query, clearSelection]);
+  useEffect(() => {
+    clearSelection();
+    setDetailsSheet(false);
+  }, [view, query, clearSelection]);
   useEffect(() => setSearchCursor(0), [query]);
 
   // ----- actions -----
@@ -1306,7 +1309,14 @@ export function Vault() {
           <StarGlyph size={19} />
           <span>Favorites</span>
         </button>
-        <button className={`tab${drawerOpen ? " active" : ""}`} onClick={() => setDrawerOpen(true)}>
+        <button
+          className={`tab${drawerOpen ? " active" : ""}`}
+          onClick={() => {
+            // The drawer and the details sheet never stack.
+            setDetailsSheet(false);
+            setDrawerOpen(true);
+          }}
+        >
           <MenuGlyph size={19} />
           <span>More</span>
         </button>

@@ -3,6 +3,13 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.22.1] - 2026-07-29
+
+### Fixed
+- On narrow windows the details panel no longer covers the tab bar or gets
+  buried under the navigation drawer. It now floats as a card above the tab
+  bar, closes when the drawer opens, and dismisses on view changes.
+
 ## [0.22.0] - 2026-07-29
 
 ### Added
