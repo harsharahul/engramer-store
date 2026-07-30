@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useLocation, useParams } from "react-router";
 import {
   ready,
-  decryptBytes,
+  decryptContent,
   decryptFileMetadata,
   deriveShareAccess,
   openShareKey,
@@ -93,7 +93,7 @@ export function ShareView() {
 
   const fetchDecrypted = async (): Promise<Uint8Array> => {
     const ciphertext = await api.publicData(token!, accessKey);
-    return decryptBytes(ciphertext, key!);
+    return decryptContent(ciphertext, key!);
   };
 
   const download = async () => {

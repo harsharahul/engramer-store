@@ -2,7 +2,7 @@ import { createReadStream, existsSync, mkdirSync, readdirSync, statSync } from "
 import { rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import type { BlobStore, PartReceipt } from "./blobs.js";
+import type { BlobRange, BlobStore, PartReceipt } from "./blobs.js";
 import { bufferUpTo } from "./streams.js";
 
 /**
@@ -110,7 +110,11 @@ export class DiskCachedBlobStore implements BlobStore {
     this.evict();
   }
 
-  async get(key: string): Promise<Readable> {
+  async get(key: string, range?: BlobRange): Promise<Readable> {
+    if (range) {
+      // Ranged reads never involve the cache; content blobs are not cached.
+      return this.backing.get(key, range);
+    }
     if (!this.cacheable(key)) {
       return this.backing.get(key);
     }

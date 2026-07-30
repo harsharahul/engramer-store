@@ -21,6 +21,7 @@ import {
 import { searchFiles, highlightParts, type SearchHit } from "../search";
 import { collectDropped, fromDirectoryInput } from "../uploader";
 import { MOBILE_QUERY, useMediaQuery } from "../media";
+import { installMediaKeyResponder } from "../mediastream";
 import { useLongPress } from "../longpress";
 import {
   clearUnlockRecord,
@@ -606,6 +607,10 @@ export function Vault() {
     clearThumbnailCache();
     store.logout();
   };
+
+  // The media bridge's worker may restart at any time; this responder
+  // re-supplies file keys for as long as the vault is open.
+  useEffect(() => installMediaKeyResponder(), []);
 
   // One-time offer: skip the password next launch. Only on capable
   // browsers, only until enrolled or declined once.

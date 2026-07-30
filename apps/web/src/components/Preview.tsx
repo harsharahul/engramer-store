@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FileEntry } from "../store";
 import { downloadAndDecrypt } from "../transfer";
+import { mediaBridgeAvailable, mediaUrl, onMediaProgress, registerMediaKey } from "../mediastream";
 import { fileKind, formatBytes } from "../format";
 import { triggerDownload } from "../download";
 import { DownloadGlyph, PencilGlyph, ShareGlyph, TagGlyph, XGlyph } from "./Icon";
@@ -64,12 +65,26 @@ export function Preview(props: {
   const kind = fileKind(file.mime, file.name);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
 
   useEffect(() => {
     let url: string | null = null;
     let cancelled = false;
     setLoaded(null);
     setError(null);
+    setProgress(null);
+    // Video and audio stream through the service worker's media bridge:
+    // decrypted on the fly, range requests answered, nothing buffered whole.
+    if ((kind === "video" || kind === "audio") && mediaBridgeAvailable()) {
+      registerMediaKey(file.id);
+      setLoaded({ url: mediaUrl(file.id), text: null, docx: null });
+      const stopProgress = onMediaProgress(file.id, (done, total) =>
+        setProgress(done < total ? { loaded: done, total } : null),
+      );
+      return () => {
+        stopProgress();
+      };
+    }
     void downloadAndDecrypt(file.id, file.key)
       .then((bytes) => {
         if (cancelled) {
@@ -153,7 +168,14 @@ export function Preview(props: {
         ) : kind === "image" && loaded.url ? (
           <img src={loaded.url} alt={file.name} />
         ) : kind === "video" && loaded.url ? (
-          <video src={loaded.url} controls autoPlay />
+          <>
+            <video src={loaded.url} controls autoPlay />
+            {progress && (
+              <div className="media-progress">
+                Decrypting {formatBytes(progress.loaded)} of {formatBytes(progress.total)}
+              </div>
+            )}
+          </>
         ) : kind === "audio" && loaded.url ? (
           <audio src={loaded.url} controls autoPlay />
         ) : kind === "pdf" && loaded.url ? (
