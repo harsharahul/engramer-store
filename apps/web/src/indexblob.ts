@@ -9,7 +9,12 @@ const MAGIC = "EIDX1:";
 
 export interface IndexPayload {
   text?: string;
+  /** The primary meaning vector: the image, or a video's poster frame. */
   clip?: Float32Array;
+  /** Every meaning vector, when there is more than one: videos sample
+   * several frames so any scene matches, not only the poster. The first
+   * entry always equals `clip`, keeping older readers correct. */
+  clips?: Float32Array[];
 }
 
 function toBase64(bytes: Uint8Array): string {
@@ -29,13 +34,21 @@ function fromBase64(encoded: string): Uint8Array {
   return bytes;
 }
 
+function vectorToBase64(vector: Float32Array): string {
+  return toBase64(new Uint8Array(vector.buffer, vector.byteOffset, vector.byteLength));
+}
+
 export function encodeIndexPayload(payload: IndexPayload): Uint8Array {
-  const body: { text?: string; clip?: string } = {};
+  const body: { text?: string; clip?: string; clips?: string[] } = {};
   if (payload.text !== undefined) {
     body.text = payload.text;
   }
-  if (payload.clip !== undefined) {
-    body.clip = toBase64(new Uint8Array(payload.clip.buffer, payload.clip.byteOffset, payload.clip.byteLength));
+  const primary = payload.clip ?? payload.clips?.[0];
+  if (primary !== undefined) {
+    body.clip = vectorToBase64(primary);
+  }
+  if (payload.clips !== undefined && payload.clips.length > 1) {
+    body.clips = payload.clips.map(vectorToBase64);
   }
   return new TextEncoder().encode(MAGIC + JSON.stringify(body));
 }
@@ -47,14 +60,25 @@ export function decodeIndexPayload(bytes: Uint8Array): IndexPayload {
     return { text };
   }
   try {
-    const body = JSON.parse(text.slice(MAGIC.length)) as { text?: string; clip?: string };
+    const body = JSON.parse(text.slice(MAGIC.length)) as {
+      text?: string;
+      clip?: string;
+      clips?: string[];
+    };
     const payload: IndexPayload = {};
     if (typeof body.text === "string") {
       payload.text = body.text;
     }
+    const decodeVector = (encoded: string) => {
+      const raw = fromBase64(encoded);
+      return new Float32Array(raw.buffer, 0, Math.floor(raw.length / 4));
+    };
     if (typeof body.clip === "string") {
-      const raw = fromBase64(body.clip);
-      payload.clip = new Float32Array(raw.buffer, 0, Math.floor(raw.length / 4));
+      payload.clip = decodeVector(body.clip);
+    }
+    if (Array.isArray(body.clips) && body.clips.every((c) => typeof c === "string")) {
+      payload.clips = body.clips.map(decodeVector);
+      payload.clip ??= payload.clips[0];
     }
     return payload;
   } catch {
