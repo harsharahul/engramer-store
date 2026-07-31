@@ -54,6 +54,7 @@ import { ShareDialog } from "./ShareDialog";
 import { SharedView, NewRequestDialog } from "./SharedView";
 import { TwoFactorDialog } from "./TwoFactorDialog";
 import { AdminPanel } from "./AdminPanel";
+import { ProfileView } from "./ProfileView";
 import { UploadTray } from "./UploadTray";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { Confirm, TextPrompt } from "./Dialogs";
@@ -108,6 +109,7 @@ type View =
   | { kind: "trash" }
   | { kind: "favorites" }
   | { kind: "shared" }
+  | { kind: "profile" }
   | { kind: "category"; name: string };
 
 const CATEGORY_ORDER = [
@@ -716,6 +718,36 @@ export function Vault() {
     store.logout();
   };
 
+  // Shared by the sidebar controls and the profile page, so the two
+  // surfaces can never disagree about a setting.
+  const toggleOcr = () => {
+    const next = !ocrOn;
+    setOcrEnabled(next);
+    setOcrOn(next);
+    showToast(
+      next
+        ? "New images will be read on this device. Cmd+K, then “Make images searchable” for existing ones."
+        : "Image reading is off.",
+    );
+  };
+
+  const toggleSemantic = () => {
+    const next = !semanticOn;
+    setSemanticEnabled(next);
+    setSemanticOn(next);
+    showToast(
+      next
+        ? "Photos and videos will be indexed by meaning on this device (a 65 MB model downloads once). Cmd+K, then “Index photos and videos by meaning” for existing ones."
+        : "Meaning search is off.",
+    );
+  };
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    applyTheme(next);
+    setTheme(next);
+  };
+
   // The media bridge's worker may restart at any time; this responder
   // re-supplies file keys for as long as the vault is open.
   useEffect(() => installMediaKeyResponder(), []);
@@ -910,11 +942,17 @@ export function Vault() {
             ? "Favorites"
             : view.kind === "shared"
               ? "Shared"
-              : "Trash";
+              : view.kind === "profile"
+                ? "Profile"
+                : "Trash";
 
   const similarActive = !searching && similarTo !== null;
   const showViewControls =
-    !searching && !similarActive && view.kind !== "trash" && view.kind !== "shared";
+    !searching &&
+    !similarActive &&
+    view.kind !== "trash" &&
+    view.kind !== "shared" &&
+    view.kind !== "profile";
 
   const navButton = (
     active: boolean,
@@ -1007,16 +1045,7 @@ export function Vault() {
         <button
           className={`ocr-toggle${ocrOn ? " on" : ""}`}
           title="OCR runs entirely on this device; recognized text is stored encrypted"
-          onClick={() => {
-            const next = !ocrOn;
-            setOcrEnabled(next);
-            setOcrOn(next);
-            showToast(
-              next
-                ? "New images will be read on this device. Cmd+K, then “Make images searchable” for existing ones."
-                : "Image reading is off.",
-            );
-          }}
+          onClick={toggleOcr}
         >
           <ScanTextGlyph size={14} />
           <span>Read text in images</span>
@@ -1025,31 +1054,14 @@ export function Vault() {
         <button
           className={`ocr-toggle${semanticOn ? " on" : ""}`}
           title="A small on-device model makes photos and videos findable by what is in them; nothing leaves this device"
-          onClick={() => {
-            const next = !semanticOn;
-            setSemanticEnabled(next);
-            setSemanticOn(next);
-            showToast(
-              next
-                ? "Photos and videos will be indexed by meaning on this device (a 65 MB model downloads once). Cmd+K, then \u201cIndex photos and videos by meaning\u201d for existing ones."
-                : "Meaning search is off.",
-            );
-          }}
+          onClick={toggleSemantic}
         >
           <SparkGlyph size={14} />
           <span>Find media by meaning</span>
           <span className={`switch${semanticOn ? " on" : ""}`} />
         </button>
         <div className="appearance">
-          <button
-            className="theme-toggle"
-            title="Toggle day and night"
-            onClick={() => {
-              const next = theme === "dark" ? "light" : "dark";
-              applyTheme(next);
-              setTheme(next);
-            }}
-          >
+          <button className="theme-toggle" title="Toggle day and night" onClick={toggleTheme}>
             {theme === "dark" ? <SunGlyph size={15} /> : <MoonGlyph size={15} />}
             {theme === "dark" ? "Day" : "Night"}
           </button>
@@ -1081,7 +1093,16 @@ export function Vault() {
           </div>
         )}
         <div className="account-row">
-          <span title={store.session?.email}>{store.session?.email}</span>
+          <button
+            className="account-link"
+            title="Profile and settings"
+            onClick={() => {
+              setDrawerOpen(false);
+              setView({ kind: "profile" });
+            }}
+          >
+            {store.session?.email}
+          </button>
           {store.isAdmin && (
             <button
               className="icon-btn"
@@ -1297,6 +1318,8 @@ export function Vault() {
                   ? `like “${similarTo!.name}”`
                   : view.kind === "shared"
                   ? "links and file requests"
+                  : view.kind === "profile"
+                  ? "account, security, and settings"
                   : `${visibleFiles.length} file${visibleFiles.length === 1 ? "" : "s"}${
                       view.kind === "folder" && childFolders.length
                         ? ` · ${childFolders.length} folder${childFolders.length === 1 ? "" : "s"}`
@@ -1379,6 +1402,23 @@ export function Vault() {
             />
           ) : view.kind === "shared" ? (
             <SharedView onToast={showToast} />
+          ) : view.kind === "profile" ? (
+            <ProfileView
+              ocrOn={ocrOn}
+              onToggleOcr={toggleOcr}
+              semanticOn={semanticOn}
+              onToggleSemantic={toggleSemantic}
+              theme={theme}
+              onToggleTheme={toggleTheme}
+              accent={accent}
+              onAccent={(id) => {
+                applyAccent(id);
+                setAccent(id);
+              }}
+              onOpenTwoFactor={() => setSecurityOpen(true)}
+              onLock={lock}
+              onToast={showToast}
+            />
           ) : view.kind === "trash" ? (
             <TrashList
               files={viewFiles}

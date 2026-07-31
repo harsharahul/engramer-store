@@ -9,6 +9,23 @@ import { formatBytes } from "../format";
  * material; the recovery key is the only way back into an account.
  */
 export function AdminPanel(props: { onClose: () => void; onToast: (message: string) => void }) {
+  return (
+    <div className="overlay" onClick={(e) => e.target === e.currentTarget && props.onClose()}>
+      <div className="modal modal-wide">
+        <h2>Server administration</h2>
+        <AdminBody onToast={props.onToast} />
+        <div className="modal-actions">
+          <button className="btn" onClick={props.onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The panel's working surface, embeddable in a dialog or a settings page. */
+export function AdminBody(props: { onToast: (message: string) => void }) {
   const [tab, setTab] = useState<"users" | "invites">("users");
   const [users, setUsers] = useState<AdminUserInfo[]>([]);
   const [registration, setRegistration] = useState<string>("open");
@@ -57,9 +74,8 @@ export function AdminPanel(props: { onClose: () => void; onToast: (message: stri
   const pending = invites.filter((invite) => !invite.used);
 
   return (
-    <div className="overlay" onClick={(e) => e.target === e.currentTarget && props.onClose()}>
-      <div className="modal modal-wide">
-        <h2>Server administration</h2>
+    <>
+      <div>
         <p className="modal-sub">
           Registration is <b>{registration}</b>. Accounts are end-to-end encrypted: you can manage
           access and quotas here, but no one, including you, can read a vault or reset its password.
@@ -180,11 +196,6 @@ export function AdminPanel(props: { onClose: () => void; onToast: (message: stri
           </div>
         )}
 
-        <div className="modal-actions">
-          <button className="btn" onClick={props.onClose}>
-            Close
-          </button>
-        </div>
       </div>
 
       {confirmDelete && (
@@ -213,6 +224,6 @@ export function AdminPanel(props: { onClose: () => void; onToast: (message: stri
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
