@@ -3,6 +3,20 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.25.0] - 2026-07-31
+
+### Added
+- Search photos and videos by meaning. An optional on-device model (a
+  65 MB download, fetched once from the server itself) embeds each
+  photo, and each video's poster frame, into a semantic index that is
+  encrypted like everything else: type "a dog on a beach" and matching
+  media surfaces even when no filename or text agrees. Nothing about
+  your files ever leaves the device; the model runs entirely in the
+  browser, and search results merge with regular name and content
+  matches under a "meaning" tag. A command palette action indexes the
+  existing library in one sweep, reading only stored thumbnails for
+  videos so no full video is ever re-downloaded.
+
 ## [0.24.2] - 2026-07-30
 
 ### Fixed
