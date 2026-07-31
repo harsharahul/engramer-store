@@ -975,10 +975,29 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--hairline);
   font-weight: 600;
   font-size: 13px;
+}
+
+.upload-tray header span {
+  flex: 1;
+}
+
+.tray-cancel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--paper-dim);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--hairline-strong);
+}
+
+.tray-cancel:hover {
+  color: var(--paper);
+  background: var(--ink-2);
 }
 
 .upload-tray ul {

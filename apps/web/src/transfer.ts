@@ -21,6 +21,7 @@ import {
   completePartUpload,
   uploadBlob,
   uploadPart,
+  UPLOAD_CANCELLED,
   type FileDto,
 } from "./api";
 import { categorize, type Analysis } from "./intel/categorize";
@@ -235,9 +236,39 @@ export interface UploadResult {
 // and the streaming path does the heavy lifting.
 const PART_THRESHOLD = 12 * 1024 * 1024;
 const CHUNKS_PER_PART = 4;
-const PART_RETRYABLE = new Set([0, 429, 503]);
-const PART_MAX_ATTEMPTS = 5;
+// Transfer-tool practice: retry network failures, timeouts, throttles, and
+// server-side errors; give up immediately on any other client error.
+const PART_RETRYABLE = new Set([0, 408, 429, 500, 502, 503, 504]);
+const PART_MAX_ATTEMPTS = 6;
 const PART_BLOCK_COOLDOWN_MS = 60_000;
+// Parts are sized to the measured link, aiming near this transfer time:
+// long enough to amortize request overhead, short enough that a retry
+// repeats little work and no edge body-timeout can fire mid-part.
+const PART_TIME_TARGET_MS = 8_000;
+// Two chunks stay above S3's minimum size for non-final multipart parts.
+const MIN_CHUNKS_PER_PART = 2;
+// A little concurrency hides per-request latency without the memory cost
+// of a wide window; phones hold at most this many part bodies at once.
+const PARTS_IN_FLIGHT = 2;
+
+/** Full jitter keeps a fleet of retrying clients from re-arriving in step. */
+function retryDelay(attempt: number): number {
+  return Math.random() * Math.min(15_000, 1_000 * 2 ** attempt);
+}
+
+/** Offline is a state to wait out, not an error to burn retry budget on. */
+function whenOnline(): Promise<void> {
+  if (typeof navigator === "undefined" || navigator.onLine !== false) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const on = () => {
+      window.removeEventListener("online", on);
+      resolve();
+    };
+    window.addEventListener("online", on);
+  });
+}
 
 async function sendPartWithRetry(
   fileId: string,
@@ -245,12 +276,17 @@ async function sendPartWithRetry(
   partNo: number,
   payload: Uint8Array,
   onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   let attempt = 0;
   let blockRetried = false;
   for (;;) {
+    await whenOnline();
+    if (signal?.aborted) {
+      throw new ApiError(UPLOAD_CANCELLED, "upload cancelled");
+    }
     try {
-      return await uploadPart(fileId, session, partNo, payload, onProgress);
+      return await uploadPart(fileId, session, partNo, payload, onProgress, signal);
     } catch (err) {
       if (!(err instanceof ApiError)) {
         throw err;
@@ -267,7 +303,7 @@ async function sendPartWithRetry(
       if (!PART_RETRYABLE.has(err.status) || attempt >= PART_MAX_ATTEMPTS) {
         throw err;
       }
-      const wait = err.retryAfterMs ?? Math.min(15_000, 500 * 2 ** attempt);
+      const wait = err.retryAfterMs ?? retryDelay(attempt);
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
   }
@@ -293,6 +329,7 @@ async function uploadInParts(
   fileId: string,
   fileKey: Uint8Array,
   onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<number> {
   const total = contentCiphertextSize(file);
   const { session } = await beginPartUpload(fileId, total);
@@ -303,9 +340,65 @@ async function uploadInParts(
     const chunkCount = Math.max(1, Math.ceil(file.size / STREAM_CHUNK_SIZE));
     let pieces: Uint8Array[] = [encryptor.header];
     let pieceBytes = encryptor.header.length;
-    let sent = 0;
+    let chunksInPart = 0;
+    let chunksPerPart = CHUNKS_PER_PART;
     let partNo = 0;
+    let settled = 0;
+    // Encryption stays strictly sequential (the stream cipher demands it);
+    // finished part bodies overlap on the network so latency does not
+    // serialize with crypto. Parts land by number, so order is free.
+    const inFlight = new Map<number, Promise<void>>();
+    const partSent = new Map<number, number>();
+    let uploadError: unknown = null;
+    const report = () => {
+      let moving = 0;
+      for (const bytes of partSent.values()) {
+        moving += bytes;
+      }
+      onProgress((settled + moving) / total);
+    };
+    const launch = (no: number, body: Uint8Array) => {
+      const started = Date.now();
+      const task = sendPartWithRetry(
+        fileId,
+        session,
+        no,
+        body,
+        (fraction) => {
+          partSent.set(no, fraction * body.length);
+          report();
+        },
+        signal,
+      )
+        .then(() => {
+          settled += body.length;
+          // Size the next parts to the pace just measured: a slow or
+          // retried part shrinks the window, a quick one restores it.
+          const elapsed = Date.now() - started;
+          chunksPerPart =
+            elapsed > PART_TIME_TARGET_MS * 2
+              ? MIN_CHUNKS_PER_PART
+              : elapsed < PART_TIME_TARGET_MS
+                ? CHUNKS_PER_PART
+                : chunksPerPart;
+        })
+        .catch((err) => {
+          uploadError ??= err;
+        })
+        .finally(() => {
+          partSent.delete(no);
+          inFlight.delete(no);
+          report();
+        });
+      inFlight.set(no, task);
+    };
     for (let i = 0; i < chunkCount; i++) {
+      if (uploadError) {
+        throw uploadError;
+      }
+      if (signal?.aborted) {
+        throw new ApiError(UPLOAD_CANCELLED, "upload cancelled");
+      }
       const start = i * STREAM_CHUNK_SIZE;
       const slice = file.slice(start, Math.min(start + STREAM_CHUNK_SIZE, file.size));
       const plainChunk = new Uint8Array(await slice.arrayBuffer());
@@ -315,7 +408,8 @@ async function uploadInParts(
           : encryptor.push(plainChunk, i === chunkCount - 1);
       pieces.push(sealed);
       pieceBytes += sealed.length;
-      if ((i + 1) % CHUNKS_PER_PART === 0 || i === chunkCount - 1) {
+      chunksInPart += 1;
+      if (chunksInPart >= chunksPerPart || i === chunkCount - 1) {
         const body = new Uint8Array(pieceBytes);
         let offset = 0;
         for (const piece of pieces) {
@@ -324,13 +418,17 @@ async function uploadInParts(
         }
         pieces = [];
         pieceBytes = 0;
+        chunksInPart = 0;
         partNo += 1;
-        const base = sent;
-        await sendPartWithRetry(fileId, session, partNo, body, (fraction) =>
-          onProgress((base + fraction * body.length) / total),
-        );
-        sent += body.length;
+        launch(partNo, body);
+        while (inFlight.size >= PARTS_IN_FLIGHT) {
+          await Promise.race(inFlight.values());
+        }
       }
+    }
+    await Promise.all([...inFlight.values()]);
+    if (uploadError) {
+      throw uploadError;
     }
     await completePartUpload(fileId, session);
     return total;
@@ -348,6 +446,7 @@ export async function encryptAndUpload(
   masterKey: Uint8Array,
   prepared: PreparedFile,
   onProgress: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<UploadResult> {
   const fileKey = generateKey();
   const encryptedMeta = encryptFileMetadata(prepared.meta, fileKey);
@@ -356,17 +455,17 @@ export async function encryptAndUpload(
 
   const totalCiphertext = contentCiphertextSize(file);
   if (totalCiphertext > PART_THRESHOLD) {
-    await uploadInParts(file, dto.id, fileKey, onProgress);
+    await uploadInParts(file, dto.id, fileKey, onProgress, signal);
   } else {
     const plaintext = new Uint8Array(await file.arrayBuffer());
     const ciphertext = isMediaFile(file)
       ? chunkedEncrypt(plaintext, fileKey)
       : encryptBytes(plaintext, fileKey);
-    await uploadBlob(dto.id, "data", ciphertext, onProgress);
+    await uploadBlob(dto.id, "data", ciphertext, onProgress, signal);
   }
 
   if (prepared.thumbnail) {
-    await uploadBlob(dto.id, "thumbnail", encryptBytes(prepared.thumbnail.bytes, fileKey));
+    await uploadBlob(dto.id, "thumbnail", encryptBytes(prepared.thumbnail.bytes, fileKey), undefined, signal);
   }
   if (prepared.text !== undefined || prepared.clip) {
     // Search signals travel as their own encrypted blob, keeping sync rows
@@ -375,6 +474,8 @@ export async function encryptAndUpload(
       dto.id,
       "index",
       encryptBytes(encodeIndexPayload({ text: prepared.text, clip: prepared.clip }), fileKey),
+      undefined,
+      signal,
     );
   }
 

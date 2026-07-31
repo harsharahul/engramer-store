@@ -4,6 +4,7 @@ import { XGlyph } from "./Icon";
 export function UploadTray() {
   const uploads = useStore((s) => s.uploads);
   const clear = useStore((s) => s.clearFinishedUploads);
+  const cancel = useStore((s) => s.cancelUploads);
 
   if (uploads.length === 0) {
     return null;
@@ -18,6 +19,11 @@ export function UploadTray() {
             ? `Encrypting and uploading ${active.length} file${active.length > 1 ? "s" : ""}`
             : "Uploads finished"}
         </span>
+        {active.length > 0 && (
+          <button className="tray-cancel" onClick={cancel}>
+            Cancel
+          </button>
+        )}
         <button className="icon-btn" title="Clear" onClick={clear}>
           <XGlyph size={14} />
         </button>
