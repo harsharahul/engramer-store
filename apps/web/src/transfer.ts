@@ -75,18 +75,26 @@ async function imageThumbnail(file: File): Promise<Thumbnail | null> {
  * browsers in particular can leave media decoding pending indefinitely, so
  * every step runs under a deadline and simply yields nothing when it lapses.
  */
-export function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | undefined> {
+export function withDeadline<T>(
+  work: Promise<T>,
+  ms: number,
+  signal?: AbortSignal,
+): Promise<T | undefined> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(undefined), ms);
-    void work
-      .then((value) => {
-        clearTimeout(timer);
-        resolve(value);
-      })
-      .catch(() => {
-        clearTimeout(timer);
-        resolve(undefined);
-      });
+    const settle = (value: T | undefined) => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(value);
+    };
+    // Cancelling mid-analysis abandons the step immediately; the worker it
+    // fed may keep chewing briefly, but the upload flow moves on.
+    const onAbort = () => settle(undefined);
+    if (signal?.aborted) {
+      return settle(undefined);
+    }
+    signal?.addEventListener("abort", onAbort);
+    void work.then(settle).catch(() => settle(undefined));
   });
 }
 
@@ -223,37 +231,46 @@ export interface PreparedFile {
  * Client-side analysis phase: search text, EXIF, category, tags, thumbnail.
  * Everything computed here ships only inside encrypted metadata.
  */
-export async function analyzeFile(file: File): Promise<PreparedFile> {
+export async function analyzeFile(file: File, signal?: AbortSignal): Promise<PreparedFile> {
+  const cancelled = () => {
+    if (signal?.aborted) {
+      throw new ApiError(UPLOAD_CANCELLED, "upload cancelled");
+    }
+  };
   let [text, exif, thumbnail] = await Promise.all([
-    withDeadline(extractText(file), ANALYSIS_DEADLINE_MS),
-    withDeadline(extractExif(file), ANALYSIS_DEADLINE_MS),
-    withDeadline(makeThumbnail(file), THUMB_DEADLINE_MS + 2_000).then((t) => t ?? null),
+    withDeadline(extractText(file), ANALYSIS_DEADLINE_MS, signal),
+    withDeadline(extractExif(file), ANALYSIS_DEADLINE_MS, signal),
+    withDeadline(makeThumbnail(file), THUMB_DEADLINE_MS + 2_000, signal).then((t) => t ?? null),
   ]);
+  cancelled();
   // Opt-in OCR: screenshots and scans become searchable, and the recognized
   // text sharpens categorization (a photographed invoice files as a receipt).
   if (text === undefined && file.type.startsWith("image/") && ocrEnabled()) {
-    text = await withDeadline(recognizeImage(file), ANALYSIS_DEADLINE_MS * 3);
+    text = await withDeadline(recognizeImage(file), ANALYSIS_DEADLINE_MS * 3, signal);
   }
   // A PDF with no text layer is a scan; its pages read like photos.
   if (text === undefined && isPdf(file.name, file.type) && ocrEnabled()) {
-    text = await withDeadline(recognizePdf(file), ANALYSIS_DEADLINE_MS * 6);
+    text = await withDeadline(recognizePdf(file), ANALYSIS_DEADLINE_MS * 6, signal);
   }
+  cancelled();
   // Opt-in semantic indexing: photos become findable by what is in them,
   // and videos by their poster frame, which the thumbnail step already
   // extracted; decoding the video a second time would be wasted work.
   let clip: Float32Array | undefined;
   if (semanticEnabled()) {
     if (file.type.startsWith("image/")) {
-      clip = await withDeadline(embedImage(file), 45_000);
+      clip = await withDeadline(embedImage(file), 45_000, signal);
     } else if (file.type.startsWith("video/") && thumbnail) {
       clip = await withDeadline(
         embedImage(
           new Blob([thumbnail.bytes.slice().buffer as ArrayBuffer], { type: "image/jpeg" }),
         ),
         45_000,
+        signal,
       );
     }
   }
+  cancelled();
   const analysis = categorize({
     name: file.name,
     mime: file.type || "application/octet-stream",

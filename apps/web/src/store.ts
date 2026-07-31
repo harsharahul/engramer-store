@@ -579,7 +579,7 @@ export const useStore = create<StoreState>((set, get) => {
             uploads: get().uploads.map((u) => (u.id === uploadId ? { ...u, ...patch } : u)),
           });
         try {
-          const prepared = await analyzeFile(file);
+          const prepared = await analyzeFile(file, cancel.signal);
           // Root uploads are auto-filed into a category folder; uploads into a
           // folder the user picked stay where the user put them.
           const destination =
@@ -671,7 +671,7 @@ export const useStore = create<StoreState>((set, get) => {
         const current = get().batch;
         set({ batch: current ? { ...current, current: item.file.name } : null });
         try {
-          const prepared = await analyzeFile(item.file);
+          const prepared = await analyzeFile(item.file, cancel.signal);
           const destination =
             item.path.length > 0
               ? (folderIds.get(pathKey(item.path)) ?? baseFolderId)
