@@ -3,6 +3,25 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.26.0] - 2026-07-31
+
+### Added
+- Find similar. Any photo or video that has a meaning index gains a
+  context-menu action that ranks the whole library by visual closeness,
+  entirely on-device: near-duplicates surface first, similar scenes
+  follow, and videos match through their poster frames. Results open in
+  the familiar search view with one click back to files.
+- Uploads can be cancelled. A Cancel control in the upload tray stops
+  every transfer in flight immediately.
+
+### Changed
+- Uploads now shrug off bad networks. A watchdog aborts any request that
+  stops moving bytes instead of hanging forever, timeouts and server
+  errors retry with jittered backoff, parts shrink on slow links so a
+  retry repeats little work, two parts travel concurrently for higher
+  throughput, and going offline pauses the queue until the connection
+  returns.
+
 ## [0.25.0] - 2026-07-31
 
 ### Added
