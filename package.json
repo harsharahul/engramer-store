@@ -1,6 +1,6 @@
 {
   "name": "engramer-store",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "private": true,
   "description": "Self-hostable, end-to-end encrypted cloud storage",
   "license": "AGPL-3.0-only",

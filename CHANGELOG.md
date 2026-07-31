@@ -3,6 +3,29 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.29.0] - 2026-08-01
+
+### Added
+- Video meaning search covers every scene. Uploads sample five frames
+  across a video's timeline and index each one, so a query matches
+  whatever appears anywhere in the clip, not only its opening moment.
+- Watched folders in the desktop app. Folders chosen in the profile
+  page upload new files automatically, encrypted, with subfolders
+  preserved and files already in the vault skipped. Strictly one-way;
+  nothing is ever deleted.
+- A gentle Lock. Locking keeps Touch ID or the passkey enrolled so one
+  touch reopens the vault; signing out remains the full revocation.
+- An on-device activity log. The profile page shows what this device
+  did recently: upload retries, playback buffering with timestamps,
+  watched-folder activity. Kept only in memory, never transmitted.
+- Optional structured request logging on the server for cluster log
+  collectors, off by default.
+
+### Fixed
+- Smoother video playback: the streaming bridge no longer re-fetches
+  the media header for every range request browsers issue during
+  playback, removing a round trip per cycle.
+
 ## [0.28.0] - 2026-07-31
 
 ### Added
