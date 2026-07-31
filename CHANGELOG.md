@@ -3,6 +3,24 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.28.0] - 2026-07-31
+
+### Added
+- Touch ID unlock in the desktop app. The Mac app keeps an unlock secret
+  in the macOS Keychain behind the system's biometric prompt, and the
+  vault keys are wrapped under a key derived from it, exactly like the
+  browser passkey flavor. Signing out clears both halves.
+- The desktop app lives in the menu bar: closing the window parks it in
+  the tray with open, start-at-login, and quit controls, and the dock
+  icon brings it back.
+
+### Fixed
+- The sidebar stays put; only the file area scrolls.
+- Signing in reads calmly: the button keeps a short label with the
+  key-derivation note beneath it instead of overflowing.
+- The search field's placeholder shortens before it can clip in narrow
+  windows, and the command palette shortcut renders as a proper keycap.
+
 ## [0.27.0] - 2026-07-31
 
 ### Added
