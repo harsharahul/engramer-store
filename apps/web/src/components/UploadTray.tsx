@@ -41,7 +41,7 @@ export function UploadTray() {
                 }`}
               >
                 {upload.status === "encrypting"
-                  ? "encrypting"
+                  ? (upload.detail ?? "encrypting")
                   : upload.status === "finalizing"
                     ? "finalizing"
                     : upload.status === "uploading"
