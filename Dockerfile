@@ -17,6 +17,9 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages ./packages
 COPY apps ./apps
 RUN pnpm install --frozen-lockfile
+# Stage the on-device semantic search model so images are self-contained;
+# the app's CSP allows fetching from its own origin only.
+RUN node apps/web/scripts/fetch-models.mjs
 RUN pnpm --filter @engramer/web build
 
 # Production dependencies only, for the server and its workspace packages.

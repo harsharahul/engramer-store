@@ -66,10 +66,64 @@ function ocrAssets(): Plugin {
   };
 }
 
+/**
+ * Serves the onnxruntime-web runtime under /ort so the semantic search
+ * worker never reaches for a CDN: transformers.js is pointed at this path
+ * and the strict CSP would refuse anything else anyway.
+ */
+function ortAssets(): Plugin {
+  // Exports maps hide package.json; resolve entry points and walk from there.
+  const transformersEntry = require.resolve("@huggingface/transformers");
+  const ortEntry = require.resolve("onnxruntime-web", { paths: [dirname(transformersEntry)] });
+  const ortDist = dirname(ortEntry);
+  const names = [
+    "ort-wasm-simd-threaded.asyncify.mjs",
+    "ort-wasm-simd-threaded.asyncify.wasm",
+    "ort-wasm-simd-threaded.mjs",
+    "ort-wasm-simd-threaded.wasm",
+  ];
+  const files = names.map((name) => ({ from: join(ortDist, name), name }));
+  let outDir = "dist";
+  let isBuild = false;
+  return {
+    name: "engram-ort-assets",
+    configResolved(config) {
+      outDir = config.build.outDir;
+      isBuild = config.command === "build" && !process.env.VITEST;
+    },
+    closeBundle() {
+      if (!isBuild) {
+        return;
+      }
+      const target = join(outDir, "ort");
+      mkdirSync(target, { recursive: true });
+      for (const file of files) {
+        if (existsSync(file.from)) {
+          cpSync(file.from, join(target, file.name));
+        }
+      }
+    },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const hit = files.find((f) => req.url === `/ort/${f.name}`);
+        if (!hit) {
+          return next();
+        }
+        res.setHeader(
+          "content-type",
+          hit.name.endsWith(".wasm") ? "application/wasm" : "text/javascript",
+        );
+        res.end(require("node:fs").readFileSync(hit.from));
+      });
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     react(),
     ocrAssets(),
+    ortAssets(),
     VitePWA({
       strategies: "injectManifest",
       srcDir: "src",
@@ -102,7 +156,7 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,woff2,svg,png}"],
         // The OCR runtime and language model are megabytes and fetched only
         // when OCR actually runs; they never belong in the app-shell cache.
-        globIgnores: ["ocr/**"],
+        globIgnores: ["ocr/**", "models/**", "ort/**"],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
       },
     }),

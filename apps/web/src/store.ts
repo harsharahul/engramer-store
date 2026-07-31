@@ -22,6 +22,8 @@ import { holdTransferLock, releaseTransferLock } from "./wakelock";
 import { analyzeFile, downloadAndDecrypt, encryptAndUpload } from "./transfer";
 import { recognizeImage, recognizePdf } from "./intel/ocr";
 import { isPdf } from "./intel/extract";
+import { embedImage } from "./intel/semantic";
+import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
 
 export interface FolderEntry {
@@ -47,6 +49,10 @@ export interface FileEntry {
   text?: string;
   /** An encrypted search-text blob exists for this file. */
   hasText: boolean;
+  /** In-memory semantic embedding (lazily fetched from the index blob). */
+  clip?: Float32Array;
+  /** The index blob carries a semantic embedding for this file. */
+  hasClip: boolean;
   /** Legacy row still carrying text inside its metadata. */
   inlineText: boolean;
   category?: string;
@@ -112,6 +118,7 @@ interface StoreState {
   uploads: UploadItem[];
   reveal: Reveal | null;
   ocrProgress: OcrProgress | null;
+  semanticProgress: OcrProgress | null;
   batch: BatchProgress | null;
   /** Search-index warm-up progress; null when idle or complete. */
   indexWarm: { done: number; total: number } | null;
@@ -142,6 +149,8 @@ interface StoreState {
   ingestRequestUploads: () => Promise<number>;
   recognizeFile: (id: string) => Promise<boolean>;
   recognizeAllImages: () => Promise<number>;
+  embedFile: (id: string) => Promise<boolean>;
+  embedAllImages: () => Promise<number>;
   restoreVersion: (id: string, generation: number) => Promise<void>;
   warmSearchIndex: () => Promise<void>;
 }
@@ -174,6 +183,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
     blur: meta.blur,
     text: meta.text,
     hasText: meta.hasText === true || meta.text !== undefined,
+    hasClip: meta.hasClip === true,
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -198,6 +208,7 @@ function metadataOf(file: FileEntry): FileMetadata {
     // Legacy rows keep their inline text until migrated; split rows carry
     // only the marker, with text living in the index blob.
     ...(file.inlineText ? { text: file.text } : file.hasText ? { hasText: true } : {}),
+    ...(file.hasClip ? { hasClip: true } : {}),
     category: file.category,
     tags: file.tags,
     favorite: file.favorite,
@@ -242,6 +253,9 @@ export const useStore = create<StoreState>((set, get) => {
           if (entry.text === undefined && entry.hasText && before?.text !== undefined) {
             entry.text = before.text;
           }
+          if (entry.clip === undefined && entry.hasClip && before?.clip !== undefined) {
+            entry.clip = before.clip;
+          }
           files.set(dto.id, entry);
         } catch {
           undecryptable++;
@@ -275,6 +289,9 @@ export const useStore = create<StoreState>((set, get) => {
       if (entry.text === undefined && entry.hasText && prior?.text !== undefined) {
         entry.text = prior.text;
       }
+      if (entry.clip === undefined && entry.hasClip && prior?.clip !== undefined) {
+        entry.clip = prior.clip;
+      }
       files.set(dto.id, entry);
     }
     set({ files });
@@ -282,6 +299,16 @@ export const useStore = create<StoreState>((set, get) => {
 
 
   /** Replaces one entry's in-memory search text. */
+  const setEntryClip = (id: string, clip: Float32Array) => {
+    const entry = get().files.get(id);
+    if (!entry) {
+      return;
+    }
+    const files = new Map(get().files);
+    files.set(id, { ...entry, clip, hasClip: true });
+    set({ files });
+  };
+
   const setEntryText = (id: string, text: string | undefined, inlineText?: boolean) => {
     const files = new Map(get().files);
     const entry = files.get(id);
@@ -344,6 +371,7 @@ export const useStore = create<StoreState>((set, get) => {
     uploads: [],
     reveal: null,
     ocrProgress: null,
+    semanticProgress: null,
     batch: null,
     indexWarm: null,
 
@@ -647,7 +675,11 @@ export const useStore = create<StoreState>((set, get) => {
       const bytes = utf8Encode(text);
       await uploadBlob(id, "data", encryptBytes(bytes, file.key));
       const searchText = text.slice(0, 100_000);
-      await uploadBlob(id, "index", encryptBytes(utf8Encode(searchText), file.key));
+      await uploadBlob(
+        id,
+        "index",
+        encryptBytes(encodeIndexPayload({ text: searchText, clip: file.clip }), file.key),
+      );
       await patchFileMeta(id, { size: bytes.length, mtime: Date.now(), hasText: true, text: undefined });
       setEntryText(id, searchText, false);
       await get().refreshUsage();
@@ -663,7 +695,14 @@ export const useStore = create<StoreState>((set, get) => {
       }
       await uploadBlob(id, "data", encryptBytes(bytes, file.key));
       if (searchText !== undefined) {
-        await uploadBlob(id, "index", encryptBytes(utf8Encode(searchText.slice(0, 100_000)), file.key));
+        await uploadBlob(
+          id,
+          "index",
+          encryptBytes(
+            encodeIndexPayload({ text: searchText.slice(0, 100_000), clip: file.clip }),
+            file.key,
+          ),
+        );
       }
       await patchFileMeta(id, {
         size: bytes.length,
@@ -822,7 +861,11 @@ export const useStore = create<StoreState>((set, get) => {
       if (!text) {
         return false;
       }
-      await uploadBlob(id, "index", encryptBytes(utf8Encode(text), file.key));
+      await uploadBlob(
+        id,
+        "index",
+        encryptBytes(encodeIndexPayload({ text, clip: file.clip }), file.key),
+      );
       await patchFileMeta(id, { hasText: true, text: undefined });
       setEntryText(id, text, false);
       return true;
@@ -852,6 +895,67 @@ export const useStore = create<StoreState>((set, get) => {
       }
       set({ ocrProgress: null });
       return found;
+    },
+
+    /** Computes this image's semantic embedding on-device and files it into
+     * the encrypted index blob alongside any search text already there. */
+    embedFile: async (id) => {
+      const file = get().files.get(id);
+      if (!file || !file.mime.startsWith("image/")) {
+        return false;
+      }
+      const bytes = await downloadAndDecrypt(file.id, file.key);
+      const clip = await embedImage(
+        new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime }),
+      );
+      if (!clip) {
+        return false;
+      }
+      // Merge with whatever the index blob already holds so text survives.
+      let text = file.text;
+      if (text === undefined && file.hasText && !file.inlineText) {
+        try {
+          const indexBytes = await api.downloadBlob(file.id, "index");
+          text = decodeIndexPayload(decryptBytes(indexBytes, file.key)).text;
+        } catch {
+          // The embedding still lands; text warms on demand later.
+        }
+      }
+      await uploadBlob(
+        id,
+        "index",
+        encryptBytes(encodeIndexPayload({ text, clip }), file.key),
+      );
+      await patchFileMeta(id, {
+        hasClip: true,
+        ...(file.inlineText && text !== undefined ? { hasText: true, text: undefined } : {}),
+      });
+      if (file.inlineText && text !== undefined) {
+        setEntryText(id, text, false);
+      }
+      setEntryClip(id, clip);
+      return true;
+    },
+
+    /** Makes the photo library searchable by meaning, one image at a time. */
+    embedAllImages: async () => {
+      const candidates = [...get().files.values()].filter(
+        (f) => !f.trashed && !f.hasClip && f.mime.startsWith("image/"),
+      );
+      let indexed = 0;
+      for (let i = 0; i < candidates.length; i++) {
+        const file = candidates[i]!;
+        set({ semanticProgress: { done: i, total: candidates.length, current: file.name } });
+        try {
+          if (await get().embedFile(file.id)) {
+            indexed++;
+          }
+        } catch {
+          // One unreadable image never stops the sweep.
+        }
+      }
+      set({ semanticProgress: null });
+      return indexed;
     },
 
     /**
@@ -888,15 +992,23 @@ export const useStore = create<StoreState>((set, get) => {
         return;
       }
       const candidates = [...get().files.values()].filter(
-        (f) => !f.trashed && f.hasText && !f.inlineText && f.text === undefined,
+        (f) =>
+          !f.trashed &&
+          ((f.hasText && !f.inlineText && f.text === undefined) ||
+            (f.hasClip && f.clip === undefined)),
       );
       if (candidates.length > 0) {
         set({ indexWarm: { done: 0, total: candidates.length } });
         await boundedRun(candidates, 3, async (file) => {
           try {
             const bytes = await api.downloadBlob(file.id, "index");
-            const text = new TextDecoder().decode(decryptBytes(bytes, file.key));
-            setEntryText(file.id, text);
+            const payload = decodeIndexPayload(decryptBytes(bytes, file.key));
+            if (payload.text !== undefined) {
+              setEntryText(file.id, payload.text);
+            }
+            if (payload.clip) {
+              setEntryClip(file.id, payload.clip);
+            }
           } catch {
             // A missing index never blocks the rest; search simply skips it.
           }
@@ -914,7 +1026,11 @@ export const useStore = create<StoreState>((set, get) => {
         .slice(0, 150);
       await boundedRun(legacy, 2, async (file) => {
         try {
-          await uploadBlob(file.id, "index", encryptBytes(utf8Encode(file.text!), file.key));
+          await uploadBlob(
+            file.id,
+            "index",
+            encryptBytes(encodeIndexPayload({ text: file.text!, clip: file.clip }), file.key),
+          );
           const meta = { ...metadataOf({ ...file, inlineText: false }), hasText: true };
           const dto = await api.patchFile(file.id, {
             encryptedMeta: encryptFileMetadata(meta, file.key),

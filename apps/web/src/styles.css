@@ -3363,3 +3363,10 @@ span.item-menu {
   color: var(--paper-dim);
   pointer-events: none;
 }
+
+/* ---------- semantic search ---------- */
+
+.row-tag.meaning {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}

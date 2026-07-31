@@ -19,6 +19,8 @@ export interface FileMetadata {
   text?: string;
   /** Marks that an encrypted search-text blob exists for this file. */
   hasText?: boolean;
+  /** Marks that the index blob carries a semantic image embedding. */
+  hasClip?: boolean;
   /** Auto-assigned category (client-side analysis; opaque to the server). */
   category?: string;
   /** Tags, auto-assigned and user-edited alike. */

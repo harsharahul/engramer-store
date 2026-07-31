@@ -32,6 +32,7 @@ import {
   unlockDeclined,
 } from "../unlock";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
+import { cosine, embedQuery, semanticEnabled, setSemanticEnabled } from "../intel/semantic";
 import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { saveDecryptedFile } from "../download";
@@ -220,6 +221,8 @@ export function Vault() {
   const [searchCursor, setSearchCursor] = useState(0);
   const [recentSearches, setRecentSearches] = useState<string[]>(() => loadRecentSearches());
   const [ocrOn, setOcrOn] = useState(() => ocrEnabled());
+  const [semanticOn, setSemanticOn] = useState(() => semanticEnabled());
+  const [semanticHits, setSemanticHits] = useState<SearchHit[]>([]);
   const isMobile = useMediaQuery(MOBILE_QUERY);
   const dragDepth = useRef(0);
   const lastSelected = useRef<string | null>(null);
@@ -566,6 +569,52 @@ export function Vault() {
     return () => window.removeEventListener("keydown", onKey);
   }, [paletteOpen, selection, previewId, editorId, ctxMenu, drawerOpen, clearSelection]);
 
+  // Meaning search runs beside the lexical index: the query embeds on this
+  // device and warmed photo vectors rank by similarity. Operator queries
+  // stay purely lexical.
+  useEffect(() => {
+    let cancelled = false;
+    setSemanticHits([]);
+    const trimmed = query.trim();
+    if (!semanticOn || trimmed.length < 3 || trimmed.includes(":")) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      void (async () => {
+        const vector = await embedQuery(trimmed);
+        if (!vector || cancelled) {
+          return;
+        }
+        const scored: SearchHit[] = [];
+        for (const file of store.files.values()) {
+          if (file.trashed || !file.clip) {
+            continue;
+          }
+          const score = cosine(vector, file.clip);
+          if (score >= 0.15) {
+            scored.push({
+              file,
+              score,
+              matchedText: null,
+              textRanges: [],
+              nameRanges: [],
+              matchedFolder: null,
+              semantic: true,
+            });
+          }
+        }
+        scored.sort((a, b) => b.score - a.score);
+        if (!cancelled) {
+          setSemanticHits(scored.slice(0, 24));
+        }
+      })();
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, semanticOn, store.files]);
+
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const target = event.target;
@@ -702,6 +751,24 @@ export function Vault() {
               found > 0
                 ? `Read text in ${found} image${found === 1 ? "" : "s"}. They are searchable now.`
                 : "No new text found in your images.",
+            );
+          });
+        },
+      },
+      {
+        id: "clip-all",
+        label: "Index photos by meaning",
+        hint: "on-device; find photos by what is in them",
+        run: () => {
+          if (!semanticEnabled()) {
+            setSemanticEnabled(true);
+            setSemanticOn(true);
+          }
+          void store.embedAllImages().then((indexed) => {
+            showToast(
+              indexed > 0
+                ? `Indexed ${indexed} photo${indexed === 1 ? "" : "s"} by meaning.`
+                : "No new photos to index.",
             );
           });
         },
@@ -893,6 +960,24 @@ export function Vault() {
           <ScanTextGlyph size={14} />
           <span>Read text in images</span>
           <span className={`switch${ocrOn ? " on" : ""}`} />
+        </button>
+        <button
+          className={`ocr-toggle${semanticOn ? " on" : ""}`}
+          title="A small on-device model makes photos findable by what is in them; nothing leaves this device"
+          onClick={() => {
+            const next = !semanticOn;
+            setSemanticEnabled(next);
+            setSemanticOn(next);
+            showToast(
+              next
+                ? "Photos will be indexed by meaning on this device (a 65 MB model downloads once). Cmd+K, then \u201cIndex photos by meaning\u201d for existing ones."
+                : "Meaning search is off.",
+            );
+          }}
+        >
+          <SparkGlyph size={14} />
+          <span>Find photos by meaning</span>
+          <span className={`switch${semanticOn ? " on" : ""}`} />
         </button>
         <div className="appearance">
           <button
@@ -1203,7 +1288,7 @@ export function Vault() {
         <div className="content" onClick={(e) => e.target === e.currentTarget && clearSelection()}>
           {searching ? (
             <SearchResults
-              hits={hits}
+              hits={[...hits, ...semanticHits.filter((s) => !hits.some((h) => h.file.id === s.file.id))]}
               folders={store.folders}
               cursor={searchCursor}
               selection={selection}
@@ -1555,6 +1640,13 @@ export function Vault() {
           {store.ocrProgress.total}
         </div>
       )}
+      {store.semanticProgress && (
+        <div className="ocr-pill">
+          <span className="spinner" />
+          Indexing {store.semanticProgress.current} · {store.semanticProgress.done + 1} of{" "}
+          {store.semanticProgress.total}
+        </div>
+      )}
       {unlockPromptOpen && (
         <Confirm
           title="Unlock with Touch ID next time?"
@@ -1763,6 +1855,7 @@ function ResultRow(props: {
           </div>
         )}
       </div>
+      {hit.semantic && <span className="row-tag meaning">meaning</span>}
       {hit.file.category && <span className="row-tag">{hit.file.category}</span>}
       <span className="row-meta">{formatBytes(hit.file.size)}</span>
     </div>
