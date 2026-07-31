@@ -19,7 +19,7 @@ import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { clearSession, type Session } from "./session";
 import { holdTransferLock, releaseTransferLock } from "./wakelock";
-import { analyzeFile, downloadAndDecrypt, encryptAndUpload } from "./transfer";
+import { analyzeFile, downloadAndDecrypt, downloadThumbnail, encryptAndUpload } from "./transfer";
 import { recognizeImage, recognizePdf } from "./intel/ocr";
 import { isPdf } from "./intel/extract";
 import { embedImage } from "./intel/semantic";
@@ -897,16 +897,27 @@ export const useStore = create<StoreState>((set, get) => {
       return found;
     },
 
-    /** Computes this image's semantic embedding on-device and files it into
-     * the encrypted index blob alongside any search text already there. */
+    /** Computes this file's semantic embedding on-device and files it into
+     * the encrypted index blob alongside any search text already there.
+     * Images embed from their full content; videos embed from their stored
+     * poster frame, so the sweep never downloads a whole video. */
     embedFile: async (id) => {
       const file = get().files.get(id);
-      if (!file || !file.mime.startsWith("image/")) {
+      if (!file) {
         return false;
       }
-      const bytes = await downloadAndDecrypt(file.id, file.key);
+      const isImage = file.mime.startsWith("image/");
+      const isVideo = file.mime.startsWith("video/") && file.hasThumb;
+      if (!isImage && !isVideo) {
+        return false;
+      }
+      const bytes = isImage
+        ? await downloadAndDecrypt(file.id, file.key)
+        : await downloadThumbnail(file.id, file.key);
       const clip = await embedImage(
-        new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime }),
+        new Blob([bytes.slice().buffer as ArrayBuffer], {
+          type: isImage ? file.mime : "image/jpeg",
+        }),
       );
       if (!clip) {
         return false;
@@ -937,10 +948,13 @@ export const useStore = create<StoreState>((set, get) => {
       return true;
     },
 
-    /** Makes the photo library searchable by meaning, one image at a time. */
+    /** Makes photos and videos searchable by meaning, one file at a time. */
     embedAllImages: async () => {
       const candidates = [...get().files.values()].filter(
-        (f) => !f.trashed && !f.hasClip && f.mime.startsWith("image/"),
+        (f) =>
+          !f.trashed &&
+          !f.hasClip &&
+          (f.mime.startsWith("image/") || (f.mime.startsWith("video/") && f.hasThumb)),
       );
       let indexed = 0;
       for (let i = 0; i < candidates.length; i++) {

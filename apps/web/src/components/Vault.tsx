@@ -757,8 +757,8 @@ export function Vault() {
       },
       {
         id: "clip-all",
-        label: "Index photos by meaning",
-        hint: "on-device; find photos by what is in them",
+        label: "Index photos and videos by meaning",
+        hint: "on-device; find media by what is in it",
         run: () => {
           if (!semanticEnabled()) {
             setSemanticEnabled(true);
@@ -767,8 +767,8 @@ export function Vault() {
           void store.embedAllImages().then((indexed) => {
             showToast(
               indexed > 0
-                ? `Indexed ${indexed} photo${indexed === 1 ? "" : "s"} by meaning.`
-                : "No new photos to index.",
+                ? `Indexed ${indexed} file${indexed === 1 ? "" : "s"} by meaning.`
+                : "No new photos or videos to index.",
             );
           });
         },
@@ -963,20 +963,20 @@ export function Vault() {
         </button>
         <button
           className={`ocr-toggle${semanticOn ? " on" : ""}`}
-          title="A small on-device model makes photos findable by what is in them; nothing leaves this device"
+          title="A small on-device model makes photos and videos findable by what is in them; nothing leaves this device"
           onClick={() => {
             const next = !semanticOn;
             setSemanticEnabled(next);
             setSemanticOn(next);
             showToast(
               next
-                ? "Photos will be indexed by meaning on this device (a 65 MB model downloads once). Cmd+K, then \u201cIndex photos by meaning\u201d for existing ones."
+                ? "Photos and videos will be indexed by meaning on this device (a 65 MB model downloads once). Cmd+K, then \u201cIndex photos and videos by meaning\u201d for existing ones."
                 : "Meaning search is off.",
             );
           }}
         >
           <SparkGlyph size={14} />
-          <span>Find photos by meaning</span>
+          <span>Find media by meaning</span>
           <span className={`switch${semanticOn ? " on" : ""}`} />
         </button>
         <div className="appearance">
