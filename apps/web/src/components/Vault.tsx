@@ -24,13 +24,15 @@ import { MOBILE_QUERY, useMediaQuery } from "../media";
 import { installMediaKeyResponder } from "../mediastream";
 import { useLongPress } from "../longpress";
 import {
-  clearUnlockRecord,
+  clearNativeUnlock,
   deviceUnlockSupported,
   enrollDeviceUnlock,
+  enrollNativeUnlock,
   hasDeviceUnlock,
   markUnlockDeclined,
   unlockDeclined,
 } from "../unlock";
+import { nativeUnlockAvailable } from "../native";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
 import { cosine, embedQuery, semanticEnabled, setSemanticEnabled } from "../intel/semantic";
 import { thumbnailUrl } from "../thumbs";
@@ -228,6 +230,9 @@ export function Vault() {
   const [similarTo, setSimilarTo] = useState<FileEntry | null>(null);
   const [similarHits, setSimilarHits] = useState<SearchHit[]>([]);
   const isMobile = useMediaQuery(MOBILE_QUERY);
+  // Between phone and full desktop the long placeholder clips mid-word;
+  // a narrower window gets the short, confident form instead.
+  const compactSearch = useMediaQuery("(max-width: 1180px)");
   const dragDepth = useRef(0);
   const lastSelected = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -759,14 +764,15 @@ export function Vault() {
   }, []);
 
   // One-time offer: skip the password next launch. Only on capable
-  // browsers, only until enrolled or declined once.
+  // surfaces (desktop shell or passkey browser), until enrolled or declined.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       if (hasDeviceUnlock() || unlockDeclined()) {
         return;
       }
-      if ((await deviceUnlockSupported()) && !cancelled) {
+      const capable = (await nativeUnlockAvailable()) || (await deviceUnlockSupported());
+      if (capable && !cancelled) {
         setUnlockPromptOpen(true);
       }
     })();
@@ -781,12 +787,16 @@ export function Vault() {
       return;
     }
     try {
-      const result = await enrollDeviceUnlock(session);
+      // The desktop shell's Keychain flavor wins when present; the passkey
+      // flavor covers every capable browser.
+      const result = (await nativeUnlockAvailable())
+        ? await enrollNativeUnlock(session)
+        : await enrollDeviceUnlock(session);
       if (result === "enrolled") {
         showToast("Device unlock is on. Next time, one touch opens the vault.");
       } else if (result === "unsupported") {
         markUnlockDeclined();
-        showToast("This browser cannot unlock with a passkey.");
+        showToast("This app cannot unlock with Touch ID or a passkey.");
       }
       // "cancelled" keeps the offer available from the command palette.
     } catch {
@@ -897,7 +907,7 @@ export function Vault() {
         label: "Disable device unlock",
         hint: "require the password on this device",
         run: () => {
-          clearUnlockRecord();
+          clearNativeUnlock();
           showToast("Device unlock removed. Your password is required next time.");
         },
       },
@@ -1141,7 +1151,11 @@ export function Vault() {
             </span>
             <input
               ref={searchInput}
-              placeholder={isMobile ? "Search your vault" : "Search names, contents, tags, folders   /"}
+              placeholder={
+                isMobile || compactSearch
+                  ? "Search your vault"
+                  : "Search names, contents, tags, folders   /"
+              }
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onFocus={() => {

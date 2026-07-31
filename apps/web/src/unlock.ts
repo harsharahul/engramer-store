@@ -6,6 +6,7 @@ import {
   toB64,
   type SecretBox,
 } from "@engramer/crypto";
+import { NATIVE_CANCELLED, nativeSecretDelete, nativeSecretGet, nativeSecretStore } from "./native";
 
 /**
  * Device unlock: reopening the app asks for Touch ID (or any platform
@@ -34,6 +35,9 @@ export interface UnlockRecord {
   wrappedMasterKey: SecretBox;
   wrappedPrivateKey: SecretBox;
   createdAt: number;
+  /** True when the wrap secret lives in the desktop shell's Keychain
+   * (Touch ID) instead of behind a WebAuthn passkey. */
+  native?: boolean;
 }
 
 const RECORD_KEY = "engram-unlock";
@@ -242,22 +246,67 @@ export async function deviceUnlock(): Promise<UnlockSession | null> {
   if (!record) {
     return null;
   }
-  let secret: ArrayBuffer | undefined;
-  try {
-    secret = await evaluatePrf(fromB64(record.credentialId).slice().buffer as ArrayBuffer, fromB64(record.salt));
-  } catch {
-    // The user dismissed the prompt or the authenticator refused; keep the
-    // record so they can try again, and let the caller fall back.
-    return null;
+  let secret: Uint8Array;
+  if (record.native) {
+    // Desktop shell: the wrap secret sits in the Mac's Keychain behind a
+    // Touch ID prompt; the crypto below is identical to the passkey path.
+    try {
+      secret = fromB64(await nativeSecretGet(record.email));
+    } catch {
+      return null;
+    }
+  } else {
+    let prf: ArrayBuffer | undefined;
+    try {
+      prf = await evaluatePrf(fromB64(record.credentialId).slice().buffer as ArrayBuffer, fromB64(record.salt));
+    } catch {
+      // The user dismissed the prompt or the authenticator refused; keep the
+      // record so they can try again, and let the caller fall back.
+      return null;
+    }
+    if (!prf) {
+      return null;
+    }
+    secret = new Uint8Array(prf);
   }
-  if (!secret) {
-    return null;
-  }
   try {
-    return openUnlockRecord(new Uint8Array(secret), record);
+    return openUnlockRecord(secret, record);
   } catch {
     // Wrong authenticator or corrupted record: unusable, remove it.
     clearUnlockRecord();
     return null;
   }
+}
+
+// ----- desktop shell (Keychain + Touch ID) -----
+
+/**
+ * Enrolls unlock through the desktop shell: a random secret goes into the
+ * Mac's Keychain behind a biometric prompt, and the master key is wrapped
+ * under a key derived from that secret, exactly like the passkey flavor.
+ */
+export async function enrollNativeUnlock(
+  session: UnlockSession,
+): Promise<"enrolled" | "unsupported" | "cancelled"> {
+  const secret = randomBytes(32);
+  try {
+    await nativeSecretStore(session.email, toB64(secret));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.toLowerCase().includes(NATIVE_CANCELLED) ? "cancelled" : "unsupported";
+  }
+  saveUnlockRecord({
+    ...wrapForUnlock(secret, session, "native", toB64(randomBytes(16))),
+    native: true,
+  });
+  return "enrolled";
+}
+
+/** Removes both halves of a native enrollment; safe to call unenrolled. */
+export function clearNativeUnlock(): void {
+  const record = loadUnlockRecord();
+  if (record?.native) {
+    void nativeSecretDelete(record.email);
+  }
+  clearUnlockRecord();
 }

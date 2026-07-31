@@ -396,6 +396,13 @@ a {
   padding: 24px;
 }
 
+.auth-note {
+  color: var(--paper-dim);
+  font-size: 12.5px;
+  text-align: center;
+  animation: fade-rise 0.25s ease both;
+}
+
 .auth-form label {
   font-size: 12px;
   color: var(--paper-dim);
@@ -2334,8 +2341,22 @@ button.tag:hover {
 }
 
 .palette-trigger kbd {
-  font-size: 11px;
-  color: var(--paper-faint);
+  /* The system font draws ⌘ properly; mono fonts render it tiny and faint. */
+  font-family: ui-sans-serif, -apple-system, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--paper-dim);
+  background: var(--ink-2);
+  border: 1px solid var(--hairline-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px 6px 2px;
+  line-height: 1.4;
+}
+
+.palette-trigger:hover kbd {
+  color: var(--paper);
 }
 
 /* ---------- categorization reveal ---------- */

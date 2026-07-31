@@ -9,7 +9,7 @@ import {
   type KeyAttributes,
 } from "@engramer/crypto";
 import { api, setAuthToken } from "./api";
-import { clearUnlockRecord, deviceUnlock, updateUnlockToken } from "./unlock";
+import { clearNativeUnlock, deviceUnlock, updateUnlockToken } from "./unlock";
 
 export interface Session {
   email: string;
@@ -145,9 +145,9 @@ export async function restoreSession(): Promise<Session | null> {
 
 export function clearSession(): void {
   sessionStorage.removeItem(SESSION_KEY);
-  // Signing out is the revocation gesture: the passkey-wrapped session
-  // must not outlive it.
-  clearUnlockRecord();
+  // Signing out is the revocation gesture: the wrapped session must not
+  // outlive it, in this browser or in the desktop shell's Keychain.
+  clearNativeUnlock();
   setAuthToken(null);
 }
 
