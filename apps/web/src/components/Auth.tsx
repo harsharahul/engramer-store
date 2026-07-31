@@ -72,11 +72,11 @@ export function Auth() {
           setError("Passwords do not match.");
           return;
         }
-        setBusy("Deriving your keys with Argon2id. This is slow on purpose.");
+        setBusy("Strengthening your password into encryption keys; slow on purpose.");
         const result = await registerAccount(email, password, invite.trim() || undefined);
         setPendingRecovery(result);
       } else {
-        setBusy("Deriving your keys with Argon2id. This is slow on purpose.");
+        setBusy("Strengthening your password into encryption keys; slow on purpose.");
         const result = await login(email, password);
         if (result.kind === "two-factor") {
           setTwoFactor(result);
@@ -133,8 +133,9 @@ export function Auth() {
             {error && <div className="error-text">{error}</div>}
             <button className="btn btn-primary" type="submit" disabled={busy !== null || !code.trim()}>
               {busy ? <span className="spinner" /> : null}
-              {busy ?? "Verify"}
+              {busy ? "Verifying" : "Verify"}
             </button>
+            {busy && <div className="auth-note">{busy}</div>}
           </form>
           <div className="auth-switch">
             <a
@@ -229,8 +230,15 @@ export function Auth() {
           {error && <div className="error-text">{error}</div>}
           <button className="btn btn-primary" type="submit" disabled={busy !== null}>
             {busy ? <span className="spinner" /> : null}
-            {busy ?? (mode === "signup" ? "Create vault" : "Unlock")}
+            {busy
+              ? mode === "signup"
+                ? "Creating vault"
+                : "Unlocking"
+              : mode === "signup"
+                ? "Create vault"
+                : "Unlock"}
           </button>
+          {busy && <div className="auth-note">{busy}</div>}
         </form>
 
         <div className="auth-switch">

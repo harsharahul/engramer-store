@@ -1,0 +1,9 @@
+{
+  "identifier": "main",
+  "description": "The main window, serving the hosted vault app: it may call the shell's unlock commands.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://localhost:3080", "http://localhost:5173"]
+  },
+  "permissions": ["core:default"]
+}

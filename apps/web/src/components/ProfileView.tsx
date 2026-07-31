@@ -3,15 +3,17 @@ import { useStore } from "../store";
 import { formatBytes } from "../format";
 import { ACCENTS, type ThemeMode } from "../theme";
 import {
-  clearUnlockRecord,
+  clearNativeUnlock,
   deviceUnlockSupported,
   enrollDeviceUnlock,
+  enrollNativeUnlock,
   hasDeviceUnlock,
 } from "../unlock";
+import { nativeUnlockAvailable } from "../native";
 import { AdminBody } from "./AdminPanel";
 import { KeyGlyph, LockGlyph, MoonGlyph, ScanTextGlyph, SparkGlyph, SunGlyph } from "./Icon";
 
-type UnlockState = "checking" | "on" | "available" | "unsupported";
+type UnlockState = "checking" | "on" | "available" | "native" | "unsupported";
 
 /**
  * One page for the whole account: identity, storage, security, preferences,
@@ -40,7 +42,13 @@ export function ProfileView(props: {
       setUnlockState("on");
       return;
     }
-    void deviceUnlockSupported().then((ok) => setUnlockState(ok ? "available" : "unsupported"));
+    void (async () => {
+      if (await nativeUnlockAvailable()) {
+        setUnlockState("native");
+      } else {
+        setUnlockState((await deviceUnlockSupported()) ? "available" : "unsupported");
+      }
+    })();
   }, []);
 
   const email = store.session?.email ?? "";
@@ -53,22 +61,32 @@ export function ProfileView(props: {
       return;
     }
     setEnrolling(true);
-    const result = await enrollDeviceUnlock(session);
+    const viaShell = unlockState === "native";
+    const result = viaShell ? await enrollNativeUnlock(session) : await enrollDeviceUnlock(session);
     setEnrolling(false);
     if (result === "enrolled") {
       setUnlockState("on");
-      props.onToast("Device unlock is on. Next launch, unlock with Touch ID or your passkey.");
+      props.onToast("Device unlock is on. Next launch, one touch opens the vault.");
     } else if (result === "cancelled") {
       props.onToast("Setup cancelled. You can try again any time.");
     } else {
       setUnlockState("unsupported");
-      props.onToast("This device could not create a vault passkey.");
+      props.onToast(
+        viaShell ? "The Keychain refused to store the unlock secret." : "This device could not create a vault passkey.",
+      );
     }
   };
 
   const turnOffUnlock = () => {
-    clearUnlockRecord();
-    setUnlockState("available");
+    clearNativeUnlock();
+    void (async () =>
+      setUnlockState(
+        (await nativeUnlockAvailable())
+          ? "native"
+          : (await deviceUnlockSupported())
+            ? "available"
+            : "unsupported",
+      ))();
     props.onToast("Device unlock is off. Your password unlocks the vault from now on.");
   };
 
@@ -124,18 +142,20 @@ export function ProfileView(props: {
             <div className="profile-row-sub">
               {unlockState === "on"
                 ? "On for this device: Touch ID or a passkey opens the vault."
-                : unlockState === "available"
-                  ? "Skip typing the password: unlock with Touch ID or a passkey."
-                  : unlockState === "unsupported"
-                    ? "Not available here. The desktop app gains native Touch ID unlock in an upcoming release; Safari and Chrome support it today."
-                    : "Checking this device…"}
+                : unlockState === "native"
+                  ? "Skip typing the password: Touch ID guards the vault through the Mac's Keychain."
+                  : unlockState === "available"
+                    ? "Skip typing the password: unlock with Touch ID or a passkey."
+                    : unlockState === "unsupported"
+                      ? "Not available in this browser. Safari, Chrome, and the desktop app support it."
+                      : "Checking this device…"}
             </div>
           </div>
           {unlockState === "on" ? (
             <button className="btn" onClick={turnOffUnlock}>
               Turn off
             </button>
-          ) : unlockState === "available" ? (
+          ) : unlockState === "available" || unlockState === "native" ? (
             <button className="btn btn-primary" disabled={enrolling} onClick={() => void setUpUnlock()}>
               {enrolling ? "Waiting…" : "Set up"}
             </button>
