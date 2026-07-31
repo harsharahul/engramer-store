@@ -363,7 +363,90 @@ export interface RequestUploadInfo {
   createdAt: number;
 }
 
-/** Anonymous upload to a file request; same XHR progress pattern, no auth. */
+/** ApiError status used when the user cancels; never retried anywhere. */
+export const UPLOAD_CANCELLED = -1;
+
+// A body that moves no bytes for this long is a dead connection, not a slow
+// one; the request is aborted so the retry layer can start a fresh attempt
+// instead of hanging the queue forever (seen with a stalled VPN tunnel).
+const UPLOAD_STALL_MS = 30_000;
+// After the body is fully sent the server may legitimately take a while
+// (writing a part to object storage), so the response phase gets more room.
+const RESPONSE_STALL_MS = 180_000;
+
+/**
+ * One PUT with progress, a stall watchdog, and optional cancellation.
+ * XHR rather than fetch because fetch cannot observe upload progress.
+ */
+function putBytes(
+  url: string,
+  payload: Uint8Array,
+  opts: {
+    auth?: boolean;
+    onProgress?: (fraction: number) => void;
+    signal?: AbortSignal;
+    errorFor?: (status: number) => string | undefined;
+  },
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (opts.signal?.aborted) {
+      reject(new ApiError(UPLOAD_CANCELLED, "upload cancelled"));
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("content-type", "application/octet-stream");
+    if (opts.auth && authToken) {
+      xhr.setRequestHeader("authorization", `Bearer ${authToken}`);
+    }
+    let lastMovement = Date.now();
+    let bodySent = false;
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastMovement > (bodySent ? RESPONSE_STALL_MS : UPLOAD_STALL_MS)) {
+        xhr.abort();
+      }
+    }, 5_000);
+    const onCancel = () => xhr.abort();
+    opts.signal?.addEventListener("abort", onCancel);
+    const settle = (outcome: () => void) => {
+      clearInterval(watchdog);
+      opts.signal?.removeEventListener("abort", onCancel);
+      outcome();
+    };
+    xhr.upload.onprogress = (event) => {
+      lastMovement = Date.now();
+      if (event.lengthComputable && opts.onProgress) {
+        opts.onProgress(event.loaded / event.total);
+      }
+    };
+    xhr.upload.onload = () => {
+      bodySent = true;
+      lastMovement = Date.now();
+    };
+    xhr.onload = () =>
+      settle(() => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve();
+        } else {
+          reject(
+            new ApiError(xhr.status, opts.errorFor?.(xhr.status) ?? `upload failed (${xhr.status})`),
+          );
+        }
+      });
+    xhr.onerror = () => settle(() => reject(new ApiError(0, "network error during upload")));
+    xhr.onabort = () =>
+      settle(() =>
+        reject(
+          opts.signal?.aborted
+            ? new ApiError(UPLOAD_CANCELLED, "upload cancelled")
+            : new ApiError(0, "upload stalled"),
+        ),
+      );
+    xhr.send(sendable(payload));
+  });
+}
+
+/** Anonymous upload to a file request; same PUT machinery, no auth. */
 export function uploadRequestBlob(
   requestToken: string,
   uploadId: string,
@@ -371,26 +454,9 @@ export function uploadRequestBlob(
   payload: Uint8Array,
   onProgress?: (fraction: number) => void,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", `/api/public/requests/${requestToken}/files/${uploadId}/${kind}`);
-    xhr.setRequestHeader("content-type", "application/octet-stream");
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable && onProgress) {
-        onProgress(event.loaded / event.total);
-      }
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve();
-      } else if (xhr.status === 413) {
-        reject(new ApiError(413, "the recipient is out of storage space"));
-      } else {
-        reject(new ApiError(xhr.status, `upload failed (${xhr.status})`));
-      }
-    };
-    xhr.onerror = () => reject(new ApiError(0, "network error during upload"));
-    xhr.send(sendable(payload));
+  return putBytes(`/api/public/requests/${requestToken}/files/${uploadId}/${kind}`, payload, {
+    onProgress,
+    errorFor: (status) => (status === 413 ? "the recipient is out of storage space" : undefined),
   });
 }
 
@@ -419,28 +485,13 @@ export function uploadPart(
   partNo: number,
   payload: Uint8Array,
   onProgress?: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", `/api/files/${fileId}/data/parts/${session}/${partNo}`);
-    xhr.setRequestHeader("content-type", "application/octet-stream");
-    if (authToken) {
-      xhr.setRequestHeader("authorization", `Bearer ${authToken}`);
-    }
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable && onProgress) {
-        onProgress(event.loaded / event.total);
-      }
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve();
-      } else {
-        reject(new ApiError(xhr.status, `part upload failed (${xhr.status})`));
-      }
-    };
-    xhr.onerror = () => reject(new ApiError(0, "network error during upload"));
-    xhr.send(sendable(payload));
+  return putBytes(`/api/files/${fileId}/data/parts/${session}/${partNo}`, payload, {
+    auth: true,
+    onProgress,
+    signal,
+    errorFor: (status) => `part upload failed (${status})`,
   });
 }
 
@@ -458,29 +509,12 @@ export function uploadBlob(
   kind: "data" | "thumbnail" | "index",
   payload: Uint8Array,
   onProgress?: (fraction: number) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", `/api/files/${fileId}/${kind}`);
-    xhr.setRequestHeader("content-type", "application/octet-stream");
-    if (authToken) {
-      xhr.setRequestHeader("authorization", `Bearer ${authToken}`);
-    }
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable && onProgress) {
-        onProgress(event.loaded / event.total);
-      }
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve();
-      } else if (xhr.status === 413) {
-        reject(new ApiError(413, "storage quota exceeded"));
-      } else {
-        reject(new ApiError(xhr.status, `upload failed (${xhr.status})`));
-      }
-    };
-    xhr.onerror = () => reject(new ApiError(0, "network error during upload"));
-    xhr.send(sendable(payload));
+  return putBytes(`/api/files/${fileId}/${kind}`, payload, {
+    auth: true,
+    onProgress,
+    signal,
+    errorFor: (status) => (status === 413 ? "storage quota exceeded" : undefined),
   });
 }
