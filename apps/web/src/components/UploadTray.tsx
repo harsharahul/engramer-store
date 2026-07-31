@@ -9,7 +9,9 @@ export function UploadTray() {
   if (uploads.length === 0) {
     return null;
   }
-  const active = uploads.filter((u) => u.status === "encrypting" || u.status === "uploading");
+  const active = uploads.filter(
+    (u) => u.status === "encrypting" || u.status === "uploading" || u.status === "finalizing",
+  );
 
   return (
     <div className="upload-tray">
@@ -40,14 +42,18 @@ export function UploadTray() {
               >
                 {upload.status === "encrypting"
                   ? "encrypting"
-                  : upload.status === "uploading"
-                    ? `${Math.round(upload.progress * 100)}%`
-                    : upload.status === "done"
-                      ? "done"
-                      : (upload.error ?? "failed")}
+                  : upload.status === "finalizing"
+                    ? "finalizing"
+                    : upload.status === "uploading"
+                      ? `${Math.round(upload.progress * 100)}%`
+                      : upload.status === "done"
+                        ? "done"
+                        : (upload.error ?? "failed")}
               </span>
             </div>
-            {(upload.status === "uploading" || upload.status === "encrypting") && (
+            {(upload.status === "uploading" ||
+              upload.status === "encrypting" ||
+              upload.status === "finalizing") && (
               <div className="progress">
                 <div style={{ width: `${Math.round(upload.progress * 100)}%` }} />
               </div>

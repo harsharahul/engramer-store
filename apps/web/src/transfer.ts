@@ -454,14 +454,24 @@ export async function encryptAndUpload(
   const dto = await api.createFile(folderId, encryptedKey, encryptedMeta);
 
   const totalCiphertext = contentCiphertextSize(file);
-  if (totalCiphertext > PART_THRESHOLD) {
-    await uploadInParts(file, dto.id, fileKey, onProgress, signal);
-  } else {
-    const plaintext = new Uint8Array(await file.arrayBuffer());
-    const ciphertext = isMediaFile(file)
-      ? chunkedEncrypt(plaintext, fileKey)
-      : encryptBytes(plaintext, fileKey);
-    await uploadBlob(dto.id, "data", ciphertext, onProgress, signal);
+  try {
+    if (totalCiphertext > PART_THRESHOLD) {
+      await uploadInParts(file, dto.id, fileKey, onProgress, signal);
+    } else {
+      const plaintext = new Uint8Array(await file.arrayBuffer());
+      const ciphertext = isMediaFile(file)
+        ? chunkedEncrypt(plaintext, fileKey)
+        : encryptBytes(plaintext, fileKey);
+      await uploadBlob(dto.id, "data", ciphertext, onProgress, signal);
+    }
+  } catch (err) {
+    // A file whose content never landed must not linger as an empty row;
+    // best-effort removal, since the error itself still needs surfacing.
+    void api
+      .trashFile(dto.id)
+      .then(() => api.deleteForever(dto.id))
+      .catch(() => {});
+    throw err;
   }
 
   if (prepared.thumbnail) {
