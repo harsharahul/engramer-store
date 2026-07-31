@@ -64,3 +64,84 @@ export async function nativeSecretDelete(email: string): Promise<void> {
   }
   await invoke("unlock_secret_delete", { email }).catch(() => {});
 }
+
+// ----- watched folders (desktop shell only) -----
+
+export interface WatchedFile {
+  path: string;
+  name: string;
+  rel_dirs: string[];
+  size: number;
+  mtime: number;
+}
+
+export async function watchedFolders(): Promise<string[]> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return [];
+  }
+  return (await invoke("watched_folders")) as string[];
+}
+
+export async function watchedAdd(path: string): Promise<string[]> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return [];
+  }
+  return (await invoke("watched_add", { path })) as string[];
+}
+
+export async function watchedRemove(path: string): Promise<string[]> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return [];
+  }
+  return (await invoke("watched_remove", { path })) as string[];
+}
+
+export async function watchedScan(): Promise<WatchedFile[]> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return [];
+  }
+  return (await invoke("watched_scan")) as WatchedFile[];
+}
+
+export async function watchedFileRead(path: string): Promise<ArrayBuffer> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    throw new Error("no native shell");
+  }
+  return (await invoke("watched_file_read", { path })) as ArrayBuffer;
+}
+
+/** Native folder picker; null when dismissed. */
+export async function pickFolder(): Promise<string | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  const chosen = await invoke("plugin:dialog|open", {
+    options: { directory: true, multiple: false },
+  });
+  return typeof chosen === "string" ? chosen : null;
+}
+
+/** Subscribes to shell events; returns an unsubscribe, or a no-op outside
+ * the shell. */
+export async function nativeListen<T>(
+  event: string,
+  handler: (payload: T) => void,
+): Promise<() => void> {
+  const shell = (
+    window as {
+      __TAURI__?: {
+        event?: { listen?: (e: string, cb: (ev: { payload: T }) => void) => Promise<() => void> };
+      };
+    }
+  ).__TAURI__;
+  if (!shell?.event?.listen) {
+    return () => {};
+  }
+  return shell.event.listen(event, (ev) => handler(ev.payload));
+}

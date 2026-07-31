@@ -9,7 +9,15 @@ import {
   enrollNativeUnlock,
   hasDeviceUnlock,
 } from "../unlock";
-import { nativeUnlockAvailable } from "../native";
+import {
+  nativeShell,
+  nativeUnlockAvailable,
+  pickFolder,
+  watchedAdd,
+  watchedFolders,
+  watchedRemove,
+} from "../native";
+import { syncWatchedNow } from "../watchfolders";
 import { AdminBody } from "./AdminPanel";
 import { KeyGlyph, LockGlyph, MoonGlyph, ScanTextGlyph, SparkGlyph, SunGlyph } from "./Icon";
 
@@ -36,6 +44,28 @@ export function ProfileView(props: {
   const store = useStore();
   const [unlockState, setUnlockState] = useState<UnlockState>("checking");
   const [enrolling, setEnrolling] = useState(false);
+  const [shell] = useState(() => nativeShell());
+  const [watched, setWatched] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (shell) {
+      void watchedFolders().then(setWatched);
+    }
+  }, [shell]);
+
+  const addWatchedFolder = async () => {
+    const path = await pickFolder();
+    if (!path) {
+      return;
+    }
+    try {
+      setWatched(await watchedAdd(path));
+      props.onToast("Folder is being watched. New files there upload automatically.");
+      void syncWatchedNow();
+    } catch (err) {
+      props.onToast(err instanceof Error ? err.message : "could not watch that folder");
+    }
+  };
 
   useEffect(() => {
     if (hasDeviceUnlock()) {
@@ -235,6 +265,43 @@ export function ProfileView(props: {
           </button>
         </div>
       </section>
+
+      {shell && (
+        <section className="profile-card">
+          <h3>Watched folders</h3>
+          <div className="profile-row">
+            <div className="profile-row-main">
+              <b>Automatic uploads</b>
+              <div className="profile-row-sub">
+                New files in these folders upload themselves, encrypted, with subfolders
+                preserved. One-way: nothing is ever deleted, and a file whose name and size
+                already exist in the vault is skipped.
+              </div>
+            </div>
+            <button className="btn btn-primary" onClick={() => void addWatchedFolder()}>
+              Add folder
+            </button>
+          </div>
+          {watched.map((path) => (
+            <div key={path} className="profile-row">
+              <div className="profile-row-main">
+                <b className="watched-path">{path}</b>
+              </div>
+              <button
+                className="btn"
+                onClick={() =>
+                  void watchedRemove(path).then((rest) => {
+                    setWatched(rest);
+                    props.onToast("Folder is no longer watched; nothing was deleted.");
+                  })
+                }
+              >
+                Stop watching
+              </button>
+            </div>
+          ))}
+        </section>
+      )}
 
       <section className="profile-card">
         <h3>This device</h3>

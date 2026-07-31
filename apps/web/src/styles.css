@@ -3600,3 +3600,10 @@ span.item-menu {
     flex-wrap: wrap;
   }
 }
+
+.watched-path {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}

@@ -5,7 +5,9 @@
 //! kept in the Keychain behind Touch ID.
 
 mod unlock;
+mod watched;
 
+use std::sync::{Arc, Mutex};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, WindowEvent};
@@ -25,13 +27,21 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_dialog::init())
+        .manage::<watched::SharedWatchState>(Arc::new(Mutex::new(Default::default())))
         .invoke_handler(tauri::generate_handler![
             unlock::native_unlock_available,
             unlock::unlock_secret_store,
             unlock::unlock_secret_get,
             unlock::unlock_secret_delete,
+            watched::watched_folders,
+            watched::watched_add,
+            watched::watched_remove,
+            watched::watched_scan,
+            watched::watched_file_read,
         ])
         .setup(|app| {
+            watched::rebuild_watchers(app.handle());
             let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
             let open_item = MenuItem::with_id(app, "open", "Open Engram Store", true, None::<&str>)?;
             let autostart_item = CheckMenuItem::with_id(
