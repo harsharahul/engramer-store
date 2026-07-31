@@ -117,10 +117,63 @@ async function videoThumbnail(file: File): Promise<Thumbnail | null> {
     video.setAttribute("playsinline", "");
     video.setAttribute("muted", "");
     video.src = url;
+    // WebKit may not have painted the seeked-to frame when the event fires;
+    // capturing then yields a black poster. Wait for a presented frame, with
+    // a timeout so a codec quirk can never wedge the upload.
+    const presentedFrame = () =>
+      new Promise<void>((resolve) => {
+        const v = video as HTMLVideoElement & {
+          requestVideoFrameCallback?: (cb: () => void) => void;
+        };
+        if (typeof v.requestVideoFrameCallback === "function") {
+          v.requestVideoFrameCallback(() => resolve());
+        } else {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }
+        setTimeout(resolve, 1_000);
+      });
+    // Mean luminance of a coarse sample; enough to tell a fade-from-black
+    // opening frame from a real one.
+    const frameLuminance = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 16;
+      canvas.height = 10;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        return 255;
+      }
+      ctx.drawImage(video, 0, 0, 16, 10);
+      const data = ctx.getImageData(0, 0, 16, 10).data;
+      let sum = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        sum += 0.299 * data[i]! + 0.587 * data[i + 1]! + 0.114 * data[i + 2]!;
+      }
+      return sum / (data.length / 4);
+    };
+    let retriedBlack = false;
     const capture = async () => {
+      if (settled) {
+        return;
+      }
       const { videoWidth, videoHeight } = video;
       if (!videoWidth || !videoHeight) {
         return finish(null);
+      }
+      await presentedFrame();
+      if (settled) {
+        return;
+      }
+      // A pitch-black poster helps nobody; one seek deeper into the clip
+      // rescues footage that fades in from black.
+      if (
+        !retriedBlack &&
+        Number.isFinite(video.duration) &&
+        video.duration > 2 &&
+        frameLuminance() < 8
+      ) {
+        retriedBlack = true;
+        video.currentTime = Math.min(video.duration / 2, 3);
+        return;
       }
       const blob = await drawScaled(video, videoWidth, videoHeight);
       const blur = computeBlur(video, videoWidth, videoHeight);
