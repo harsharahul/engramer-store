@@ -317,6 +317,39 @@ async function notifyProgress(fileId: string, loaded: number, total: number): Pr
   }
 }
 
+// WebKit streams video as many short-lived range requests, several per
+// second; re-fetching the immutable 28-byte format header for each one
+// adds a full round trip per cycle, which reads as playback hiccups on
+// high-latency paths. A short TTL keeps a restored version from being
+// served with a stale layout for more than a minute.
+const probeCache = new Map<string, { probe: Uint8Array; at: number }>();
+const PROBE_TTL_MS = 60_000;
+const PROBE_CACHE_MAX = 32;
+
+async function fetchProbe(fileId: string, entry: MediaEntry): Promise<Uint8Array> {
+  const cached = probeCache.get(fileId);
+  if (cached && Date.now() - cached.at < PROBE_TTL_MS) {
+    return cached.probe;
+  }
+  const body = await fetchCiphertext(fileId, entry, { start: 0, end: 27 });
+  const probe = new Uint8Array(await new Response(body).arrayBuffer());
+  probeCache.set(fileId, { probe, at: Date.now() });
+  if (probeCache.size > PROBE_CACHE_MAX) {
+    let oldestKey: string | null = null;
+    let oldestAt = Infinity;
+    for (const [key, value] of probeCache) {
+      if (value.at < oldestAt) {
+        oldestAt = value.at;
+        oldestKey = key;
+      }
+    }
+    if (oldestKey) {
+      probeCache.delete(oldestKey);
+    }
+  }
+  return probe;
+}
+
 async function serveMedia(request: Request, fileId: string): Promise<Response> {
   await ready();
   const entry = await requestEntry(fileId);
@@ -324,8 +357,7 @@ async function serveMedia(request: Request, fileId: string): Promise<Response> {
     return new Response("media key unavailable", { status: 503 });
   }
   // The first 28 bytes identify the format and, for chunked blobs, the size.
-  const probeBody = await fetchCiphertext(fileId, entry, { start: 0, end: 27 });
-  const probe = new Uint8Array(await new Response(probeBody).arrayBuffer());
+  const probe = await fetchProbe(fileId, entry);
   if (isChunkedFormat(probe)) {
     const header = readChunkedHeader(probe);
     const range = parseRangeHeader(request.headers.get("range"), header.plainSize);
