@@ -184,11 +184,22 @@ export async function analyzeFile(file: File): Promise<PreparedFile> {
   if (text === undefined && isPdf(file.name, file.type) && ocrEnabled()) {
     text = await withDeadline(recognizePdf(file), ANALYSIS_DEADLINE_MS * 6);
   }
-  // Opt-in semantic indexing: photos become findable by what is in them.
-  const clip =
-    file.type.startsWith("image/") && semanticEnabled()
-      ? await withDeadline(embedImage(file), 45_000)
-      : undefined;
+  // Opt-in semantic indexing: photos become findable by what is in them,
+  // and videos by their poster frame, which the thumbnail step already
+  // extracted; decoding the video a second time would be wasted work.
+  let clip: Float32Array | undefined;
+  if (semanticEnabled()) {
+    if (file.type.startsWith("image/")) {
+      clip = await withDeadline(embedImage(file), 45_000);
+    } else if (file.type.startsWith("video/") && thumbnail) {
+      clip = await withDeadline(
+        embedImage(
+          new Blob([thumbnail.bytes.slice().buffer as ArrayBuffer], { type: "image/jpeg" }),
+        ),
+        45_000,
+      );
+    }
+  }
   const analysis = categorize({
     name: file.name,
     mime: file.type || "application/octet-stream",

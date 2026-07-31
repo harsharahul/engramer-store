@@ -52,7 +52,9 @@ function ocrAssets(): Plugin {
     },
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        const hit = files.find((f) => req.url === `/ocr/${f.name}`);
+        // Dev-only: Vite tags dynamic imports with ?import, so match the path.
+        const path = (req.url ?? "").split("?")[0];
+        const hit = files.find((f) => path === `/ocr/${f.name}`);
         if (!hit) {
           return next();
         }
@@ -105,7 +107,9 @@ function ortAssets(): Plugin {
     },
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        const hit = files.find((f) => req.url === `/ort/${f.name}`);
+        // Dev-only: Vite tags dynamic imports with ?import, so match the path.
+        const path = (req.url ?? "").split("?")[0];
+        const hit = files.find((f) => path === `/ort/${f.name}`);
         if (!hit) {
           return next();
         }
