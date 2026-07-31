@@ -69,7 +69,7 @@ export interface UploadItem {
   id: string;
   name: string;
   progress: number;
-  status: "encrypting" | "uploading" | "done" | "error";
+  status: "encrypting" | "uploading" | "finalizing" | "done" | "error";
   error?: string;
 }
 
@@ -584,12 +584,19 @@ export const useStore = create<StoreState>((set, get) => {
           // folder the user picked stay where the user put them.
           const destination =
             folderId ?? (await ensureCategoryFolder(prepared.analysis.category));
+          // The bar never walks backwards (a retried part restarts its own
+          // count), and a full bar that is still working reads "finalizing"
+          // while the server stitches parts together.
+          let peak = 0;
           const result = await encryptAndUpload(
             file,
             destination,
             key,
             prepared,
-            (fraction) => update({ status: "uploading", progress: fraction }),
+            (fraction) => {
+              peak = Math.max(peak, fraction);
+              update({ status: peak >= 1 ? "finalizing" : "uploading", progress: peak });
+            },
             cancel.signal,
           );
           applyFile(result.dto);
