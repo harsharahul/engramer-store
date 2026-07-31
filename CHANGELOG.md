@@ -3,6 +3,15 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.24.2] - 2026-07-30
+
+### Fixed
+- Large videos play to the end: the media stream now decrypts at the
+  player's pace instead of racing ahead, so memory stays flat no matter
+  the file size, and an abandoned stream releases its download at once.
+- The screen stays awake while uploads run, so a long transfer is not
+  killed by the phone locking itself.
+
 ## [0.24.1] - 2026-07-30
 
 ### Fixed
