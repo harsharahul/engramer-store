@@ -434,6 +434,13 @@ a {
   height: 100%;
 }
 
+/* A column's content must never stretch the frame beyond the viewport:
+   otherwise the page itself scrolls and takes the sidebar with it. Each
+   column manages its own overflow instead. */
+.frame > * {
+  min-height: 0;
+}
+
 .frame.with-details {
   grid-template-columns: 232px 1fr 300px;
 }
@@ -470,6 +477,8 @@ a {
   flex-direction: column;
   padding: 20px 14px;
   gap: 4px;
+  /* Short windows scroll the sidebar itself, never the page. */
+  overflow-y: auto;
 }
 
 .sidebar .brand {
