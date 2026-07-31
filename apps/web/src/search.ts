@@ -17,6 +17,8 @@ export interface SearchHit {
   nameRanges: Highlight[];
   /** Which folder-name matched, when the hit came from location. */
   matchedFolder: string | null;
+  /** The hit came from semantic similarity rather than the words typed. */
+  semantic?: boolean;
 }
 
 export interface ParsedQuery {

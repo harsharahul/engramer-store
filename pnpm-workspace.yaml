@@ -4,6 +4,11 @@ packages:
 allowBuilds:
   better-sqlite3: true
   esbuild: true
+  # transformers.js optional Node-side deps; the browser uses onnxruntime-web
+  # (no build script), so none of these need their native builds.
+  onnxruntime-node: false
+  protobufjs: false
+  sharp: false
   "tesseract.js": false
   vue-demi: true
 overrides:

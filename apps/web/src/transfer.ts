@@ -26,6 +26,8 @@ import {
 import { categorize, type Analysis } from "./intel/categorize";
 import { extractExif, extractText, isPdf } from "./intel/extract";
 import { ocrEnabled, recognizeImage, recognizePdf } from "./intel/ocr";
+import { embedImage, semanticEnabled } from "./intel/semantic";
+import { encodeIndexPayload } from "./indexblob";
 import { computeBlur } from "./intel/blur";
 
 const THUMB_SIZE = 512;
@@ -157,8 +159,10 @@ export interface PreparedFile {
   meta: FileMetadata;
   analysis: Analysis;
   thumbnail: Thumbnail | null;
-  /** Extracted search text; uploaded as a separate encrypted index blob. */
+  /** Extracted search text; uploaded inside the encrypted index blob. */
   text?: string;
+  /** Semantic image embedding; rides in the same index blob. */
+  clip?: Float32Array;
 }
 
 /**
@@ -180,6 +184,11 @@ export async function analyzeFile(file: File): Promise<PreparedFile> {
   if (text === undefined && isPdf(file.name, file.type) && ocrEnabled()) {
     text = await withDeadline(recognizePdf(file), ANALYSIS_DEADLINE_MS * 6);
   }
+  // Opt-in semantic indexing: photos become findable by what is in them.
+  const clip =
+    file.type.startsWith("image/") && semanticEnabled()
+      ? await withDeadline(embedImage(file), 45_000)
+      : undefined;
   const analysis = categorize({
     name: file.name,
     mime: file.type || "application/octet-stream",
@@ -197,8 +206,9 @@ export async function analyzeFile(file: File): Promise<PreparedFile> {
     ...(thumbnail ? { width: thumbnail.width, height: thumbnail.height } : {}),
     ...(thumbnail?.blur ? { blur: thumbnail.blur } : {}),
     ...(text !== undefined ? { hasText: true } : {}),
+    ...(clip ? { hasClip: true } : {}),
   };
-  return { meta, analysis, thumbnail, text };
+  return { meta, analysis, thumbnail, text, clip };
 }
 
 export interface UploadResult {
@@ -347,9 +357,14 @@ export async function encryptAndUpload(
   if (prepared.thumbnail) {
     await uploadBlob(dto.id, "thumbnail", encryptBytes(prepared.thumbnail.bytes, fileKey));
   }
-  if (prepared.text !== undefined) {
-    // Search text travels as its own encrypted blob, keeping sync rows small.
-    await uploadBlob(dto.id, "index", encryptBytes(utf8Encode(prepared.text), fileKey));
+  if (prepared.text !== undefined || prepared.clip) {
+    // Search signals travel as their own encrypted blob, keeping sync rows
+    // small: text and the semantic embedding share one envelope.
+    await uploadBlob(
+      dto.id,
+      "index",
+      encryptBytes(encodeIndexPayload({ text: prepared.text, clip: prepared.clip }), fileKey),
+    );
   }
 
   const uploadedDto: FileDto = {
