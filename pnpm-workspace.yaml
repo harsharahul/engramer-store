@@ -15,6 +15,9 @@ overrides:
   # Force patched versions of Fastify's transitive deps into the tree until
   # Fastify ships them directly.
   fast-uri@3: "^3.1.4" # GHSA-v2hh-gcrm-f6hx (host confusion)
+  # transformers.js Node-side deps, unused by the browser bundle but audited:
+  adm-zip@0.5: "^0.6.0" # GHSA-xcpc-8h2w-3j85 (zip bomb allocation)
+  sharp@0.34: "^0.35.3" # GHSA-f88m-g3jw-g9cj (libvips CVEs)
   find-my-way@9: "^9.6.1" # GHSA-c96f-x56v-gq3h (HTTP/2 DoS)
   brace-expansion@5: "^5.0.8" # GHSA-mh99-v99m-4gvg (unbounded expansion DoS)
   # SuperDoc lists the rollup-plugin-copy build tool in its runtime deps by
