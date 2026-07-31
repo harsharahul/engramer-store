@@ -126,25 +126,69 @@ async function fetchCiphertext(
   return response.body;
 }
 
-/** Re-frames an arbitrary byte stream into exact sealed-chunk sized pieces. */
-function chunkFramer(sealedSizes: number[], onChunk: (bytes: Uint8Array, index: number) => void) {
-  let buffer = new Uint8Array(0);
-  let chunkIndex = 0;
-  return {
-    push(incoming: Uint8Array) {
-      const merged = new Uint8Array(buffer.length + incoming.length);
-      merged.set(buffer, 0);
-      merged.set(incoming, buffer.length);
-      buffer = merged;
-      while (chunkIndex < sealedSizes.length && buffer.length >= sealedSizes[chunkIndex]!) {
-        const take = sealedSizes[chunkIndex]!;
-        onChunk(buffer.slice(0, take), chunkIndex);
-        buffer = buffer.slice(take);
-        chunkIndex++;
-      }
+/** One decrypted piece at a time, produced only when the player pulls. */
+interface PlainSource {
+  next(): Promise<Uint8Array | null>;
+  cancel(): void;
+}
+
+/**
+ * Backpressured bridge stream: nothing is fetched or decrypted until the
+ * media element drains its queue and pulls again, so memory holds a couple
+ * of chunks no matter how large the file. A cancelled response (a seek, a
+ * closed player) releases the underlying ciphertext fetch immediately.
+ */
+function pulledBody(open: () => Promise<PlainSource>): ReadableStream<Uint8Array> {
+  let source: PlainSource | null = null;
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        try {
+          source = source ?? (await open());
+          const piece = await source.next();
+          if (piece === null) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(piece);
+        } catch (err) {
+          source?.cancel();
+          controller.error(err);
+        }
+      },
+      cancel() {
+        source?.cancel();
+      },
     },
-    done(): boolean {
-      return chunkIndex >= sealedSizes.length;
+    // Measured in enqueued pieces: keep at most ~2 chunks ready.
+    new CountQueuingStrategy({ highWaterMark: 2 }),
+  );
+}
+
+/** Reads exact-length frames from a byte stream, one call at a time. */
+function frameReader(reader: ReadableStreamDefaultReader<Uint8Array>) {
+  let buffer = new Uint8Array(0);
+  let ended = false;
+  return {
+    async take(length: number): Promise<Uint8Array | null> {
+      while (buffer.length < length && !ended) {
+        const { done, value } = await reader.read();
+        if (done) {
+          ended = true;
+          break;
+        }
+        const merged = new Uint8Array(buffer.length + value.length);
+        merged.set(buffer, 0);
+        merged.set(value, buffer.length);
+        buffer = merged;
+      }
+      if (buffer.length === 0) {
+        return null;
+      }
+      const take = Math.min(length, buffer.length);
+      const frame = buffer.slice(0, take);
+      buffer = buffer.slice(take);
+      return frame;
     },
   };
 }
@@ -160,58 +204,46 @@ function chunkedResponse(
 ): Response {
   const span = chunkSpanForRange(header, start, end);
   const chunkTotal = header.plainSize === 0 ? 1 : Math.ceil(header.plainSize / CHUNKED_CHUNK_SIZE);
-  const sealedSizes: number[] = [];
-  for (let i = span.firstChunk; i <= span.lastChunk; i++) {
-    const plainLen =
-      i < chunkTotal - 1
-        ? CHUNKED_CHUNK_SIZE
-        : header.plainSize - (chunkTotal - 1) * CHUNKED_CHUNK_SIZE;
-    sealedSizes.push((i < chunkTotal - 1 ? CHUNKED_CHUNK_SIZE : plainLen) + 16);
-  }
 
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      try {
-        const body = await fetchCiphertext(fileId, entry, {
-          start: span.ciphertextStart,
-          end: span.ciphertextEnd,
-        });
-        const reader = body.getReader();
-        let plainOffset = span.plainStart;
-        const framer = chunkFramer(sealedSizes, (chunkBytes, i) => {
-          const index = span.firstChunk + i;
-          let plain = decryptChunkRange(header, entry.key, chunkBytes, {
-            firstChunk: index,
-            lastChunk: index,
-            ciphertextStart: 0,
-            ciphertextEnd: chunkBytes.length - 1,
-            plainStart: index * CHUNKED_CHUNK_SIZE,
-          });
-          const chunkStart = plainOffset;
-          const chunkEnd = chunkStart + plain.length - 1;
-          const from = Math.max(start, chunkStart) - chunkStart;
-          const to = Math.min(end, chunkEnd) - chunkStart;
-          if (to >= from) {
-            plain = plain.subarray(from, to + 1);
-            controller.enqueue(plain);
-          }
-          plainOffset = chunkEnd + 1;
-        });
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) {
-            break;
-          }
-          framer.push(value);
-          if (framer.done()) {
-            break;
-          }
+  const stream = pulledBody(async () => {
+    const body = await fetchCiphertext(fileId, entry, {
+      start: span.ciphertextStart,
+      end: span.ciphertextEnd,
+    });
+    const reader = body.getReader();
+    const frames = frameReader(reader);
+    let index = span.firstChunk;
+    return {
+      async next() {
+        if (index > span.lastChunk) {
+          return null;
         }
-        controller.close();
-      } catch (err) {
-        controller.error(err);
-      }
-    },
+        const plainLen =
+          index < chunkTotal - 1
+            ? CHUNKED_CHUNK_SIZE
+            : header.plainSize - (chunkTotal - 1) * CHUNKED_CHUNK_SIZE;
+        const sealed = await frames.take(plainLen + 16);
+        if (sealed === null) {
+          return null;
+        }
+        const plain = decryptChunkRange(header, entry.key, sealed, {
+          firstChunk: index,
+          lastChunk: index,
+          ciphertextStart: 0,
+          ciphertextEnd: sealed.length - 1,
+          plainStart: index * CHUNKED_CHUNK_SIZE,
+        });
+        const chunkStart = index * CHUNKED_CHUNK_SIZE;
+        const chunkEnd = chunkStart + plain.length - 1;
+        index++;
+        const from = Math.max(start, chunkStart) - chunkStart;
+        const to = Math.min(end, chunkEnd) - chunkStart;
+        return to >= from ? plain.subarray(from, to + 1) : new Uint8Array(0);
+      },
+      cancel() {
+        void reader.cancel().catch(() => {});
+      },
+    };
   });
 
   const headers = new Headers({
@@ -226,62 +258,42 @@ function chunkedResponse(
 }
 
 /**
- * Legacy sequential blobs decrypt progressively from the start: the whole
- * ciphertext streams in, chunks decrypt as they complete, and plaintext
- * leaves immediately, so playback begins long before the download ends.
- * No byte-range answers are possible for this format, which is exactly why
- * media now uploads in the chunked one.
+ * Legacy sequential blobs decrypt progressively from the start, one chunk
+ * per pull; no byte-range answers are possible for this format, which is
+ * exactly why media now uploads in the chunked one.
  */
 function legacyResponse(fileId: string, entry: MediaEntry): Response {
   const headerLen = streamHeaderBytes();
   const sealed = CHUNKED_CHUNK_SIZE + streamOverheadBytes();
 
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      try {
-        const body = await fetchCiphertext(fileId, entry);
-        const reader = body.getReader();
-        let decryptor: StreamDecryptor | null = null;
-        let buffer = new Uint8Array(0);
-        let served = 0;
-        const append = (incoming: Uint8Array) => {
-          const merged = new Uint8Array(buffer.length + incoming.length);
-          merged.set(buffer, 0);
-          merged.set(incoming, buffer.length);
-          buffer = merged;
-        };
-        const emit = (chunk: Uint8Array) => {
-          const { message } = decryptor!.pull(chunk);
-          controller.enqueue(message);
-          served += message.length;
-          void notifyProgress(fileId, served, entry.plainSize);
-        };
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (value) {
-            append(value);
+  const stream = pulledBody(async () => {
+    const body = await fetchCiphertext(fileId, entry);
+    const reader = body.getReader();
+    const frames = frameReader(reader);
+    let decryptor: StreamDecryptor | null = null;
+    let served = 0;
+    return {
+      async next() {
+        if (!decryptor) {
+          const head = await frames.take(headerLen);
+          if (head === null || head.length < headerLen) {
+            return null;
           }
-          if (!decryptor && buffer.length >= headerLen) {
-            decryptor = new StreamDecryptor(entry.key, buffer.slice(0, headerLen));
-            buffer = buffer.slice(headerLen);
-          }
-          while (decryptor && buffer.length >= sealed) {
-            emit(buffer.slice(0, sealed));
-            buffer = buffer.slice(sealed);
-          }
-          if (done) {
-            // The tail chunk is whatever remains once the source ends.
-            if (decryptor && buffer.length > 0) {
-              emit(buffer);
-            }
-            break;
-          }
+          decryptor = new StreamDecryptor(entry.key, head);
         }
-        controller.close();
-      } catch (err) {
-        controller.error(err);
-      }
-    },
+        const chunk = await frames.take(sealed);
+        if (chunk === null) {
+          return null;
+        }
+        const { message } = decryptor.pull(chunk);
+        served += message.length;
+        void notifyProgress(fileId, served, entry.plainSize);
+        return message;
+      },
+      cancel() {
+        void reader.cancel().catch(() => {});
+      },
+    };
   });
 
   return new Response(stream, {
