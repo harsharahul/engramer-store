@@ -35,6 +35,25 @@ describe("index blob envelope", () => {
     expect(decodeIndexPayload(nearMiss).text).toBe("EIDX2 is not our format");
   });
 
+  it("round-trips several frame vectors and keeps the poster as clip", () => {
+    const frames = [1, 2, 3].map((n) => new Float32Array(8).fill(n / 10));
+    const bytes = encodeIndexPayload({ text: "drone clip", clips: frames });
+    const decoded = decodeIndexPayload(bytes);
+    expect(decoded.text).toBe("drone clip");
+    expect(decoded.clips).toHaveLength(3);
+    expect([...decoded.clips![2]!]).toEqual([...frames[2]!]);
+    // The primary vector mirrors the first frame, so older readers that
+    // only understand `clip` keep working on multi-frame blobs.
+    expect([...decoded.clip!]).toEqual([...frames[0]!]);
+  });
+
+  it("keeps a single-vector payload free of the clips array", () => {
+    const clip = new Float32Array([0.5, 0.5]);
+    const decoded = decodeIndexPayload(encodeIndexPayload({ clip, clips: [clip] }));
+    expect(decoded.clips).toBeUndefined();
+    expect([...decoded.clip!]).toEqual([0.5, 0.5]);
+  });
+
   it("survives corrupt envelope bodies by yielding nothing", () => {
     const bytes = encodeIndexPayload({ text: "ok" });
     const corrupted = bytes.slice(0, bytes.length - 3);

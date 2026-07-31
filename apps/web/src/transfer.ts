@@ -101,6 +101,96 @@ export function withDeadline<T>(
 const THUMB_DEADLINE_MS = 10_000;
 const ANALYSIS_DEADLINE_MS = 20_000;
 
+// WebKit may not have painted a seeked-to frame when its event fires;
+// capturing then yields black. Wait for a presented frame, with a timeout
+// so a codec quirk can never wedge the pipeline.
+function awaitPresentedFrame(video: HTMLVideoElement): Promise<void> {
+  return new Promise((resolve) => {
+    const v = video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: () => void) => void;
+    };
+    if (typeof v.requestVideoFrameCallback === "function") {
+      v.requestVideoFrameCallback(() => resolve());
+    } else {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }
+    setTimeout(resolve, 1_000);
+  });
+}
+
+function seekTo(video: HTMLVideoElement, at: number): Promise<void> {
+  return new Promise((resolve) => {
+    let done = false;
+    const settle = () => {
+      if (!done) {
+        done = true;
+        video.removeEventListener("seeked", settle);
+        resolve();
+      }
+    };
+    video.addEventListener("seeked", settle);
+    video.currentTime = at;
+    setTimeout(settle, 3_000);
+  });
+}
+
+/** How many frames represent a video in meaning search. */
+const MEANING_FRAMES = 5;
+
+/**
+ * Frames spread across a video's timeline, so meaning search can match any
+ * scene rather than only the poster. Short or duration-less clips yield
+ * nothing extra; the poster alone already covers them.
+ */
+async function sampleVideoFrames(file: File): Promise<Blob[]> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    const frames: Blob[] = [];
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      URL.revokeObjectURL(url);
+      video.removeAttribute("src");
+      video.load();
+      resolve(frames);
+    };
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.setAttribute("playsinline", "");
+    video.setAttribute("muted", "");
+    video.src = url;
+    const timer = setTimeout(finish, 45_000);
+    video.onerror = () => {
+      clearTimeout(timer);
+      finish();
+    };
+    video.onloadedmetadata = () => {
+      void (async () => {
+        const duration = video.duration;
+        if (!Number.isFinite(duration) || duration <= 3 || !video.videoWidth) {
+          clearTimeout(timer);
+          return finish();
+        }
+        for (let i = 0; i < MEANING_FRAMES && !settled; i++) {
+          await seekTo(video, duration * ((i + 0.5) / MEANING_FRAMES));
+          await awaitPresentedFrame(video);
+          const blob = await drawScaled(video, video.videoWidth, video.videoHeight);
+          if (blob) {
+            frames.push(blob);
+          }
+        }
+        clearTimeout(timer);
+        finish();
+      })();
+    };
+  });
+}
+
 async function videoThumbnail(file: File): Promise<Thumbnail | null> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
@@ -125,21 +215,6 @@ async function videoThumbnail(file: File): Promise<Thumbnail | null> {
     video.setAttribute("playsinline", "");
     video.setAttribute("muted", "");
     video.src = url;
-    // WebKit may not have painted the seeked-to frame when the event fires;
-    // capturing then yields a black poster. Wait for a presented frame, with
-    // a timeout so a codec quirk can never wedge the upload.
-    const presentedFrame = () =>
-      new Promise<void>((resolve) => {
-        const v = video as HTMLVideoElement & {
-          requestVideoFrameCallback?: (cb: () => void) => void;
-        };
-        if (typeof v.requestVideoFrameCallback === "function") {
-          v.requestVideoFrameCallback(() => resolve());
-        } else {
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-        }
-        setTimeout(resolve, 1_000);
-      });
     // Mean luminance of a coarse sample; enough to tell a fade-from-black
     // opening frame from a real one.
     const frameLuminance = () => {
@@ -167,7 +242,7 @@ async function videoThumbnail(file: File): Promise<Thumbnail | null> {
       if (!videoWidth || !videoHeight) {
         return finish(null);
       }
-      await presentedFrame();
+      await awaitPresentedFrame(video);
       if (settled) {
         return;
       }
@@ -225,6 +300,8 @@ export interface PreparedFile {
   text?: string;
   /** Semantic image embedding; rides in the same index blob. */
   clip?: Float32Array;
+  /** All meaning vectors for videos: poster plus sampled frames. */
+  clips?: Float32Array[];
 }
 
 /**
@@ -264,6 +341,7 @@ export async function analyzeFile(
   // and videos by their poster frame, which the thumbnail step already
   // extracted; decoding the video a second time would be wasted work.
   let clip: Float32Array | undefined;
+  let clips: Float32Array[] | undefined;
   if (semanticEnabled() && (file.type.startsWith("image/") || file.type.startsWith("video/"))) {
     onPhase?.("indexing by meaning");
   }
@@ -278,6 +356,25 @@ export async function analyzeFile(
         45_000,
         signal,
       );
+      // Several frames across the timeline: any scene in the video should
+      // answer a meaning query, not only its opening moment.
+      const frames = (await withDeadline(sampleVideoFrames(file), 60_000, signal)) ?? [];
+      if (frames.length > 0) {
+        const vectors: Float32Array[] = clip ? [clip] : [];
+        for (const frame of frames) {
+          if (signal?.aborted) {
+            break;
+          }
+          const vector = await withDeadline(embedImage(frame), 45_000, signal);
+          if (vector) {
+            vectors.push(vector);
+          }
+        }
+        if (vectors.length > 1) {
+          clips = vectors;
+          clip ??= vectors[0];
+        }
+      }
     }
   }
   cancelled();
@@ -300,7 +397,7 @@ export async function analyzeFile(
     ...(text !== undefined ? { hasText: true } : {}),
     ...(clip ? { hasClip: true } : {}),
   };
-  return { meta, analysis, thumbnail, text, clip };
+  return { meta, analysis, thumbnail, text, clip, clips };
 }
 
 export interface UploadResult {
@@ -563,7 +660,10 @@ export async function encryptAndUpload(
     await uploadBlob(
       dto.id,
       "index",
-      encryptBytes(encodeIndexPayload({ text: prepared.text, clip: prepared.clip }), fileKey),
+      encryptBytes(
+        encodeIndexPayload({ text: prepared.text, clip: prepared.clip, clips: prepared.clips }),
+        fileKey,
+      ),
       undefined,
       signal,
     );

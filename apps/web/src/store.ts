@@ -51,6 +51,8 @@ export interface FileEntry {
   hasText: boolean;
   /** In-memory semantic embedding (lazily fetched from the index blob). */
   clip?: Float32Array;
+  /** All meaning vectors when a video sampled several frames. */
+  clips?: Float32Array[];
   /** The index blob carries a semantic embedding for this file. */
   hasClip: boolean;
   /** Legacy row still carrying text inside its metadata. */
@@ -261,6 +263,7 @@ export const useStore = create<StoreState>((set, get) => {
           }
           if (entry.clip === undefined && entry.hasClip && before?.clip !== undefined) {
             entry.clip = before.clip;
+            entry.clips = before.clips;
           }
           files.set(dto.id, entry);
         } catch {
@@ -297,6 +300,7 @@ export const useStore = create<StoreState>((set, get) => {
       }
       if (entry.clip === undefined && entry.hasClip && prior?.clip !== undefined) {
         entry.clip = prior.clip;
+        entry.clips = prior.clips;
       }
       files.set(dto.id, entry);
     }
@@ -317,13 +321,13 @@ export const useStore = create<StoreState>((set, get) => {
   };
 
   /** Replaces one entry's in-memory search text. */
-  const setEntryClip = (id: string, clip: Float32Array) => {
+  const setEntryClip = (id: string, clip: Float32Array, clips?: Float32Array[]) => {
     const entry = get().files.get(id);
     if (!entry) {
       return;
     }
     const files = new Map(get().files);
-    files.set(id, { ...entry, clip, hasClip: true });
+    files.set(id, { ...entry, clip, ...(clips ? { clips } : {}), hasClip: true });
     set({ files });
   };
 
@@ -729,7 +733,10 @@ export const useStore = create<StoreState>((set, get) => {
       await uploadBlob(
         id,
         "index",
-        encryptBytes(encodeIndexPayload({ text: searchText, clip: file.clip }), file.key),
+        encryptBytes(
+          encodeIndexPayload({ text: searchText, clip: file.clip, clips: file.clips }),
+          file.key,
+        ),
       );
       await patchFileMeta(id, { size: bytes.length, mtime: Date.now(), hasText: true, text: undefined });
       setEntryText(id, searchText, false);
@@ -750,7 +757,7 @@ export const useStore = create<StoreState>((set, get) => {
           id,
           "index",
           encryptBytes(
-            encodeIndexPayload({ text: searchText.slice(0, 100_000), clip: file.clip }),
+            encodeIndexPayload({ text: searchText.slice(0, 100_000), clip: file.clip, clips: file.clips }),
             file.key,
           ),
         );
@@ -919,7 +926,7 @@ export const useStore = create<StoreState>((set, get) => {
       await uploadBlob(
         id,
         "index",
-        encryptBytes(encodeIndexPayload({ text, clip: file.clip }), file.key),
+        encryptBytes(encodeIndexPayload({ text, clip: file.clip, clips: file.clips }), file.key),
       );
       await patchFileMeta(id, { hasText: true, text: undefined });
       setEntryText(id, text, false);
@@ -1076,7 +1083,7 @@ export const useStore = create<StoreState>((set, get) => {
               setEntryText(file.id, payload.text);
             }
             if (payload.clip) {
-              setEntryClip(file.id, payload.clip);
+              setEntryClip(file.id, payload.clip, payload.clips);
             }
           } catch {
             // A missing index never blocks the rest; search simply skips it.
@@ -1098,7 +1105,10 @@ export const useStore = create<StoreState>((set, get) => {
           await uploadBlob(
             file.id,
             "index",
-            encryptBytes(encodeIndexPayload({ text: file.text!, clip: file.clip }), file.key),
+            encryptBytes(
+              encodeIndexPayload({ text: file.text!, clip: file.clip, clips: file.clips }),
+              file.key,
+            ),
           );
           const meta = { ...metadataOf({ ...file, inlineText: false }), hasText: true };
           const dto = await api.patchFile(file.id, {
