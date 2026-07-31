@@ -518,11 +518,18 @@ export function Vault() {
       return;
     }
     const scored: SearchHit[] = [];
+    const targetVectors = target.clips ?? [target.clip];
     for (const file of files.values()) {
       if (file.id === id || file.trashed || !file.clip) {
         continue;
       }
-      const score = cosine(target.clip, file.clip);
+      const vectors = file.clips ?? [file.clip];
+      let score = -1;
+      for (const mine of targetVectors) {
+        for (const theirs of vectors) {
+          score = Math.max(score, cosine(mine, theirs));
+        }
+      }
       if (score >= 0.5) {
         scored.push({
           file,
@@ -649,7 +656,13 @@ export function Vault() {
           if (file.trashed || !file.clip) {
             continue;
           }
-          const score = cosine(vector, file.clip);
+          // Videos carry several frame vectors; the best one speaks for
+          // the file, so any scene in the clip can answer the query.
+          const vectors = file.clips ?? [file.clip];
+          let score = -1;
+          for (const candidate of vectors) {
+            score = Math.max(score, cosine(vector, candidate));
+          }
           if (score >= 0.15) {
             scored.push({
               file,
