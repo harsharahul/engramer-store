@@ -116,6 +116,8 @@ interface StoreState {
   usage: Usage | null;
   isAdmin: boolean;
   uploads: UploadItem[];
+  /** Cancels every transfer in flight; a fresh batch gets a fresh scope. */
+  uploadAbort: AbortController | null;
   reveal: Reveal | null;
   ocrProgress: OcrProgress | null;
   semanticProgress: OcrProgress | null;
@@ -144,6 +146,7 @@ interface StoreState {
   restoreFile: (id: string) => Promise<void>;
   deleteForever: (id: string) => Promise<void>;
   clearFinishedUploads: () => void;
+  cancelUploads: () => void;
   dismissReveal: () => void;
   createFileRequest: (label: string, folderId: string | null, expiresAt: number | null) => Promise<string>;
   ingestRequestUploads: () => Promise<number>;
@@ -298,6 +301,18 @@ export const useStore = create<StoreState>((set, get) => {
   };
 
 
+  /** One cancel scope shared by every transfer in flight; a scope that has
+   * been cancelled is spent, so the next batch opens a fresh one. */
+  const transferScope = (): AbortController => {
+    const existing = get().uploadAbort;
+    if (existing && !existing.signal.aborted) {
+      return existing;
+    }
+    const fresh = new AbortController();
+    set({ uploadAbort: fresh });
+    return fresh;
+  };
+
   /** Replaces one entry's in-memory search text. */
   const setEntryClip = (id: string, clip: Float32Array) => {
     const entry = get().files.get(id);
@@ -369,6 +384,7 @@ export const useStore = create<StoreState>((set, get) => {
     usage: null,
     isAdmin: false,
     uploads: [],
+    uploadAbort: null,
     reveal: null,
     ocrProgress: null,
     semanticProgress: null,
@@ -545,8 +561,12 @@ export const useStore = create<StoreState>((set, get) => {
     uploadFiles: async (fileList, folderId) => {
       const key = masterKey();
       const revealItems: RevealItem[] = [];
+      const cancel = transferScope();
       holdTransferLock();
       for (const file of fileList) {
+        if (cancel.signal.aborted) {
+          break;
+        }
         const uploadId = crypto.randomUUID();
         set({
           uploads: [
@@ -564,8 +584,13 @@ export const useStore = create<StoreState>((set, get) => {
           // folder the user picked stay where the user put them.
           const destination =
             folderId ?? (await ensureCategoryFolder(prepared.analysis.category));
-          const result = await encryptAndUpload(file, destination, key, prepared, (fraction) =>
-            update({ status: "uploading", progress: fraction }),
+          const result = await encryptAndUpload(
+            file,
+            destination,
+            key,
+            prepared,
+            (fraction) => update({ status: "uploading", progress: fraction }),
+            cancel.signal,
           );
           applyFile(result.dto);
           update({ status: "done", progress: 1 });
@@ -578,7 +603,14 @@ export const useStore = create<StoreState>((set, get) => {
             tags: prepared.analysis.tags,
           });
         } catch (err) {
-          update({ status: "error", error: err instanceof Error ? err.message : "upload failed" });
+          update({
+            status: "error",
+            error: cancel.signal.aborted
+              ? "cancelled"
+              : err instanceof Error
+                ? err.message
+                : "upload failed",
+          });
         }
       }
       releaseTransferLock();
@@ -596,6 +628,7 @@ export const useStore = create<StoreState>((set, get) => {
      */
     uploadTree: async (items, baseFolderId) => {
       const key = masterKey();
+      const cancel = transferScope();
       holdTransferLock();
       set({ batch: { done: 0, failed: 0, total: items.length, current: "" } });
 
@@ -623,6 +656,11 @@ export const useStore = create<StoreState>((set, get) => {
 
       const revealItems: RevealItem[] = [];
       await boundedRun(items, 4, async (item) => {
+        if (cancel.signal.aborted) {
+          const skipped = get().batch;
+          set({ batch: skipped ? { ...skipped, failed: skipped.failed + 1 } : null });
+          return;
+        }
         const current = get().batch;
         set({ batch: current ? { ...current, current: item.file.name } : null });
         try {
@@ -632,7 +670,7 @@ export const useStore = create<StoreState>((set, get) => {
               ? (folderIds.get(pathKey(item.path)) ?? baseFolderId)
               : (baseFolderId ?? (await ensureCategoryFolder(prepared.analysis.category)));
           const result = await withRetry(() =>
-            encryptAndUpload(item.file, destination, key, prepared, () => {}),
+            encryptAndUpload(item.file, destination, key, prepared, () => {}, cancel.signal),
           );
           applyFile(result.dto);
           if (revealItems.length < 3) {
@@ -789,6 +827,10 @@ export const useStore = create<StoreState>((set, get) => {
 
     clearFinishedUploads: () => {
       set({ uploads: get().uploads.filter((u) => u.status !== "done" && u.status !== "error") });
+    },
+
+    cancelUploads: () => {
+      get().uploadAbort?.abort();
     },
 
     dismissReveal: () => set({ reveal: null }),
