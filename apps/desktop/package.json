@@ -5,7 +5,7 @@
   "description": "Engram Store desktop app: native shell, watch folders, and Keychain unlock.",
   "scripts": {
     "dev": "tauri dev",
-    "build": "tauri build",
+    "bundle": "tauri build",
     "tauri": "tauri"
   },
   "devDependencies": {
