@@ -16,3 +16,7 @@ PLAN.md
 
 # Playwright MCP artifacts
 .playwright-mcp/
+
+# Tauri build output
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/

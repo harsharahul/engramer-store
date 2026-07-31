@@ -1,0 +1,19 @@
+[package]
+name = "engram-store-desktop"
+version = "0.26.0"
+description = "Engram Store desktop app"
+authors = ["Harsha Rahul Boggaram"]
+license = "AGPL-3.0-only"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lib]
+name = "engram_store_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
