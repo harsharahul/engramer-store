@@ -3,6 +3,28 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.27.0] - 2026-07-31
+
+### Added
+- A profile page. Clicking the account name opens one place for
+  everything: storage usage, two-factor authentication, device unlock
+  with per-device availability, recovery-key guidance, appearance and
+  intelligence preferences, a library resync, and for operators the
+  full server administration panel inline.
+
+### Fixed
+- Large videos always fit the window. The media viewer previously let
+  a 4K video overflow the screen on desktop-sized windows, which could
+  squeeze it into a corner or push it out of sight entirely while the
+  audio kept playing.
+- Video posters no longer come out black: capture waits for a truly
+  painted frame, and clips that fade in from black retry a few seconds
+  into the footage.
+- Failed or cancelled uploads clean up after themselves instead of
+  leaving an empty file in the library, upload progress never walks
+  backwards during a retry, and a full bar that is still working now
+  reads "finalizing".
+
 ## [0.26.0] - 2026-07-31
 
 ### Added
