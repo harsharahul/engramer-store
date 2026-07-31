@@ -13,6 +13,7 @@ function file(partial: Partial<FileEntry>): FileEntry {
     tags: partial.tags ?? [],
     favorite: partial.favorite ?? false,
     text: partial.text,
+    hasClip: false,
     hasText: partial.text !== undefined,
     inlineText: partial.text !== undefined,
     category: partial.category,
