@@ -151,6 +151,16 @@ export function clearSession(): void {
   setAuthToken(null);
 }
 
+/**
+ * Locks without revoking: in-memory keys and the session token go away,
+ * but the device-unlock enrollment stays, so Touch ID or the passkey
+ * reopens the vault. Signing out remains the full wipe.
+ */
+export function suspendSession(): void {
+  sessionStorage.removeItem(SESSION_KEY);
+  setAuthToken(null);
+}
+
 /** Restores a session via the device passkey (Touch ID); null if dismissed. */
 export async function restoreDeviceSession(): Promise<Session | null> {
   await ready();

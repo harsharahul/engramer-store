@@ -15,6 +15,7 @@ import {
   type WatchedFile,
 } from "./native";
 import type { TreeFile } from "./uploader";
+import { diag } from "./diag";
 
 /** v1 reads whole files through the shell bridge; keep that bounded. */
 const MAX_WATCH_FILE_BYTES = 1_536 * 1024 * 1024;
@@ -44,8 +45,12 @@ async function drain(): Promise<void> {
       file.size <= MAX_WATCH_FILE_BYTES,
   );
   if (fresh.length === 0) {
+    if (batch.length > 0) {
+      diag("watch", `${batch.length} file(s) seen, all already in the vault`);
+    }
     return;
   }
+  diag("watch", `uploading ${fresh.length} new file(s) from watched folders`);
   fresh.forEach((file) => inFlight.add(file.path));
   try {
     const items: TreeFile[] = [];
@@ -92,8 +97,13 @@ export async function startWatchSync(): Promise<void> {
     return;
   }
   started = true;
-  await nativeListen<WatchedFile>("watch-file", (file) => enqueue([file]));
-  enqueue(await watchedScan());
+  await nativeListen<WatchedFile>("watch-file", (file) => {
+    diag("watch", `settled: ${file.name} (${file.size} bytes)`);
+    enqueue([file]);
+  });
+  const found = await watchedScan();
+  diag("watch", `startup scan found ${found.length} file(s) in watched folders`);
+  enqueue(found);
 }
 
 /** Rescans every watched folder now; used right after adding one. */

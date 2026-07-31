@@ -732,7 +732,18 @@ export function Vault() {
     });
   };
 
+  // Lock keeps the Touch ID / passkey enrollment so one touch reopens the
+  // vault; without an enrollment it is the same as signing out.
   const lock = () => {
+    clearThumbnailCache();
+    if (hasDeviceUnlock()) {
+      store.lockVault();
+    } else {
+      store.logout();
+    }
+  };
+
+  const signOut = () => {
     clearThumbnailCache();
     store.logout();
   };
@@ -930,7 +941,8 @@ export function Vault() {
           showToast("Device unlock removed. Your password is required next time.");
         },
       },
-      { id: "lock", label: "Lock vault and sign out", run: lock },
+      { id: "lock", label: "Lock vault", hint: "Touch ID or passkey reopens it", run: lock },
+      { id: "signout", label: "Sign out", hint: "full sign-out; password required next time", run: signOut },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -1156,7 +1168,7 @@ export function Vault() {
           >
             <KeyGlyph size={14} />
           </button>
-          <button className="icon-btn" title="Lock and sign out" onClick={lock}>
+          <button className="icon-btn" title="Lock vault" onClick={lock}>
             <LockGlyph />
           </button>
         </div>
@@ -1450,6 +1462,7 @@ export function Vault() {
               }}
               onOpenTwoFactor={() => setSecurityOpen(true)}
               onLock={lock}
+              onSignOut={signOut}
               onToast={showToast}
             />
           ) : view.kind === "trash" ? (
