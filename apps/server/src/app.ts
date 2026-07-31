@@ -59,6 +59,14 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   const app = Fastify({
     bodyLimit: 16 * 1024 * 1024,
     trustProxy: config.trustedProxies,
+    // Structured request logs to stdout for whatever ships container logs
+    // off the node. Off by default; even when on, entries carry only what
+    // the server already sees: method, path (opaque ids), status, timing.
+    logger:
+      process.env.ENGRAMER_LOG_REQUESTS === "true"
+        ? { level: "info" }
+        : false,
+    disableRequestLogging: process.env.ENGRAMER_LOG_REQUESTS !== "true",
   });
 
   let blobs: BlobStore;
