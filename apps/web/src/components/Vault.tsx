@@ -33,6 +33,7 @@ import {
   unlockDeclined,
 } from "../unlock";
 import { nativeUnlockAvailable } from "../native";
+import { startWatchSync } from "../watchfolders";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
 import { cosine, embedQuery, semanticEnabled, setSemanticEnabled } from "../intel/semantic";
 import { thumbnailUrl } from "../thumbs";
@@ -769,6 +770,11 @@ export function Vault() {
   // The media bridge's worker may restart at any time; this responder
   // re-supplies file keys for as long as the vault is open.
   useEffect(() => installMediaKeyResponder(), []);
+
+  // Desktop shell only: pick up watched-folder arrivals, past and live.
+  useEffect(() => {
+    void startWatchSync();
+  }, []);
 
   // Belt to the Auth blur's braces: landing here with a keyboard-stale
   // viewport (iOS) misplaces fixed chrome until something forces relayout.

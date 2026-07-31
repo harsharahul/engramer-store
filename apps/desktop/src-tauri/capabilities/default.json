@@ -5,5 +5,5 @@
   "remote": {
     "urls": ["https://store.harsharahul.com", "http://localhost:5173"]
   },
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:allow-open"]
 }
