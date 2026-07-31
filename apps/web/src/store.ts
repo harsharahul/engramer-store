@@ -70,6 +70,9 @@ export interface UploadItem {
   name: string;
   progress: number;
   status: "encrypting" | "uploading" | "finalizing" | "done" | "error";
+  /** What the preparing phase is actually doing (analyzing, reading
+   * scanned pages, indexing by meaning); shown in place of "encrypting". */
+  detail?: string;
   error?: string;
 }
 
@@ -579,7 +582,10 @@ export const useStore = create<StoreState>((set, get) => {
             uploads: get().uploads.map((u) => (u.id === uploadId ? { ...u, ...patch } : u)),
           });
         try {
-          const prepared = await analyzeFile(file, cancel.signal);
+          const prepared = await analyzeFile(file, cancel.signal, (phase) =>
+            update({ detail: phase }),
+          );
+          update({ detail: "encrypting" });
           // Root uploads are auto-filed into a category folder; uploads into a
           // folder the user picked stay where the user put them.
           const destination =
