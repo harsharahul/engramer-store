@@ -3,6 +3,14 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.24.1] - 2026-07-30
+
+### Fixed
+- On phones, the tab bar no longer floats above the bottom edge after
+  logging in with the keyboard open.
+- Part uploads survive a brief block from edge protections with a single
+  patient retry instead of failing the file.
+
 ## [0.24.0] - 2026-07-30
 
 ### Added
