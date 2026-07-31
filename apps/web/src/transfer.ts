@@ -231,12 +231,17 @@ export interface PreparedFile {
  * Client-side analysis phase: search text, EXIF, category, tags, thumbnail.
  * Everything computed here ships only inside encrypted metadata.
  */
-export async function analyzeFile(file: File, signal?: AbortSignal): Promise<PreparedFile> {
+export async function analyzeFile(
+  file: File,
+  signal?: AbortSignal,
+  onPhase?: (phase: string) => void,
+): Promise<PreparedFile> {
   const cancelled = () => {
     if (signal?.aborted) {
       throw new ApiError(UPLOAD_CANCELLED, "upload cancelled");
     }
   };
+  onPhase?.("analyzing");
   let [text, exif, thumbnail] = await Promise.all([
     withDeadline(extractText(file), ANALYSIS_DEADLINE_MS, signal),
     withDeadline(extractExif(file), ANALYSIS_DEADLINE_MS, signal),
@@ -246,10 +251,12 @@ export async function analyzeFile(file: File, signal?: AbortSignal): Promise<Pre
   // Opt-in OCR: screenshots and scans become searchable, and the recognized
   // text sharpens categorization (a photographed invoice files as a receipt).
   if (text === undefined && file.type.startsWith("image/") && ocrEnabled()) {
+    onPhase?.("reading text");
     text = await withDeadline(recognizeImage(file), ANALYSIS_DEADLINE_MS * 3, signal);
   }
   // A PDF with no text layer is a scan; its pages read like photos.
   if (text === undefined && isPdf(file.name, file.type) && ocrEnabled()) {
+    onPhase?.("reading scanned pages");
     text = await withDeadline(recognizePdf(file), ANALYSIS_DEADLINE_MS * 6, signal);
   }
   cancelled();
@@ -257,6 +264,9 @@ export async function analyzeFile(file: File, signal?: AbortSignal): Promise<Pre
   // and videos by their poster frame, which the thumbnail step already
   // extracted; decoding the video a second time would be wasted work.
   let clip: Float32Array | undefined;
+  if (semanticEnabled() && (file.type.startsWith("image/") || file.type.startsWith("video/"))) {
+    onPhase?.("indexing by meaning");
+  }
   if (semanticEnabled()) {
     if (file.type.startsWith("image/")) {
       clip = await withDeadline(embedImage(file), 45_000, signal);
