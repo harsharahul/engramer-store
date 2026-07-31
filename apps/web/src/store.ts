@@ -18,6 +18,7 @@ import { api, uploadBlob, withRetry, type FileDto, type FolderDto } from "./api"
 import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { clearSession, type Session } from "./session";
+import { holdTransferLock, releaseTransferLock } from "./wakelock";
 import { analyzeFile, downloadAndDecrypt, encryptAndUpload } from "./transfer";
 import { recognizeImage, recognizePdf } from "./intel/ocr";
 import { isPdf } from "./intel/extract";
@@ -516,6 +517,7 @@ export const useStore = create<StoreState>((set, get) => {
     uploadFiles: async (fileList, folderId) => {
       const key = masterKey();
       const revealItems: RevealItem[] = [];
+      holdTransferLock();
       for (const file of fileList) {
         const uploadId = crypto.randomUUID();
         set({
@@ -551,6 +553,7 @@ export const useStore = create<StoreState>((set, get) => {
           update({ status: "error", error: err instanceof Error ? err.message : "upload failed" });
         }
       }
+      releaseTransferLock();
       if (revealItems.length > 0) {
         set({ reveal: { items: revealItems, at: Date.now() } });
       }
@@ -565,6 +568,7 @@ export const useStore = create<StoreState>((set, get) => {
      */
     uploadTree: async (items, baseFolderId) => {
       const key = masterKey();
+      holdTransferLock();
       set({ batch: { done: 0, failed: 0, total: items.length, current: "" } });
 
       // Folder plan: create every needed path once, parents before children.
@@ -625,6 +629,7 @@ export const useStore = create<StoreState>((set, get) => {
         }
       });
 
+      releaseTransferLock();
       set({ batch: null });
       if (revealItems.length > 0) {
         set({ reveal: { items: revealItems, at: Date.now() } });
