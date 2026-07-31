@@ -1731,8 +1731,13 @@ a {
 
 .preview-body {
   flex: 1;
-  display: grid;
-  place-items: center;
+  /* Flex, not grid: a grid track sizes to its content, so a child's
+     max-height:100% resolves against nothing and a 4K video overflows the
+     screen. Flex children resolve percentages against this box, which has
+     definite height, so media always fits the viewport. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   overflow: auto;
   padding: 0 24px 24px;
   min-height: 0;
@@ -1754,8 +1759,8 @@ a {
 }
 
 .preview-body pre {
+  flex: 1;
   align-self: stretch;
-  justify-self: stretch;
   overflow: auto;
   background: var(--ink-1);
   border: 1px solid var(--hairline);
