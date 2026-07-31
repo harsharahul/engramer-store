@@ -18,6 +18,7 @@ import {
   watchedRemove,
 } from "../native";
 import { syncWatchedNow } from "../watchfolders";
+import { diagEntries, diagText, onDiag } from "../diag";
 import { AdminBody } from "./AdminPanel";
 import { KeyGlyph, LockGlyph, MoonGlyph, ScanTextGlyph, SparkGlyph, SunGlyph } from "./Icon";
 
@@ -39,6 +40,7 @@ export function ProfileView(props: {
   onAccent: (id: string) => void;
   onOpenTwoFactor: () => void;
   onLock: () => void;
+  onSignOut: () => void;
   onToast: (message: string) => void;
 }) {
   const store = useStore();
@@ -46,6 +48,16 @@ export function ProfileView(props: {
   const [enrolling, setEnrolling] = useState(false);
   const [shell] = useState(() => nativeShell());
   const [watched, setWatched] = useState<string[]>([]);
+  const [showDiag, setShowDiag] = useState(false);
+  const [diagLines, setDiagLines] = useState(() => [...diagEntries()]);
+
+  useEffect(() => {
+    if (!showDiag) {
+      return;
+    }
+    setDiagLines([...diagEntries()]);
+    return onDiag(() => setDiagLines([...diagEntries()]));
+  }, [showDiag]);
 
   useEffect(() => {
     if (shell) {
@@ -131,9 +143,20 @@ export function ProfileView(props: {
             End-to-end encrypted vault
           </div>
         </div>
-        <button className="btn" onClick={props.onLock}>
-          <LockGlyph size={14} /> Lock and sign out
-        </button>
+        <div className="profile-head-actions">
+          {unlockState === "on" && (
+            <button className="btn" title="Touch ID or your passkey reopens the vault" onClick={props.onLock}>
+              <LockGlyph size={14} /> Lock
+            </button>
+          )}
+          <button
+            className="btn"
+            title="Full sign-out: removes device unlock; password required next time"
+            onClick={props.onSignOut}
+          >
+            Sign out
+          </button>
+        </div>
       </section>
 
       {usage && (
@@ -326,6 +349,47 @@ export function ProfileView(props: {
             Resync
           </button>
         </div>
+      </section>
+
+      <section className="profile-card">
+        <h3>Diagnostics</h3>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Activity log</b>
+            <div className="profile-row-sub">
+              What this device did recently: upload retries, playback stalls, watched-folder
+              activity. Kept only in this tab's memory; never sent anywhere.
+            </div>
+          </div>
+          <div className="profile-head-actions">
+            <button
+              className="btn"
+              onClick={() => {
+                void navigator.clipboard.writeText(diagText()).then(
+                  () => props.onToast("Activity log copied."),
+                  () => props.onToast("Could not copy the log."),
+                );
+              }}
+            >
+              Copy
+            </button>
+            <button className="btn" onClick={() => setShowDiag((v) => !v)}>
+              {showDiag ? "Hide" : "Show"}
+            </button>
+          </div>
+        </div>
+        {showDiag && (
+          <pre className="diag-log">
+            {diagLines.length > 0
+              ? diagLines
+                  .map(
+                    (e) =>
+                      `${new Date(e.at).toLocaleTimeString()} [${e.tag}] ${e.message}`,
+                  )
+                  .join("\n")
+              : "Nothing logged yet in this session."}
+          </pre>
+        )}
       </section>
 
       {store.isAdmin && (

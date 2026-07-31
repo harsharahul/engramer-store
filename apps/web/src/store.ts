@@ -17,7 +17,7 @@ import {
 import { api, uploadBlob, withRetry, type FileDto, type FolderDto } from "./api";
 import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
-import { clearSession, type Session } from "./session";
+import { clearSession, suspendSession, type Session } from "./session";
 import { holdTransferLock, releaseTransferLock } from "./wakelock";
 import { analyzeFile, downloadAndDecrypt, downloadThumbnail, encryptAndUpload } from "./transfer";
 import { recognizeImage, recognizePdf } from "./intel/ocr";
@@ -132,6 +132,8 @@ interface StoreState {
 
   startSession: (session: Session) => Promise<void>;
   logout: () => void;
+  /** Locks the vault but keeps device-unlock enrolled; Touch ID reopens it. */
+  lockVault: () => void;
   refresh: () => Promise<void>;
   resyncLibrary: () => Promise<void>;
   refreshUsage: () => Promise<void>;
@@ -434,6 +436,20 @@ export const useStore = create<StoreState>((set, get) => {
       } catch {
         // Storage may be unavailable; nothing else to do.
       }
+      set({
+        session: null,
+        synced: false,
+        folders: new Map(),
+        files: new Map(),
+        usage: null,
+        uploads: [],
+        reveal: null,
+      });
+    },
+
+    lockVault: () => {
+      syncCursor = 0;
+      suspendSession();
       set({
         session: null,
         synced: false,

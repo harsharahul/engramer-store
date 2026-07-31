@@ -30,6 +30,7 @@ import { ocrEnabled, recognizeImage, recognizePdf } from "./intel/ocr";
 import { embedImage, semanticEnabled } from "./intel/semantic";
 import { encodeIndexPayload } from "./indexblob";
 import { computeBlur } from "./intel/blur";
+import { diag } from "./diag";
 
 const THUMB_SIZE = 512;
 
@@ -478,9 +479,11 @@ async function sendPartWithRetry(
       }
       attempt++;
       if (!PART_RETRYABLE.has(err.status) || attempt >= PART_MAX_ATTEMPTS) {
+        diag("upload", `part ${partNo} giving up after ${attempt} attempts (status ${err.status})`);
         throw err;
       }
       const wait = err.retryAfterMs ?? retryDelay(attempt);
+      diag("upload", `part ${partNo} attempt ${attempt} got status ${err.status}; retrying in ${Math.round(wait)}ms`);
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
   }
@@ -552,12 +555,16 @@ async function uploadInParts(
           // Size the next parts to the pace just measured: a slow or
           // retried part shrinks the window, a quick one restores it.
           const elapsed = Date.now() - started;
-          chunksPerPart =
+          const next =
             elapsed > PART_TIME_TARGET_MS * 2
               ? MIN_CHUNKS_PER_PART
               : elapsed < PART_TIME_TARGET_MS
                 ? CHUNKS_PER_PART
                 : chunksPerPart;
+          if (next !== chunksPerPart) {
+            diag("upload", `part pace ${Math.round(elapsed / 100) / 10}s; part size -> ${next} chunks`);
+          }
+          chunksPerPart = next;
         })
         .catch((err) => {
           uploadError ??= err;

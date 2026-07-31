@@ -1,4 +1,5 @@
 import type { KdfParams, KeyAttributes, SecretBox } from "@engramer/crypto";
+import { diag } from "./diag";
 
 export interface FolderDto {
   id: string;
@@ -433,15 +434,22 @@ function putBytes(
           );
         }
       });
-    xhr.onerror = () => settle(() => reject(new ApiError(0, "network error during upload")));
+    xhr.onerror = () =>
+      settle(() => {
+        diag("upload", `network error on PUT ${url.split("?")[0]}`);
+        reject(new ApiError(0, "network error during upload"));
+      });
     xhr.onabort = () =>
-      settle(() =>
+      settle(() => {
+        if (!opts.signal?.aborted) {
+          diag("upload", `stalled request aborted after no progress: ${url.split("?")[0]}`);
+        }
         reject(
           opts.signal?.aborted
             ? new ApiError(UPLOAD_CANCELLED, "upload cancelled")
             : new ApiError(0, "upload stalled"),
-        ),
-      );
+        );
+      });
     xhr.send(sendable(payload));
   });
 }
