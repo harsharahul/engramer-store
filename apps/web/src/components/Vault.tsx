@@ -223,6 +223,8 @@ export function Vault() {
   const [ocrOn, setOcrOn] = useState(() => ocrEnabled());
   const [semanticOn, setSemanticOn] = useState(() => semanticEnabled());
   const [semanticHits, setSemanticHits] = useState<SearchHit[]>([]);
+  const [similarTo, setSimilarTo] = useState<FileEntry | null>(null);
+  const [similarHits, setSimilarHits] = useState<SearchHit[]>([]);
   const isMobile = useMediaQuery(MOBILE_QUERY);
   const dragDepth = useRef(0);
   const lastSelected = useRef<string | null>(null);
@@ -456,6 +458,16 @@ export function Vault() {
           },
         ]
       : []),
+    ...(file.hasClip
+      ? [
+          {
+            id: "similar",
+            label: "Find similar",
+            icon: <SparkGlyph size={13} />,
+            run: () => void findSimilar(file.id),
+          },
+        ]
+      : []),
     { id: "download", label: "Download", icon: <DownloadGlyph size={13} />, run: () => download(file) },
     { id: "share", label: "Share", icon: <ShareGlyph size={13} />, run: () => setShareId(file.id) },
     { id: "d1", label: "", divider: true, run: () => {} },
@@ -485,6 +497,46 @@ export function Vault() {
       },
     },
   ];
+
+  /** Ranks every indexed photo and video by closeness to this file's stored
+   * meaning vector. Plain arithmetic over vectors already on this device;
+   * the model never loads and nothing is downloaded beyond index blobs. */
+  const findSimilar = async (id: string) => {
+    showToast("Comparing on this device…");
+    await store.warmSearchIndex().catch(() => {});
+    const files = useStore.getState().files;
+    const target = files.get(id);
+    if (!target?.clip) {
+      showToast("This file has no meaning index yet.");
+      return;
+    }
+    const scored: SearchHit[] = [];
+    for (const file of files.values()) {
+      if (file.id === id || file.trashed || !file.clip) {
+        continue;
+      }
+      const score = cosine(target.clip, file.clip);
+      if (score >= 0.5) {
+        scored.push({
+          file,
+          score,
+          matchedText: null,
+          textRanges: [],
+          nameRanges: [],
+          matchedFolder: null,
+          semantic: true,
+        });
+      }
+    }
+    scored.sort((a, b) => b.score - a.score);
+    if (scored.length === 0) {
+      showToast("Nothing similar among indexed photos and videos.");
+      return;
+    }
+    setQuery("");
+    setSimilarHits(scored.slice(0, 24));
+    setSimilarTo(target);
+  };
 
   const openFileMenu = (id: string, x: number, y: number) => {
     const file = store.files.get(id);
@@ -614,6 +666,13 @@ export function Vault() {
       clearTimeout(timer);
     };
   }, [query, semanticOn, store.files]);
+
+  // Similar-items mode is a transient lens; leaving it for any other view
+  // should not require finding the close button.
+  useEffect(() => {
+    setSimilarTo(null);
+    setSimilarHits([]);
+  }, [view]);
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
@@ -853,7 +912,9 @@ export function Vault() {
               ? "Shared"
               : "Trash";
 
-  const showViewControls = !searching && view.kind !== "trash" && view.kind !== "shared";
+  const similarActive = !searching && similarTo !== null;
+  const showViewControls =
+    !searching && !similarActive && view.kind !== "trash" && view.kind !== "shared";
 
   const navButton = (
     active: boolean,
@@ -1196,7 +1257,7 @@ export function Vault() {
 
         <div className="viewbar">
           <div className="crumbs">
-            {view.kind === "folder" && !searching ? (
+            {view.kind === "folder" && !searching && !similarActive ? (
               <>
                 <button
                   onClick={() => setView({ kind: "folder", id: null })}
@@ -1223,7 +1284,7 @@ export function Vault() {
                 ))}
               </>
             ) : (
-              <span className="current">{viewTitle}</span>
+              <span className="current">{similarActive ? "Similar items" : viewTitle}</span>
             )}
             <span className="crumb-note">
               {searching
@@ -1232,7 +1293,9 @@ export function Vault() {
                       ? ` · indexing ${store.indexWarm.done} of ${store.indexWarm.total}`
                       : ""
                   }`
-                : view.kind === "shared"
+                : similarActive
+                  ? `like “${similarTo!.name}”`
+                  : view.kind === "shared"
                   ? "links and file requests"
                   : `${visibleFiles.length} file${visibleFiles.length === 1 ? "" : "s"}${
                       view.kind === "folder" && childFolders.length
@@ -1240,8 +1303,16 @@ export function Vault() {
                         : ""
                     }`}
             </span>
-            {searching && (
-              <button className="icon-btn" onClick={() => setQuery("")} title="Clear search">
+            {(searching || similarActive) && (
+              <button
+                className="icon-btn"
+                onClick={() => {
+                  setQuery("");
+                  setSimilarTo(null);
+                  setSimilarHits([]);
+                }}
+                title={searching ? "Clear search" : "Back to files"}
+              >
                 <XGlyph size={13} />
               </button>
             )}
@@ -1291,6 +1362,16 @@ export function Vault() {
               hits={[...hits, ...semanticHits.filter((s) => !hits.some((h) => h.file.id === s.file.id))]}
               folders={store.folders}
               cursor={searchCursor}
+              selection={selection}
+              onSelect={select}
+              onOpen={openFile}
+              onMenu={openFileMenu}
+            />
+          ) : similarActive ? (
+            <SearchResults
+              hits={similarHits}
+              folders={store.folders}
+              cursor={-1}
               selection={selection}
               onSelect={select}
               onOpen={openFile}
