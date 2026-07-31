@@ -7,6 +7,7 @@ import {
   type SecretBox,
 } from "@engramer/crypto";
 import { NATIVE_CANCELLED, nativeSecretDelete, nativeSecretGet, nativeSecretStore } from "./native";
+import { diag } from "./diag";
 
 /**
  * Device unlock: reopening the app asks for Touch ID (or any platform
@@ -252,7 +253,8 @@ export async function deviceUnlock(): Promise<UnlockSession | null> {
     // Touch ID prompt; the crypto below is identical to the passkey path.
     try {
       secret = fromB64(await nativeSecretGet(record.email));
-    } catch {
+    } catch (err) {
+      diag("unlock", `keychain unlock declined or failed: ${err instanceof Error ? err.message : "unknown"}`);
       return null;
     }
   } else {

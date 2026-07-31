@@ -5,6 +5,7 @@ import { mediaBridgeAvailable, mediaUrl, onMediaProgress, registerMediaKey } fro
 import { fileKind, formatBytes } from "../format";
 import { triggerDownload } from "../download";
 import { DownloadGlyph, PencilGlyph, ShareGlyph, TagGlyph, XGlyph } from "./Icon";
+import { diag } from "../diag";
 
 interface Loaded {
   url: string | null;
@@ -169,7 +170,30 @@ export function Preview(props: {
           <img src={loaded.url} alt={file.name} />
         ) : kind === "video" && loaded.url ? (
           <>
-            <video src={loaded.url} controls autoPlay />
+            <video
+              src={loaded.url}
+              controls
+              autoPlay
+              onWaiting={(e) =>
+                diag(
+                  "playback",
+                  `${file.name} buffering at ${Math.round(e.currentTarget.currentTime)}s`,
+                )
+              }
+              onStalled={(e) =>
+                diag(
+                  "playback",
+                  `${file.name} stalled at ${Math.round(e.currentTarget.currentTime)}s`,
+                )
+              }
+              onError={() => diag("playback", `${file.name} playback error`)}
+              onPlaying={(e) =>
+                diag(
+                  "playback",
+                  `${file.name} playing from ${Math.round(e.currentTarget.currentTime)}s`,
+                )
+              }
+            />
             {progress && (
               <div className="media-progress">
                 Decrypting {formatBytes(progress.loaded)} of {formatBytes(progress.total)}
