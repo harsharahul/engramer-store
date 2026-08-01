@@ -14,6 +14,7 @@ import {
   streamOverheadBytes,
   type ChunkedHeader,
 } from "@engramer/crypto";
+import { ContinuationPool } from "./swpool";
 
 declare let self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Parameters<typeof precacheAndRoute>[0];
@@ -194,51 +195,118 @@ function frameReader(reader: ReadableStreamDefaultReader<Uint8Array>) {
 }
 
 /**
- * Upstream continuation cache. Media engines, WebKit especially, consume a
- * stream in many short-lived range requests that continue exactly where
- * the previous one stopped; opening a fresh ciphertext fetch for each one
- * pays a full round trip per cycle. A finished or cancelled request parks
- * its upstream reader here instead, and the next request that continues at
- * the same chunk picks it up mid-flight. Seeks discard and refetch.
+ * Upstream continuation pool. Media engines consume a stream in many
+ * short-lived range requests; opening a fresh ciphertext fetch for each
+ * one pays a full round trip per cycle, and against a rate-limited object
+ * store the flood itself becomes the stall. A finished or cancelled
+ * request parks its upstream reader; a later request resumes the best
+ * positional match: exactly where a reader stopped, inside one of the few
+ * chunks it decrypted last (WebKit's ranges are rarely chunk-aligned and
+ * land a little behind a reader that ran ahead of the engine's commit
+ * point), or a few chunks ahead, discarding the gap from the wire.
+ *
+ * The wire itself travels in bounded windows that renew inside the same
+ * session, the shape the native desktop player uses. WebKit's network
+ * layer drains a response ahead of consumption without regard for stream
+ * backpressure, so an abandoned open-ended fetch would slurp until the
+ * blob ends; an abandoned window costs at most the window.
  */
 interface UpstreamSession {
-  frames: ReturnType<typeof frameReader>;
+  frames: ReturnType<typeof frameReader> | null;
   cancelUpstream: () => void;
   /** The next chunk index this reader will yield. */
   nextChunk: number;
-  /** Serializes takers so a parked reader is never consumed twice. */
+  /** First chunk past the current wire window; reads renew from there. */
+  windowEnd: number;
+  /** Recently decrypted chunks, newest last, consecutive up to nextChunk. */
+  ring: Array<{ index: number; plain: Uint8Array }>;
+  /** Serializes takers so a reader is never consumed twice. */
   queue: Promise<unknown>;
-  parkTimer: ReturnType<typeof setTimeout> | null;
 }
 
-const upstreamPool = new Map<string, UpstreamSession>();
 const PARK_TTL_MS = 20_000;
-const PARK_MAX_FILES = 2;
+const PARK_MAX_SESSIONS = 3;
+const SKIP_AHEAD_CHUNKS = 4;
+const RING_CHUNKS = 3;
+// The native desktop player's read-ahead shape: 8 chunks (32 MiB) per
+// request keeps a full play at a few dozen upstream requests while an
+// abandoned connection wastes at most one window of transfer.
+const WINDOW_CHUNKS = 8;
+// Ranged answers stop at a chunk boundary after this many chunks (16 MiB,
+// the native player's bounded-answer size); one upstream window feeds two.
+const ANSWER_CHUNKS = 4;
 
-function dropSession(fileId: string, session: UpstreamSession): void {
-  if (session.parkTimer) {
-    clearTimeout(session.parkTimer);
-  }
-  if (upstreamPool.get(fileId) === session) {
-    upstreamPool.delete(fileId);
-  }
-  session.cancelUpstream();
+const upstreamPool = new ContinuationPool<UpstreamSession>(
+  PARK_MAX_SESSIONS,
+  PARK_TTL_MS,
+  SKIP_AHEAD_CHUNKS,
+  (session) => session.cancelUpstream(),
+);
+
+function chunkCount(header: ChunkedHeader): number {
+  return header.plainSize === 0 ? 1 : Math.ceil(header.plainSize / CHUNKED_CHUNK_SIZE);
 }
 
-function parkSession(fileId: string, session: UpstreamSession): void {
-  const existing = upstreamPool.get(fileId);
-  if (existing && existing !== session) {
-    dropSession(fileId, existing);
+function chunkPlainLength(header: ChunkedHeader, index: number): number {
+  const total = chunkCount(header);
+  return index < total - 1 ? CHUNKED_CHUNK_SIZE : header.plainSize - (total - 1) * CHUNKED_CHUNK_SIZE;
+}
+
+/** Tells the open pages when an upstream fetch opens or resumes, for the
+ * activity log; a healthy playback opens sparsely and resumes quietly. */
+async function notifyUpstream(
+  fileId: string,
+  chunk: number,
+  kind: "opened" | "renewed" | "resumed",
+): Promise<void> {
+  for (const client of await self.clients.matchAll({ type: "window" })) {
+    client.postMessage({ type: "media-upstream", fileId, chunk, kind });
   }
-  if (session.parkTimer) {
-    clearTimeout(session.parkTimer);
+}
+
+async function openWindow(
+  fileId: string,
+  entry: MediaEntry,
+  header: ChunkedHeader,
+  firstChunk: number,
+  kind: "opened" | "renewed",
+): Promise<{ frames: ReturnType<typeof frameReader>; cancel: () => void; windowEnd: number }> {
+  const plainEnd = Math.min(
+    Math.max(0, header.plainSize - 1),
+    (firstChunk + WINDOW_CHUNKS) * CHUNKED_CHUNK_SIZE - 1,
+  );
+  const span = chunkSpanForRange(header, firstChunk * CHUNKED_CHUNK_SIZE, plainEnd);
+  const body = await fetchCiphertext(fileId, entry, {
+    start: span.ciphertextStart,
+    end: span.ciphertextEnd,
+  });
+  void notifyUpstream(fileId, firstChunk, kind);
+  const reader = body.getReader();
+  return {
+    frames: frameReader(reader),
+    cancel: () => void reader.cancel().catch(() => {}),
+    windowEnd: span.lastChunk + 1,
+  };
+}
+
+/** The next sealed chunk from the session's wire, renewing the window. */
+async function takeSealed(
+  fileId: string,
+  entry: MediaEntry,
+  header: ChunkedHeader,
+  session: UpstreamSession,
+): Promise<Uint8Array | null> {
+  if (session.nextChunk >= chunkCount(header)) {
+    return null;
   }
-  session.parkTimer = setTimeout(() => dropSession(fileId, session), PARK_TTL_MS);
-  upstreamPool.set(fileId, session);
-  while (upstreamPool.size > PARK_MAX_FILES) {
-    const [oldestId, oldest] = upstreamPool.entries().next().value as [string, UpstreamSession];
-    dropSession(oldestId, oldest);
+  if (session.frames === null || session.nextChunk >= session.windowEnd) {
+    session.cancelUpstream();
+    const window = await openWindow(fileId, entry, header, session.nextChunk, "renewed");
+    session.frames = window.frames;
+    session.cancelUpstream = window.cancel;
+    session.windowEnd = window.windowEnd;
   }
+  return session.frames.take(chunkPlainLength(header, session.nextChunk) + 16);
 }
 
 async function acquireSession(
@@ -247,32 +315,38 @@ async function acquireSession(
   header: ChunkedHeader,
   firstChunk: number,
 ): Promise<UpstreamSession> {
-  const parked = upstreamPool.get(fileId);
-  if (parked) {
-    upstreamPool.delete(fileId);
-    if (parked.parkTimer) {
-      clearTimeout(parked.parkTimer);
-      parked.parkTimer = null;
+  const claimed = upstreamPool.claim(fileId, firstChunk);
+  if (claimed) {
+    if (claimed.nextChunk >= firstChunk) {
+      // Exact continuation, or re-entry into a ring-held chunk.
+      void notifyUpstream(fileId, firstChunk, "resumed");
+      return claimed;
     }
-    if (parked.nextChunk === firstChunk) {
-      return parked;
+    // A reader a few chunks short discards the gap from bytes already in
+    // flight; cheaper than a round trip, but only within its own window.
+    while (claimed.nextChunk < firstChunk && claimed.frames !== null && claimed.nextChunk < claimed.windowEnd) {
+      const sealedLen = chunkPlainLength(header, claimed.nextChunk) + 16;
+      const skipped = await claimed.frames.take(sealedLen);
+      if (skipped === null || skipped.length < sealedLen) {
+        break;
+      }
+      claimed.nextChunk += 1;
+      claimed.ring = [];
     }
-    parked.cancelUpstream();
+    if (claimed.nextChunk === firstChunk) {
+      void notifyUpstream(fileId, firstChunk, "resumed");
+      return claimed;
+    }
+    claimed.cancelUpstream(); // the gap outran the window; fetch fresh
   }
-  // Fetch from the requested chunk to the end of the blob: backpressure
-  // keeps unread bytes on the wire, and continuations read on from here.
-  const tail = chunkSpanForRange(header, firstChunk * CHUNKED_CHUNK_SIZE, Math.max(0, header.plainSize - 1));
-  const body = await fetchCiphertext(fileId, entry, {
-    start: tail.ciphertextStart,
-    end: tail.ciphertextEnd,
-  });
-  const reader = body.getReader();
+  const window = await openWindow(fileId, entry, header, firstChunk, "opened");
   return {
-    frames: frameReader(reader),
-    cancelUpstream: () => void reader.cancel().catch(() => {}),
+    frames: window.frames,
+    cancelUpstream: window.cancel,
     nextChunk: firstChunk,
+    windowEnd: window.windowEnd,
+    ring: [],
     queue: Promise.resolve(),
-    parkTimer: null,
   };
 }
 
@@ -286,10 +360,12 @@ function chunkedResponse(
   partial: boolean,
 ): Response {
   const span = chunkSpanForRange(header, start, end);
-  const chunkTotal = header.plainSize === 0 ? 1 : Math.ceil(header.plainSize / CHUNKED_CHUNK_SIZE);
 
   const stream = pulledBody(async () => {
     const session = await acquireSession(fileId, entry, header, span.firstChunk);
+    // The response's own position; it trails session.nextChunk by one only
+    // while serving out of the retained chunk.
+    let cursor = span.firstChunk;
     let finished = false;
     const exclusive = <T>(op: () => Promise<T>): Promise<T> => {
       const run = session.queue.then(op, op);
@@ -299,30 +375,45 @@ function chunkedResponse(
     return {
       next: () =>
         exclusive(async () => {
-          if (session.nextChunk > span.lastChunk) {
+          if (cursor > span.lastChunk) {
             finished = true;
-            parkSession(fileId, session);
+            upstreamPool.park(fileId, session);
             return null;
           }
-          const index = session.nextChunk;
-          const plainLen =
-            index < chunkTotal - 1
-              ? CHUNKED_CHUNK_SIZE
-              : header.plainSize - (chunkTotal - 1) * CHUNKED_CHUNK_SIZE;
-          const sealed = await session.frames.take(plainLen + 16);
-          if (sealed === null) {
+          const index = cursor;
+          let plain: Uint8Array;
+          const held = session.ring.find((kept) => kept.index === index);
+          if (held) {
+            plain = held.plain;
+          } else if (index === session.nextChunk) {
+            const sealed = await takeSealed(fileId, entry, header, session);
+            // A short frame is a connection that died mid-chunk, not data.
+            if (sealed === null || sealed.length < chunkPlainLength(header, index) + 16) {
+              finished = true;
+              session.cancelUpstream();
+              return null;
+            }
+            session.nextChunk = index + 1;
+            plain = decryptChunkRange(header, entry.key, sealed, {
+              firstChunk: index,
+              lastChunk: index,
+              ciphertextStart: 0,
+              ciphertextEnd: sealed.length - 1,
+              plainStart: index * CHUNKED_CHUNK_SIZE,
+            });
+            session.ring.push({ index, plain });
+            if (session.ring.length > RING_CHUNKS) {
+              session.ring.shift();
+            }
+          } else {
+            // The cursor fell between an evicted ring chunk and the wire
+            // position; should not happen, but a defensive close beats
+            // serving bytes from the wrong offset.
             finished = true;
-            dropSession(fileId, session);
+            session.cancelUpstream();
             return null;
           }
-          session.nextChunk = index + 1;
-          const plain = decryptChunkRange(header, entry.key, sealed, {
-            firstChunk: index,
-            lastChunk: index,
-            ciphertextStart: 0,
-            ciphertextEnd: sealed.length - 1,
-            plainStart: index * CHUNKED_CHUNK_SIZE,
-          });
+          cursor = index + 1;
           const chunkStart = index * CHUNKED_CHUNK_SIZE;
           const chunkEnd = chunkStart + plain.length - 1;
           const from = Math.max(start, chunkStart) - chunkStart;
@@ -330,12 +421,12 @@ function chunkedResponse(
           return to >= from ? plain.subarray(from, to + 1) : new Uint8Array(0);
         }),
       cancel() {
-        // A cancelled request is usually WebKit about to continue from the
-        // same spot; keep the upstream alive for it. exclusive() ensures a
-        // pending read settles before anyone else touches the reader.
+        // A cancelled request is usually the engine about to continue from
+        // the same spot; keep the upstream alive for it. exclusive() ensures
+        // a pending read settles before anyone else touches the reader.
         void exclusive(async () => {
           if (!finished) {
-            parkSession(fileId, session);
+            upstreamPool.park(fileId, session);
           }
         });
       },
@@ -464,7 +555,16 @@ async function serveMedia(request: Request, fileId: string): Promise<Response> {
       });
     }
     const start = range?.start ?? 0;
-    const end = range?.end ?? header.plainSize - 1;
+    let end = range?.end ?? header.plainSize - 1;
+    if (range) {
+      // Answer ranges in bounded windows ending on a chunk boundary, the
+      // native desktop player's shape. A finite 206 with an honest
+      // content-range makes the engine's next request begin exactly where
+      // this answer ends, so continuations align instead of the engine
+      // slurping an endless response far past what it commits.
+      const cap = (Math.floor(start / CHUNKED_CHUNK_SIZE) + ANSWER_CHUNKS) * CHUNKED_CHUNK_SIZE - 1;
+      end = Math.min(end, Math.min(header.plainSize - 1, cap));
+    }
     return chunkedResponse(fileId, entry, header, start, end, range !== null);
   }
   return legacyResponse(fileId, entry);
