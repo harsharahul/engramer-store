@@ -193,6 +193,89 @@ function frameReader(reader: ReadableStreamDefaultReader<Uint8Array>) {
   };
 }
 
+/**
+ * Upstream continuation cache. Media engines, WebKit especially, consume a
+ * stream in many short-lived range requests that continue exactly where
+ * the previous one stopped; opening a fresh ciphertext fetch for each one
+ * pays a full round trip per cycle. A finished or cancelled request parks
+ * its upstream reader here instead, and the next request that continues at
+ * the same chunk picks it up mid-flight. Seeks discard and refetch.
+ */
+interface UpstreamSession {
+  frames: ReturnType<typeof frameReader>;
+  cancelUpstream: () => void;
+  /** The next chunk index this reader will yield. */
+  nextChunk: number;
+  /** Serializes takers so a parked reader is never consumed twice. */
+  queue: Promise<unknown>;
+  parkTimer: ReturnType<typeof setTimeout> | null;
+}
+
+const upstreamPool = new Map<string, UpstreamSession>();
+const PARK_TTL_MS = 20_000;
+const PARK_MAX_FILES = 2;
+
+function dropSession(fileId: string, session: UpstreamSession): void {
+  if (session.parkTimer) {
+    clearTimeout(session.parkTimer);
+  }
+  if (upstreamPool.get(fileId) === session) {
+    upstreamPool.delete(fileId);
+  }
+  session.cancelUpstream();
+}
+
+function parkSession(fileId: string, session: UpstreamSession): void {
+  const existing = upstreamPool.get(fileId);
+  if (existing && existing !== session) {
+    dropSession(fileId, existing);
+  }
+  if (session.parkTimer) {
+    clearTimeout(session.parkTimer);
+  }
+  session.parkTimer = setTimeout(() => dropSession(fileId, session), PARK_TTL_MS);
+  upstreamPool.set(fileId, session);
+  while (upstreamPool.size > PARK_MAX_FILES) {
+    const [oldestId, oldest] = upstreamPool.entries().next().value as [string, UpstreamSession];
+    dropSession(oldestId, oldest);
+  }
+}
+
+async function acquireSession(
+  fileId: string,
+  entry: MediaEntry,
+  header: ChunkedHeader,
+  firstChunk: number,
+): Promise<UpstreamSession> {
+  const parked = upstreamPool.get(fileId);
+  if (parked) {
+    upstreamPool.delete(fileId);
+    if (parked.parkTimer) {
+      clearTimeout(parked.parkTimer);
+      parked.parkTimer = null;
+    }
+    if (parked.nextChunk === firstChunk) {
+      return parked;
+    }
+    parked.cancelUpstream();
+  }
+  // Fetch from the requested chunk to the end of the blob: backpressure
+  // keeps unread bytes on the wire, and continuations read on from here.
+  const tail = chunkSpanForRange(header, firstChunk * CHUNKED_CHUNK_SIZE, Math.max(0, header.plainSize - 1));
+  const body = await fetchCiphertext(fileId, entry, {
+    start: tail.ciphertextStart,
+    end: tail.ciphertextEnd,
+  });
+  const reader = body.getReader();
+  return {
+    frames: frameReader(reader),
+    cancelUpstream: () => void reader.cancel().catch(() => {}),
+    nextChunk: firstChunk,
+    queue: Promise.resolve(),
+    parkTimer: null,
+  };
+}
+
 /** Serves a plaintext range of a chunked blob, decrypting only its chunks. */
 function chunkedResponse(
   fileId: string,
@@ -206,42 +289,55 @@ function chunkedResponse(
   const chunkTotal = header.plainSize === 0 ? 1 : Math.ceil(header.plainSize / CHUNKED_CHUNK_SIZE);
 
   const stream = pulledBody(async () => {
-    const body = await fetchCiphertext(fileId, entry, {
-      start: span.ciphertextStart,
-      end: span.ciphertextEnd,
-    });
-    const reader = body.getReader();
-    const frames = frameReader(reader);
-    let index = span.firstChunk;
+    const session = await acquireSession(fileId, entry, header, span.firstChunk);
+    let finished = false;
+    const exclusive = <T>(op: () => Promise<T>): Promise<T> => {
+      const run = session.queue.then(op, op);
+      session.queue = run.catch(() => {});
+      return run;
+    };
     return {
-      async next() {
-        if (index > span.lastChunk) {
-          return null;
-        }
-        const plainLen =
-          index < chunkTotal - 1
-            ? CHUNKED_CHUNK_SIZE
-            : header.plainSize - (chunkTotal - 1) * CHUNKED_CHUNK_SIZE;
-        const sealed = await frames.take(plainLen + 16);
-        if (sealed === null) {
-          return null;
-        }
-        const plain = decryptChunkRange(header, entry.key, sealed, {
-          firstChunk: index,
-          lastChunk: index,
-          ciphertextStart: 0,
-          ciphertextEnd: sealed.length - 1,
-          plainStart: index * CHUNKED_CHUNK_SIZE,
-        });
-        const chunkStart = index * CHUNKED_CHUNK_SIZE;
-        const chunkEnd = chunkStart + plain.length - 1;
-        index++;
-        const from = Math.max(start, chunkStart) - chunkStart;
-        const to = Math.min(end, chunkEnd) - chunkStart;
-        return to >= from ? plain.subarray(from, to + 1) : new Uint8Array(0);
-      },
+      next: () =>
+        exclusive(async () => {
+          if (session.nextChunk > span.lastChunk) {
+            finished = true;
+            parkSession(fileId, session);
+            return null;
+          }
+          const index = session.nextChunk;
+          const plainLen =
+            index < chunkTotal - 1
+              ? CHUNKED_CHUNK_SIZE
+              : header.plainSize - (chunkTotal - 1) * CHUNKED_CHUNK_SIZE;
+          const sealed = await session.frames.take(plainLen + 16);
+          if (sealed === null) {
+            finished = true;
+            dropSession(fileId, session);
+            return null;
+          }
+          session.nextChunk = index + 1;
+          const plain = decryptChunkRange(header, entry.key, sealed, {
+            firstChunk: index,
+            lastChunk: index,
+            ciphertextStart: 0,
+            ciphertextEnd: sealed.length - 1,
+            plainStart: index * CHUNKED_CHUNK_SIZE,
+          });
+          const chunkStart = index * CHUNKED_CHUNK_SIZE;
+          const chunkEnd = chunkStart + plain.length - 1;
+          const from = Math.max(start, chunkStart) - chunkStart;
+          const to = Math.min(end, chunkEnd) - chunkStart;
+          return to >= from ? plain.subarray(from, to + 1) : new Uint8Array(0);
+        }),
       cancel() {
-        void reader.cancel().catch(() => {});
+        // A cancelled request is usually WebKit about to continue from the
+        // same spot; keep the upstream alive for it. exclusive() ensures a
+        // pending read settles before anyone else touches the reader.
+        void exclusive(async () => {
+          if (!finished) {
+            parkSession(fileId, session);
+          }
+        });
       },
     };
   });
