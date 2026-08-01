@@ -1,4 +1,5 @@
 import { useStore } from "./store";
+import { diag } from "./diag";
 import { nativeMediaRegister, nativeMediaUrl, nativeShell } from "./native";
 
 /**
@@ -63,9 +64,13 @@ export function installMediaKeyResponder(): () => void {
     return () => {};
   }
   const onMessage = (event: MessageEvent) => {
-    const data = event.data as { type?: string; fileId?: string } | undefined;
+    const data = event.data as { type?: string; fileId?: string; chunk?: number; kind?: string } | undefined;
     if (data?.type === "media-key-request" && data.fileId) {
       postKey(data.fileId);
+    }
+    if (data?.type === "media-upstream" && data.fileId) {
+      const name = useStore.getState().files.get(data.fileId)?.name ?? data.fileId.slice(0, 8);
+      diag("stream", `${name} upstream ${data.kind} at chunk ${data.chunk}`);
     }
   };
   navigator.serviceWorker.addEventListener("message", onMessage);
