@@ -3,6 +3,26 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.30.0] - 2026-08-01
+
+### Added
+- The desktop app plays media through a native protocol. The player's
+  byte-range requests are answered inside the app, with ciphertext
+  fetched ahead in large spans and chunks decrypted natively (verified
+  byte-compatible with the web format), so playback no longer pays a
+  network round trip per request. If the protocol is unavailable the
+  service worker bridge takes over transparently.
+
+### Fixed
+- Streaming rides one connection. Browsers play video as many short
+  range requests that continue where the last stopped; the media bridge
+  now hands the open ciphertext stream from one request to the next
+  instead of reconnecting each time. Six requests that previously cost
+  six upstream fetches now cost one; seeks cost exactly one.
+- Watched-folder scans and file reads explain themselves in the
+  activity log, including a pointer at macOS folder permissions when a
+  non-empty folder scans as empty.
+
 ## [0.29.0] - 2026-08-01
 
 ### Added
