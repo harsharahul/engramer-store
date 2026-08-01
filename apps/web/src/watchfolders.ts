@@ -61,8 +61,9 @@ async function drain(): Promise<void> {
           file: new File([bytes], file.name, { lastModified: file.mtime }),
           path: file.rel_dirs,
         });
-      } catch {
+      } catch (err) {
         // Unreadable now (moved, permissions); a later event retries it.
+        diag("watch", `could not read ${file.name}: ${err instanceof Error ? err.message : "unknown"}`);
         inFlight.delete(file.path);
       }
     }
@@ -111,5 +112,12 @@ export async function syncWatchedNow(): Promise<void> {
   if (!nativeShell()) {
     return;
   }
-  enqueue(await watchedScan());
+  const found = await watchedScan();
+  diag(
+    "watch",
+    found.length === 0
+      ? "scan found 0 files; if the folder is not empty, macOS may be blocking access (System Settings > Privacy & Security > Files and Folders)"
+      : `scan found ${found.length} file(s)`,
+  );
+  enqueue(found);
 }
