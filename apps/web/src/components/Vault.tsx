@@ -32,7 +32,7 @@ import {
   markUnlockDeclined,
   unlockDeclined,
 } from "../unlock";
-import { nativeUnlockAvailable } from "../native";
+import { nativeShell, nativeUnlockAvailable } from "../native";
 import { startWatchSync } from "../watchfolders";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
 import { cosine, embedQuery, semanticEnabled, setSemanticEnabled } from "../intel/semantic";
@@ -623,6 +623,11 @@ export function Vault() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setPaletteOpen(true);
+      } else if (nativeShell() && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "r") {
+        // Browsers reload on their own; the desktop shell needs the shortcut
+        // wired by hand or the page lives until the app quits.
+        event.preventDefault();
+        window.location.reload();
       } else if (event.key === "/" && !typing && !paletteOpen) {
         event.preventDefault();
         searchInput.current?.focus();
