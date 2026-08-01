@@ -145,3 +145,47 @@ export async function nativeListen<T>(
   }
   return shell.event.listen(event, (ev) => handler(ev.payload));
 }
+
+// ----- native media path (desktop shell only) -----
+
+/** The shell's media protocol answers range requests locally. */
+export function nativeMediaUrl(fileId: string): string {
+  return `stream://localhost/${fileId}`;
+}
+
+export async function nativeMediaRegister(
+  fileId: string,
+  key: Uint8Array,
+  token: string,
+  mime: string,
+): Promise<boolean> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return false;
+  }
+  let b64 = "";
+  for (let i = 0; i < key.length; i += 0x8000) {
+    b64 += String.fromCharCode(...key.subarray(i, i + 0x8000));
+  }
+  try {
+    await invoke("media_register", {
+      fileId,
+      key: btoa(b64),
+      token,
+      base: location.origin,
+      mime,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Locking or signing out revokes every key the shell holds. */
+export async function nativeMediaClear(): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return;
+  }
+  await invoke("media_clear").catch(() => {});
+}

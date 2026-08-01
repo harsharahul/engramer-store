@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FileEntry } from "../store";
 import { downloadAndDecrypt } from "../transfer";
-import { mediaBridgeAvailable, mediaUrl, onMediaProgress, registerMediaKey } from "../mediastream";
+import { bridgeMediaUrl, mediaBridgeAvailable, mediaUrl, onMediaProgress, registerMediaKey } from "../mediastream";
 import { fileKind, formatBytes } from "../format";
 import { triggerDownload } from "../download";
 import { DownloadGlyph, PencilGlyph, ShareGlyph, TagGlyph, XGlyph } from "./Icon";
@@ -186,7 +186,19 @@ export function Preview(props: {
                   `${file.name} stalled at ${Math.round(e.currentTarget.currentTime)}s`,
                 )
               }
-              onError={() => diag("playback", `${file.name} playback error`)}
+              onError={(e) => {
+                const el = e.currentTarget;
+                if (el.src.startsWith("stream:")) {
+                  // The shell's native protocol failed; the service worker
+                  // path always remains as the safety net.
+                  diag("playback", `${file.name} native path failed; using the bridge`);
+                  el.src = bridgeMediaUrl(file.id);
+                  el.load();
+                  void el.play().catch(() => {});
+                  return;
+                }
+                diag("playback", `${file.name} playback error`);
+              }}
               onPlaying={(e) =>
                 diag(
                   "playback",

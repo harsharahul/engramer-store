@@ -1,4 +1,5 @@
 import { useStore } from "./store";
+import { nativeMediaRegister, nativeMediaUrl, nativeShell } from "./native";
 
 /**
  * Page side of the media bridge: the service worker serves decrypted
@@ -7,6 +8,14 @@ import { useStore } from "./store";
  */
 
 export function mediaUrl(fileId: string): string {
+  // The desktop shell serves media through its native protocol: range
+  // requests are answered in-process, so WKWebView's many short reads
+  // cost no network round trips. Browsers keep the service worker path.
+  return nativeShell() ? nativeMediaUrl(fileId) : `/media/${fileId}`;
+}
+
+/** The browser path, used as a fallback if the native protocol fails. */
+export function bridgeMediaUrl(fileId: string): string {
   return `/media/${fileId}`;
 }
 
@@ -35,6 +44,14 @@ function postKey(fileId: string): void {
 /** Pushes a file's key to the worker ahead of setting a media src. */
 export function registerMediaKey(fileId: string): void {
   postKey(fileId);
+  if (nativeShell()) {
+    const state = useStore.getState();
+    const file = state.files.get(fileId);
+    const token = state.session?.token;
+    if (file && token) {
+      void nativeMediaRegister(fileId, file.key, token, file.mime);
+    }
+  }
 }
 
 /**

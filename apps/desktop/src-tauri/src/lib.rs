@@ -4,6 +4,8 @@
 //! that survives the window closing, launch at login, and an unlock secret
 //! kept in the Keychain behind Touch ID.
 
+mod egc1;
+mod media;
 mod unlock;
 mod watched;
 
@@ -29,6 +31,8 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_dialog::init())
         .manage::<watched::SharedWatchState>(Arc::new(Mutex::new(Default::default())))
+        .manage(media::MediaState::default())
+        .register_asynchronous_uri_scheme_protocol("stream", media::handle)
         .invoke_handler(tauri::generate_handler![
             unlock::native_unlock_available,
             unlock::unlock_secret_store,
@@ -39,6 +43,8 @@ pub fn run() {
             watched::watched_remove,
             watched::watched_scan,
             watched::watched_file_read,
+            media::media_register,
+            media::media_clear,
         ])
         .setup(|app| {
             watched::rebuild_watchers(app.handle());
