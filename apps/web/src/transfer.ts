@@ -430,12 +430,12 @@ const MIN_CHUNKS_PER_PART = 2;
 const PARTS_IN_FLIGHT = 2;
 
 /** Full jitter keeps a fleet of retrying clients from re-arriving in step. */
-function retryDelay(attempt: number): number {
+export function retryDelay(attempt: number): number {
   return Math.random() * Math.min(15_000, 1_000 * 2 ** attempt);
 }
 
 /** Offline is a state to wait out, not an error to burn retry budget on. */
-function whenOnline(): Promise<void> {
+export function whenOnline(): Promise<void> {
   if (typeof navigator === "undefined" || navigator.onLine !== false) {
     return Promise.resolve();
   }
