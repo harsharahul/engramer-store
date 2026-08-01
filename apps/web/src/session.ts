@@ -10,6 +10,7 @@ import {
 } from "@engramer/crypto";
 import { api, setAuthToken } from "./api";
 import { clearNativeUnlock, deviceUnlock, updateUnlockToken } from "./unlock";
+import { nativeMediaClear } from "./native";
 
 export interface Session {
   email: string;
@@ -148,6 +149,7 @@ export function clearSession(): void {
   // Signing out is the revocation gesture: the wrapped session must not
   // outlive it, in this browser or in the desktop shell's Keychain.
   clearNativeUnlock();
+  void nativeMediaClear();
   setAuthToken(null);
 }
 
@@ -158,6 +160,7 @@ export function clearSession(): void {
  */
 export function suspendSession(): void {
   sessionStorage.removeItem(SESSION_KEY);
+  void nativeMediaClear();
   setAuthToken(null);
 }
 

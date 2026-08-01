@@ -149,7 +149,9 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     "worker-src 'self' blob:",
     "connect-src 'self'",
     "img-src 'self' blob: data:",
-    "media-src 'self' blob:",
+    // stream: is the desktop shell's native media protocol; browsers
+    // without it simply never reference such URLs.
+    "media-src 'self' blob: stream:",
     "font-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     "frame-src 'self' blob:",
