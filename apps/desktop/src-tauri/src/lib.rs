@@ -50,6 +50,7 @@ pub fn run() {
             watched::rebuild_watchers(app.handle());
             let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
             let open_item = MenuItem::with_id(app, "open", "Open Engram Store", true, None::<&str>)?;
+            let refresh_item = MenuItem::with_id(app, "refresh", "Refresh", true, None::<&str>)?;
             let autostart_item = CheckMenuItem::with_id(
                 app,
                 "autostart",
@@ -63,6 +64,7 @@ pub fn run() {
                 app,
                 &[
                     &open_item,
+                    &refresh_item,
                     &PredefinedMenuItem::separator(app)?,
                     &autostart_item,
                     &PredefinedMenuItem::separator(app)?,
@@ -76,6 +78,14 @@ pub fn run() {
                 .show_menu_on_left_click(true)
                 .on_menu_event(move |app, event| match event.id.as_ref() {
                     "open" => show_main(app),
+                    "refresh" => {
+                        // Reload picks up a freshly deployed frontend and clears
+                        // any in-page state without losing the session.
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.eval("window.location.reload()");
+                        }
+                        show_main(app);
+                    }
                     "autostart" => {
                         let launcher = app.autolaunch();
                         let now_on = launcher.is_enabled().unwrap_or(false);
