@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
+import { extname, join } from "node:path";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
@@ -169,7 +169,48 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     "upgrade-insecure-requests",
   ].join("; ");
 
-  app.addHook("onSend", async (_request, reply) => {
+  /**
+   * The office editors are vendored third-party code that runs in a
+   * sandboxed frame with no access to this origin's storage, cookies or
+   * the page holding the master key. That frame is a separate, opaque
+   * origin, which has three consequences for these responses and these
+   * only: the assets are cross-origin to their own host, their fetches
+   * arrive with a null origin, and framing checks that name an origin
+   * cannot match an opaque one. The app's own documents and every API
+   * route keep the strict policy above.
+   *
+   * The relaxed script policy is what the editors require to run at all;
+   * it buys nothing for an attacker here, because the frame holds no key,
+   * no session and no storage to reach.
+   */
+  const OFFICE_PREFIX = "/office/";
+  const OFFICE_CSP = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
+    "worker-src 'self' blob:",
+    // data: carries the converted document into the editor frame, which
+    // cannot read a blob: URL minted by another origin.
+    "connect-src 'self' blob: data:",
+    "img-src 'self' blob: data:",
+    "media-src 'self' blob:",
+    "font-src 'self' data:",
+    "style-src 'self' 'unsafe-inline'",
+    "frame-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; ");
+
+  app.addHook("onSend", async (request, reply) => {
+    if (request.url.startsWith(OFFICE_PREFIX)) {
+      reply.header("content-security-policy", OFFICE_CSP);
+      reply.header("x-content-type-options", "nosniff");
+      reply.header("referrer-policy", "no-referrer");
+      reply.header("cross-origin-resource-policy", "cross-origin");
+      reply.header("access-control-allow-origin", "*");
+      reply.removeHeader("x-frame-options");
+      return;
+    }
     reply.header("content-security-policy", CSP);
     reply.header("x-content-type-options", "nosniff");
     reply.header("x-frame-options", "DENY");
@@ -209,6 +250,35 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   app.get("/api/health", async () => ({ status: "ok" }));
 
   if (config.webDistDir && existsSync(config.webDistDir)) {
+    /**
+     * The vendored editor ships a pre-compressed sibling for most of its
+     * bulk, so a client that accepts brotli gets roughly a fifth of the
+     * bytes for free. Served ahead of the general static handler, with the
+     * original path's content type preserved.
+     */
+    app.addHook("onRequest", async (request, reply) => {
+      if (!request.url.startsWith(OFFICE_PREFIX) || request.method !== "GET") {
+        return;
+      }
+      const accepts = String(request.headers["accept-encoding"] ?? "").includes("br");
+      if (!accepts) {
+        return;
+      }
+      const path = request.url.split("?")[0] ?? "";
+      // The office tree is generated, but a request path is not: refuse any
+      // traversal before it reaches the filesystem.
+      if (path.includes("..") || path.endsWith(".br")) {
+        return;
+      }
+      const compressed = join(config.webDistDir!, `${path}.br`);
+      if (!existsSync(compressed)) {
+        return;
+      }
+      reply.header("content-encoding", "br");
+      reply.header("vary", "accept-encoding");
+      reply.type(mimeFor(path));
+      return reply.send(createReadStream(compressed));
+    });
     await app.register(fastifyStatic, { root: config.webDistDir });
     // Single-page app: unknown non-API paths fall through to the client router.
     app.setNotFoundHandler((request, reply) => {
@@ -220,6 +290,21 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   }
 
   return app;
+}
+
+/** Content types for the file kinds the vendored editor serves compressed. */
+const MIME_BY_EXT: Record<string, string> = {
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".html": "text/html; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".wasm": "application/wasm",
+};
+
+function mimeFor(path: string): string {
+  return MIME_BY_EXT[extname(path)] ?? "application/octet-stream";
 }
 
 /** sha256 CSP hashes of every inline <script> in the served page. */
