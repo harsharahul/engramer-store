@@ -160,7 +160,10 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,woff2,svg,png}"],
         // The OCR runtime and language model are megabytes and fetched only
         // when OCR actually runs; they never belong in the app-shell cache.
-        globIgnores: ["ocr/**", "models/**", "ort/**"],
+        // The office editors are hundreds of megabytes fetched only when a
+        // document is opened; they belong to the HTTP cache, never the
+        // app-shell precache.
+        globIgnores: ["ocr/**", "models/**", "ort/**", "office/**"],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
       },
     }),
