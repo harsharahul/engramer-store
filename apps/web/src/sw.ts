@@ -36,7 +36,8 @@ cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
 registerRoute(
   new NavigationRoute(createHandlerBoundToURL("index.html"), {
-    denylist: [/^\/api\//, /^\/media\//],
+    // /office/ is the sandboxed editor tree: never an app navigation.
+    denylist: [/^\/api\//, /^\/media\//, /^\/office\//],
   }),
 );
 
