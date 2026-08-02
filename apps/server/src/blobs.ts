@@ -52,8 +52,10 @@ export interface BlobRange {
 export interface BlobStore {
   /** Streams a blob in, enforcing maxBytes; resolves to the byte count. */
   put(key: string, source: Readable, maxBytes: number): Promise<number>;
-  /** Streams a blob out, optionally only the given inclusive byte range. */
-  get(key: string, range?: BlobRange): Promise<Readable>;
+  /** Streams a blob out, optionally only the given inclusive byte range.
+   * Callers that know the blob's total size pass it along; tiered stores
+   * use it to serve tail ranges from hot copies without a lookup. */
+  get(key: string, range?: BlobRange, totalBytes?: number): Promise<Readable>;
   remove(key: string): Promise<void>;
   /** Opens a part session targeting the key; returns a backend handle. */
   beginParts(key: string): Promise<string>;

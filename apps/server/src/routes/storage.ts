@@ -615,7 +615,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         reply.header("content-type", "application/octet-stream");
         reply.header("content-range", `bytes ${range.start}-${range.end}/${size}`);
         reply.header("content-length", range.end - range.start + 1);
-        return reply.send(await app.blobs.get(key, range));
+        return reply.send(await app.blobs.get(key, range, Number(size)));
       }
     }
     reply.header("content-type", "application/octet-stream");

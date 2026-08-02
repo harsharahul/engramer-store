@@ -110,10 +110,10 @@ export class DiskCachedBlobStore implements BlobStore {
     this.evict();
   }
 
-  async get(key: string, range?: BlobRange): Promise<Readable> {
+  async get(key: string, range?: BlobRange, totalBytes?: number): Promise<Readable> {
     if (range) {
       // Ranged reads never involve the cache; content blobs are not cached.
-      return this.backing.get(key, range);
+      return this.backing.get(key, range, totalBytes);
     }
     if (!this.cacheable(key)) {
       return this.backing.get(key);

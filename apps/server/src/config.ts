@@ -52,6 +52,9 @@ export interface ServerConfig {
   /** Disk budget for the derived-blob cache in front of S3; 0 disables it. */
   blobCacheBytes: number;
   blobCacheDir: string;
+  /** Disk budget for the content window cache; 0 disables it. */
+  mediaCacheBytes: number;
+  mediaCacheDir: string;
 }
 
 export interface ConfigOverrides {
@@ -107,6 +110,8 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
     s3Derived: loadDerivedS3Settings(s3),
     blobCacheBytes: positiveOrZero(process.env.ENGRAMER_BLOB_CACHE_BYTES),
     blobCacheDir: process.env.ENGRAMER_BLOB_CACHE_DIR || join(dataDir, "blob-cache"),
+    mediaCacheBytes: positiveOrZero(process.env.ENGRAMER_MEDIA_CACHE_BYTES),
+    mediaCacheDir: process.env.ENGRAMER_MEDIA_CACHE_DIR || join(dataDir, "media-cache"),
   };
 }
 
