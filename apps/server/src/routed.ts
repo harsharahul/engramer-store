@@ -20,26 +20,97 @@ export class RoutedBlobStore implements BlobStore {
   private static readonly DERIVED = /\.(thumb|idx)$/;
   /** Fallback copies are buffered; derived blobs are small by construction. */
   private static readonly HEAL_CAP = 4 * 1024 * 1024;
+  /** Bookend sizes: every playback start touches a file's head, and media
+   * containers keep their index near the tail. Copies of both live on the
+   * fast store, so a cold start never pays the slow store's price. The
+   * tail is two 32MiB cache windows deep, which always covers the final
+   * window and the one before it regardless of how the size divides. */
+  static readonly HEAD_BYTES = 32 * 1024 * 1024;
+  static readonly TAIL_BYTES = 64 * 1024 * 1024;
+  private readonly headBytes: number;
+  private readonly tailBytes: number;
+
+  /** Bookend copies being written right now, deduplicated per key. */
+  private readonly healing = new Set<string>();
+  /** Part sizes per open session, so completeParts knows the blob size. */
+  private readonly partBytes = new Map<string, Map<number, number>>();
 
   constructor(
     private readonly primary: BlobStore,
     private readonly derived: BlobStore,
-  ) {}
+    geometry?: { headBytes?: number; tailBytes?: number },
+  ) {
+    this.headBytes = geometry?.headBytes ?? RoutedBlobStore.HEAD_BYTES;
+    this.tailBytes = geometry?.tailBytes ?? RoutedBlobStore.TAIL_BYTES;
+  }
 
   private isDerived(key: string): boolean {
     return RoutedBlobStore.DERIVED.test(key);
   }
 
   async put(key: string, source: Readable, maxBytes: number): Promise<number> {
-    return this.isDerived(key)
-      ? this.derived.put(key, source, maxBytes)
-      : this.primary.put(key, source, maxBytes);
+    if (this.isDerived(key)) {
+      return this.derived.put(key, source, maxBytes);
+    }
+    const written = await this.primary.put(key, source, maxBytes);
+    this.copyBookends(key, written);
+    return written;
   }
 
-  async get(key: string, range?: BlobRange): Promise<Readable> {
+  /**
+   * Copies a content blob's head and tail from the slow store to the fast
+   * one, once, in the background. Best-effort: a missing bookend only
+   * means the read that wanted it falls back to the slow store.
+   */
+  private copyBookends(key: string, totalBytes: number): void {
+    if (totalBytes <= 0 || this.healing.has(key)) {
+      return;
+    }
+    this.healing.add(key);
+    void (async () => {
+      try {
+        const headEnd = Math.min(this.headBytes, totalBytes) - 1;
+        const head = await this.primary.get(key, { start: 0, end: headEnd });
+        await this.derived.put(`${key}.bhead`, head, headEnd + 1);
+        const tailStart = Math.max(0, totalBytes - this.tailBytes);
+        if (tailStart > headEnd) {
+          const tail = await this.primary.get(key, { start: tailStart, end: totalBytes - 1 });
+          await this.derived.put(`${key}.btail`, tail, totalBytes - tailStart);
+        }
+      } catch {
+        // The slow store still holds the truth; a later read retries.
+      } finally {
+        this.healing.delete(key);
+      }
+    })();
+  }
+
+  async get(key: string, range?: BlobRange, totalBytes?: number): Promise<Readable> {
     if (range) {
-      // Ranged reads are a content-blob affair; they route directly and
-      // never trigger the derived-heal copy.
+      if (!this.isDerived(key) && totalBytes !== undefined && totalBytes > 0) {
+        const headEnd = Math.min(this.headBytes, totalBytes) - 1;
+        const tailStart = Math.max(0, totalBytes - this.tailBytes);
+        try {
+          if (range.end <= headEnd) {
+            return await this.derived.get(`${key}.bhead`, range);
+          }
+          if (range.start >= tailStart && tailStart > headEnd) {
+            return await this.derived.get(`${key}.btail`, {
+              start: range.start - tailStart,
+              end: range.end - tailStart,
+            });
+          }
+        } catch (err) {
+          if (!isMissingBlob(err)) {
+            throw err;
+          }
+          // Pre-bookend blob: serve slow, and put the bookends in place
+          // for every read after this one.
+          this.copyBookends(key, totalBytes);
+        }
+      }
+      // Ranged reads route directly and never trigger the derived-heal
+      // copy for derived keys.
       return this.backendFor(key).get(key, range);
     }
     if (!this.isDerived(key)) {
@@ -75,6 +146,9 @@ export class RoutedBlobStore implements BlobStore {
       return;
     }
     await this.primary.remove(key);
+    // Bookend ciphertext must not outlive the blob it copies.
+    await this.derived.remove(`${key}.bhead`).catch(() => {});
+    await this.derived.remove(`${key}.btail`).catch(() => {});
   }
 
   // Part sessions follow the same placement rule as put().
@@ -86,22 +160,38 @@ export class RoutedBlobStore implements BlobStore {
     return this.backendFor(key).beginParts(key);
   }
 
-  putPart(
+  async putPart(
     key: string,
     handle: string,
     partNo: number,
     source: Readable,
     length: number,
   ): Promise<PartReceipt> {
-    return this.backendFor(key).putPart(key, handle, partNo, source, length);
+    const receipt = await this.backendFor(key).putPart(key, handle, partNo, source, length);
+    if (!this.isDerived(key)) {
+      const session = this.partBytes.get(`${key}:${handle}`) ?? new Map<number, number>();
+      session.set(partNo, receipt.bytes);
+      this.partBytes.set(`${key}:${handle}`, session);
+    }
+    return receipt;
   }
 
-  completeParts(key: string, handle: string, parts: { partNo: number; etag?: string }[]): Promise<void> {
-    return this.backendFor(key).completeParts(key, handle, parts);
+  async completeParts(key: string, handle: string, parts: { partNo: number; etag?: string }[]): Promise<void> {
+    await this.backendFor(key).completeParts(key, handle, parts);
+    const session = this.partBytes.get(`${key}:${handle}`);
+    this.partBytes.delete(`${key}:${handle}`);
+    if (session && !this.isDerived(key)) {
+      let total = 0;
+      for (const part of parts) {
+        total += session.get(part.partNo) ?? 0;
+      }
+      this.copyBookends(key, total);
+    }
   }
 
-  abortParts(key: string, handle: string): Promise<void> {
-    return this.backendFor(key).abortParts(key, handle);
+  async abortParts(key: string, handle: string): Promise<void> {
+    this.partBytes.delete(`${key}:${handle}`);
+    await this.backendFor(key).abortParts(key, handle);
   }
 }
 
