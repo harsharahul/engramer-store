@@ -16,6 +16,7 @@
  *   node scripts/office-assets.mjs --clean   remove the derived tree
  */
 import { createHash } from "node:crypto";
+import { brotliCompressSync, brotliDecompressSync } from "node:zlib";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -176,7 +177,12 @@ async function applyPatches(base, checkOnly) {
       const source = await readFile(path, "utf8");
       const already = source.split(patch.replace).length - 1;
       if (already > 0) {
-        continue; // idempotent: an applied patch is not an error
+        // An applied patch must be applied exactly once: a second copy means
+        // the tree was patched twice and the editor would load two shims.
+        if (already !== 1) {
+          throw new Error(`patch "${patch.id}" appears ${already} times in ${file}`);
+        }
+        continue;
       }
       const hits = source.split(patch.find).length - 1;
       if (hits !== 1) {
@@ -185,12 +191,58 @@ async function applyPatches(base, checkOnly) {
             `The upstream build changed; re-validate before shipping.`,
         );
       }
-      if (!checkOnly) {
-        await writeFile(path, source.replace(patch.find, patch.replace));
+      if (checkOnly) {
+        continue;
+      }
+      await writeFile(path, source.replace(patch.find, patch.replace));
+      // The release ships a pre-compressed sibling for most files. Patching
+      // the original leaves that sibling stale, and a server that prefers it
+      // would serve the unpatched bytes: the editor would load without the
+      // shim and die on the first cross-origin parent read. Recompress.
+      const sibling = `${path}.br`;
+      if (existsSync(sibling)) {
+        await writeFile(sibling, brotliCompressSync(await readFile(path)));
       }
     }
-    console.log(`${checkOnly ? "anchor ok" : "patched  "} ${patch.id}`);
+    console.log(`${checkOnly ? "verified " : "patched  "} ${patch.id}`);
   }
+}
+
+/**
+ * Guards against the failure the patch step is designed to prevent: a
+ * pre-compressed sibling whose contents no longer match the file it shadows.
+ * Any mismatch means a client negotiating compression gets different code
+ * from one that does not.
+ */
+async function verifyCompressedSiblings(base) {
+  const mismatched = [];
+  const walk = async (dir) => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(path);
+        continue;
+      }
+      if (!entry.name.endsWith(".br")) {
+        continue;
+      }
+      const original = path.slice(0, -3);
+      if (!existsSync(original)) {
+        continue; // compressed-only assets are legitimate
+      }
+      const decoded = brotliDecompressSync(await readFile(path));
+      if (!decoded.equals(await readFile(original))) {
+        mismatched.push(relative(base, original));
+      }
+    }
+  };
+  await walk(base);
+  if (mismatched.length > 0) {
+    throw new Error(
+      `compressed siblings disagree with their sources:\n  ${mismatched.join("\n  ")}`,
+    );
+  }
+  console.log("verified  compressed siblings match their sources");
 }
 
 async function measure(dir) {
@@ -207,6 +259,7 @@ async function main() {
   }
   if (args.has("--check")) {
     await applyPatches(outDir, true);
+    await verifyCompressedSiblings(outDir);
     return;
   }
 
@@ -253,6 +306,7 @@ async function main() {
   await execFile("cp", [join(root, "apps/web/office/engram-sandbox-shim.js"), outDir]);
 
   await applyPatches(outDir, false);
+  await verifyCompressedSiblings(outDir);
   await rm(staging, { recursive: true, force: true });
   console.log(`office assets ready: ${await measure(outDir)} MB in ${relative(root, outDir)}`);
 }

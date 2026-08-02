@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync, readFileSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
@@ -274,9 +274,21 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
       if (!existsSync(compressed)) {
         return;
       }
+      // Same validators the static handler would have sent: without them the
+      // editor's tens of megabytes are re-fetched on every open instead of
+      // being revalidated. The vendored tree is immutable for a given build,
+      // so its identity is (size, mtime) of the compressed file.
+      const info = statSync(compressed);
       reply.header("content-encoding", "br");
       reply.header("vary", "accept-encoding");
+      reply.header("content-length", info.size);
+      reply.header("last-modified", info.mtime.toUTCString());
+      reply.header("etag", `"${info.size.toString(16)}-${info.mtimeMs.toString(16)}"`);
+      reply.header("cache-control", "public, max-age=604800");
       reply.type(mimeFor(path));
+      if (request.headers["if-none-match"] === reply.getHeader("etag")) {
+        return reply.code(304).send();
+      }
       return reply.send(createReadStream(compressed));
     });
     await app.register(fastifyStatic, { root: config.webDistDir });
@@ -284,6 +296,12 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     app.setNotFoundHandler((request, reply) => {
       if (request.url.startsWith("/api/")) {
         return reply.code(404).send({ error: "not found" });
+      }
+      // The office prefix answers with vendored files or with nothing. Falling
+      // through would serve the app's own shell under the relaxed policy that
+      // prefix carries, which is the one place this app must never run.
+      if (request.url.startsWith(OFFICE_PREFIX)) {
+        return reply.code(404).type("text/plain").send("not found");
       }
       return reply.sendFile("index.html");
     });
