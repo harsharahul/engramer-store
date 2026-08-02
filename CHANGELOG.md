@@ -3,6 +3,40 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.31.0] - 2026-08-02
+
+### Added
+- Content storage tiering. The server keeps a bounded on-disk cache of
+  aligned 32 MiB ciphertext windows: cold reads stream through at
+  unchanged latency while the windows they touch fill behind them, and
+  an upload warms its own first and last windows, so a video plays
+  smoothly the moment it finishes uploading and repeat viewing costs
+  the backing store nothing. When content and derived blobs live on
+  separate stores, every file also leaves hot copies of its opening
+  and closing bytes on the fast store, written on upload and
+  self-healing for existing files, so playback starts and tail-index
+  reads never wait on a slow or rate-limited backend.
+- The desktop app can refresh in place: a Refresh item in the tray
+  menu and Cmd+R in the window reload the page without restarting,
+  which also picks up newly deployed versions.
+- The activity log narrates streaming: the media bridge reports every
+  upstream connection it opens or resumes, so playback behavior is
+  visible on the device instead of only in server logs.
+
+### Fixed
+- Browser streaming answers range requests in bounded, chunk-aligned
+  windows. Desktop Safari's media engine reads with unaligned ranges
+  and drains open-ended responses far beyond what it keeps, which
+  defeated the single-connection cache and multiplied transfer;
+  playback of a large file could stall once the backing store began
+  throttling. Measured against real WebKit, Chromium, and Gecko
+  engines, upstream requests for a 1 GB play drop from 237 to 54 and
+  total transfer from 14.3x the file's size to 1.7x, with playback
+  and seeking unchanged.
+- A thumbnail that failed to load once no longer stays a blurred
+  placeholder for the whole session: fetches retry with backoff, and
+  a failure is forgotten so the next look starts over.
+
 ## [0.30.0] - 2026-08-01
 
 ### Added
