@@ -3,6 +3,21 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.31.1] - 2026-08-02
+
+### Fixed
+- Streaming stays smooth at real-world latency. Media responses now
+  read decrypted chunks from one shared pool per file: a missing chunk
+  starts a single windowed fetch that every concurrent request joins,
+  and read-ahead fills the pool before the playhead arrives, so a
+  player reading with several cursors can no longer trigger bursts of
+  simultaneous connections that briefly drain its buffer. At the
+  network profile that reproduced the periodic mid-play lag, stalled
+  playback samples drop to zero, seek settle falls from seconds to
+  about 200 ms, and total transfer runs below 1.2x the file's size.
+  The activity log now distinguishes fetches a player waited on from
+  quiet read-ahead.
+
 ## [0.31.0] - 2026-08-02
 
 ### Added
