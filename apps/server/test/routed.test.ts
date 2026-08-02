@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
-import { byteLimiter, type BlobStore, type PartReceipt } from "../src/blobs.js";
+import { byteLimiter, type BlobRange, type BlobStore, type PartReceipt } from "../src/blobs.js";
 import { loadConfig } from "../src/config.js";
 import { RoutedBlobStore } from "../src/routed.js";
 
@@ -24,13 +24,17 @@ class FakeStore implements BlobStore {
     return limiter.written();
   }
 
-  async get(key: string): Promise<Readable> {
+  async get(key: string, range?: BlobRange): Promise<Readable> {
     this.gets++;
     const bytes = this.blobs.get(key);
     if (!bytes) {
       throw Object.assign(new Error("no such key"), { name: "NoSuchKey" });
     }
-    return Readable.from(bytes);
+    if (!range) {
+      return Readable.from(bytes);
+    }
+    // S3 semantics: an end past the blob clamps to the last byte.
+    return Readable.from(bytes.subarray(range.start, Math.min(range.end + 1, bytes.length)));
   }
 
   async remove(key: string): Promise<void> {
@@ -94,6 +98,24 @@ async function drain(stream: Readable): Promise<Buffer> {
 const put = (store: BlobStore, key: string, bytes: Buffer) =>
   store.put(key, Readable.from(bytes), 1024 * 1024);
 
+async function until(check: () => boolean, ms = 2000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > deadline) {
+      throw new Error("condition never held");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+function patterned(length: number): Buffer {
+  const bytes = Buffer.alloc(length);
+  for (let i = 0; i < length; i++) {
+    bytes[i] = (i * 31 + 7) % 256;
+  }
+  return bytes;
+}
+
 describe("routed blob store", () => {
   it("sends content and versions to primary, derived blobs to the derived backend", async () => {
     const primary = new FakeStore();
@@ -106,7 +128,14 @@ describe("routed blob store", () => {
     await put(routed, "file-1.idx", Buffer.from("index"));
 
     expect([...primary.blobs.keys()].sort()).toEqual(["file-1", "file-1.g2"]);
-    expect([...derived.blobs.keys()].sort()).toEqual(["file-1.idx", "file-1.thumb"]);
+    // Content puts also leave hot bookend copies on the derived backend.
+    await until(() => derived.blobs.has("file-1.bhead") && derived.blobs.has("file-1.g2.bhead"));
+    expect([...derived.blobs.keys()].sort()).toEqual([
+      "file-1.bhead",
+      "file-1.g2.bhead",
+      "file-1.idx",
+      "file-1.thumb",
+    ]);
 
     expect(await drain(await routed.get("file-1"))).toEqual(Buffer.from("content"));
     expect(await drain(await routed.get("file-1.thumb"))).toEqual(Buffer.from("thumb"));
@@ -159,6 +188,89 @@ describe("routed blob store", () => {
 
     await routed.remove("file-1");
     expect(primary.blobs.has("file-1")).toBe(false);
+  });
+});
+
+describe("content bookends", () => {
+  const GEOMETRY = { headBytes: 8, tailBytes: 16 };
+  const SIZE = 40;
+
+  async function seeded(): Promise<{ primary: FakeStore; derived: FakeStore; routed: RoutedBlobStore; blob: Buffer }> {
+    const primary = new FakeStore();
+    const derived = new FakeStore();
+    const routed = new RoutedBlobStore(primary, derived, GEOMETRY);
+    const blob = patterned(SIZE);
+    await put(routed, "movie", blob);
+    await until(() => derived.blobs.has("movie.bhead") && derived.blobs.has("movie.btail"));
+    return { primary, derived, routed, blob };
+  }
+
+  it("a content put leaves head and tail copies on the fast store", async () => {
+    const { derived, blob } = await seeded();
+    expect(derived.blobs.get("movie.bhead")).toEqual(blob.subarray(0, 8));
+    expect(derived.blobs.get("movie.btail")).toEqual(blob.subarray(SIZE - 16));
+  });
+
+  it("serves head and tail ranges from the fast store, middles from the slow one", async () => {
+    const { primary, routed, blob } = await seeded();
+    const before = primary.gets;
+    expect(await drain(await routed.get("movie", { start: 2, end: 7 }, SIZE))).toEqual(
+      blob.subarray(2, 8),
+    );
+    expect(await drain(await routed.get("movie", { start: 30, end: 39 }, SIZE))).toEqual(
+      blob.subarray(30, 40),
+    );
+    expect(primary.gets).toBe(before);
+    expect(await drain(await routed.get("movie", { start: 8, end: 23 }, SIZE))).toEqual(
+      blob.subarray(8, 24),
+    );
+    expect(primary.gets).toBe(before + 1);
+  });
+
+  it("falls back to the slow store for pre-bookend blobs and heals them", async () => {
+    const primary = new FakeStore();
+    const derived = new FakeStore();
+    const routed = new RoutedBlobStore(primary, derived, GEOMETRY);
+    const blob = patterned(SIZE);
+    primary.blobs.set("old-movie", blob);
+    expect(await drain(await routed.get("old-movie", { start: 0, end: 7 }, SIZE))).toEqual(
+      blob.subarray(0, 8),
+    );
+    await until(() => derived.blobs.has("old-movie.bhead") && derived.blobs.has("old-movie.btail"));
+    expect(derived.blobs.get("old-movie.btail")).toEqual(blob.subarray(SIZE - 16));
+  });
+
+  it("without a size hint every ranged read goes to the slow store, untouched", async () => {
+    const primary = new FakeStore();
+    const derived = new FakeStore();
+    const routed = new RoutedBlobStore(primary, derived, GEOMETRY);
+    const blob = patterned(SIZE);
+    primary.blobs.set("plain", blob);
+    expect(await drain(await routed.get("plain", { start: 0, end: 7 }))).toEqual(blob.subarray(0, 8));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(derived.blobs.size).toBe(0);
+  });
+
+  it("a part upload leaves bookends sized from its parts", async () => {
+    const primary = new FakeStore();
+    const derived = new FakeStore();
+    const routed = new RoutedBlobStore(primary, derived, GEOMETRY);
+    const blob = patterned(SIZE);
+    const handle = await routed.beginParts("parted");
+    await routed.putPart("parted", handle, 1, Readable.from(blob.subarray(0, 24)), 24);
+    await routed.putPart("parted", handle, 2, Readable.from(blob.subarray(24)), 16);
+    await routed.completeParts("parted", handle, [{ partNo: 1 }, { partNo: 2 }]);
+    await until(() => derived.blobs.has("parted.bhead") && derived.blobs.has("parted.btail"));
+    expect(derived.blobs.get("parted.bhead")).toEqual(blob.subarray(0, 8));
+    expect(derived.blobs.get("parted.btail")).toEqual(blob.subarray(SIZE - 16));
+  });
+
+  it("removing a content blob removes its bookends", async () => {
+    const { primary, derived, routed } = await seeded();
+    await routed.remove("movie");
+    expect(primary.blobs.has("movie")).toBe(false);
+    expect(derived.blobs.has("movie.bhead")).toBe(false);
+    expect(derived.blobs.has("movie.btail")).toBe(false);
   });
 });
 

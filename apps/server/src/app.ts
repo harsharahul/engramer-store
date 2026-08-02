@@ -10,6 +10,7 @@ import { ready } from "@engramer/crypto";
 import { loadConfig, type ConfigOverrides, type ServerConfig } from "./config.js";
 import { FsBlobStore, type BlobStore } from "./blobs.js";
 import { DiskCachedBlobStore } from "./blobcache.js";
+import { MediaWindowCache } from "./mediacache.js";
 import { RoutedBlobStore } from "./routed.js";
 import { S3BlobStore } from "./s3.js";
 import { openDatabase, type Db } from "./db.js";
@@ -88,6 +89,12 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
       config.blobCacheBytes > 0
         ? new DiskCachedBlobStore(store, config.blobCacheDir, config.blobCacheBytes)
         : store;
+    // Opt-in content tier: media windows cached on local disk, so range
+    // cycling, replays, and just-uploaded playback stop reaching the
+    // backing store. Outermost so it fronts everything below.
+    if (config.mediaCacheBytes > 0) {
+      blobs = new MediaWindowCache(blobs, config.mediaCacheDir, config.mediaCacheBytes);
+    }
   } else {
     blobs = new FsBlobStore(config.blobDir);
   }
