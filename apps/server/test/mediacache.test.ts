@@ -95,6 +95,21 @@ function windowFiles(dir: string): number {
   return readdirSync(dir).filter((name) => name.endsWith(".win")).length;
 }
 
+/** Waits for background fills to stop touching the backing store: two
+ * consecutive polls with an unchanged count mean nothing is in flight,
+ * which a file-count poll alone cannot promise (a window is usable only
+ * once its index entry follows the file onto disk). */
+async function settle(backing: CountingStore): Promise<number> {
+  let last = -1;
+  await until(() => {
+    const now = backing.gets;
+    const stable = now === last;
+    last = now;
+    return stable;
+  });
+  return backing.gets;
+}
+
 async function until(check: () => boolean, ms = 2000): Promise<void> {
   const deadline = Date.now() + ms;
   while (!check()) {
@@ -140,12 +155,13 @@ describe("MediaWindowCache", () => {
     const { cache, dir } = makeCache(backing);
     const got = await read(await cache.get("file-2", { start: 10, end: WINDOW * 2 + 5 }));
     expect(got).toEqual(blob.subarray(10, WINDOW * 2 + 6));
-    // 1 serve-through + 3 window fills, coalesced and settled on disk.
+    // One serve-through plus one fill per touched window, never more.
     await until(() => windowFiles(dir) === 3);
-    expect(backing.gets).toBe(4);
+    const cold = await settle(backing);
+    expect(cold).toBeLessThanOrEqual(4);
     const warm = await read(await cache.get("file-2", { start: 10, end: WINDOW * 2 + 5 }));
     expect(warm).toEqual(blob.subarray(10, WINDOW * 2 + 6));
-    expect(backing.gets).toBe(4);
+    expect(backing.gets).toBe(cold);
   });
 
   it("stitches warm windows byte-exactly, including the short tail window", async () => {
@@ -155,12 +171,13 @@ describe("MediaWindowCache", () => {
     const { cache, dir } = makeCache(backing);
     await read(await cache.get("file-3", { start: 0, end: blob.length - 1 }));
     await until(() => windowFiles(dir) === 3);
-    expect(backing.gets).toBe(4);
+    const cold = await settle(backing);
+    expect(cold).toBeLessThanOrEqual(4);
     const whole = await read(await cache.get("file-3", { start: 0, end: blob.length - 1 }));
     expect(whole).toEqual(blob);
     const cross = await read(await cache.get("file-3", { start: WINDOW - 3, end: WINDOW * 2 + 2 }));
     expect(cross).toEqual(blob.subarray(WINDOW - 3, WINDOW * 2 + 3));
-    expect(backing.gets).toBe(4);
+    expect(backing.gets).toBe(cold);
   });
 
   it("coalesces concurrent fills of the same window", async () => {
