@@ -6,9 +6,10 @@
 # The base tracks a Node Active LTS line, matching the versions CI tests.
 FROM node:24-bookworm-slim AS build
 
-# Toolchain for the better-sqlite3 native module when no prebuild matches.
+# Toolchain for the better-sqlite3 native module when no prebuild matches,
+# plus unzip for the vendored editor archives.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 make g++ \
+    && apt-get install -y --no-install-recommends python3 make g++ unzip \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g pnpm@11
 
@@ -16,10 +17,16 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages ./packages
 COPY apps ./apps
+COPY scripts ./scripts
 RUN pnpm install --frozen-lockfile
 # Stage the on-device semantic search model so images are self-contained;
 # the app's CSP allows fetching from its own origin only.
 RUN node apps/web/scripts/fetch-models.mjs
+# Stage the Word and Excel editors: pinned upstream releases, verified
+# against recorded digests, pruned to what the two editors load, and
+# patched to run inside the sandboxed frame. Same origin-only rule as the
+# model above; nothing is fetched at runtime.
+RUN node scripts/office-assets.mjs
 RUN pnpm --filter @engramer/web build
 
 # Production dependencies only, for the server and its workspace packages.
