@@ -215,6 +215,11 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
       "object-src 'none'",
       `base-uri ${self}`,
       "form-action 'none'",
+      // The editor's only ancestor is this application's own page, which has
+      // a real origin, so framing can be restricted normally. It could not be
+      // while a second sandboxed document sat in between: an opaque ancestor
+      // matches no source expression, and this protection had to be dropped.
+      "frame-ancestors 'self'",
     ].join("; ");
   };
 
