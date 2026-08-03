@@ -20,6 +20,10 @@ PLAN.md
 # Tauri build output
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
+# Written by apps/desktop/scripts/instance-config.mjs from ENGRAM_APP_URL, so
+# a build never leaves the builder's own address in a tracked file.
+apps/desktop/src-tauri/tauri.instance.json
+apps/desktop/src-tauri/capabilities/instance.json
 
 # Local code index
 .intentdb/
