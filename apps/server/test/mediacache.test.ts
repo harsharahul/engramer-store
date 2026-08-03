@@ -95,21 +95,6 @@ function windowFiles(dir: string): number {
   return readdirSync(dir).filter((name) => name.endsWith(".win")).length;
 }
 
-/** Waits for background fills to stop touching the backing store: two
- * consecutive polls with an unchanged count mean nothing is in flight,
- * which a file-count poll alone cannot promise (a window is usable only
- * once its index entry follows the file onto disk). */
-async function settle(backing: CountingStore): Promise<number> {
-  let last = -1;
-  await until(() => {
-    const now = backing.gets;
-    const stable = now === last;
-    last = now;
-    return stable;
-  });
-  return backing.gets;
-}
-
 async function until(check: () => boolean, ms = 2000): Promise<void> {
   const deadline = Date.now() + ms;
   while (!check()) {
@@ -157,7 +142,8 @@ describe("MediaWindowCache", () => {
     expect(got).toEqual(blob.subarray(10, WINDOW * 2 + 6));
     // One serve-through plus one fill per touched window, never more.
     await until(() => windowFiles(dir) === 3);
-    const cold = await settle(backing);
+    await cache.quiet();
+    const cold = backing.gets;
     expect(cold).toBeLessThanOrEqual(4);
     const warm = await read(await cache.get("file-2", { start: 10, end: WINDOW * 2 + 5 }));
     expect(warm).toEqual(blob.subarray(10, WINDOW * 2 + 6));
@@ -171,7 +157,8 @@ describe("MediaWindowCache", () => {
     const { cache, dir } = makeCache(backing);
     await read(await cache.get("file-3", { start: 0, end: blob.length - 1 }));
     await until(() => windowFiles(dir) === 3);
-    const cold = await settle(backing);
+    await cache.quiet();
+    const cold = backing.gets;
     expect(cold).toBeLessThanOrEqual(4);
     const whole = await read(await cache.get("file-3", { start: 0, end: blob.length - 1 }));
     expect(whole).toEqual(blob);
@@ -201,7 +188,8 @@ describe("MediaWindowCache", () => {
     const blob = patterned(WINDOW * 4 + 9);
     const { cache, dir } = makeCache(backing);
     await cache.put("file-5", Readable.from(blob), blob.length);
-    await until(() => windowFiles(dir) === 2);
+    await cache.quiet();
+    expect(windowFiles(dir)).toBe(2);
     backing.gets = 0;
     const head = await read(await cache.get("file-5", { start: 0, end: WINDOW - 1 }));
     expect(head).toEqual(blob.subarray(0, WINDOW));
@@ -219,7 +207,8 @@ describe("MediaWindowCache", () => {
     await cache.putPart("file-6", handle, 1, Readable.from(half), half.length);
     await cache.putPart("file-6", handle, 2, Readable.from(rest), rest.length);
     await cache.completeParts("file-6", handle, [{ partNo: 1 }, { partNo: 2 }]);
-    await until(() => windowFiles(dir) === 2);
+    await cache.quiet();
+    expect(windowFiles(dir)).toBe(2);
     backing.gets = 0;
     const tail = await read(await cache.get("file-6", { start: WINDOW, end: WINDOW * 2 - 1 }));
     expect(tail).toEqual(rest);
@@ -234,6 +223,7 @@ describe("MediaWindowCache", () => {
     await read(await cache.get("file-7", { start: 0, end: WINDOW - 1 }));
     await read(await cache.get("file-7x", { start: 0, end: WINDOW - 1 }));
     await until(() => windowFiles(dir) === 2);
+    await cache.quiet();
     await cache.remove("file-7");
     const left = readdirSync(dir);
     expect(left).toEqual(["file-7x.w0.win"]);
