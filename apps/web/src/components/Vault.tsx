@@ -33,6 +33,7 @@ import {
   unlockDeclined,
 } from "../unlock";
 import { nativeShell, nativeUnlockAvailable } from "../native";
+import { APP_VERSION } from "../version";
 import { startWatchSync } from "../watchfolders";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
 import { cosine, embedQuery, semanticEnabled, setSemanticEnabled } from "../intel/semantic";
@@ -846,6 +847,33 @@ export function Vault() {
     }
   };
 
+  // Everything the app can create, in one list. Four buttons that differed
+  // only by label collapsed to one menu: at narrow widths their labels hide
+  // and they became three identical icons, which is no way to pick between a
+  // note, a document and a spreadsheet.
+  const newItems: MenuItem[] = [
+    { id: "new-note", label: "Note", icon: <NoteGlyph size={15} />, run: () => setNewNoteOpen(true) },
+    {
+      id: "new-document",
+      label: "Word document",
+      icon: <DocGlyph size={15} />,
+      run: () => setNewOfficeKind("docx"),
+    },
+    {
+      id: "new-spreadsheet",
+      label: "Spreadsheet",
+      icon: <GridGlyph size={15} />,
+      run: () => setNewOfficeKind("xlsx"),
+    },
+    { id: "new-d", label: "", divider: true, run: () => {} },
+    {
+      id: "new-folder",
+      label: "Folder",
+      icon: <FolderGlyph size={15} />,
+      run: () => setNewFolderOpen(true),
+    },
+  ];
+
   // The tab bar's center [+]: one sheet absorbs every create/upload action
   // that the phone topbar has no room for.
   const openAddSheet = () => {
@@ -867,13 +895,13 @@ export function Vault() {
         {
           id: "new-document",
           label: "New document",
-          icon: <NoteGlyph size={15} />,
+          icon: <DocGlyph size={15} />,
           run: () => setNewOfficeKind("docx"),
         },
         {
           id: "new-spreadsheet",
           label: "New spreadsheet",
-          icon: <NoteGlyph size={15} />,
+          icon: <GridGlyph size={15} />,
           run: () => setNewOfficeKind("xlsx"),
         },
       ],
@@ -1169,6 +1197,9 @@ export function Vault() {
             encrypted at rest
           </div>
         )}
+        <div className="build-line" title="The version running in this page">
+          v{APP_VERSION}
+        </div>
         <div className="account-row">
           <button
             className="account-link"
@@ -1294,25 +1325,18 @@ export function Vault() {
             <SparkGlyph size={14} /> <kbd className="mono">⌘K</kbd>
           </button>
           <div className="grow" />
-          <button className="btn" title="New note" onClick={() => setNewNoteOpen(true)}>
-            <NoteGlyph size={14} /> <span className="btn-label">New note</span>
-          </button>
           <button
             className="btn"
-            title="New Word document"
-            onClick={() => setNewOfficeKind("docx")}
+            title="Create a note, document, spreadsheet or folder"
+            aria-haspopup="menu"
+            onClick={(event) => {
+              // Anchored under the button, so the menu reads as belonging to
+              // it. On a phone the same component becomes a bottom sheet.
+              const at = event.currentTarget.getBoundingClientRect();
+              setCtxMenu({ x: at.left, y: at.bottom + 6, title: "Create", items: newItems });
+            }}
           >
-            <NoteGlyph size={14} /> <span className="btn-label">New doc</span>
-          </button>
-          <button
-            className="btn"
-            title="New spreadsheet"
-            onClick={() => setNewOfficeKind("xlsx")}
-          >
-            <NoteGlyph size={14} /> <span className="btn-label">New sheet</span>
-          </button>
-          <button className="btn" title="New folder" onClick={() => setNewFolderOpen(true)}>
-            <PlusGlyph /> <span className="btn-label">New folder</span>
+            <PlusGlyph /> <span className="btn-word">New</span>
           </button>
           <button
             className="btn"
