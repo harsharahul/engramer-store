@@ -30,27 +30,40 @@ is about containing that.
 ## What runs where
 
 ```
-app page                      holds the master key, decrypts and re-encrypts
-  └─ sandboxed frame          opaque origin; no key, no storage, no session
-       ├─ x2t (WebAssembly)   converts .docx/.xlsx to the editor's format
-       └─ editor frame        the OnlyOffice editor itself
+app page                    holds the master key, decrypts and re-encrypts
+  ├─ converter worker       x2t (WebAssembly): file format <-> editor format
+  └─ sandboxed frame        opaque origin: no key, no storage, no session
+       └─ the editor        one document, framed directly
 ```
 
-A document opens like this: the app decrypts the file in the page that already
-holds the key, transfers the plaintext bytes into the sandboxed frame as a
-zero-copy transferable, and the frame converts and edits them. Saving reverses
-it, and the returned bytes are re-encrypted under the file's existing key and
-stored as a new version. Keys never cross the boundary.
+A document opens like this. The app decrypts the file in the page that already
+holds the key and converts it in a worker on this origin. The converted
+document and the images the conversion extracted are transferred into the
+sandboxed frame as bytes. Saving reverses it: the editor returns the document
+in its internal format, the worker converts it back to .docx or .xlsx, and the
+result is re-encrypted under the file's existing key and stored as a new
+version. Keys never cross the frame boundary, and neither does anything but
+bytes.
+
+The converter runs beside the app rather than inside the frame because it
+needs none of the permissions the editor does, and because an opaque origin
+has no usable HTTP cache: the largest single asset in the system would be
+re-fetched on every document open. On this origin it is fetched once and
+revalidated cheaply, and it still runs under the application's strict content
+policy, in a worker realm of its own. One converter is held per open document,
+because importing extracts a document's images into a working directory and
+exporting reads them back from the same place.
 
 ## The isolation, and why it is an opaque origin
 
-The editor requires `'unsafe-eval'`. In this application's own origin that would
-be fatal, because the page holding the master key lives there; the security
-model assumes that any script execution in this origin is a total compromise.
+The editor requires `'unsafe-eval'`. In this application's own origin that
+would be fatal, because the page holding the master key lives there; the
+security model assumes that any script execution in this origin is a total
+compromise.
 
 The editor therefore runs in a frame with the `sandbox` attribute and without
-`allow-same-origin`, which places it in an *opaque* origin. Measured from inside
-a running editor, the frame cannot reach:
+`allow-same-origin`, which places it in an *opaque* origin. Measured from
+inside a running editor, the frame cannot reach:
 
 - the page holding the master key, or any window above it
 - `localStorage`, `sessionStorage`, `IndexedDB` or the Cache API
@@ -59,10 +72,11 @@ a running editor, the frame cannot reach:
   anything that survives a reload
 
 This is stronger than hosting the editor on a second domain, which is the more
-common answer: a second origin has its own storage and can register a service
-worker, so a compromise there can persist. An opaque origin gets no persistence
-at all. It also avoids requiring every self-hoster to run a second hostname and
-certificate.
+common answer: a second origin has storage of its own and can register a
+service worker, so a compromise there can persist, and on a subdomain it can
+also set cookies that the parent domain's other services will accept. An
+opaque origin gets no persistence at all. It also avoids requiring every
+self-hoster to run a second hostname and certificate.
 
 The relaxed script policy is scoped to the vendored asset path alone. The
 application's own documents and every API route keep the strict policy, which
@@ -75,35 +89,74 @@ Two costs come with this choice, and both are deliberate:
   The document holds no key, no cookie and no storage, and it does nothing
   without a host that speaks its message protocol, but it is a clickjacking
   surface that a second origin would not have.
-- **Data must travel as messages and data URLs.** A `blob:` URL is readable only
-  by the origin that created it, so the converted document and its images cross
-  as `data:` URLs, and every host-driven editor action is a message rather than
-  a property access.
+- **Everything travels as messages.** A `blob:` URL is readable only by the
+  origin that created it, so the document and its images cross as bytes and the
+  frame mints its own URLs from them; every app-driven editor action is a
+  message rather than a property access.
+
+## Why exactly one document is in the sandbox
+
+The vendored suite comes in two halves: the editor itself, and a wrapper script
+meant to run on the hosting page, which creates the editor's frame and speaks
+to it. Using the wrapper puts *two* documents inside the sandbox, and every
+document nested in a sandboxed context gets its own, distinct opaque origin.
+The two halves of the vendor's own code then cannot reach each other, which is
+what forces this design onto a second real origin in every integration that
+uses the wrapper.
+
+So the wrapper is not used. The app frames the editor's own page directly and
+speaks its protocol from [`apps/web/src/office/session.ts`](../apps/web/src/office/session.ts).
+The protocol is small: the editor announces itself and is given a
+configuration and a document, then talks to what it believes is a
+collaboration server, asking to be authenticated and taking and releasing
+locks. All of it is answered in memory, on the page, and none of it goes near a
+network. The editor reads the origin it should trust from its own URL, which
+this arrangement can name honestly, because the page above it has a real one.
+
+The result is one sandboxed document with no storage, no second hostname to
+buy or configure, and less vendored code served: the wrapper is no longer
+loaded at all.
 
 ## The patch set
 
-Four changes are applied to the upstream release by
-`scripts/office-assets.mjs`. Three are one line each; the fourth injects a
-script tag. Every anchor must match exactly once, so an upstream change fails
-the build loudly rather than silently skipping.
+Two changes are applied to the upstream release by `scripts/office-assets.mjs`,
+both to the editor's own page. Every anchor must match exactly once, so an
+upstream change fails the build loudly rather than silently skipping.
 
 | Patch | What it does | Why |
 |---|---|---|
 | `shim` | loads our shim first in each editor document | see below |
-| `service-worker-guard` | makes a service worker probe tolerate a throw | `"serviceWorker" in navigator` is true even when sandboxed, and the next statement throws; harmless but noisy |
-| `parent-origin` | uses `window.origin` instead of `location.origin` | in an opaque origin, `location.origin` reports the URL's origin while messages carry `null` |
-| `frame-origin` | same, on the receiving side | without both, each side silently drops the other's messages and the editor hangs after loading completely |
+| `service-worker-guard` | makes a service worker probe tolerate a throw | `"serviceWorker" in navigator` is true even when sandboxed, and the next statement throws |
 
 The shim itself (`apps/web/office/engram-sandbox-shim.js`) is ours and is the
-only file to re-read on an upstream upgrade. It exists because the editor reads
-`window.parent` without guarding for a cross-origin parent, which throws in an
-opaque origin and stops the SDK from loading. Rather than patch every such read
-inside a multi-megabyte minified bundle, the shim replaces `window.parent`
-itself, which the HTML specification permits because it is a replaceable
-property. The replacement exposes only `postMessage`, a capability a
-cross-origin parent already had, and keeps the real window in a closure.
-`window.top` is unforgeable by specification and is left alone, so the page
-holding the key stays unreachable.
+only file to re-read on an upstream upgrade. It does four things, each because
+the editor was not written to run without an origin:
+
+- **Replaces `window.parent`.** The editor reads `window.parent.APP` without
+  guarding for a cross-origin parent, which throws in an opaque origin and
+  stops the SDK from loading. Rather than patch every such read inside a
+  multi-megabyte minified bundle, the shim replaces `window.parent` itself,
+  which the HTML specification permits because it is a replaceable property.
+  The replacement exposes only `postMessage`, a capability a cross-origin
+  parent already had, and keeps the real window in a closure. `window.top` is
+  unforgeable by specification and is left alone, so the page holding the key
+  stays unreachable.
+- **Answers the document's address.** The editor loads its document by URL. The
+  shim gives it a sentinel and answers that request from the bytes posted in,
+  minting a `blob:` URL in the frame's own origin. Requests that arrive early
+  simply wait, which is what lets the editor load while the file is still being
+  decrypted.
+- **Resolves embedded images** from the same bytes, for the callback the editor
+  expects its host to provide.
+- **Carries actions across the boundary**: the save shortcut outward, and the
+  save and focus calls inward, because a cross-origin page cannot reach into
+  the editor to make them directly.
+
+One more workaround lives there: an opaque origin cannot construct a worker
+from an `http(s)` script URL at all, and the editor builds its spellchecker
+inside the document-open path with no error handling, so that single throw
+would stop every open at 94%. The shim routes it through a `blob:` worker that
+imports the real script.
 
 ## Assets
 

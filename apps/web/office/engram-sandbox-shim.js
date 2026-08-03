@@ -3,64 +3,122 @@
 // OUR file, not a patched vendor file: on an OnlyOffice upgrade it is the only
 // thing that has to be re-read and understood.
 //
-// WHY: the editor document runs inside a NESTED opaque origin (its ancestor
-// iframe is sandbox="allow-scripts" without allow-same-origin, and every
-// document nested inside a sandboxed context gets its own fresh opaque origin).
-// So every read of window.parent.<anything> throws SecurityError. sdkjs's
-// loadSdk() does exactly that -- `window.parent && window.parent.APP &&
-// window.parent.APP.urlArgs` -- with no try/catch, so sdk-all.js never loads
-// and the editor never boots. CryptPad's fork adds several more
-// `window.parent.APP.*` host callbacks on top.
+// The app frames this document directly with sandbox="allow-scripts" and no
+// allow-same-origin, so it runs in an OPAQUE ORIGIN: it has no storage, no
+// cookies, no session, and cannot reach the page that holds the master key.
+// It is handed a document as bytes and hands one back. Everything below
+// exists because the editor was not written for that, and because the app,
+// being cross-origin, cannot reach into the editor to drive it.
 //
-// `parent` is a [Replaceable] attribute on Window, i.e. a configurable accessor
-// with a setter, so it can simply be overwritten (measured: own descriptor
-// {get:true,set:true,configurable:true}; `top` by contrast is
-// [LegacyUnforgeable] and cannot be redefined -- measured
-// "TypeError: Cannot redefine property: top"). Overwriting it with a minimal
-// stand-in makes every window.parent.* read in sdkjs and web-apps safe at once,
-// instead of patching each site inside a 2.4 MB minified bundle.
-//
-// THIS GRANTS NO NEW CAPABILITY. The stand-in exposes only postMessage, which a
-// cross-origin parent already allowed; the real parent WindowProxy stays in a
-// closure and is never handed out. window.top is untouched and still throws on
-// every property read. Verified by the probe block at the bottom.
+// The editor is loaded directly rather than through the vendor's wrapper
+// script, which would create a further frame. Two nested sandboxed documents
+// get two DIFFERENT opaque origins and cannot reach each other, which is what
+// forced the whole editor onto a second real origin before. One document
+// needs no second origin at all. The protocol the wrapper used to speak now
+// lives in apps/web/src/office/session.ts.
 
 (function () {
-  var real = window.parent;
-  if (real === window) { return; }                    // not framed: nothing to do
-  try { void real.APP; return; } catch (e) { /* opaque-origin parent: shim it */ }
+  var MIME_BY_EXT = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    bmp: "image/bmp",
+    svg: "image/svg+xml",
+    webp: "image/webp",
+    emf: "image/emf",
+    wmf: "image/wmf",
+  };
 
-  // window.parent.APP is the host-callback surface CryptPad's fork calls into.
-  // Same-origin it is a plain object on the host window; here it has to become a
-  // postMessage RPC. Only the members the boot + open path actually uses are
-  // implemented; anything else stays undefined, which is what every caller in
-  // sdkjs already tests for (`window.parent.APP && window.parent.APP.x`).
-  var seq = 0, pending = {};
+  // ------------------------------------------------- document and its images
+  // Both are delivered as BYTES over postMessage, never as URLs. A blob: URL
+  // is readable only by the origin that made it, and this origin is opaque,
+  // so a URL minted by the app would be unreadable here. Minting them HERE,
+  // from bytes posted in, is what makes them readable at all.
+  //
+  // The document additionally cannot be inlined: base64 adds a third, and
+  // Safari refuses a data: URL beyond 64MiB, which a text-heavy document
+  // reaches while a far larger one full of images does not (measured, see
+  // docs/office-editing.md). So the editor is given a sentinel address and
+  // its request for it is answered from memory. Requests that arrive before
+  // the bytes do simply wait, which is what lets the editor start loading
+  // while the app is still decrypting.
+  var DOCUMENT_URL = 'engram:document';
+  var documentBytes = null;
+  var documentWaiting = [];
+  var media = {};
+  var mediaUrls = {};
+
   window.addEventListener('message', function (ev) {
     var d = ev.data;
-    if (d && d.t === 'engramAppRpcResult' && pending[d.id]) {
-      var cb = pending[d.id]; delete pending[d.id]; cb(d.value);
-    }
+    if (!d || d.t !== 'engramDocument') { return; }
+    media = d.media || {};
+    documentBytes = new Uint8Array(d.bytes);
+    var waiting = documentWaiting.splice(0);
+    for (var i = 0; i < waiting.length; i++) { waiting[i](documentBytes); }
   });
-  function rpc(method, arg, cb) {
-    var id = ++seq; pending[id] = cb;
-    real.postMessage({ t: 'engramAppRpc', id: id, method: method, arg: arg }, '*');
+
+  function withDocument(fn) {
+    if (documentBytes) { fn(documentBytes); return; }
+    documentWaiting.push(fn);
   }
 
-  window.parent = {
-    // loadSdk() and index.html's CP_urlArgs read this. '' disables cache-busting
-    // query args, which we do not need: the asset path is already versioned.
-    APP: {
-      urlArgs: '',
-      // sdkjs: window.parent.APP.getImageURL(src, cb) -- resolves an embedded
-      // image name to something loadable. Callback-shaped already, so it maps
-      // onto the RPC without changing the caller.
-      getImageURL: function (src, cb) { rpc('getImageURL', src, cb); },
-    },
-    postMessage: function () { return real.postMessage.apply(real, arguments); },
-    innerWidth: window.innerWidth,
-    innerHeight: window.innerHeight,
-  };
+  // The editor asks for an embedded image by the name the conversion gave it,
+  // sometimes as a bare name and sometimes as a path. Cached, because it asks
+  // again on every repaint.
+  function imageUrl(request) {
+    var name = String(request).split('/').pop().split('?')[0];
+    if (mediaUrls[name]) { return mediaUrls[name]; }
+    var bytes = media[name];
+    if (!bytes) { return ''; }
+    var mime = MIME_BY_EXT[name.split('.').pop().toLowerCase()] || 'application/octet-stream';
+    mediaUrls[name] = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    return mediaUrls[name];
+  }
+
+  // ------------------------------------------------------ the opaque parent
+  // Every read of window.parent.<anything> throws SecurityError across
+  // origins. sdkjs's loadSdk() does exactly that -- `window.parent &&
+  // window.parent.APP && window.parent.APP.urlArgs` -- with no try/catch, so
+  // sdk-all.js never loads and the editor never boots. CryptPad's fork adds
+  // several more `window.parent.APP.*` host callbacks on top.
+  //
+  // `parent` is a [Replaceable] attribute on Window, i.e. a configurable
+  // accessor with a setter, so it can simply be overwritten (measured: own
+  // descriptor {get:true,set:true,configurable:true}; `top` by contrast is
+  // [LegacyUnforgeable] and cannot be redefined -- measured "TypeError:
+  // Cannot redefine property: top"). Overwriting it with a minimal stand-in
+  // makes every window.parent.* read in sdkjs and web-apps safe at once,
+  // instead of patching each site inside a 2.4 MB minified bundle.
+  //
+  // THIS GRANTS NO NEW CAPABILITY. The stand-in exposes only postMessage,
+  // which a cross-origin parent already allowed; the real parent WindowProxy
+  // stays in a closure and is never handed out. window.top is untouched and
+  // still throws on every property read.
+  var real = window.parent;
+  var reachable = real === window;
+  if (!reachable) {
+    try { void real.APP; reachable = true; } catch (e) { /* opaque: shim it */ }
+  }
+  if (!reachable) {
+    window.parent = {
+      // window.parent.APP is the host-callback surface CryptPad's fork calls
+      // into. Same-origin it is a plain object on the host window; here the
+      // members the boot and open path actually use are answered locally,
+      // from the bytes already posted in. Anything else stays undefined,
+      // which is what every caller in sdkjs already tests for.
+      APP: {
+        // loadSdk() and index.html's CP_urlArgs read this. '' disables
+        // cache-busting query args, which we do not need: the asset path is
+        // already versioned.
+        urlArgs: '',
+        getImageURL: function (src, cb) { cb(imageUrl(src)); },
+      },
+      postMessage: function () { return real.postMessage.apply(real, arguments); },
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+    };
+  }
 
   // A document with an opaque origin cannot construct a Worker from an http(s)
   // script URL at all -- every such URL is cross-origin to it. Measured:
@@ -85,36 +143,6 @@
       }
     };
     window.Worker.prototype = NativeWorker.prototype;
-  }
-
-  // ------------------------------------------------------------------ document
-  // The document is delivered as BYTES over postMessage, never as a URL.
-  //
-  // The editor loads its document by URL. A blob: URL minted by the host is
-  // unreadable here, because this frame is a different opaque origin, so the
-  // obvious remaining option was to inline the whole document as a data: URL.
-  // That works until it does not: base64 adds a third, and Safari refuses a
-  // data: URL beyond 64MiB, which a text-heavy document reaches while a far
-  // larger one full of images does not (measured, see docs/office-editing.md).
-  //
-  // Instead the host posts the bytes in and the editor's request for a
-  // sentinel URL is answered from memory. Requests that arrive before the
-  // bytes do simply wait, so there is no race with the editor's boot.
-  var DOCUMENT_URL = 'engram:document';
-  var documentBytes = null;
-  var documentWaiting = [];
-
-  window.addEventListener('message', function (ev) {
-    var d = ev.data;
-    if (!d || d.t !== 'engramDocument') { return; }
-    documentBytes = new Uint8Array(d.bytes);
-    var waiting = documentWaiting.splice(0);
-    for (var i = 0; i < waiting.length; i++) { waiting[i](documentBytes); }
-  });
-
-  function withDocument(fn) {
-    if (documentBytes) { fn(documentBytes); return; }
-    documentWaiting.push(fn);
   }
 
   // The editor loads its document with XMLHttpRequest. Rather than imitate
@@ -165,10 +193,10 @@
     }
   }, true);
 
-  // Host -> editor control RPC. Same-origin, the host reaches into the editor
+  // App -> editor control RPC. Same-origin, a host reaches into the editor
   // frame directly (`iframe.contentWindow.editor.asc_nativeGetFile()` --
-  // CryptPad's own accessor, inner.js:141-149). Across opaque origins that read
-  // throws, so every host-driven editor call has to be a message. This is the
+  // CryptPad's own accessor, inner.js:141-149). Across origins that read
+  // throws, so every app-driven editor call has to be a message. This is the
   // whole save path, and it is glue we own rather than a vendor patch.
   window.addEventListener('message', function (ev) {
     var d = ev.data;
