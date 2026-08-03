@@ -25,7 +25,7 @@ interface Loaded {
  * another. Drawing it ourselves works the same everywhere, and the engine is
  * already here for reading text out of PDFs.
  */
-function PdfBody(props: { bytes: Uint8Array; name: string }) {
+function PdfBody(props: { bytes: Uint8Array; name: string; onUnreadable: () => void }) {
   const host = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
   const [pages, setPages] = useState(0);
@@ -72,9 +72,13 @@ function PdfBody(props: { bytes: Uint8Array; name: string }) {
           }
         }
       } catch (err) {
+        // Not every file named .pdf is one: a page saved by a browser, a
+        // truncated download, something a share sheet mislabelled. Falling
+        // back to the download offer says more than an error does.
         diag("preview", `pdf render failed: ${err instanceof Error ? err.message : "unknown"}`);
         if (!cancelled) {
           setFailed(true);
+          props.onUnreadable();
         }
       }
     })();
@@ -85,7 +89,7 @@ function PdfBody(props: { bytes: Uint8Array; name: string }) {
   }, [props.bytes]);
 
   if (failed) {
-    return <div className="preview-fallback">Could not render this document.</div>;
+    return null; // the shell shows its own fallback, download button and all
   }
   return (
     <div className="pdf-host" ref={host} data-pages={pages} />
@@ -217,6 +221,9 @@ export function Preview(props: {
   const { file } = props;
   const kind = fileKind(file.mime, file.name);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  // A file whose contents do not match what its name claims: show what the
+  // app shows for anything else it cannot display, rather than an apology.
+  const [unreadable, setUnreadable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
 
@@ -224,6 +231,7 @@ export function Preview(props: {
     let url: string | null = null;
     let cancelled = false;
     setLoaded(null);
+    setUnreadable(false);
     setError(null);
     setProgress(null);
     // Video and audio stream through the service worker's media bridge:
@@ -374,8 +382,8 @@ export function Preview(props: {
           </>
         ) : kind === "audio" && loaded.url ? (
           <audio src={loaded.url} controls autoPlay />
-        ) : kind === "pdf" && loaded.pdf ? (
-          <PdfBody bytes={loaded.pdf} name={file.name} />
+        ) : kind === "pdf" && loaded.pdf && !unreadable ? (
+          <PdfBody bytes={loaded.pdf} name={file.name} onUnreadable={() => setUnreadable(true)} />
         ) : kind === "sheet" && loaded.sheet ? (
           <SheetBody bytes={loaded.sheet} />
         ) : kind === "doc" && loaded.docx ? (
