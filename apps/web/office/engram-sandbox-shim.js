@@ -278,6 +278,22 @@
         api.asc_PasteData(window.AscCommon.c_oAscClipboardDataFormat.Text, d.arg);
         value = true;
       } else if (d.method === 'save') {
+        // Whatever the editor is still holding has to be committed first, or
+        // it is not in the file. A spreadsheet keeps the cell you are typing
+        // in open until you leave it, and that cell is not part of the
+        // document yet: type, press Save, and the text was silently dropped.
+        // The argument is `cancel`, so false is what commits it.
+        try {
+          if (typeof api.asc_closeCellEditor === 'function') { api.asc_closeCellEditor(false); }
+        } catch (e) {}
+        // Likewise a composition in progress, which is how text arrives from
+        // an on-screen keyboard.
+        try {
+          var ctx = window.AscCommon && window.AscCommon.g_inputContext;
+          if (ctx && typeof ctx.externalEndCompositeInput === 'function') {
+            ctx.externalEndCompositeInput();
+          }
+        } catch (e) {}
         value = api.asc_nativeGetFile();          // a STRING ("DOCY;v5;…"), never a buffer
       } else { throw new Error('unknown method ' + d.method); }
     } catch (e) { error = e.message; }
