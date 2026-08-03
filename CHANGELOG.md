@@ -3,6 +3,43 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.32.0] - 2026-08-03
+
+### Added
+- **Word and Excel editing, entirely on your device.** Open a .docx or
+  .xlsx and edit it in a real office engine that runs in the browser:
+  formulas, charts, images, tables and tracked changes survive a round
+  trip, because the document is edited in its own format rather than
+  converted through a lossy intermediate. Nothing is converted on a
+  server, which is the reason the usual self-hosted office integrations
+  cannot work on encrypted storage at all. Saving re-encrypts under the
+  file's existing key and keeps the previous version, so an edit joins
+  version history like any other change.
+
+  The editor runs in a frame with an opaque origin: no storage, no
+  cookies, no session, and no access to the page holding your keys. It
+  is handed a document as bytes and hands one back. Editing needs no
+  second hostname and no extra certificate; a self-hoster runs what they
+  already run. See [docs/office-editing.md](docs/office-editing.md).
+- **New documents and spreadsheets, created in the app.** A blank .docx
+  or .xlsx is created encrypted in your vault and opened for editing,
+  so a document can start here rather than being uploaded from
+  somewhere else. Spreadsheets are a file kind the app now recognises
+  throughout, with their own art and actions.
+- **The running version is visible.** The client names the release it
+  was built from: in the sidebar, once in the browser console at
+  start-up, and at the head of the activity log, so a captured log
+  always says which build produced it. It is compiled into the client
+  rather than read from the server, because an installed app or a
+  desktop shell can be running an older build than the server has.
+
+### Changed
+- **One way to create things.** The four create buttons in the top bar
+  became a single New menu offering a note, a Word document, a
+  spreadsheet or a folder, each with its own icon. At widths where
+  button labels collapse, the old row read as three identical icons
+  with no way to tell them apart.
+
 ## [0.31.1] - 2026-08-02
 
 ### Fixed
