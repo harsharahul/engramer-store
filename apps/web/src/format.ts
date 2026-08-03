@@ -23,9 +23,19 @@ export function formatDate(ms: number): string {
   });
 }
 
-export type FileKind = "image" | "video" | "audio" | "pdf" | "text" | "doc" | "archive" | "other";
+export type FileKind =
+  | "image"
+  | "video"
+  | "audio"
+  | "pdf"
+  | "text"
+  | "doc"
+  | "sheet"
+  | "archive"
+  | "other";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 export function fileKind(mime: string, name: string): FileKind {
   if (mime.startsWith("image/")) return "image";
@@ -33,6 +43,7 @@ export function fileKind(mime: string, name: string): FileKind {
   if (mime.startsWith("audio/")) return "audio";
   if (mime === "application/pdf") return "pdf";
   if (mime === DOCX_MIME || /\.docx$/i.test(name)) return "doc";
+  if (mime === XLSX_MIME || /\.xlsx$/i.test(name)) return "sheet";
   if (mime.startsWith("text/") || /\.(md|txt|json|ya?ml|csv|log)$/i.test(name)) return "text";
   if (/\.(zip|tar|gz|bz2|7z|rar)$/i.test(name)) return "archive";
   return "other";

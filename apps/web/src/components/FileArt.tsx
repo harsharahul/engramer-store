@@ -14,6 +14,7 @@ export const KIND_ACCENTS: Record<FileKind | "folder", string> = {
   pdf: "#f47272",
   text: "#60a5fa",
   doc: "#5b8def",
+  sheet: "#3fb984",
   archive: "#93a4c3",
   other: "#8593ab",
 };

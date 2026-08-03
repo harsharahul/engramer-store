@@ -348,9 +348,12 @@ async function main() {
   console.log("unpacking x2t");
   await execFile("unzip", ["-qo", x2tZip, "-d", join(outDir, "x2t")], { maxBuffer: 1 << 28 });
 
-  // Our own shim is tracked in the repo; the derived tree only ever holds a
-  // copy, so editing it here is never how it changes.
-  await execFile("cp", [join(root, "apps/web/office/engram-sandbox-shim.js"), outDir]);
+  // Our own glue (the sandbox shim, the host page and its script) is tracked
+  // in the repo; the derived tree only ever holds copies, so editing it there
+  // is never how any of it changes.
+  for (const name of await readdir(join(root, "apps/web/office"))) {
+    await execFile("cp", [join(root, "apps/web/office", name), outDir]);
+  }
 
   await applyPatches(outDir, false);
   await compressLargeAssets(outDir);
