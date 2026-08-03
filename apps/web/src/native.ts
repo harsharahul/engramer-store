@@ -107,12 +107,38 @@ export async function watchedScan(): Promise<WatchedFile[]> {
   return (await invoke("watched_scan")) as WatchedFile[];
 }
 
-export async function watchedFileRead(path: string): Promise<ArrayBuffer> {
+/**
+ * File content as bytes, whatever shape the shell hands it over in.
+ *
+ * This crossing has no type safety: the value arrives as JSON from another
+ * process, and declaring it an ArrayBuffer only asserted a hope. It arrives
+ * as a plain array of byte values, and `new Blob([array])` does not reject
+ * that: it stringifies it, so a PDF became the text "37,80,68,70,..." and
+ * every file a watched folder uploaded was silently corrupted, at three and
+ * a half times its real size. Convert rather than assert.
+ */
+export function fileBytes(value: unknown): Uint8Array {
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (Array.isArray(value)) {
+    return Uint8Array.from(value as number[]);
+  }
+  throw new Error("the shell returned something that is not file content");
+}
+
+export async function watchedFileRead(path: string): Promise<Uint8Array> {
   const invoke = tauriInvoke();
   if (!invoke) {
     throw new Error("no native shell");
   }
-  return (await invoke("watched_file_read", { path })) as ArrayBuffer;
+  return fileBytes(await invoke("watched_file_read", { path }));
 }
 
 /** Native folder picker; null when dismissed. */

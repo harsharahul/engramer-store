@@ -108,6 +108,18 @@ async function drain(): Promise<void> {
     for (const file of fresh) {
       try {
         const bytes = await watchedFileRead(file.path);
+        // The size the scan reported and the bytes actually read must agree.
+        // They did not, for months, and nothing noticed: every upload was a
+        // stringified byte array. A file that fails this is left for the next
+        // scan rather than stored wrong.
+        if (bytes.byteLength !== file.size) {
+          diag(
+            "watch",
+            `skipped ${file.name}: read ${bytes.byteLength} bytes but the file is ${file.size}`,
+          );
+          inFlight.delete(file.path);
+          continue;
+        }
         // Which watched folder this came from: the longest one that
         // prefixes it, so nested watched folders resolve to the nearest.
         const root = roots
@@ -116,7 +128,9 @@ async function drain(): Promise<void> {
         const origin = root ? folderName(root) : null;
         const mirrored = root ? watchMode(root) === "mirrored" : false;
         items.push({
-          file: new File([bytes], file.name, { lastModified: file.mtime }),
+          file: new File([bytes.slice().buffer as ArrayBuffer], file.name, {
+            lastModified: file.mtime,
+          }),
           path: mirrored && origin ? [origin, ...file.rel_dirs] : file.rel_dirs,
           tags: !mirrored && origin ? [origin] : undefined,
         });
