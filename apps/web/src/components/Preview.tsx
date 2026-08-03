@@ -6,11 +6,163 @@ import { fileKind, formatBytes } from "../format";
 import { triggerDownload } from "../download";
 import { DownloadGlyph, PencilGlyph, ShareGlyph, TagGlyph, XGlyph } from "./Icon";
 import { diag } from "../diag";
+import type { WorkbookPreview } from "../sheet";
 
 interface Loaded {
   url: string | null;
   text: string | null;
   docx: Uint8Array | null;
+  sheet: Uint8Array | null;
+  pdf: Uint8Array | null;
+}
+
+/**
+ * Draws a PDF with pdf.js rather than handing it to the browser.
+ *
+ * A blob URL in an iframe renders only where the engine ships a PDF viewer.
+ * Safari's WebView does not, which is every desktop shell window and every
+ * iPhone, so a document that opened on one machine was a blank page on
+ * another. Drawing it ourselves works the same everywhere, and the engine is
+ * already here for reading text out of PDFs.
+ */
+function PdfBody(props: { bytes: Uint8Array; name: string }) {
+  const host = useRef<HTMLDivElement>(null);
+  const [failed, setFailed] = useState(false);
+  const [pages, setPages] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    // The loading task owns the worker; destroying it is what releases both.
+    let task: { destroy: () => Promise<void> } | null = null;
+    void (async () => {
+      try {
+        const pdfjs = await import("pdfjs-dist");
+        const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+        pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+        const loading = pdfjs.getDocument({ data: props.bytes.slice() });
+        task = loading;
+        const pdf = await loading.promise;
+        if (cancelled || !host.current) {
+          return;
+        }
+        setPages(pdf.numPages);
+        // Enough of a document to judge it by; the rest is a download away.
+        const limit = Math.min(pdf.numPages, 30);
+        for (let number = 1; number <= limit; number++) {
+          const page = await pdf.getPage(number);
+          if (cancelled || !host.current) {
+            return;
+          }
+          const width = host.current.clientWidth || 800;
+          const base = page.getViewport({ scale: 1 });
+          // Fit the width, then draw at device resolution so text stays sharp.
+          const scale = Math.min(width / base.width, 2);
+          const ratio = Math.min(window.devicePixelRatio || 1, 2);
+          const viewport = page.getViewport({ scale: scale * ratio });
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.floor(viewport.width);
+          canvas.height = Math.floor(viewport.height);
+          canvas.style.width = `${Math.floor(viewport.width / ratio)}px`;
+          canvas.style.height = `${Math.floor(viewport.height / ratio)}px`;
+          canvas.className = "pdf-page";
+          host.current.appendChild(canvas);
+          const context = canvas.getContext("2d");
+          if (context) {
+            await page.render({ canvas, canvasContext: context, viewport }).promise;
+          }
+        }
+      } catch (err) {
+        diag("preview", `pdf render failed: ${err instanceof Error ? err.message : "unknown"}`);
+        if (!cancelled) {
+          setFailed(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      void task?.destroy();
+    };
+  }, [props.bytes]);
+
+  if (failed) {
+    return <div className="preview-fallback">Could not render this document.</div>;
+  }
+  return (
+    <div className="pdf-host" ref={host} data-pages={pages} />
+  );
+}
+
+/** Shows a workbook as a table, one sheet at a time. */
+function SheetBody(props: { bytes: Uint8Array }) {
+  const [book, setBook] = useState<WorkbookPreview | null>(null);
+  const [active, setActive] = useState(0);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void import("../sheet")
+      .then(({ readWorkbook }) => readWorkbook(props.bytes))
+      .then((workbook) => {
+        if (!cancelled) {
+          setBook(workbook);
+          setActive(0);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.bytes]);
+
+  if (failed) {
+    return <div className="preview-fallback">Could not read this spreadsheet.</div>;
+  }
+  if (!book) {
+    return <div className="office-loading"><span className="spinner" /> Reading the spreadsheet</div>;
+  }
+  const sheet = book.sheets[active] ?? book.sheets[0];
+  if (!sheet) {
+    return <div className="preview-fallback">This workbook has no sheets.</div>;
+  }
+  return (
+    <div className="sheet-host">
+      {book.sheets.length > 1 && (
+        <div className="sheet-tabs">
+          {book.sheets.map((each, index) => (
+            <button
+              key={each.name}
+              className={`sheet-tab${index === active ? " active" : ""}`}
+              onClick={() => setActive(index)}
+            >
+              {each.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="sheet-scroll">
+        <table className="sheet-table">
+          <tbody>
+            {sheet.rows.map((row, y) => (
+              <tr key={y}>
+                <th className="sheet-gutter">{y + 1}</th>
+                {row.map((cell, x) => (
+                  <td key={x}>{cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {sheet.rows.length === 0 && <div className="preview-fallback">This sheet is empty.</div>}
+      </div>
+      {sheet.truncated && (
+        <div className="sheet-note">Showing the first part of this sheet. Open it to see everything.</div>
+      )}
+    </div>
+  );
 }
 
 /** Renders decrypted .docx bytes with docx-preview, loaded on demand. */
@@ -78,7 +230,7 @@ export function Preview(props: {
     // decrypted on the fly, range requests answered, nothing buffered whole.
     if ((kind === "video" || kind === "audio") && mediaBridgeAvailable()) {
       registerMediaKey(file.id);
-      setLoaded({ url: mediaUrl(file.id), text: null, docx: null });
+      setLoaded({ url: mediaUrl(file.id), text: null, docx: null, sheet: null, pdf: null });
       const stopProgress = onMediaProgress(file.id, (done, total) =>
         setProgress(done < total ? { loaded: done, total } : null),
       );
@@ -91,17 +243,25 @@ export function Preview(props: {
         if (cancelled) {
           return;
         }
+        const empty = { url: null, text: null, docx: null, sheet: null, pdf: null };
         if (kind === "text") {
-          setLoaded({ url: null, text: new TextDecoder().decode(bytes), docx: null });
+          setLoaded({ ...empty, text: new TextDecoder().decode(bytes) });
           return;
         }
         if (kind === "doc") {
-          setLoaded({ url: null, text: null, docx: bytes });
+          setLoaded({ ...empty, docx: bytes });
           return;
         }
-        const mime = kind === "pdf" ? "application/pdf" : file.mime;
-        url = URL.createObjectURL(new Blob([bytes.slice().buffer as ArrayBuffer], { type: mime }));
-        setLoaded({ url, text: null, docx: null });
+        if (kind === "sheet") {
+          setLoaded({ ...empty, sheet: bytes });
+          return;
+        }
+        if (kind === "pdf") {
+          setLoaded({ ...empty, pdf: bytes });
+          return;
+        }
+        url = URL.createObjectURL(new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime }));
+        setLoaded({ ...empty, url });
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -214,8 +374,10 @@ export function Preview(props: {
           </>
         ) : kind === "audio" && loaded.url ? (
           <audio src={loaded.url} controls autoPlay />
-        ) : kind === "pdf" && loaded.url ? (
-          <iframe src={loaded.url} title={file.name} />
+        ) : kind === "pdf" && loaded.pdf ? (
+          <PdfBody bytes={loaded.pdf} name={file.name} />
+        ) : kind === "sheet" && loaded.sheet ? (
+          <SheetBody bytes={loaded.sheet} />
         ) : kind === "doc" && loaded.docx ? (
           <DocxBody bytes={loaded.docx} name={file.name} />
         ) : loaded.text !== null ? (
