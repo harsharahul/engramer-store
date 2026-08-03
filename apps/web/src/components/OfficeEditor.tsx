@@ -69,7 +69,17 @@ export function OfficeEditor(props: {
         return;
       }
       if (data?.t === "changed") {
-        setDirty(Boolean(data.modified));
+        // Only ever set. The editor clears its own modified flag as soon as
+        // the stand-in collaboration server acknowledges a change, about a
+        // second after typing; treating that as "saved" would grey out Save
+        // and let the document close with the edit only in the editor.
+        if (data.modified) {
+          setDirty(true);
+        }
+        return;
+      }
+      if (data?.t === "shortcut" && data.name === "save") {
+        void save();
         return;
       }
       if (data?.t === "saved") {
@@ -193,7 +203,11 @@ export function OfficeEditor(props: {
         </span>
         <div className="grow" />
         {error && <span className="error-text">{error}</span>}
-        <button className="btn btn-primary" onClick={() => void save()} disabled={!dirty || busy}>
+        <button
+          className="btn btn-primary"
+          onClick={() => void save()}
+          disabled={stage !== "ready" || busy}
+        >
           {busy ? <span className="spinner" /> : null}
           {busy ? "Encrypting" : "Save"}
           {!busy && <kbd className="mono save-kbd">⌘S</kbd>}
