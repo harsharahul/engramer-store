@@ -9,6 +9,12 @@ export interface TreeFile {
   file: File;
   /** Folder path relative to the drop root, e.g. ["photos", "2026"]. */
   path: string[];
+  /**
+   * Tags to add on top of whatever analysis finds. Watched folders use this
+   * to record where a file came from, which is the only trace left once
+   * auto-filing has moved it into a category folder.
+   */
+  tags?: string[];
 }
 
 /** Files picked through an <input webkitdirectory>: paths ride on the File. */

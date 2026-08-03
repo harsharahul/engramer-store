@@ -703,7 +703,18 @@ export const useStore = create<StoreState>((set, get) => {
         const current = get().batch;
         set({ batch: current ? { ...current, current: item.file.name } : null });
         try {
-          const prepared = await analyzeFile(item.file, cancel.signal);
+          const analyzed = await analyzeFile(item.file, cancel.signal);
+          // Caller-supplied tags join the analysis rather than replace it, so
+          // a watched file keeps its category and gains its origin.
+          const prepared = item.tags?.length
+            ? {
+                ...analyzed,
+                analysis: {
+                  ...analyzed.analysis,
+                  tags: [...new Set([...analyzed.analysis.tags, ...item.tags])],
+                },
+              }
+            : analyzed;
           const destination =
             item.path.length > 0
               ? (folderIds.get(pathKey(item.path)) ?? baseFolderId)

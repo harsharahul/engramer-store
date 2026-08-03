@@ -17,7 +17,13 @@ import {
   watchedFolders,
   watchedRemove,
 } from "../native";
-import { syncWatchedNow } from "../watchfolders";
+import {
+  folderName,
+  setWatchMode,
+  syncWatchedNow,
+  watchMode,
+  type WatchMode,
+} from "../watchfolders";
 import { diagEntries, diagText, onDiag } from "../diag";
 import { AdminBody } from "./AdminPanel";
 import { KeyGlyph, LockGlyph, MoonGlyph, ScanTextGlyph, SparkGlyph, SunGlyph } from "./Icon";
@@ -48,6 +54,7 @@ export function ProfileView(props: {
   const [enrolling, setEnrolling] = useState(false);
   const [shell] = useState(() => nativeShell());
   const [watched, setWatched] = useState<string[]>([]);
+  const [modes, setModes] = useState<Record<string, WatchMode>>({});
   const [showDiag, setShowDiag] = useState(false);
   const [diagLines, setDiagLines] = useState(() => [...diagEntries()]);
 
@@ -61,7 +68,10 @@ export function ProfileView(props: {
 
   useEffect(() => {
     if (shell) {
-      void watchedFolders().then(setWatched);
+      void watchedFolders().then((paths) => {
+        setWatched(paths);
+        setModes(Object.fromEntries(paths.map((path) => [path, watchMode(path)])));
+      });
     }
   }, [shell]);
 
@@ -309,6 +319,33 @@ export function ProfileView(props: {
             <div key={path} className="profile-row">
               <div className="profile-row-main">
                 <b className="watched-path">{path}</b>
+                <div className="watch-modes">
+                  <button
+                    className={`sheet-tab${modes[path] !== "mirrored" ? " active" : ""}`}
+                    onClick={() => {
+                      setWatchMode(path, "sorted");
+                      setModes({ ...modes, [path]: "sorted" });
+                      props.onToast("New arrivals will be sorted by kind and tagged with the folder name.");
+                    }}
+                  >
+                    Sort by kind
+                  </button>
+                  <button
+                    className={`sheet-tab${modes[path] === "mirrored" ? " active" : ""}`}
+                    onClick={() => {
+                      setWatchMode(path, "mirrored");
+                      setModes({ ...modes, [path]: "mirrored" });
+                      props.onToast(`New arrivals will go into a "${folderName(path)}" folder.`);
+                    }}
+                  >
+                    Keep the folder
+                  </button>
+                </div>
+                <div className="profile-note">
+                  {modes[path] === "mirrored"
+                    ? `Files land in a "${folderName(path)}" folder, subfolders and all.`
+                    : `Files are filed by what they are, tagged "${folderName(path)}" so you can find them.`}
+                </div>
               </div>
               <button
                 className="btn"
