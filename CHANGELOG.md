@@ -3,6 +3,50 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.33.0] - 2026-08-03
+
+### Added
+- **Every file now proves it is the file it was.** A digest of the
+  contents is taken on your device before any encryption and checked
+  after decryption, so the whole path is covered rather than the
+  storage half of it. Encryption already proved the server returned
+  what it was given; it could never prove that what it was given was
+  what your file held. The digest rides along with the encryption
+  rather than costing a second read.
+- **Check every file, on request.** Under your account menu, a pass
+  that reads the whole vault back and reports what it finds: intact,
+  damaged, unreadable, or stored before this existed and carrying
+  nothing to check against. Nothing else can tell you this, because the
+  server cannot read your files. It downloads everything, so it is
+  asked for rather than automatic, reports progress by name, and can be
+  stopped.
+- A file that fails its check is marked in the library, says so when
+  opened, and still downloads: a check that could itself be wrong must
+  never be the reason data becomes unreachable.
+
+### Fixed
+- **Watched folders were storing every file corrupted.** A file read
+  through the desktop shell was declared to be bytes rather than
+  converted into them, and what arrives is an array of byte values,
+  which a Blob stringifies without complaint. Files were stored as the
+  text "37,80,68,70,..." at about three and a half times their real
+  size, unopenable, and nothing reported it. Uploads from a watched
+  folder since the feature shipped need replacing; the originals were
+  never touched.
+- **The same watched files uploaded again on every scan.** A file
+  counts as new when nothing of its name and size is in the vault, and
+  the corrupted size could never match, so the folder re-uploaded
+  forever.
+- **A spreadsheet dropped the cell you were typing in.** The cell stays
+  open until you leave it, and until then its text is not part of the
+  document, so typing and pressing Save stored the document without it.
+- **Uploads verify what arrived.** Every upload compares the bytes it
+  read against the size the file system reported, and completes only
+  when the server confirms it holds every byte.
+- **A file that only claims to be a PDF offers the download again**
+  rather than an error, for pages saved by a browser and other things
+  named .pdf that are not.
+
 ## [0.32.2] - 2026-08-03
 
 ### Added
