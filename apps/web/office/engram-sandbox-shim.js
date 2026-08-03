@@ -220,10 +220,27 @@
           var ctx = window.AscCommon && window.AscCommon.g_inputContext;
           var area = ctx && ctx.HtmlArea;
           if (area && area.focus) {
-            if (typeof api.asc_enableKeyEvents === 'function') { api.asc_enableKeyEvents(true); }
             window.focus();
             area.focus();
-            if (document.activeElement === area) { return; }
+            // Order matters: the editor keeps its own flag for whether it
+            // holds the keyboard, and a keypress that arrives while it is
+            // false is dropped rather than queued. Setting it after the
+            // element is focused is what makes the first keystroke count.
+            if (typeof api.asc_enableKeyEvents === 'function') { api.asc_enableKeyEvents(true); }
+            // Only the element actually holding focus is a reliable signal.
+            // The editor's own focus flag reads true well before that, and
+            // trusting it stops this loop while the keyboard still goes
+            // nowhere -- measured in the spreadsheet, which does exactly that.
+            if (document.activeElement === area) {
+              // Focusing the element arms a timer that wipes it half a second
+              // later, to drop anything stale left behind. It is empty here,
+              // and a first keystroke landing inside that window is wiped
+              // along with it. Retrying would re-arm the timer every time.
+              if (!area.value && ctx && typeof ctx.onFocusInputTextEnd === 'function') {
+                ctx.onFocusInputTextEnd();
+              }
+              return;
+            }
           }
           if (tries++ < 40) { setTimeout(place, 100); }
         })();
