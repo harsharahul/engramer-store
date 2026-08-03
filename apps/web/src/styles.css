@@ -543,6 +543,18 @@ a {
   color: var(--paper-dim);
 }
 
+/* Per-folder choice of where watched arrivals land. */
+.watch-modes {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.watch-modes .sheet-tab {
+  border-radius: 6px;
+  border-bottom: 1px solid var(--hairline);
+}
+
 /* A PDF drawn page by page, rather than handed to a viewer the engine may
    not have. Pages stack and scroll like the document they came from. */
 .pdf-host {
