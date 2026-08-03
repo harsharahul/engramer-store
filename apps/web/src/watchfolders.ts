@@ -65,13 +65,49 @@ const pending = new Map<string, WatchedFile>();
 const inFlight = new Set<string>();
 let drainTimer: ReturnType<typeof setTimeout> | null = null;
 
-function alreadyInLibrary(file: WatchedFile): boolean {
-  for (const entry of useStore.getState().files.values()) {
+/**
+ * Whether the vault already holds this file. Name and size together, because
+ * the shell has no identity to offer beyond the path, and a path changes
+ * when a folder is reorganised.
+ *
+ * The sizes compared here have to describe the same thing. They did not
+ * once: uploads stored a mangled, larger copy, so this never matched and the
+ * same files uploaded on every scan, forever.
+ */
+export function alreadyInLibrary(
+  file: { name: string; size: number },
+  entries: Iterable<{ name: string; size: number; trashed: boolean }>,
+): boolean {
+  for (const entry of entries) {
     if (!entry.trashed && entry.name === file.name && entry.size === file.size) {
       return true;
     }
   }
   return false;
+}
+
+/**
+ * Where an arrival goes, and what marks where it came from. Sorted, it is
+ * filed by what it is and tagged with the folder's name, which is the only
+ * trace left once auto-filing has moved it. Mirrored, the folder is
+ * recreated in the vault and the file keeps its place inside it.
+ */
+export function destinationFor(
+  file: { path: string; rel_dirs: string[] },
+  roots: string[],
+  mode: (root: string) => WatchMode,
+): { path: string[]; tags?: string[] } {
+  // The nearest watched folder, when one contains another.
+  const root = roots
+    .filter((candidate) => file.path.startsWith(candidate))
+    .sort((a, b) => b.length - a.length)[0];
+  if (!root) {
+    return { path: file.rel_dirs };
+  }
+  const origin = folderName(root);
+  return mode(root) === "mirrored"
+    ? { path: [origin, ...file.rel_dirs] }
+    : { path: file.rel_dirs, tags: [origin] };
 }
 
 async function drain(): Promise<void> {
@@ -90,7 +126,7 @@ async function drain(): Promise<void> {
   const fresh = batch.filter(
     (file) =>
       !inFlight.has(file.path) &&
-      !alreadyInLibrary(file) &&
+      !alreadyInLibrary(file, useStore.getState().files.values()) &&
       file.size > 0 &&
       file.size <= MAX_WATCH_FILE_BYTES,
   );
@@ -120,19 +156,13 @@ async function drain(): Promise<void> {
           inFlight.delete(file.path);
           continue;
         }
-        // Which watched folder this came from: the longest one that
-        // prefixes it, so nested watched folders resolve to the nearest.
-        const root = roots
-          .filter((candidate) => file.path.startsWith(candidate))
-          .sort((a, b) => b.length - a.length)[0];
-        const origin = root ? folderName(root) : null;
-        const mirrored = root ? watchMode(root) === "mirrored" : false;
+        const destination = destinationFor(file, roots, watchMode);
         items.push({
           file: new File([bytes.slice().buffer as ArrayBuffer], file.name, {
             lastModified: file.mtime,
           }),
-          path: mirrored && origin ? [origin, ...file.rel_dirs] : file.rel_dirs,
-          tags: !mirrored && origin ? [origin] : undefined,
+          path: destination.path,
+          tags: destination.tags,
         });
       } catch (err) {
         // Unreadable now (moved, permissions); a later event retries it.
