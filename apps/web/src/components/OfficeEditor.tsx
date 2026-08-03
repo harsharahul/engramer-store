@@ -67,6 +67,10 @@ export function OfficeEditor(props: {
       }
       if (data?.t === "ready") {
         setStage("ready");
+        // Focus has to be handed across the frame boundary explicitly, or the
+        // document opens with a caret that is not listening to the keyboard.
+        frameRef.current?.contentWindow?.focus();
+        frameRef.current?.contentWindow?.postMessage({ t: "focus" }, "*");
         return;
       }
       if (data?.t === "changed") {

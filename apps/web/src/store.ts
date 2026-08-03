@@ -25,6 +25,7 @@ import { isPdf } from "./intel/extract";
 import { embedImage } from "./intel/semantic";
 import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
+import { blankDocument, DOCX_MIME, XLSX_MIME } from "./office/templates";
 
 export interface FolderEntry {
   id: string;
@@ -145,6 +146,11 @@ interface StoreState {
   saveFileContent: (id: string, text: string) => Promise<void>;
   saveFileBinary: (id: string, bytes: Uint8Array, searchText?: string) => Promise<void>;
   createNote: (name: string, folderId: string | null) => Promise<string>;
+  createOfficeDocument: (
+    name: string,
+    kind: "docx" | "xlsx",
+    folderId: string | null,
+  ) => Promise<string>;
   renameFile: (id: string, name: string) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
   toggleFavorite: (id: string) => Promise<void>;
@@ -807,6 +813,30 @@ export const useStore = create<StoreState>((set, get) => {
       );
       await uploadBlob(dto.id, "data", encryptBytes(new Uint8Array(0), fileKey));
       applyFile({ ...dto, uploaded: true });
+      return dto.id;
+    },
+
+    /** A new Word document or spreadsheet, created empty and encrypted here. */
+    createOfficeDocument: async (name, kind, folderId) => {
+      const extension = `.${kind}`;
+      const fileName = name.toLowerCase().endsWith(extension) ? name : `${name}${extension}`;
+      const bytes = blankDocument(kind);
+      const fileKey = generateKey();
+      const meta: FileMetadata = {
+        name: fileName,
+        mime: kind === "docx" ? DOCX_MIME : XLSX_MIME,
+        size: bytes.length,
+        mtime: Date.now(),
+        category: kind === "docx" ? "Documents" : "Spreadsheets",
+        tags: [kind, String(new Date().getFullYear())],
+      };
+      const dto = await api.createFile(
+        folderId,
+        secretBoxSeal(fileKey, masterKey()),
+        encryptFileMetadata(meta, fileKey),
+      );
+      await uploadBlob(dto.id, "data", encryptBytes(bytes, fileKey));
+      applyFile({ ...dto, uploaded: true, size: bytes.length });
       return dto.id;
     },
 

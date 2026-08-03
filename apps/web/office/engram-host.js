@@ -140,6 +140,11 @@ window.addEventListener("message", function (event) {
     return;
   }
 
+  if (data.t === "focus") {
+    focusEditor();
+    return;
+  }
+
   if (data.t === "save") {
     // The editor returns its document as base64 in the internal format; the
     // app converts it back to a real file, where the converter lives.
@@ -153,6 +158,18 @@ window.addEventListener("message", function (event) {
     );
   }
 });
+
+/**
+ * Hands keyboard focus down to the editor. Focus does not cross frames on
+ * its own, so each level passes it along: without this the document opens
+ * with a caret blinking in an editor that is not listening, and typing does
+ * nothing until the user clicks.
+ */
+function focusEditor() {
+  try { window.focus(); } catch (e) {}
+  try { window.frames[0] && window.frames[0].focus(); } catch (e) {}
+  editorCall("focus").catch(function () {});
+}
 
 function loadEditorApi() {
   return new Promise(function (resolve, reject) {
@@ -206,6 +223,7 @@ function open(request) {
           toApp({ t: "progress", stage: "loading" });
         },
         onDocumentReady: function () {
+          focusEditor();
           toApp({ t: "ready" });
         },
         onDocumentStateChange: function (event) {
