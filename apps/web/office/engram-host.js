@@ -37,6 +37,29 @@ var MIME_BY_EXT = {
 
 var state = { media: {}, editor: null, fileType: "docx" };
 
+/** Matches the sentinel the shim intercepts inside the editor frame. */
+var DOCUMENT_URL = "engram:document";
+
+/**
+ * Delivers the document to the editor frame as bytes. The frame is created
+ * by the editor API, so it may take a moment to exist; retry briefly rather
+ * than assume, and transfer the buffer so nothing is copied.
+ */
+function sendDocument(bytes) {
+  var attempts = 0;
+  (function push() {
+    var target = window.frames[0];
+    if (!target) {
+      if (attempts++ < 100) {
+        setTimeout(push, 20);
+      }
+      return;
+    }
+    var copy = bytes.slice();
+    target.postMessage({ t: "engramDocument", bytes: copy }, "*", [copy.buffer]);
+  })();
+}
+
 function toBase64(bytes) {
   var out = "";
   for (var i = 0; i < bytes.length; i += 0x8000) {
@@ -159,7 +182,10 @@ function open(request) {
         fileType: request.fileType,
         key: "local",
         title: request.title || "document." + request.fileType,
-        url: dataUrl(new Uint8Array(request.bin)),
+        // A sentinel, not a real URL. The shim inside the editor answers a
+        // request for it from bytes we post in below, so the document never
+        // becomes a string: no base64 expansion, and no 64MiB ceiling.
+        url: DOCUMENT_URL,
         permissions: { print: true, download: false },
       },
       documentType: isSheet ? "cell" : "word",
@@ -195,6 +221,12 @@ function open(request) {
     // The editor API hangs its host callbacks off this object and does not
     // create it; without it, connecting the stand-in server throws.
     window.APP = window.APP || {};
+
+    // Hand the document to the shim as soon as the editor's frame exists.
+    // It arrives long before the editor asks for it, and the shim makes any
+    // earlier request wait, so the order cannot go wrong.
+    var bin = new Uint8Array(request.bin);
+    sendDocument(bin);
 
     // Standing in for the collaboration server the editor expects. Nothing
     // here goes near a network: a single local participant, no history, and

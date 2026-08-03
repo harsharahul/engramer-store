@@ -87,6 +87,74 @@
     window.Worker.prototype = NativeWorker.prototype;
   }
 
+  // ------------------------------------------------------------------ document
+  // The document is delivered as BYTES over postMessage, never as a URL.
+  //
+  // The editor loads its document by URL. A blob: URL minted by the host is
+  // unreadable here, because this frame is a different opaque origin, so the
+  // obvious remaining option was to inline the whole document as a data: URL.
+  // That works until it does not: base64 adds a third, and Safari refuses a
+  // data: URL beyond 64MiB, which a text-heavy document reaches while a far
+  // larger one full of images does not (measured, see docs/office-editing.md).
+  //
+  // Instead the host posts the bytes in and the editor's request for a
+  // sentinel URL is answered from memory. Requests that arrive before the
+  // bytes do simply wait, so there is no race with the editor's boot.
+  var DOCUMENT_URL = 'engram:document';
+  var documentBytes = null;
+  var documentWaiting = [];
+
+  window.addEventListener('message', function (ev) {
+    var d = ev.data;
+    if (!d || d.t !== 'engramDocument') { return; }
+    documentBytes = new Uint8Array(d.bytes);
+    var waiting = documentWaiting.splice(0);
+    for (var i = 0; i < waiting.length; i++) { waiting[i](documentBytes); }
+  });
+
+  function withDocument(fn) {
+    if (documentBytes) { fn(documentBytes); return; }
+    documentWaiting.push(fn);
+  }
+
+  // The editor loads its document with XMLHttpRequest. Rather than imitate
+  // one, which fails because native getters reject a stand-in receiver, the
+  // request is redirected: the sentinel is swapped for a blob: URL minted
+  // HERE, in the editor's own origin, where it is readable. Real requests are
+  // untouched, and the object stays a genuine XMLHttpRequest throughout.
+  var nativeOpen = window.XMLHttpRequest.prototype.open;
+  var nativeSend = window.XMLHttpRequest.prototype.send;
+  var nativeSetHeader = window.XMLHttpRequest.prototype.setRequestHeader;
+
+  window.XMLHttpRequest.prototype.open = function (method, url) {
+    if (String(url) === DOCUMENT_URL) {
+      // Defer opening until send(), by which point the bytes are in hand.
+      this.__engramDocument = true;
+      return;
+    }
+    this.__engramDocument = false;
+    return nativeOpen.apply(this, arguments);
+  };
+
+  window.XMLHttpRequest.prototype.setRequestHeader = function () {
+    // Nothing is open yet on the deferred path, and the document needs no
+    // headers; setting one here would throw.
+    if (this.__engramDocument) { return; }
+    return nativeSetHeader.apply(this, arguments);
+  };
+
+  window.XMLHttpRequest.prototype.send = function () {
+    if (!this.__engramDocument) { return nativeSend.apply(this, arguments); }
+    var xhr = this;
+    withDocument(function (bytes) {
+      xhr.__engramDocument = false;
+      var url = URL.createObjectURL(new Blob([bytes]));
+      nativeOpen.call(xhr, 'GET', url, true);
+      xhr.addEventListener('loadend', function () { URL.revokeObjectURL(url); });
+      nativeSend.call(xhr);
+    });
+  };
+
   // Save shortcut. Focus lives inside this frame while editing, so the app's
   // own keydown listener never sees it; forward the intent outward instead of
   // letting the browser's own save dialog appear.
