@@ -123,9 +123,32 @@ function ortAssets(): Plugin {
   };
 }
 
+/**
+ * Development mirror of the headers the server sends for the office editor.
+ * That editor is framed with an opaque origin, so its own assets are
+ * cross-origin to it and its fetches carry a null origin; without these,
+ * the editor loads and then fails on its first locale fetch. Production
+ * sets the same headers, scoped to the same prefix, in apps/server.
+ */
+function officeDevHeaders(): Plugin {
+  return {
+    name: "engram-office-dev-headers",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if ((req.url ?? "").startsWith("/office/")) {
+          res.setHeader("access-control-allow-origin", "*");
+          res.setHeader("cross-origin-resource-policy", "cross-origin");
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     react(),
+    officeDevHeaders(),
     ocrAssets(),
     ortAssets(),
     VitePWA({

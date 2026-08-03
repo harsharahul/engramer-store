@@ -77,13 +77,14 @@ export class Converter {
     return result;
   }
 
-  /** Converts the edited document back to its original format. */
-  async exportDocument(name: string, bin: Uint8Array): Promise<Uint8Array> {
+  /**
+   * Converts the edited document back to its original format. The editor
+   * produces a prefixed string rather than raw bytes, and the converter
+   * reads it in that form, so it travels unmodified.
+   */
+  async exportDocument(name: string, bin: string): Promise<Uint8Array> {
     const started = performance.now();
-    const copy = bin.slice();
-    const result = await this.send<{ bytes: Uint8Array }>({ op: "export", name, bytes: copy }, [
-      copy.buffer,
-    ]);
+    const result = await this.send<{ bytes: Uint8Array }>({ op: "export", name, bytes: bin }, []);
     diag("office", `exported ${name} in ${Math.round(performance.now() - started)}ms`);
     return result.bytes;
   }

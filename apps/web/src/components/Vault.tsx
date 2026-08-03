@@ -50,8 +50,14 @@ import { Preview } from "./Preview";
 import { Editor } from "./Editor";
 
 // The Word editor is heavy (SuperDoc); it loads only when a .docx is opened.
-const DocEditor = lazy(() =>
-  import("./DocEditor").then((m) => ({ default: m.DocEditor })),
+/** Word and Excel open in the full editor; everything else does not. */
+function officeKind(file: FileEntry): "docx" | "xlsx" | null {
+  const kind = fileKind(file.mime, file.name);
+  return kind === "doc" ? "docx" : kind === "sheet" ? "xlsx" : null;
+}
+
+const OfficeEditor = lazy(() =>
+  import("./OfficeEditor").then((m) => ({ default: m.OfficeEditor })),
 );
 import { ShareDialog } from "./ShareDialog";
 import { SharedView, NewRequestDialog } from "./SharedView";
@@ -445,7 +451,7 @@ export function Vault() {
 
   const fileMenuItems = (file: FileEntry): MenuItem[] => [
     { id: "open", label: "Open", run: () => openFile(file.id) },
-    ...(["text", "doc"].includes(fileKind(file.mime, file.name))
+    ...(["text", "doc", "sheet"].includes(fileKind(file.mime, file.name))
       ? [{ id: "edit", label: "Edit", icon: <PencilGlyph size={13} />, run: () => setEditorId(file.id) }]
       : []),
     ...((file.mime.startsWith("image/") || file.mime === "application/pdf") && !file.hasText
@@ -1703,7 +1709,7 @@ export function Vault() {
           }
         />
       )}
-      {editorFile && fileKind(editorFile.mime, editorFile.name) === "doc" ? (
+      {editorFile && officeKind(editorFile) ? (
         <Suspense
           fallback={
             <div className="preview-shell">
@@ -1711,8 +1717,9 @@ export function Vault() {
             </div>
           }
         >
-          <DocEditor
+          <OfficeEditor
             file={editorFile}
+            fileType={officeKind(editorFile)!}
             onSave={(bytes) => store.saveFileBinary(editorFile.id, bytes)}
             onClose={() => setEditorId(null)}
           />
