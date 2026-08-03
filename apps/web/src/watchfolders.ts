@@ -35,6 +35,16 @@ function alreadyInLibrary(file: WatchedFile): boolean {
 }
 
 async function drain(): Promise<void> {
+  // Nothing may be judged new until the library it is judged against exists.
+  // The shell reloads its window on refresh, and the startup scan runs the
+  // moment the vault mounts, well before the first sync returns; an empty
+  // library makes every watched file look unseen and uploads it again. The
+  // files stay queued rather than being dropped.
+  if (!useStore.getState().synced) {
+    diag("watch", "waiting for the library before deciding what is new");
+    schedule(5_000);
+    return;
+  }
   const batch = [...pending.values()];
   pending.clear();
   const fresh = batch.filter(
@@ -75,17 +85,22 @@ async function drain(): Promise<void> {
   }
 }
 
+function schedule(delay: number): void {
+  if (pending.size === 0 || drainTimer !== null) {
+    return;
+  }
+  drainTimer = setTimeout(() => {
+    drainTimer = null;
+    void drain();
+  }, delay);
+}
+
 function enqueue(files: WatchedFile[]): void {
   for (const file of files) {
     pending.set(file.path, file);
   }
-  if (pending.size > 0 && drainTimer === null) {
-    // A short quiet period batches a burst of files into one upload wave.
-    drainTimer = setTimeout(() => {
-      drainTimer = null;
-      void drain();
-    }, 2_000);
-  }
+  // A short quiet period batches a burst of files into one upload wave.
+  schedule(2_000);
 }
 
 /**
