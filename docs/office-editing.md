@@ -149,8 +149,11 @@ the editor was not written to run without an origin:
 - **Resolves embedded images** from the same bytes, for the callback the editor
   expects its host to provide.
 - **Carries actions across the boundary**: the save shortcut outward, and the
-  save and focus calls inward, because a cross-origin page cannot reach into
-  the editor to make them directly.
+  save call inward, because a cross-origin page cannot reach into the editor
+  to make it directly. Focus is not in that list: the editor has its own
+  command for it, and using it rather than reaching for the editor's hidden
+  input element is the difference between a document you can type into and a
+  caret that quietly swallows every keystroke.
 
 One more workaround lives there: an opaque origin cannot construct a worker
 from an `http(s)` script URL at all, and the editor builds its spellchecker
