@@ -23,7 +23,7 @@ jobs:
         run: |
           ver="$(node -p "require('./package.json').version")"
           grep -q "^## $ver" CHANGELOG.md || { echo "::error::CHANGELOG.md has no entry for $ver"; exit 1; }
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v6.0.9
         with:
           version: 11
       - uses: actions/setup-node@v7

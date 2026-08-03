@@ -33,7 +33,7 @@ jobs:
       ENGRAMER_TEST_PG: postgres://postgres:citest@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v6.0.9
         with:
           version: 11
       - uses: actions/setup-node@v7
