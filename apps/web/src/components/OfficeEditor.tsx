@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileEntry } from "../store";
 import { downloadAndDecrypt } from "../transfer";
 import { Converter } from "../office/x2t";
+import { EditorSession, editorFrameUrl } from "../office/session";
 import { diag } from "../diag";
 import { XGlyph } from "./Icon";
 
@@ -14,25 +15,11 @@ import { XGlyph } from "./Icon";
  * returns the document in its internal format, the worker converts it back,
  * and the caller re-encrypts it under the file's existing key.
  *
- * The frame is deliberately given nothing but bytes.
+ * The frame is deliberately given nothing but bytes. It is a single document
+ * with an opaque origin, which is what denies it storage entirely; the
+ * protocol that would otherwise be spoken by a wrapper script creating a
+ * second frame lives in ../office/session.ts instead.
  */
-
-/**
- * Where the editor is served from, and therefore how it is isolated.
- *
- * Unset, the editor is framed from this same origin with an opaque origin,
- * which denies it storage entirely. Safari, however, refuses the editor's
- * own cross-frame access in that configuration, so the editor misbehaves.
- *
- * Set to a second origin, the frame keeps `allow-same-origin` and so works
- * everywhere, while remaining cross-origin to the page that holds the
- * master key: it still cannot read this page, its storage or its session.
- * That is the arrangement CryptPad ships.
- */
-const OFFICE_ORIGIN = (import.meta.env.VITE_OFFICE_ORIGIN as string | undefined) ?? "";
-const HOST_URL = `${OFFICE_ORIGIN}/office/engram-host.html`;
-const FRAME_SANDBOX = OFFICE_ORIGIN ? "allow-scripts allow-same-origin" : "allow-scripts";
-
 
 type Stage = "decrypting" | "converting" | "loading" | "ready" | "failed";
 
@@ -53,82 +40,59 @@ export function OfficeEditor(props: {
   const { file, fileType } = props;
   const frameRef = useRef<HTMLIFrameElement>(null);
   const converterRef = useRef<Converter | null>(null);
-  const saveWaiters = useRef(new Map<number, (bin: string) => void>());
-  const saveSeq = useRef(0);
+  const sessionRef = useRef<EditorSession | null>(null);
+  // The editor's own save shortcut arrives as a message, which the session
+  // hands on; it needs whatever save() currently is, not the one that existed
+  // when the session was built.
+  const saveRef = useRef<() => void>(() => {});
   const [stage, setStage] = useState<Stage>("decrypting");
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
+  // The frame's address depends only on the kind of document, so the editor
+  // begins loading its several megabytes immediately, while this file is
+  // still being downloaded, decrypted and converted.
+  const frameUrl = useMemo(() => editorFrameUrl(fileType), [fileType]);
+
   useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame) {
+      return;
+    }
     const converter = new Converter();
     converterRef.current = converter;
     let cancelled = false;
 
-    const onMessage = (event: MessageEvent) => {
-      if (event.source !== frameRef.current?.contentWindow) {
-        return;
-      }
-      const data = event.data as { t?: string; [key: string]: unknown };
-      if (data?.t === "hello") {
-        void start();
-        return;
-      }
-      if (data?.t === "progress" && data.stage === "loading") {
-        setStage((current) => (current === "converting" ? "loading" : current));
-        return;
-      }
-      if (data?.t === "ready") {
+    const session = new EditorSession(frame, fileType, file.name, {
+      onLoading: () => diag("office", "the editor is up and waiting for its document"),
+      onReady: () => {
         setStage("ready");
-        // Focus has to be handed across the frame boundary explicitly, or the
-        // document opens with a caret that is not listening to the keyboard.
-        // The element and the window are focused separately because browsers
-        // disagree about which one moves keyboard focus into a frame.
-        frameRef.current?.focus();
-        frameRef.current?.contentWindow?.focus();
-        frameRef.current?.contentWindow?.postMessage({ t: "focus" }, "*");
-        return;
-      }
-      if (data?.t === "changed") {
+        session.focus();
+      },
+      onChanged: (modified) => {
         // Only ever set. The editor clears its own modified flag as soon as
         // the stand-in collaboration server acknowledges a change, about a
         // second after typing; treating that as "saved" would grey out Save
         // and let the document close with the edit only in the editor.
-        if (data.modified) {
+        if (modified) {
           setDirty(true);
         }
-        return;
-      }
-      if (data?.t === "focusReport") {
-        diag(
-          "office",
-          `editor focus: frameHasFocus=${data.hasFocus} active=${data.active} inputArea=${data.inputArea}`,
-        );
-        return;
-      }
-      if (data?.t === "shortcut" && data.name === "save") {
-        void save();
-        return;
-      }
-      if (data?.t === "saved") {
-        const waiter = saveWaiters.current.get(Number(data.id));
-        if (waiter) {
-          saveWaiters.current.delete(Number(data.id));
-          waiter(typeof data.bin === "string" ? data.bin : "");
+      },
+      onShortcut: (name) => {
+        if (name === "save") {
+          saveRef.current();
         }
-        if (typeof data.error === "string") {
-          setError(data.error);
-        }
-        return;
-      }
-      if (data?.t === "failed") {
+      },
+      onFailed: (message) => {
         setStage("failed");
-        setError(typeof data.error === "string" ? data.error : "the editor could not open this file");
-      }
-    };
+        setError(message);
+      },
+    });
+    sessionRef.current = session;
 
-    async function start() {
+    void (async () => {
       try {
         setStage("decrypting");
         const plaintext = await downloadAndDecrypt(file.id, file.key);
@@ -140,30 +104,20 @@ export function OfficeEditor(props: {
         if (cancelled) {
           return;
         }
-        const transfer: Transferable[] = [imported.bin.buffer as ArrayBuffer];
-        frameRef.current?.contentWindow?.postMessage(
-          {
-            t: "open",
-            fileType,
-            title: file.name,
-            bin: imported.bin,
-            media: imported.media,
-          },
-          "*",
-          transfer,
-        );
+        session.deliver(imported.bin, imported.media);
+        setStage("loading");
       } catch (err) {
         if (!cancelled) {
           setStage("failed");
           setError(err instanceof Error ? err.message : "could not open this document");
         }
       }
-    }
+    })();
 
-    window.addEventListener("message", onMessage);
     return () => {
       cancelled = true;
-      window.removeEventListener("message", onMessage);
+      session.close();
+      sessionRef.current = null;
       converter.close();
       converterRef.current = null;
     };
@@ -171,22 +125,14 @@ export function OfficeEditor(props: {
 
   const save = useCallback(async () => {
     const converter = converterRef.current;
-    if (!converter || busy || stage !== "ready") {
+    const session = sessionRef.current;
+    if (!converter || !session || busy || stage !== "ready") {
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const id = ++saveSeq.current;
-      const bin = await new Promise<string>((resolve, reject) => {
-        saveWaiters.current.set(id, resolve);
-        frameRef.current?.contentWindow?.postMessage({ t: "save", id }, "*");
-        setTimeout(() => {
-          if (saveWaiters.current.delete(id)) {
-            reject(new Error("the editor did not respond"));
-          }
-        }, 120_000);
-      });
+      const bin = await session.save();
       if (!bin) {
         throw new Error("the editor returned nothing to save");
       }
@@ -201,6 +147,10 @@ export function OfficeEditor(props: {
       setBusy(false);
     }
   }, [busy, stage, fileType, props, file.name]);
+
+  useEffect(() => {
+    saveRef.current = () => void save();
+  }, [save]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -259,12 +209,12 @@ export function OfficeEditor(props: {
           ref={frameRef}
           className="office-frame"
           title={file.name}
-          src={HOST_URL}
+          src={frameUrl}
           // No allow-same-origin: the frame runs in an opaque origin and so
-          // cannot reach this page, its storage, its cookies or its session.
-          // Removing this attribute would hand vendored third-party code the
-          // run of the origin that holds the master key.
-          sandbox={FRAME_SANDBOX}
+          // cannot reach this page, its storage, its cookies or its session,
+          // and has no storage of its own. Adding it would hand vendored
+          // third-party code the run of the origin that holds the master key.
+          sandbox="allow-scripts"
           style={{ visibility: stage === "ready" ? "visible" : "hidden" }}
         />
       </div>

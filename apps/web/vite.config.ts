@@ -127,10 +127,33 @@ function ortAssets(): Plugin {
  * Development mirror of the headers the server sends for the office editor.
  * That editor is framed with an opaque origin, so its own assets are
  * cross-origin to it and its fetches carry a null origin; without these,
- * the editor loads and then fails on its first locale fetch. Production
- * sets the same headers, scoped to the same prefix, in apps/server.
+ * the editor loads and then fails on its first locale fetch.
+ *
+ * The content policy is mirrored too, because it is the one header whose
+ * absence in development has repeatedly hidden a failure until production:
+ * every source below has to name the host explicitly, since 'self' resolves
+ * through the frame's own origin and an opaque origin matches nothing.
+ * Production sends the same policy, scoped to the same prefix, and
+ * apps/server/src/app.ts is its source of truth; these two must agree.
  */
 function officeDevHeaders(): Plugin {
+  const officeCsp = (host: string): string => {
+    const self = `https://${host} http://${host}`;
+    return [
+      `default-src ${self}`,
+      `script-src ${self} 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'`,
+      `worker-src ${self} blob:`,
+      `connect-src ${self} blob:`,
+      `img-src ${self} blob: data:`,
+      `media-src ${self} blob:`,
+      `font-src ${self} data:`,
+      `style-src ${self} 'unsafe-inline'`,
+      `frame-src ${self} blob:`,
+      "object-src 'none'",
+      `base-uri ${self}`,
+      "form-action 'none'",
+    ].join("; ");
+  };
   return {
     name: "engram-office-dev-headers",
     configureServer(server) {
@@ -138,6 +161,7 @@ function officeDevHeaders(): Plugin {
         if ((req.url ?? "").startsWith("/office/")) {
           res.setHeader("access-control-allow-origin", "*");
           res.setHeader("cross-origin-resource-policy", "cross-origin");
+          res.setHeader("content-security-policy", officeCsp(req.headers.host ?? "localhost:5173"));
         }
         next();
       });

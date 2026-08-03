@@ -203,9 +203,10 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
       `default-src ${self}`,
       `script-src ${self} 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'`,
       `worker-src ${self} blob:`,
-      // data: carries the converted document into the editor frame, which
-      // cannot read a blob: URL minted by another origin.
-      `connect-src ${self} blob: data:`,
+      // blob: is how the document reaches the editor: it arrives as bytes
+      // over a message and the frame mints its own URL, because a blob: URL
+      // is readable only by the origin that made it.
+      `connect-src ${self} blob:`,
       `img-src ${self} blob: data:`,
       `media-src ${self} blob:`,
       `font-src ${self} data:`,

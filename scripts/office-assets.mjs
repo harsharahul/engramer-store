@@ -80,10 +80,11 @@ const LOCALE_DIRS = [
 ];
 
 /**
- * The vendor patch set. Each anchor must match exactly once; a moved anchor
- * after an upstream upgrade fails the build loudly instead of silently
- * skipping, which is the only way a patch this small stays trustworthy.
- * The reasoning for each lives in docs/office-editing.md.
+ * The vendor patch set: two changes, both to the editor's own page. Each
+ * anchor must match exactly once; a moved anchor after an upstream upgrade
+ * fails the build loudly instead of silently skipping, which is the only way
+ * a patch this small stays trustworthy. The reasoning for each lives in
+ * docs/office-editing.md.
  */
 const PATCHES = [
   {
@@ -103,19 +104,6 @@ const PATCHES = [
     ],
     find: '"serviceWorker"in navigator&&',
     replace: "function(){try{return!!navigator.serviceWorker}catch(e){return false}}()&&",
-  },
-  {
-    id: "parent-origin",
-    files: ["web-apps/apps/api/documents/api-orig.js"],
-    find: "_config.parentOrigin = window.location.origin;",
-    replace: "_config.parentOrigin = window.origin;",
-  },
-  {
-    id: "frame-origin",
-    files: ["web-apps/apps/api/documents/api-orig.js"],
-    find: "this.frameOrigin = pathArray[0] + '//' + pathArray[2];",
-    replace:
-      "this.frameOrigin = window.origin === 'null' ? 'null' : pathArray[0] + '//' + pathArray[2];",
   },
 ];
 
@@ -348,9 +336,9 @@ async function main() {
   console.log("unpacking x2t");
   await execFile("unzip", ["-qo", x2tZip, "-d", join(outDir, "x2t")], { maxBuffer: 1 << 28 });
 
-  // Our own glue (the sandbox shim, the host page and its script) is tracked
-  // in the repo; the derived tree only ever holds copies, so editing it there
-  // is never how any of it changes.
+  // Our own glue (the sandbox shim and the editor's asset manifests) is
+  // tracked in the repo; the derived tree only ever holds copies, so editing
+  // it there is never how any of it changes.
   for (const name of await readdir(join(root, "apps/web/office"))) {
     await execFile("cp", [join(root, "apps/web/office", name), outDir]);
   }
