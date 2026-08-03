@@ -4,8 +4,8 @@
   "private": true,
   "description": "Engram Store desktop app: native shell, watch folders, and Keychain unlock.",
   "scripts": {
-    "dev": "tauri dev",
-    "bundle": "tauri build",
+    "dev": "node scripts/instance-config.mjs && tauri dev --config src-tauri/tauri.instance.json",
+    "bundle": "node scripts/instance-config.mjs && tauri build --config src-tauri/tauri.instance.json",
     "tauri": "tauri"
   },
   "devDependencies": {

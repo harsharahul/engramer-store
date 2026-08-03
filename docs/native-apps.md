@@ -23,3 +23,20 @@ The installed web app works offline for the app shell, but iOS applies tighter s
 **Mobile (second): Tauri mobile or Flutter.** Tauri 2 has iOS and Android targets sharing the desktop codebase, with a stable API but a younger plugin ecosystem. If the mobile experience needs to go deeper than a WebView (background camera upload, share-sheet integration, widgets), Flutter is the fallback, which is the route Ente took. Decision point: after the desktop app ships, evaluate Tauri mobile's camera and share-extension plugins; choose Flutter only if they fall short.
 
 **Not planned: Electron.** Bundle size and memory cost buy nothing here that Tauri does not already provide.
+
+## Pointing a build at your vault
+
+The desktop shell is a native window around the hosted client, so a build has
+to be told which deployment it belongs to. That address belongs to whoever
+builds the app rather than to this source tree, so the committed
+configuration names only `http://localhost:3080` and the real one is given at
+build time:
+
+```bash
+ENGRAM_APP_URL=https://vault.example.com pnpm --filter @engramer/desktop bundle
+```
+
+Two things need it: the window's address, and the capability that lets that
+origin call the shell's unlock commands, which is what makes Touch ID work.
+Both are written into files that git ignores, so a build can never leave the
+builder's own address in a tracked file.
