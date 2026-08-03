@@ -543,6 +543,45 @@ a {
   color: var(--paper-dim);
 }
 
+/* The files a check could not vouch for, named so they can be acted on. */
+.verify-problems {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--paper-dim);
+  max-height: 220px;
+  overflow: auto;
+}
+
+.verify-problems li {
+  padding: 3px 0;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.verify-verdict {
+  flex: none;
+  min-width: 76px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.verify-verdict.damaged {
+  color: #ff6b60;
+}
+
+.verify-verdict.unreadable {
+  color: #ffb020;
+}
+
+.verify-verdict.unchecked {
+  color: var(--paper-dim);
+}
+
 /* A file whose contents disagree with the digest taken when it was
    uploaded. Stated plainly, in the one place the eye already goes. */
 .corrupt-chip {

@@ -1,4 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { IntegrityError, downloadAndDecrypt } from "../transfer";
+import {
+  describeVerify,
+  verifyFiles,
+  type VerifyProgress,
+  type VerifyResult,
+} from "../verify";
 import { useStore } from "../store";
 import { formatBytes } from "../format";
 import { ACCENTS, type ThemeMode } from "../theme";
@@ -55,6 +62,55 @@ export function ProfileView(props: {
   const [shell] = useState(() => nativeShell());
   const [watched, setWatched] = useState<string[]>([]);
   const [modes, setModes] = useState<Record<string, WatchMode>>({});
+  const [verifying, setVerifying] = useState(false);
+  const [verifyProgress, setVerifyProgress] = useState<VerifyProgress | null>(null);
+  const [verifySummary, setVerifySummary] = useState<string | null>(null);
+  const [verifyProblems, setVerifyProblems] = useState<VerifyResult["problems"]>([]);
+  const verifyAbort = useRef<AbortController | null>(null);
+
+  const runVerify = async () => {
+    const controller = new AbortController();
+    verifyAbort.current = controller;
+    setVerifying(true);
+    setVerifySummary(null);
+    setVerifyProblems([]);
+    const files = [...store.files.values()].filter((file) => !file.trashed);
+    try {
+      const result = await verifyFiles(
+        files.map((file) => ({ id: file.id, name: file.name, size: file.size, digest: file.digest })),
+        async (file) => {
+          const entry = store.files.get(file.id)!;
+          try {
+            return await downloadAndDecrypt(entry.id, entry.key, entry.digest);
+          } catch (err) {
+            // The bytes came back; it is the digest that disagreed. Judge it
+            // here rather than counting it as unreadable.
+            if (err instanceof IntegrityError) {
+              return err.bytes;
+            }
+            throw err;
+          }
+        },
+        {
+          signal: controller.signal,
+          onProgress: setVerifyProgress,
+          onVerdict: (file, verdict) => {
+            if (verdict === "damaged") {
+              store.markCorrupt(file.id);
+            }
+          },
+        },
+      );
+      setVerifyProblems(result.problems);
+      setVerifySummary(describeVerify(result, controller.signal.aborted));
+    } catch {
+      setVerifySummary("The check could not finish; try again on a steadier connection.");
+    } finally {
+      setVerifying(false);
+      setVerifyProgress(null);
+      verifyAbort.current = null;
+    }
+  };
   const [showDiag, setShowDiag] = useState(false);
   const [diagLines, setDiagLines] = useState(() => [...diagEntries()]);
 
@@ -384,6 +440,51 @@ export function ProfileView(props: {
             }}
           >
             Resync
+          </button>
+        </div>
+      </section>
+
+      <section className="profile-card">
+        <h3>Integrity</h3>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Check every file</b>
+            <div className="profile-row-sub">
+              Reads each file back and compares it against the digest taken when it was
+              uploaded. Nothing else can tell you this: the server cannot read your files, so
+              it cannot check them for you. It downloads everything, so it is worth doing on a
+              connection you do not pay by the megabyte.
+            </div>
+            {verifying && (
+              <div className="profile-row-sub">
+                {verifyProgress
+                  ? `Checked ${verifyProgress.done} of ${verifyProgress.total}: ${verifyProgress.current}`
+                  : "Starting…"}
+              </div>
+            )}
+            {verifySummary && <div className="profile-row-sub"><b>{verifySummary}</b></div>}
+            {verifyProblems.length > 0 && (
+              <ul className="verify-problems">
+                {verifyProblems.slice(0, 20).map((problem) => (
+                  <li key={problem.id}>
+                    <span className={`verify-verdict ${problem.verdict}`}>{problem.verdict}</span>
+                    {problem.name}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <button
+            className="btn"
+            onClick={() => {
+              if (verifying) {
+                verifyAbort.current?.abort();
+                return;
+              }
+              void runVerify();
+            }}
+          >
+            {verifying ? "Stop" : "Check files"}
           </button>
         </div>
       </section>

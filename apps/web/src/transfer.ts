@@ -599,6 +599,9 @@ async function uploadInParts(
       const start = i * STREAM_CHUNK_SIZE;
       const slice = file.slice(start, Math.min(start + STREAM_CHUNK_SIZE, file.size));
       const plainChunk = new Uint8Array(await slice.arrayBuffer());
+      if (plainChunk.length !== slice.size) {
+        throw new Error(`read ${plainChunk.length} bytes of a ${slice.size} byte slice`);
+      }
       digester.update(plainChunk);
       const sealed =
         encryptor instanceof ChunkedEncryptor
@@ -660,6 +663,15 @@ export async function encryptAndUpload(
       digest = digester.final();
     } else {
       const plaintext = new Uint8Array(await file.arrayBuffer());
+      // The size came from the operating system, the bytes came from reading
+      // the file: two sources, so they can disagree, and when they do the
+      // bytes are wrong. This is the check that exposed a watched folder
+      // storing every file as a stringified array.
+      if (plaintext.length !== file.size) {
+        throw new Error(
+          `read ${plaintext.length} bytes of a ${file.size} byte file; it was not uploaded`,
+        );
+      }
       digest = contentDigest(plaintext);
       const ciphertext = isMediaFile(file)
         ? chunkedEncrypt(plaintext, fileKey)
