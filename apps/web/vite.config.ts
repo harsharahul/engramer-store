@@ -152,6 +152,7 @@ function officeDevHeaders(): Plugin {
       "object-src 'none'",
       `base-uri ${self}`,
       "form-action 'none'",
+      "frame-ancestors 'self'",
     ].join("; ");
   };
   return {

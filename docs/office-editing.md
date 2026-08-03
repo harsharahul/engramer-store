@@ -82,17 +82,17 @@ The relaxed script policy is scoped to the vendored asset path alone. The
 application's own documents and every API route keep the strict policy, which
 is verified by response headers rather than assumed.
 
-Two costs come with this choice, and both are deliberate:
+One cost comes with this choice, and it is deliberate: **everything travels
+as messages.** A `blob:` URL is readable only by the origin that created it, so
+the document and its images cross as bytes and the frame mints its own URLs
+from them; every app-driven editor action is a message rather than a property
+access.
 
-- **The editor document can be framed by anyone.** An opaque ancestor cannot be
-  named by `frame-ancestors`, so that protection is dropped for those responses.
-  The document holds no key, no cookie and no storage, and it does nothing
-  without a host that speaks its message protocol, but it is a clickjacking
-  surface that a second origin would not have.
-- **Everything travels as messages.** A `blob:` URL is readable only by the
-  origin that created it, so the document and its images cross as bytes and the
-  frame mints its own URLs from them; every app-driven editor action is a
-  message rather than a property access.
+Framing is still restricted normally. The editor's only ancestor is this
+application's own page, which has a real origin, so `frame-ancestors 'self'`
+applies to it. That was not possible while a second sandboxed document sat in
+between, because an opaque ancestor matches no source expression and the
+protection had to be dropped; collapsing to one document brought it back.
 
 ## Why exactly one document is in the sandbox
 
