@@ -34,6 +34,7 @@ import {
 } from "../unlock";
 import { nativeShell, nativeUnlockAvailable } from "../native";
 import { APP_VERSION } from "../version";
+import { reloadForUpdate, watchForUpdate } from "../update";
 import { startWatchSync } from "../watchfolders";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
 import { cosine, embedQuery, semanticEnabled, setSemanticEnabled } from "../intel/semantic";
@@ -228,6 +229,7 @@ export function Vault() {
   const [unlockPromptOpen, setUnlockPromptOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [updateReady, setUpdateReady] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => currentTheme());
   const [accent, setAccent] = useState<string>(() => currentAccent());
   const [searchFocused, setSearchFocused] = useState(false);
@@ -799,6 +801,12 @@ export function Vault() {
   useEffect(() => {
     void startWatchSync();
   }, []);
+
+  // This client can outlive several releases: a home-screen app, a desktop
+  // window that reopens rather than relaunches, a tab left open for days.
+  // Offered rather than forced, because a reload in the middle of an upload
+  // or an unsaved document is the app's decision to make, not ours.
+  useEffect(() => watchForUpdate(setUpdateReady), []);
 
   // Belt to the Auth blur's braces: landing here with a keyboard-stale
   // viewport (iOS) misplaces fixed chrome until something forces relayout.
@@ -1914,6 +1922,19 @@ export function Vault() {
             }
           }}
         />
+      )}
+      {updateReady && (
+        <div className="update-bar" role="status">
+          <span>
+            Version {updateReady} is ready. This window is running {APP_VERSION}.
+          </span>
+          <button className="btn btn-primary" onClick={() => void reloadForUpdate()}>
+            Reload
+          </button>
+          <button className="icon-btn" title="Later" onClick={() => setUpdateReady(null)}>
+            <XGlyph />
+          </button>
+        </div>
       )}
       {toast && <div className="toast">{toast}</div>}
     </div>
