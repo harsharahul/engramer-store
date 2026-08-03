@@ -284,7 +284,12 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
       reply.header("content-length", info.size);
       reply.header("last-modified", info.mtime.toUTCString());
       reply.header("etag", `"${info.size.toString(16)}-${info.mtimeMs.toString(16)}"`);
-      reply.header("cache-control", "public, max-age=604800");
+      // Revalidate rather than expire: these paths carry no build id, so a
+      // freshness window would let a client hold some editor files across an
+      // upgrade while others refresh, mixing two builds. The validators
+      // above still make the second open a set of 304s wherever a cache
+      // applies at all.
+      reply.header("cache-control", "public, max-age=0, must-revalidate");
       reply.type(mimeFor(path));
       if (request.headers["if-none-match"] === reply.getHeader("etag")) {
         return reply.code(304).send();
