@@ -468,7 +468,13 @@ async function sendPartWithRetry(
       throw new ApiError(UPLOAD_CANCELLED, "upload cancelled");
     }
     try {
-      return await uploadPart(fileId, session, partNo, payload, onProgress, signal);
+      // A part is only sent when the server holds as many bytes as it was
+      // given; a short write must not count as a delivered part.
+      const written = await uploadPart(fileId, session, partNo, payload, onProgress, signal);
+      if (written !== null && written !== payload.length) {
+        throw new Error(`part ${partNo} stored ${written} bytes of ${payload.length}`);
+      }
+      return;
     } catch (err) {
       if (!(err instanceof ApiError)) {
         throw err;
@@ -658,7 +664,14 @@ export async function encryptAndUpload(
       const ciphertext = isMediaFile(file)
         ? chunkedEncrypt(plaintext, fileKey)
         : encryptBytes(plaintext, fileKey);
-      await uploadBlob(dto.id, "data", ciphertext, onProgress, signal);
+      const written = await uploadBlob(dto.id, "data", ciphertext, onProgress, signal);
+      // An upload is not complete because it returned; it is complete when
+      // what the server holds is the size of what was sent.
+      if (written !== null && written !== ciphertext.length) {
+        throw new Error(
+          `upload stored ${written} bytes of ${ciphertext.length}; the file was not saved`,
+        );
+      }
     }
   } catch (err) {
     // A file whose content never landed must not linger as an empty row;

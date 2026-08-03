@@ -379,6 +379,13 @@ const RESPONSE_STALL_MS = 180_000;
  * One PUT with progress, a stall watchdog, and optional cancellation.
  * XHR rather than fetch because fetch cannot observe upload progress.
  */
+/**
+ * Sends bytes and returns the number the server says it wrote.
+ *
+ * That count is the one independent measurement available at upload time,
+ * and it was being discarded: an upload that stored fewer bytes than it sent
+ * reported success like any other.
+ */
 function putBytes(
   url: string,
   payload: Uint8Array,
@@ -388,7 +395,7 @@ function putBytes(
     signal?: AbortSignal;
     errorFor?: (status: number) => string | undefined;
   },
-): Promise<void> {
+): Promise<number | null> {
   return new Promise((resolve, reject) => {
     if (opts.signal?.aborted) {
       reject(new ApiError(UPLOAD_CANCELLED, "upload cancelled"));
@@ -427,7 +434,14 @@ function putBytes(
     xhr.onload = () =>
       settle(() => {
         if (xhr.status >= 200 && xhr.status < 300) {
-          resolve();
+          let written: number | null = null;
+          try {
+            const body = JSON.parse(xhr.responseText) as { size?: unknown };
+            written = typeof body.size === "number" ? body.size : null;
+          } catch {
+            // Not every endpoint answers with a body; absence is not failure.
+          }
+          resolve(written);
         } else {
           reject(
             new ApiError(xhr.status, opts.errorFor?.(xhr.status) ?? `upload failed (${xhr.status})`),
@@ -461,7 +475,7 @@ export function uploadRequestBlob(
   kind: "data" | "thumbnail" | "index",
   payload: Uint8Array,
   onProgress?: (fraction: number) => void,
-): Promise<void> {
+): Promise<number | null> {
   return putBytes(`/api/public/requests/${requestToken}/files/${uploadId}/${kind}`, payload, {
     onProgress,
     errorFor: (status) => (status === 413 ? "the recipient is out of storage space" : undefined),
@@ -494,7 +508,7 @@ export function uploadPart(
   payload: Uint8Array,
   onProgress?: (fraction: number) => void,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<number | null> {
   return putBytes(`/api/files/${fileId}/data/parts/${session}/${partNo}`, payload, {
     auth: true,
     onProgress,
@@ -518,7 +532,7 @@ export function uploadBlob(
   payload: Uint8Array,
   onProgress?: (fraction: number) => void,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<number | null> {
   return putBytes(`/api/files/${fileId}/${kind}`, payload, {
     auth: true,
     onProgress,
