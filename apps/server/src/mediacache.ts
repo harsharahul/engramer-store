@@ -212,6 +212,20 @@ export class MediaWindowCache implements BlobStore {
     return written;
   }
 
+  /**
+   * Resolves once no fill is in flight, which is the point at which every
+   * window that was going to appear both exists on disk and is known to the
+   * index. Filling is deliberately background work, so an upload returns
+   * well before its windows are usable and the two facts land a tick apart;
+   * anything observing the cache from outside needs this to tell the
+   * difference between "not warm yet" and "not warming".
+   */
+  async quiet(): Promise<void> {
+    while (this.inflight.size > 0) {
+      await Promise.allSettled([...this.inflight.values()]);
+    }
+  }
+
   async remove(key: string): Promise<void> {
     await this.backing.remove(key);
     if (!this.cacheable(key)) {
