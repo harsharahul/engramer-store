@@ -184,26 +184,36 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
    * no session and no storage to reach.
    */
   const OFFICE_PREFIX = "/office/";
-  const OFFICE_CSP = [
-    "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'",
-    "worker-src 'self' blob:",
-    // data: carries the converted document into the editor frame, which
-    // cannot read a blob: URL minted by another origin.
-    "connect-src 'self' blob: data:",
-    "img-src 'self' blob: data:",
-    "media-src 'self' blob:",
-    "font-src 'self' data:",
-    "style-src 'self' 'unsafe-inline'",
-    "frame-src 'self' blob:",
-    "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-  ].join("; ");
+  /**
+   * Built per request from the host it arrived on, because 'self' is
+   * useless here: the editor runs in an opaque origin, and 'self'
+   * resolves through the document's own origin, so it matches nothing.
+   * Naming the origin explicitly lets the editor fetch its own assets
+   * while still refusing every other destination, which matters because
+   * this frame holds the decrypted document.
+   */
+  const officeCsp = (origin: string): string =>
+    [
+      `default-src ${origin}`,
+      `script-src ${origin} 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'`,
+      `worker-src ${origin} blob:`,
+      // data: carries the converted document into the editor frame, which
+      // cannot read a blob: URL minted by another origin.
+      `connect-src ${origin} blob: data:`,
+      `img-src ${origin} blob: data:`,
+      `media-src ${origin} blob:`,
+      `font-src ${origin} data:`,
+      `style-src ${origin} 'unsafe-inline'`,
+      `frame-src ${origin} blob:`,
+      "object-src 'none'",
+      `base-uri ${origin}`,
+      "form-action 'none'",
+    ].join("; ");
 
   app.addHook("onSend", async (request, reply) => {
     if (request.url.startsWith(OFFICE_PREFIX)) {
-      reply.header("content-security-policy", OFFICE_CSP);
+      const proto = String(request.headers["x-forwarded-proto"] ?? request.protocol).split(",")[0];
+      reply.header("content-security-policy", officeCsp(`${proto}://${request.host}`));
       reply.header("x-content-type-options", "nosniff");
       reply.header("referrer-policy", "no-referrer");
       reply.header("cross-origin-resource-policy", "cross-origin");

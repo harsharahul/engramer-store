@@ -88,6 +88,12 @@ window.addEventListener("message", function (event) {
     return;
   }
 
+  // A shortcut pressed inside the editor, which the app cannot see.
+  if (data.t === "engramShortcut") {
+    toApp({ t: "shortcut", name: data.name });
+    return;
+  }
+
   // The editor asking us for something. Only images are on the open path,
   // and they must be inlined: this frame's blob: URLs are unreadable there.
   if (data.t === "engramAppRpc") {
@@ -143,6 +149,12 @@ function open(request) {
   return loadEditorApi().then(function () {
     var isSheet = request.fileType === "xlsx";
     var editor = new window.DocsAPI.DocEditor("editor", {
+      // Explicit, because the vendored build replaces DocsAPI.DocEditor with
+      // its own class: the original constructor then reads defaultConfig off
+      // that wrapper, finds none, and drops every default including these.
+      // Without them the editor frame renders at 300x150 in a corner.
+      width: "100%",
+      height: "100%",
       document: {
         fileType: request.fileType,
         key: "local",
