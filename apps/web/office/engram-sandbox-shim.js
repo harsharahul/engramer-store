@@ -183,6 +183,35 @@
     });
   };
 
+  // The first keystroke, rescued.
+  //
+  // Safari refuses to move focus into this frame from a script. Measured in
+  // real Safari: sixteen attempts over 1.6 seconds, every one leaving
+  // document.activeElement on the body while the frame itself holds focus.
+  // It allows the move inside a user gesture, which is why clicking into the
+  // document has always worked, and why the first key pressed appears to
+  // vanish: the editor spends it focusing itself and the character goes with
+  // it. The editor's own focus helper is a bare element.focus(), so there is
+  // no vendor path that avoids this.
+  //
+  // A keystroke is a gesture, so focusing here succeeds. The character is
+  // then handed to the editor rather than dropped. Once the element holds
+  // focus the browser delivers keys to it directly and this does nothing.
+  document.addEventListener('keydown', function (ev) {
+    var ctx = window.AscCommon && window.AscCommon.g_inputContext;
+    var area = ctx && ctx.HtmlArea;
+    if (!area || document.activeElement === area) { return; }
+    area.focus();
+    if (document.activeElement !== area) { return; }   // still refused; nothing to rescue
+    // Only a character the browser would have inserted. Anything else the
+    // editor handles from its own key handling, as it did before.
+    if (ev.key && ev.key.length === 1 && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+      ev.preventDefault();
+      area.value = ev.key;
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }, true);
+
   // Save shortcut. Focus lives inside this frame while editing, so the app's
   // own keydown listener never sees it; forward the intent outward instead of
   // letting the browser's own save dialog appear.
@@ -209,12 +238,10 @@
       else if (d.method === 'focus') {
         // Opening a document should leave you able to type. The editor reads
         // the keyboard from a hidden text area owned by its input context,
-        // and it does not put focus there itself when it loads inside a frame
-        // that was not visible at the time. Nothing observable from outside
-        // says when it is ready to accept focus, and asking too early is
-        // silently ignored, so ask until the area is genuinely the active
-        // element. Without this the document opens with a caret drawn on
-        // screen and every keystroke goes nowhere until you click.
+        // which exists only once the editor has started, so this waits for
+        // the element before asking. Where the browser honours the request,
+        // that is the whole story; where it does not, the keydown handler
+        // further down rescues the first keystroke.
         var tries = 0;
         (function place() {
           var ctx = window.AscCommon && window.AscCommon.g_inputContext;
@@ -227,22 +254,23 @@
             // false is dropped rather than queued. Setting it after the
             // element is focused is what makes the first keystroke count.
             if (typeof api.asc_enableKeyEvents === 'function') { api.asc_enableKeyEvents(true); }
-            // Only the element actually holding focus is a reliable signal.
-            // The editor's own focus flag reads true well before that, and
-            // trusting it stops this loop while the keyboard still goes
-            // nowhere -- measured in the spreadsheet, which does exactly that.
             if (document.activeElement === area) {
               // Focusing the element arms a timer that wipes it half a second
               // later, to drop anything stale left behind. It is empty here,
               // and a first keystroke landing inside that window is wiped
-              // along with it. Retrying would re-arm the timer every time.
+              // along with it.
               if (!area.value && ctx && typeof ctx.onFocusInputTextEnd === 'function') {
                 ctx.onFocusInputTextEnd();
               }
               return;
             }
+            // Asking once is not enough: the editor takes focus back during
+            // its own start-up, and the spreadsheet in particular only holds
+            // it a few attempts in. Where the browser refuses outright, these
+            // retries change nothing and the first keystroke is rescued
+            // below, so they are bounded rather than persistent.
           }
-          if (tries++ < 40) { setTimeout(place, 100); }
+          if (tries++ < 20) { setTimeout(place, 100); }
         })();
         value = true;
       }
