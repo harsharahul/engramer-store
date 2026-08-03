@@ -178,6 +178,7 @@
     try {
       if (!api) { throw new Error('editor not constructed yet'); }
       if (d.method === 'ping') { value = true; }
+
       else if (d.method === 'paste') {
         api.asc_PasteData(window.AscCommon.c_oAscClipboardDataFormat.Text, d.arg);
         value = true;
