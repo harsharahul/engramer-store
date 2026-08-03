@@ -47,6 +47,34 @@ describe("public-exposure hardening", () => {
     expect(response.headers["cross-origin-opener-policy"]).toBe("same-origin");
   });
 
+  it("names every origin the editor can be reached on in its own policy", async () => {
+    // The editor runs in an opaque origin, so its policy cannot say 'self'
+    // and has to name the origin its assets come from. Behind a proxy that
+    // rewrites Host, the server sees an internal name and would name only
+    // that one, refusing every asset the editor loads.
+    process.env.ENGRAMER_PUBLIC_ORIGINS = "https://store.example.com, not-an-origin, https://alt.example.com/";
+    const dir = mkdtempSync(join(tmpdir(), "engramer-office-"));
+    const proxied = await buildApp({ dataDir: dir, webDistDir: null });
+    try {
+      const response = await proxied.inject({
+        method: "GET",
+        url: "/office/anything.js",
+        headers: { host: "internal.cluster.local" },
+      });
+      const csp = response.headers["content-security-policy"] as string;
+      expect(csp).toContain("https://internal.cluster.local");
+      expect(csp).toContain("https://store.example.com");
+      expect(csp).toContain("https://alt.example.com");
+      // A malformed entry must never reach a security header verbatim.
+      expect(csp).not.toContain("not-an-origin");
+      expect(csp).toContain("frame-ancestors 'self'");
+    } finally {
+      await proxied.close();
+      rmSync(dir, { recursive: true, force: true });
+      delete process.env.ENGRAMER_PUBLIC_ORIGINS;
+    }
+  });
+
   it("does not reveal which emails have accounts", async () => {
     const known = await app.inject({ method: "GET", url: "/api/auth/attributes?email=known@example.com" });
     const unknown = await app.inject({ method: "GET", url: "/api/auth/attributes?email=nobody@example.com" });

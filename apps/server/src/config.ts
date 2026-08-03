@@ -43,6 +43,16 @@ export interface ServerConfig {
    * ignored entirely.
    */
   trustedProxies: string | number | false;
+  /**
+   * Every origin a browser may reach this server on, when a proxy in front
+   * rewrites the Host header. The office editor runs in an opaque origin,
+   * whose content policy therefore cannot say 'self' and has to name the
+   * origin its own assets come from; behind such a proxy the server sees an
+   * internal hostname and would name that one, refusing every asset the
+   * editor loads. Deployments reached only at the address the server sees
+   * need nothing here.
+   */
+  publicOrigins: string[];
   /** Lowercased emails that are administrators and may always register. */
   adminEmails: string[];
   /** When set, ciphertext blobs go to an S3-compatible object store. */
@@ -102,6 +112,12 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
       .split(",")
       .map((origin) => origin.trim())
       .filter(Boolean),
+    publicOrigins: (process.env.ENGRAMER_PUBLIC_ORIGINS ?? "")
+      .split(",")
+      .map((origin) => origin.trim().replace(/\/+$/, ""))
+      // A malformed entry would land verbatim in a security header, so only
+      // well-formed scheme://host[:port] values are kept.
+      .filter((origin) => /^https?:\/\/[A-Za-z0-9.-]+(:\d+)?$/.test(origin)),
     adminEmails: (process.env.ENGRAMER_ADMIN_EMAILS ?? "")
       .split(",")
       .map((email) => email.trim().toLowerCase())

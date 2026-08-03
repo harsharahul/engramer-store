@@ -3,6 +3,19 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.32.1] - 2026-08-03
+
+### Fixed
+- Word and Excel editing behind a reverse proxy. The editor runs in an
+  opaque origin, so its content policy has to name the origin its own
+  assets come from rather than say `'self'`. Where a proxy rewrites the
+  Host header the server named an internal hostname instead, and the
+  browser refused every asset the editor loaded, leaving a document
+  that never opened. Set `ENGRAMER_PUBLIC_ORIGINS` to the addresses
+  browsers actually use and they are named too; a deployment reached at
+  the address the server itself sees needs nothing.
+- A document that cannot open now says so instead of waiting forever.
+
 ## [0.32.0] - 2026-08-03
 
 ### Added

@@ -82,6 +82,13 @@ The relaxed script policy is scoped to the vendored asset path alone. The
 application's own documents and every API route keep the strict policy, which
 is verified by response headers rather than assumed.
 
+One deployment note follows from naming an origin rather than saying `'self'`.
+A proxy that rewrites the `Host` header leaves the server naming an internal
+hostname, and the editor then refuses every asset it loads, which looks from
+the outside like an editor that never starts. Set `ENGRAMER_PUBLIC_ORIGINS` to
+the addresses browsers actually use, comma separated, and those are named too.
+A deployment reached at the address the server itself sees needs nothing.
+
 One cost comes with this choice, and it is deliberate: **everything travels
 as messages.** A `blob:` URL is readable only by the origin that created it, so
 the document and its images cross as bytes and the frame mints its own URLs
