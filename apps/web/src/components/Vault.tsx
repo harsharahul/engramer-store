@@ -214,6 +214,7 @@ export function Vault() {
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [editorId, setEditorId] = useState<string | null>(null);
   const [newNoteOpen, setNewNoteOpen] = useState(false);
+  const [newOfficeKind, setNewOfficeKind] = useState<"docx" | "xlsx" | null>(null);
   const [shareId, setShareId] = useState<string | null>(null);
   const [renameFileId, setRenameFileId] = useState<string | null>(null);
   const [renameFolderId, setRenameFolderId] = useState<string | null>(null);
@@ -863,6 +864,18 @@ export function Vault() {
         },
         { id: "new-folder", label: "New folder", icon: <PlusGlyph size={15} />, run: () => setNewFolderOpen(true) },
         { id: "new-note", label: "New note", icon: <NoteGlyph size={15} />, run: () => setNewNoteOpen(true) },
+        {
+          id: "new-document",
+          label: "New document",
+          icon: <NoteGlyph size={15} />,
+          run: () => setNewOfficeKind("docx"),
+        },
+        {
+          id: "new-spreadsheet",
+          label: "New spreadsheet",
+          icon: <NoteGlyph size={15} />,
+          run: () => setNewOfficeKind("xlsx"),
+        },
       ],
     });
   };
@@ -871,6 +884,18 @@ export function Vault() {
     () => [
       { id: "upload", label: "Upload files", hint: "encrypt and store", run: () => fileInput.current?.click() },
       { id: "new-note", label: "New note", hint: "write, encrypted", run: () => setNewNoteOpen(true) },
+      {
+        id: "new-document",
+        label: "New document",
+        hint: "Word, encrypted",
+        run: () => setNewOfficeKind("docx"),
+      },
+      {
+        id: "new-spreadsheet",
+        label: "New spreadsheet",
+        hint: "Excel, encrypted",
+        run: () => setNewOfficeKind("xlsx"),
+      },
       { id: "new-folder", label: "New folder", run: () => setNewFolderOpen(true) },
       { id: "toggle-layout", label: "Toggle grid and list", run: () => toggleLayout() },
       {
@@ -1271,6 +1296,20 @@ export function Vault() {
           <div className="grow" />
           <button className="btn" title="New note" onClick={() => setNewNoteOpen(true)}>
             <NoteGlyph size={14} /> <span className="btn-label">New note</span>
+          </button>
+          <button
+            className="btn"
+            title="New Word document"
+            onClick={() => setNewOfficeKind("docx")}
+          >
+            <NoteGlyph size={14} /> <span className="btn-label">New doc</span>
+          </button>
+          <button
+            className="btn"
+            title="New spreadsheet"
+            onClick={() => setNewOfficeKind("xlsx")}
+          >
+            <NoteGlyph size={14} /> <span className="btn-label">New sheet</span>
           </button>
           <button className="btn" title="New folder" onClick={() => setNewFolderOpen(true)}>
             <PlusGlyph /> <span className="btn-label">New folder</span>
@@ -1741,6 +1780,18 @@ export function Vault() {
             setEditorId(id);
           }}
           onClose={() => setNewNoteOpen(false)}
+        />
+      )}
+      {newOfficeKind && (
+        <TextPrompt
+          title={newOfficeKind === "docx" ? "New document" : "New spreadsheet"}
+          sub="Created empty and encrypted here, then opened for editing."
+          submitLabel="Create and open"
+          onSubmit={async (name) => {
+            const id = await store.createOfficeDocument(name, newOfficeKind, currentFolderId);
+            setEditorId(id);
+          }}
+          onClose={() => setNewOfficeKind(null)}
         />
       )}
       {newFolderOpen && (

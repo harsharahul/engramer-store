@@ -178,6 +178,28 @@
     try {
       if (!api) { throw new Error('editor not constructed yet'); }
       if (d.method === 'ping') { value = true; }
+      else if (d.method === 'focus') {
+        // Opening a document should leave you able to type. The editor draws
+        // a caret as soon as it loads, but it reads the keyboard from a
+        // hidden text area owned by its input context, and nothing focuses
+        // that until you click; until then keystrokes go nowhere.
+        if (typeof api.asc_enableKeyEvents === 'function') { api.asc_enableKeyEvents(true); }
+        var tries = 0;
+        (function place() {
+          var ctx = window.AscCommon && window.AscCommon.g_inputContext;
+          var area = ctx && ctx.HtmlArea;
+          if (area && area.focus) {
+            window.focus();
+            area.focus();
+            value = true;
+            return;
+          }
+          // The input context is built during the editor's own start-up and
+          // may not exist the instant the document reports ready.
+          if (tries++ < 40) { setTimeout(place, 100); }
+        })();
+        value = true;
+      }
 
       else if (d.method === 'paste') {
         api.asc_PasteData(window.AscCommon.c_oAscClipboardDataFormat.Text, d.arg);
