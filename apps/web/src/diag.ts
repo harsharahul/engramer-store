@@ -5,6 +5,8 @@
  * with the rest of the product.
  */
 
+import { APP_VERSION } from "./version";
+
 export interface DiagEntry {
   at: number;
   tag: string;
@@ -38,7 +40,10 @@ export function clearDiag(): void {
 }
 
 export function diagText(): string {
-  return entries
-    .map((e) => `${new Date(e.at).toISOString()} [${e.tag}] ${e.message}`)
-    .join("\n");
+  // The build is named first and not as an entry, so it survives the ring
+  // buffer filling up: a log without a version is hard to act on.
+  return [
+    `Engram Store ${APP_VERSION}`,
+    ...entries.map((e) => `${new Date(e.at).toISOString()} [${e.tag}] ${e.message}`),
+  ].join("\n");
 }

@@ -543,6 +543,22 @@ a {
   color: var(--paper-dim);
 }
 
+/* Survives the width rules that collapse .btn-label: the create button is one
+   button now, and a bare + beside a bare folder is what this replaced. */
+.btn-word {
+  margin-left: 2px;
+}
+
+/* Quiet by design: present when looked for, never competing with the vault. */
+.build-line {
+  padding: 6px 10px 10px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--paper-dim);
+  opacity: 0.65;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
 .usage .meter {
   height: 4px;
   border-radius: 2px;

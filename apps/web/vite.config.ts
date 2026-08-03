@@ -8,6 +8,13 @@ import { VitePWA } from "vite-plugin-pwa";
 const require = createRequire(import.meta.url);
 
 /**
+ * The release this bundle came from, compiled in so the running client can
+ * say which one it is. A version you have to infer from the server is no use
+ * when the question is whether the page in front of you is the new one.
+ */
+const version: string = require("./package.json").version;
+
+/**
  * Serves the OCR runtime (tesseract worker + wasm cores) under /ocr with
  * stable, unhashed names: the wasm.js loaders resolve their .wasm siblings by
  * original filename, so they cannot go through hashed asset imports. The
@@ -171,6 +178,7 @@ function officeDevHeaders(): Plugin {
 }
 
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(version) },
   plugins: [
     react(),
     officeDevHeaders(),
