@@ -16,7 +16,7 @@
  *   node scripts/office-assets.mjs --clean   remove the derived tree
  */
 import { createHash } from "node:crypto";
-import { brotliCompressSync, brotliDecompressSync } from "node:zlib";
+import { brotliCompressSync, brotliDecompressSync, constants } from "node:zlib";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -209,6 +209,53 @@ async function applyPatches(base, checkOnly) {
 }
 
 /**
+ * The release pre-compresses its JavaScript but ships the converter as a
+ * bare 57MB WebAssembly binary. The editor frame is an opaque origin and so
+ * has no usable HTTP cache, which means every document open re-fetches it;
+ * compressing it here is the difference between ~55MB and ~10MB per open.
+ */
+async function compressLargeAssets(base) {
+  const MIN_BYTES = 1024 * 1024;
+  let written = 0;
+  const walk = async (dir) => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(path);
+        continue;
+      }
+      if (entry.name.endsWith(".br") || existsSync(`${path}.br`)) {
+        continue;
+      }
+      const info = await stat(path);
+      if (info.size < MIN_BYTES) {
+        continue;
+      }
+      const bytes = await readFile(path);
+      // Quality 9 keeps a 57MB binary under a minute while giving up almost
+      // nothing against the default; this runs on every image build.
+      await writeFile(
+        `${path}.br`,
+        brotliCompressSync(bytes, {
+          params: {
+            [constants.BROTLI_PARAM_QUALITY]: 9,
+            [constants.BROTLI_PARAM_SIZE_HINT]: info.size,
+          },
+        }),
+      );
+      written++;
+      const after = (await stat(`${path}.br`)).size;
+      console.log(
+        `compressed ${relative(base, path)} ${(info.size / 1048576).toFixed(1)}MB -> ` +
+          `${(after / 1048576).toFixed(1)}MB`,
+      );
+    }
+  };
+  await walk(base);
+  return written;
+}
+
+/**
  * Guards against the failure the patch step is designed to prevent: a
  * pre-compressed sibling whose contents no longer match the file it shadows.
  * Any mismatch means a client negotiating compression gets different code
@@ -306,6 +353,7 @@ async function main() {
   await execFile("cp", [join(root, "apps/web/office/engram-sandbox-shim.js"), outDir]);
 
   await applyPatches(outDir, false);
+  await compressLargeAssets(outDir);
   await verifyCompressedSiblings(outDir);
   await rm(staging, { recursive: true, force: true });
   console.log(`office assets ready: ${await measure(outDir)} MB in ${relative(root, outDir)}`);
