@@ -41,7 +41,7 @@ export function fileKind(mime: string, name: string): FileKind {
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
   if (mime.startsWith("audio/")) return "audio";
-  if (mime === "application/pdf") return "pdf";
+  if (mime === "application/pdf" || /\.pdf$/i.test(name)) return "pdf";
   if (mime === DOCX_MIME || /\.docx$/i.test(name)) return "doc";
   if (mime === XLSX_MIME || /\.xlsx$/i.test(name)) return "sheet";
   if (mime.startsWith("text/") || /\.(md|txt|json|ya?ml|csv|log)$/i.test(name)) return "text";
