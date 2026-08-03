@@ -19,6 +19,18 @@ import { XGlyph } from "./Icon";
 
 const HOST_URL = "/office/engram-host.html";
 
+/**
+ * The converted document crosses into the editor's frame inline, because a
+ * blob URL made on this side is unreadable there: the frame has its own
+ * opaque origin. Inlining base64-expands it by a third, and Safari refuses
+ * such a URL beyond 64MiB, so anything above this simply cannot be handed
+ * over. Measured: 64,441,761 bytes of encoded document opens, 68,601,761
+ * fails. The limit is on the converted document, not the file: a 520MB
+ * Word document full of images converts to under a megabyte and opens
+ * fine, while a text-only file a thousand times smaller can exceed it.
+ */
+const MAX_CONVERTED_BYTES = Math.floor((64 * 1024 * 1024 * 3) / 4) - 2 * 1024 * 1024;
+
 type Stage = "decrypting" | "converting" | "loading" | "ready" | "failed";
 
 const STAGE_LABEL: Record<Stage, string> = {
@@ -109,6 +121,18 @@ export function OfficeEditor(props: {
         setStage("converting");
         const imported = await converter.importDocument(`document.${fileType}`, plaintext);
         if (cancelled) {
+          return;
+        }
+        if (imported.bin.length > MAX_CONVERTED_BYTES) {
+          setStage("failed");
+          setError(
+            "This document is too large to edit in the browser. " +
+              "You can still download it, and open it in a desktop application.",
+          );
+          diag(
+            "office",
+            `refused ${file.name}: converted size ${imported.bin.length} exceeds ${MAX_CONVERTED_BYTES}`,
+          );
           return;
         }
         const transfer: Transferable[] = [imported.bin.buffer as ArrayBuffer];
