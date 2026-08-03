@@ -55,6 +55,12 @@ export {
 } from "./chunked.js";
 export { encryptBytes, decryptBytes } from "./stream.js";
 export {
+  type Digester,
+  contentDigest,
+  createDigester,
+  digestMatches,
+} from "./digest.js";
+export {
   type FileMetadata,
   type FolderMetadata,
   encryptFileMetadata,

@@ -26,6 +26,21 @@ export interface FileMetadata {
   /** Tags, auto-assigned and user-edited alike. */
   tags?: string[];
   favorite?: boolean;
+  /**
+   * BLAKE2b-256 of the file's contents, taken on the device that uploaded
+   * it, before any encryption.
+   *
+   * Authenticated encryption already proves the server returned what it was
+   * given. It cannot prove what it was given is what the file contained: a
+   * bug on the way in encrypts the wrong bytes faithfully, which is exactly
+   * what happened to every file a watched folder uploaded. This digest is
+   * taken at the source and checked after decryption, so the whole path is
+   * covered rather than the storage half of it.
+   *
+   * Optional because files stored before it existed do not carry one; their
+   * contents are returned unverified rather than refused.
+   */
+  digest?: string;
 }
 
 export interface FolderMetadata {

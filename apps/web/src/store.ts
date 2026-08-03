@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import {
+  contentDigest,
   decryptBytes,
+  digestMatches,
   decryptFileMetadata,
   decryptFolderMetadata,
   encryptBytes,
@@ -61,6 +63,10 @@ export interface FileEntry {
   category?: string;
   tags: string[];
   favorite: boolean;
+  /** Digest of the contents, recorded on the device that uploaded them. */
+  digest?: string;
+  /** Set once a read has found the contents disagreeing with that digest. */
+  corrupt?: boolean;
   key: Uint8Array;
   hasThumb: boolean;
   trashed: boolean;
@@ -153,6 +159,8 @@ interface StoreState {
   ) => Promise<string>;
   renameFile: (id: string, name: string) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
+  /** Records that a read found this file disagreeing with its digest. */
+  markCorrupt: (id: string) => void;
   toggleFavorite: (id: string) => Promise<void>;
   moveFile: (id: string, folderId: string | null) => Promise<void>;
   trashFile: (id: string) => Promise<void>;
@@ -203,6 +211,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
+    digest: meta.digest,
     favorite: meta.favorite ?? false,
     key,
     hasThumb: dto.thumbSize > 0,
@@ -762,6 +771,7 @@ export const useStore = create<StoreState>((set, get) => {
       }
       const bytes = utf8Encode(text);
       await uploadBlob(id, "data", encryptBytes(bytes, file.key));
+      const digest = contentDigest(bytes);
       const searchText = text.slice(0, 100_000);
       await uploadBlob(
         id,
@@ -771,7 +781,13 @@ export const useStore = create<StoreState>((set, get) => {
           file.key,
         ),
       );
-      await patchFileMeta(id, { size: bytes.length, mtime: Date.now(), hasText: true, text: undefined });
+      await patchFileMeta(id, {
+        size: bytes.length,
+        mtime: Date.now(),
+        hasText: true,
+        text: undefined,
+        digest,
+      });
       setEntryText(id, searchText, false);
       await get().refreshUsage();
     },
@@ -784,7 +800,16 @@ export const useStore = create<StoreState>((set, get) => {
       if (!file) {
         throw new Error("file not found");
       }
-      await uploadBlob(id, "data", encryptBytes(bytes, file.key));
+      // Before storing: what we are about to write must read back as what
+      // we were given. A save that cannot be read back is not stored at all,
+      // and the previous version stays the current one.
+      const sealed = encryptBytes(bytes, file.key);
+      const readBack = decryptBytes(sealed, file.key);
+      if (!digestMatches(readBack, contentDigest(bytes))) {
+        throw new Error("this save could not be verified and was not stored");
+      }
+      await uploadBlob(id, "data", sealed);
+      const digest = contentDigest(bytes);
       if (searchText !== undefined) {
         await uploadBlob(
           id,
@@ -852,6 +877,16 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     renameFile: async (id, name) => patchFileMeta(id, { name }),
+
+    markCorrupt: (id) => {
+      const file = get().files.get(id);
+      if (!file || file.corrupt) {
+        return;
+      }
+      const files = new Map(get().files);
+      files.set(id, { ...file, corrupt: true });
+      set({ files });
+    },
 
     setTags: async (id, tags) =>
       patchFileMeta(id, { tags: [...new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))] }),
@@ -972,7 +1007,7 @@ export const useStore = create<StoreState>((set, get) => {
       if (!file || !scannable) {
         return false;
       }
-      const bytes = await downloadAndDecrypt(file.id, file.key);
+      const bytes = await downloadAndDecrypt(file.id, file.key, file.digest);
       const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime });
       const text = file.mime.startsWith("image/")
         ? await recognizeImage(blob)
@@ -1031,7 +1066,7 @@ export const useStore = create<StoreState>((set, get) => {
         return false;
       }
       const bytes = isImage
-        ? await downloadAndDecrypt(file.id, file.key)
+        ? await downloadAndDecrypt(file.id, file.key, file.digest)
         : await downloadThumbnail(file.id, file.key);
       const clip = await embedImage(
         new Blob([bytes.slice().buffer as ArrayBuffer], {

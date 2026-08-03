@@ -114,7 +114,7 @@ export function OfficeEditor(props: {
     void (async () => {
       try {
         setStage("decrypting");
-        const plaintext = await downloadAndDecrypt(opened.id, opened.key);
+        const plaintext = await downloadAndDecrypt(opened.id, opened.key, opened.digest);
         if (cancelled) {
           return;
         }
