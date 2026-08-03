@@ -191,6 +191,15 @@
           if (area && area.focus) {
             window.focus();
             area.focus();
+            setTimeout(function () {
+              var active = document.activeElement;
+              window.parent.postMessage({
+                t: 'engramFocusReport',
+                hasFocus: document.hasFocus(),
+                active: active ? (active.tagName + (active.id ? '#' + active.id : '')) : 'none',
+                inputArea: area === active,
+              }, '*');
+            }, 300);
             value = true;
             return;
           }

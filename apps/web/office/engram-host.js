@@ -41,6 +41,54 @@ var state = { media: {}, editor: null, fileType: "docx" };
 var DOCUMENT_URL = "engram:document";
 
 /**
+ * The address the editor is given for its document.
+ *
+ * When this frame has a real origin, the editor's frame shares it, so a blob
+ * URL made here is readable there and the bytes never become a string.
+ *
+ * When this frame is opaque, a blob URL cannot cross to the editor's own
+ * opaque origin, so a sentinel is used instead and the shim inside the editor
+ * answers it from bytes posted in. Either way the document is never inlined,
+ * which is what imposed a size ceiling before.
+ */
+var mediaUrls = {};
+
+/**
+ * A URL for one of the images the conversion extracted. Same rule as the
+ * document itself: a blob URL when the editor shares this origin, an inline
+ * one when it does not and cannot read our blobs. Cached, because the editor
+ * asks for the same image every time it repaints.
+ */
+function mediaUrl(name) {
+  if (mediaUrls[name]) {
+    return mediaUrls[name];
+  }
+  var bytes = state.media[name];
+  if (!bytes) {
+    return "";
+  }
+  var mime = MIME_BY_EXT[String(name).split(".").pop().toLowerCase()] || "application/octet-stream";
+  var url =
+    window.origin && window.origin !== "null"
+      ? URL.createObjectURL(new Blob([bytes], { type: mime }))
+      : dataUrl(bytes, mime);
+  mediaUrls[name] = url;
+  return url;
+}
+
+function imageName(request) {
+  return String(request).split("/").pop().split("?")[0];
+}
+
+function documentUrl(bytes) {
+  if (window.origin && window.origin !== "null") {
+    return URL.createObjectURL(new Blob([bytes]));
+  }
+  sendDocument(bytes);
+  return DOCUMENT_URL;
+}
+
+/**
  * Delivers the document to the editor frame as bytes. The frame is created
  * by the editor API, so it may take a moment to exist; retry briefly rather
  * than assume, and transfer the buffer so nothing is copied.
@@ -111,6 +159,11 @@ window.addEventListener("message", function (event) {
     return;
   }
 
+  if (data.t === "engramFocusReport") {
+    toApp({ t: "focusReport", hasFocus: data.hasFocus, active: data.active, inputArea: data.inputArea });
+    return;
+  }
+
   // A shortcut pressed inside the editor, which the app cannot see.
   if (data.t === "engramShortcut") {
     toApp({ t: "shortcut", name: data.name });
@@ -122,12 +175,7 @@ window.addEventListener("message", function (event) {
   if (data.t === "engramAppRpc") {
     var value = "";
     if (data.method === "getImageURL") {
-      var name = String(data.arg).split("/").pop().split("?")[0];
-      var bytes = state.media[name];
-      if (bytes) {
-        var ext = name.split(".").pop().toLowerCase();
-        value = dataUrl(bytes, MIME_BY_EXT[ext]);
-      }
+      value = mediaUrl(imageName(data.arg));
     }
     event.source.postMessage({ t: "engramAppRpcResult", id: data.id, value: value }, "*");
     return;
@@ -185,6 +233,7 @@ function loadEditorApi() {
 
 function open(request) {
   state.media = request.media || {};
+  mediaUrls = {};
   state.fileType = request.fileType;
   return loadEditorApi().then(function () {
     var isSheet = request.fileType === "xlsx";
@@ -199,10 +248,7 @@ function open(request) {
         fileType: request.fileType,
         key: "local",
         title: request.title || "document." + request.fileType,
-        // A sentinel, not a real URL. The shim inside the editor answers a
-        // request for it from bytes we post in below, so the document never
-        // becomes a string: no base64 expansion, and no 64MiB ceiling.
-        url: DOCUMENT_URL,
+        url: documentUrl(new Uint8Array(request.bin)),
         permissions: { print: true, download: false },
       },
       documentType: isSheet ? "cell" : "word",
@@ -240,11 +286,6 @@ function open(request) {
     // create it; without it, connecting the stand-in server throws.
     window.APP = window.APP || {};
 
-    // Hand the document to the shim as soon as the editor's frame exists.
-    // It arrives long before the editor asks for it, and the shim makes any
-    // earlier request wait, so the order cannot go wrong.
-    var bin = new Uint8Array(request.bin);
-    sendDocument(bin);
 
     // Standing in for the collaboration server the editor expects. Nothing
     // here goes near a network: a single local participant, no history, and
@@ -261,8 +302,8 @@ function open(request) {
       getInitialChanges: function () {
         return [];
       },
-      getImageURL: function () {
-        return Promise.resolve("");
+      getImageURL: function (name) {
+        return Promise.resolve(mediaUrl(imageName(name)));
       },
       onAuth: function () {},
       onMessage: function (message) {
