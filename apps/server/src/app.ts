@@ -191,29 +191,35 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
    * Naming the origin explicitly lets the editor fetch its own assets
    * while still refusing every other destination, which matters because
    * this frame holds the decrypted document.
+   *
+   * Both schemes are named for that one host rather than trusting a
+   * forwarded-protocol header: a terminator that does not set one would
+   * otherwise have the editor refuse its own assets, and the host is ours
+   * either way.
    */
-  const officeCsp = (origin: string): string =>
-    [
-      `default-src ${origin}`,
-      `script-src ${origin} 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'`,
-      `worker-src ${origin} blob:`,
+  const officeCsp = (host: string): string => {
+    const self = `https://${host} http://${host}`;
+    return [
+      `default-src ${self}`,
+      `script-src ${self} 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'`,
+      `worker-src ${self} blob:`,
       // data: carries the converted document into the editor frame, which
       // cannot read a blob: URL minted by another origin.
-      `connect-src ${origin} blob: data:`,
-      `img-src ${origin} blob: data:`,
-      `media-src ${origin} blob:`,
-      `font-src ${origin} data:`,
-      `style-src ${origin} 'unsafe-inline'`,
-      `frame-src ${origin} blob:`,
+      `connect-src ${self} blob: data:`,
+      `img-src ${self} blob: data:`,
+      `media-src ${self} blob:`,
+      `font-src ${self} data:`,
+      `style-src ${self} 'unsafe-inline'`,
+      `frame-src ${self} blob:`,
       "object-src 'none'",
-      `base-uri ${origin}`,
+      `base-uri ${self}`,
       "form-action 'none'",
     ].join("; ");
+  };
 
   app.addHook("onSend", async (request, reply) => {
     if (request.url.startsWith(OFFICE_PREFIX)) {
-      const proto = String(request.headers["x-forwarded-proto"] ?? request.protocol).split(",")[0];
-      reply.header("content-security-policy", officeCsp(`${proto}://${request.host}`));
+      reply.header("content-security-policy", officeCsp(request.host));
       reply.header("x-content-type-options", "nosniff");
       reply.header("referrer-policy", "no-referrer");
       reply.header("cross-origin-resource-policy", "cross-origin");
