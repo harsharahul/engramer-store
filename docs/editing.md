@@ -18,11 +18,12 @@ An in-app editor for text, Markdown, and code:
 - Content decrypts into the editor in your browser, and re-encrypts with the file's existing key on save (Cmd+S). The replaced blob and refreshed metadata (size, modification time, search text) are all the server ever sees, as ciphertext.
 - Saved edits are immediately searchable, because the search index lives in the encrypted metadata and is rebuilt from the new content at save time.
 
-Word documents (.docx):
+Word and Excel documents (.docx, .xlsx):
 
 - Opening a .docx renders it read-only with docx-preview: the decrypted archive is laid out as pages in the browser, images included, with nothing fetched from anywhere.
-- Edit opens the document in SuperDoc, a browser-native OOXML editor (AGPL-3.0, the same license as this project). Import and export both run entirely in the browser; saving exports a fresh .docx, which is re-encrypted with the file's existing key and replaces the blob, the same flow the text editor uses. The editor loads as a separate code chunk only when a document is opened, and its telemetry is disabled in configuration.
-- Fidelity has the limits of a JavaScript OOXML engine: complex Word constructs (some cropped images, comment anchors, text boxes) may simplify on a round trip. The download action always returns exactly the stored bytes, so nothing is lost until you choose to save an edit.
+- Edit opens a full office engine that runs entirely in the browser, so a document is edited in its own format rather than through a lossy intermediate. Saving converts back, re-encrypts under the file's existing key, and keeps the previous version. Spreadsheets go through the same path.
+- The engine is vendored third-party code, and it runs in a frame with an opaque origin: it cannot reach the page holding your keys, that page's storage, its cookies or its session. It receives bytes and returns bytes. How that is arranged, and what it costs, is in [office-editing.md](office-editing.md).
+- Fidelity is that of the engine behind a widely deployed office suite rather than a JavaScript approximation, which matters most for spreadsheets, where a workbook is a calculation graph with charts and pivot caches rather than a stream of text. The download action always returns exactly the stored bytes, so a round trip is never the only copy.
 
 ## Roadmap: live collaboration
 
@@ -118,17 +119,17 @@ editor:
 There is no permissively licensed, drop-in, high-fidelity option; it is a
 licence-versus-fidelity choice, and because Engram Store is already AGPL-3.0 the
 usual blocker on the strongest candidates does not apply to us. The plan, with
-step 1 now shipped:
+steps 1 and 2 now shipped:
 
-1. **Shipped:** SuperDoc as the editable-DOCX v1 (browser-native import and
-   export, license-aligned, sized reasonably), with docx-preview for fast
-   read-only rendering. This delivers everyday Word editing under E2EE today.
-2. **Long-term fidelity:** the OnlyOffice client-side engine in the CryptPad
-   style (the editor canvas plus the x2t conversion engine compiled to
-   WebAssembly, all assets self-hosted). It is the only path to native-model
-   fidelity with no server, proven in production by CryptPad; the cost is a
-   large asset payload and a bespoke integration layer, so it is a project,
-   not a dependency swap.
+1. A browser-native OOXML editor delivered everyday Word editing first, with
+   docx-preview for fast read-only rendering. Preview still uses it; editing
+   has since moved to step 2.
+2. **Shipped:** the OnlyOffice client-side engine in the CryptPad style (the
+   editor canvas plus the x2t conversion engine compiled to WebAssembly, all
+   assets self-hosted), which is the only path to native-model fidelity with no
+   server, and which brings spreadsheets with it. The cost is a large asset
+   payload and an integration layer of our own, described in
+   [office-editing.md](office-editing.md).
 3. Wrap the editor in a secsync-style encrypted Yjs relay for real-time
    co-editing, encrypted presence, and offline-first, and add client-side AI over
    the decrypted document. That combination is what no incumbent has shipped.
