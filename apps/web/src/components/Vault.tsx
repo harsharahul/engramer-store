@@ -1700,7 +1700,7 @@ export function Vault() {
             inspect(previewFile.id);
           }}
           onEdit={
-            ["text", "doc"].includes(fileKind(previewFile.mime, previewFile.name))
+            ["text", "doc", "sheet"].includes(fileKind(previewFile.mime, previewFile.name))
               ? () => {
                   setEditorId(previewFile.id);
                   setPreviewId(null);

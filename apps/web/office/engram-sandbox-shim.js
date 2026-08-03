@@ -87,6 +87,16 @@
     window.Worker.prototype = NativeWorker.prototype;
   }
 
+  // Save shortcut. Focus lives inside this frame while editing, so the app's
+  // own keydown listener never sees it; forward the intent outward instead of
+  // letting the browser's own save dialog appear.
+  window.addEventListener('keydown', function (ev) {
+    if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && String(ev.key).toLowerCase() === 's') {
+      ev.preventDefault();
+      try { window.parent.postMessage({ t: 'engramShortcut', name: 'save' }, '*'); } catch (e) {}
+    }
+  }, true);
+
   // Host -> editor control RPC. Same-origin, the host reaches into the editor
   // frame directly (`iframe.contentWindow.editor.asc_nativeGetFile()` --
   // CryptPad's own accessor, inner.js:141-149). Across opaque origins that read
