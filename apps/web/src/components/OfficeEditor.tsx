@@ -38,6 +38,7 @@ export function OfficeEditor(props: {
   onClose: () => void;
 }) {
   const { file, fileType } = props;
+  const fileId = file.id;
   const frameRef = useRef<HTMLIFrameElement>(null);
   const converterRef = useRef<Converter | null>(null);
   const sessionRef = useRef<EditorSession | null>(null);
@@ -45,6 +46,12 @@ export function OfficeEditor(props: {
   // hands on; it needs whatever save() currently is, not the one that existed
   // when the session was built.
   const saveRef = useRef<() => void>(() => {});
+  // Read at open time only. Saving stores a new version, which replaces this
+  // file's entry in the library; if the session depended on that entry, every
+  // save would tear the editor down and reopen it on the document that was
+  // just written.
+  const fileRef = useRef(file);
+  fileRef.current = file;
   const [stage, setStage] = useState<Stage>("decrypting");
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -65,12 +72,10 @@ export function OfficeEditor(props: {
     converterRef.current = converter;
     let cancelled = false;
 
-    const session = new EditorSession(frame, fileType, file.name, {
+    const opened = fileRef.current;
+    const session = new EditorSession(frame, fileType, opened.name, {
       onLoading: () => diag("office", "the editor is up and waiting for its document"),
-      onReady: () => {
-        setStage("ready");
-        session.focus();
-      },
+      onReady: () => setStage("ready"),
       onChanged: (modified) => {
         // Only ever set. The editor clears its own modified flag as soon as
         // the stand-in collaboration server acknowledges a change, about a
@@ -95,7 +100,7 @@ export function OfficeEditor(props: {
     void (async () => {
       try {
         setStage("decrypting");
-        const plaintext = await downloadAndDecrypt(file.id, file.key);
+        const plaintext = await downloadAndDecrypt(opened.id, opened.key);
         if (cancelled) {
           return;
         }
@@ -121,7 +126,20 @@ export function OfficeEditor(props: {
       converter.close();
       converterRef.current = null;
     };
-  }, [file.id, file.key, file.name, fileType]);
+  }, [fileId, fileType]);
+
+  /**
+   * Hand the keyboard over once the document is ready, and not a moment
+   * earlier: the frame is hidden until then, and a hidden element cannot take
+   * focus, so doing this the instant the editor reports ready silently does
+   * nothing and leaves you having to click into the document before you can
+   * type. This runs after the render that reveals it.
+   */
+  useEffect(() => {
+    if (stage === "ready") {
+      sessionRef.current?.focus();
+    }
+  }, [stage]);
 
   const save = useCallback(async () => {
     const converter = converterRef.current;

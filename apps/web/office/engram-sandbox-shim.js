@@ -207,37 +207,28 @@
       if (!api) { throw new Error('editor not constructed yet'); }
       if (d.method === 'ping') { value = true; }
       else if (d.method === 'focus') {
-        // Opening a document should leave you able to type. The editor draws
-        // a caret as soon as it loads, but it reads the keyboard from a
-        // hidden text area owned by its input context, and nothing focuses
-        // that until you click; until then keystrokes go nowhere.
-        if (typeof api.asc_enableKeyEvents === 'function') { api.asc_enableKeyEvents(true); }
+        // Opening a document should leave you able to type. The editor reads
+        // the keyboard from a hidden text area owned by its input context,
+        // and it does not put focus there itself when it loads inside a frame
+        // that was not visible at the time. Nothing observable from outside
+        // says when it is ready to accept focus, and asking too early is
+        // silently ignored, so ask until the area is genuinely the active
+        // element. Without this the document opens with a caret drawn on
+        // screen and every keystroke goes nowhere until you click.
         var tries = 0;
         (function place() {
           var ctx = window.AscCommon && window.AscCommon.g_inputContext;
           var area = ctx && ctx.HtmlArea;
           if (area && area.focus) {
+            if (typeof api.asc_enableKeyEvents === 'function') { api.asc_enableKeyEvents(true); }
             window.focus();
             area.focus();
-            setTimeout(function () {
-              var active = document.activeElement;
-              window.parent.postMessage({
-                t: 'engramFocusReport',
-                hasFocus: document.hasFocus(),
-                active: active ? (active.tagName + (active.id ? '#' + active.id : '')) : 'none',
-                inputArea: area === active,
-              }, '*');
-            }, 300);
-            value = true;
-            return;
+            if (document.activeElement === area) { return; }
           }
-          // The input context is built during the editor's own start-up and
-          // may not exist the instant the document reports ready.
           if (tries++ < 40) { setTimeout(place, 100); }
         })();
         value = true;
       }
-
       else if (d.method === 'paste') {
         api.asc_PasteData(window.AscCommon.c_oAscClipboardDataFormat.Text, d.arg);
         value = true;

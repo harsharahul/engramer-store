@@ -1,5 +1,3 @@
-import { diag } from "../diag";
-
 /**
  * Talks to the office editor running in the sandboxed frame.
  *
@@ -133,9 +131,16 @@ export class EditorSession {
   }
 
   /**
-   * Focus does not cross a frame boundary on its own, and the editor reads
-   * the keyboard from a hidden element of its own. Without this the document
-   * opens with a caret that is not listening.
+   * Hands the keyboard to the editor.
+   *
+   * Two separate things have to happen and each looks like the other when it
+   * fails. Focus does not cross a frame boundary on its own, so the frame is
+   * focused from here; and inside it the editor keeps a hidden input element
+   * that has to be focused too, which only the shim can reach and only once
+   * the editor is willing to accept it. Both are needed: with the first
+   * missing, keystrokes never enter the frame; with the second missing, they
+   * enter and are dropped. Clicking into the document does both by another
+   * route, which is why clicking first looked like a workaround.
    */
   focus(): void {
     this.frame.focus();
@@ -181,13 +186,6 @@ export class EditorSession {
     }
     if (data.t === "engramShortcut") {
       this.handlers.onShortcut(String(data.name));
-      return;
-    }
-    if (data.t === "engramFocusReport") {
-      diag(
-        "office",
-        `editor focus: frameHasFocus=${data.hasFocus} active=${data.active} inputArea=${data.inputArea}`,
-      );
     }
   };
 
