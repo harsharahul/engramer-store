@@ -14,7 +14,6 @@
     "@engramer/crypto": "workspace:*",
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
-    "@harbour-enterprises/superdoc": "1.45.0",
     "@huggingface/transformers": "4.2.0",
     "docx-preview": "0.4.0",
     "exifr": "7.1.3",
