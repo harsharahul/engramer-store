@@ -17,7 +17,21 @@ import { XGlyph } from "./Icon";
  * The frame is deliberately given nothing but bytes.
  */
 
-const HOST_URL = "/office/engram-host.html";
+/**
+ * Where the editor is served from, and therefore how it is isolated.
+ *
+ * Unset, the editor is framed from this same origin with an opaque origin,
+ * which denies it storage entirely. Safari, however, refuses the editor's
+ * own cross-frame access in that configuration, so the editor misbehaves.
+ *
+ * Set to a second origin, the frame keeps `allow-same-origin` and so works
+ * everywhere, while remaining cross-origin to the page that holds the
+ * master key: it still cannot read this page, its storage or its session.
+ * That is the arrangement CryptPad ships.
+ */
+const OFFICE_ORIGIN = (import.meta.env.VITE_OFFICE_ORIGIN as string | undefined) ?? "";
+const HOST_URL = `${OFFICE_ORIGIN}/office/engram-host.html`;
+const FRAME_SANDBOX = OFFICE_ORIGIN ? "allow-scripts allow-same-origin" : "allow-scripts";
 
 
 type Stage = "decrypting" | "converting" | "loading" | "ready" | "failed";
@@ -69,6 +83,9 @@ export function OfficeEditor(props: {
         setStage("ready");
         // Focus has to be handed across the frame boundary explicitly, or the
         // document opens with a caret that is not listening to the keyboard.
+        // The element and the window are focused separately because browsers
+        // disagree about which one moves keyboard focus into a frame.
+        frameRef.current?.focus();
         frameRef.current?.contentWindow?.focus();
         frameRef.current?.contentWindow?.postMessage({ t: "focus" }, "*");
         return;
@@ -81,6 +98,13 @@ export function OfficeEditor(props: {
         if (data.modified) {
           setDirty(true);
         }
+        return;
+      }
+      if (data?.t === "focusReport") {
+        diag(
+          "office",
+          `editor focus: frameHasFocus=${data.hasFocus} active=${data.active} inputArea=${data.inputArea}`,
+        );
         return;
       }
       if (data?.t === "shortcut" && data.name === "save") {
@@ -240,7 +264,7 @@ export function OfficeEditor(props: {
           // cannot reach this page, its storage, its cookies or its session.
           // Removing this attribute would hand vendored third-party code the
           // run of the origin that holds the master key.
-          sandbox="allow-scripts"
+          sandbox={FRAME_SANDBOX}
           style={{ visibility: stage === "ready" ? "visible" : "hidden" }}
         />
       </div>
