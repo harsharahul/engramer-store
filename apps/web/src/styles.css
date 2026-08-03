@@ -543,6 +543,24 @@ a {
   color: var(--paper-dim);
 }
 
+/* A file whose contents disagree with the digest taken when it was
+   uploaded. Stated plainly, in the one place the eye already goes. */
+.corrupt-chip {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: #b3261e;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
 /* Offered, not forced: sits above the tab bar and out of the way. */
 .update-bar {
   position: fixed;

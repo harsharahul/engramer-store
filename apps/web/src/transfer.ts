@@ -12,6 +12,10 @@ import {
   chunkedEncrypt,
   chunkedCiphertextSize,
   type FileMetadata,
+  type Digester,
+  contentDigest,
+  createDigester,
+  digestMatches,
 } from "@engramer/crypto";
 import {
   api,
@@ -509,7 +513,10 @@ async function uploadInParts(
   fileId: string,
   fileKey: Uint8Array,
   onProgress: (fraction: number) => void,
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  // Digested in the same pass that encrypts, so a file too large to hold at
+  // once is never read twice.
+  digester: Digester,
 ): Promise<number> {
   const total = contentCiphertextSize(file);
   const { session } = await beginPartUpload(fileId, total);
@@ -586,6 +593,7 @@ async function uploadInParts(
       const start = i * STREAM_CHUNK_SIZE;
       const slice = file.slice(start, Math.min(start + STREAM_CHUNK_SIZE, file.size));
       const plainChunk = new Uint8Array(await slice.arrayBuffer());
+      digester.update(plainChunk);
       const sealed =
         encryptor instanceof ChunkedEncryptor
           ? encryptor.seal(i, plainChunk)
@@ -638,11 +646,15 @@ export async function encryptAndUpload(
   const dto = await api.createFile(folderId, encryptedKey, encryptedMeta);
 
   const totalCiphertext = contentCiphertextSize(file);
+  let digest: string;
   try {
     if (totalCiphertext > PART_THRESHOLD) {
-      await uploadInParts(file, dto.id, fileKey, onProgress, signal);
+      const digester = createDigester();
+      await uploadInParts(file, dto.id, fileKey, onProgress, signal, digester);
+      digest = digester.final();
     } else {
       const plaintext = new Uint8Array(await file.arrayBuffer());
+      digest = contentDigest(plaintext);
       const ciphertext = isMediaFile(file)
         ? chunkedEncrypt(plaintext, fileKey)
         : encryptBytes(plaintext, fileKey);
@@ -657,6 +669,13 @@ export async function encryptAndUpload(
       .catch(() => {});
     throw err;
   }
+
+  // Written after the content, not with the metadata that preceded it, so
+  // the digest describes the bytes that actually landed.
+  const withDigest = { ...prepared.meta, digest };
+  const stamped = await api.patchFile(dto.id, {
+    encryptedMeta: encryptFileMetadata(withDigest, fileKey),
+  });
 
   if (prepared.thumbnail) {
     await uploadBlob(dto.id, "thumbnail", encryptBytes(prepared.thumbnail.bytes, fileKey), undefined, signal);
@@ -677,17 +696,53 @@ export async function encryptAndUpload(
   }
 
   const uploadedDto: FileDto = {
-    ...dto,
+    ...stamped,
     uploaded: true,
     size: totalCiphertext,
     thumbSize: prepared.thumbnail ? 1 : 0,
   };
-  return { dto: uploadedDto, fileKey, meta: prepared.meta };
+  return { dto: uploadedDto, fileKey, meta: withDigest };
 }
 
-export async function downloadAndDecrypt(fileId: string, fileKey: Uint8Array): Promise<Uint8Array> {
+/**
+ * A file's contents, checked against the digest taken when it was uploaded.
+ *
+ * A mismatch is reported rather than thrown: the bytes are handed back so a
+ * reader can still rescue what is there, and the caller marks the file as
+ * failing its check. Refusing outright would strand data behind a check that
+ * could itself be wrong, which is the worse failure for a storage product.
+ * Files stored before digests existed carry none and pass through unverified.
+ */
+export async function downloadAndDecrypt(
+  fileId: string,
+  fileKey: Uint8Array,
+  expectedDigest?: string,
+): Promise<Uint8Array> {
   const ciphertext = await api.downloadBlob(fileId, "data");
-  return decryptContent(ciphertext, fileKey);
+  const bytes = decryptContent(ciphertext, fileKey);
+  if (!digestMatches(bytes, expectedDigest)) {
+    diag(
+      "integrity",
+      `${fileId} does not match the digest recorded when it was uploaded ` +
+        `(${bytes.length} bytes read)`,
+    );
+    throw new IntegrityError(bytes);
+  }
+  return bytes;
+}
+
+/**
+ * Thrown when a file's contents disagree with the digest recorded at upload.
+ * Carries the bytes so a caller can still offer them: something is better
+ * than nothing when the alternative is an unreachable file.
+ */
+export class IntegrityError extends Error {
+  readonly bytes: Uint8Array;
+  constructor(bytes: Uint8Array) {
+    super("this file does not match the digest recorded when it was uploaded");
+    this.name = "IntegrityError";
+    this.bytes = bytes;
+  }
 }
 
 export async function downloadThumbnail(fileId: string, fileKey: Uint8Array): Promise<Uint8Array> {

@@ -23,7 +23,7 @@ export function Editor(props: {
 
   useEffect(() => {
     let cancelled = false;
-    void downloadAndDecrypt(file.id, file.key)
+    void downloadAndDecrypt(file.id, file.key, file.digest)
       .then((bytes) => {
         if (!cancelled) {
           const decoded = new TextDecoder().decode(bytes);

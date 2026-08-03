@@ -108,6 +108,14 @@ export function FileCard(props: {
         ) : (
           <SheetArt kind={fileKind(file.mime, file.name)} ext={extension(file.name)} />
         )}
+        {file.corrupt && (
+          <span
+            className="corrupt-chip"
+            title="This file does not match the digest recorded when it was uploaded. Download it to see what is left, then upload it again."
+          >
+            damaged
+          </span>
+        )}
         {file.category && <span className="category-chip">{file.category}</span>}
         <span className="select-ring" aria-hidden="true" />
       </div>

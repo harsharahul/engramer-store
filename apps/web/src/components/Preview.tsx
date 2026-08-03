@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { FileEntry } from "../store";
-import { downloadAndDecrypt } from "../transfer";
+import { useStore, type FileEntry } from "../store";
+import { IntegrityError, downloadAndDecrypt } from "../transfer";
 import { bridgeMediaUrl, mediaBridgeAvailable, mediaUrl, onMediaProgress, registerMediaKey } from "../mediastream";
 import { fileKind, formatBytes } from "../format";
 import { triggerDownload } from "../download";
@@ -246,7 +246,7 @@ export function Preview(props: {
         stopProgress();
       };
     }
-    void downloadAndDecrypt(file.id, file.key)
+    void downloadAndDecrypt(file.id, file.key, file.digest)
       .then((bytes) => {
         if (cancelled) {
           return;
@@ -273,6 +273,12 @@ export function Preview(props: {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
+          if (err instanceof IntegrityError) {
+            // Say what is wrong plainly, mark the file so the library shows
+            // it too, and leave the download working: the bytes are all that
+            // is left of it and the reader may still rescue something.
+            useStore.getState().markCorrupt(file.id);
+          }
           setError(err instanceof Error ? err.message : "could not decrypt this file");
         }
       });
@@ -295,7 +301,7 @@ export function Preview(props: {
   }, [props]);
 
   const download = async () => {
-    const bytes = await downloadAndDecrypt(file.id, file.key);
+    const bytes = await downloadAndDecrypt(file.id, file.key, file.digest);
     triggerDownload(
       new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime }),
       file.name,
