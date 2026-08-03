@@ -543,6 +543,32 @@ a {
   color: var(--paper-dim);
 }
 
+/* Offered, not forced: sits above the tab bar and out of the way. */
+.update-bar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 16px;
+  border-radius: 12px;
+  background: var(--ink-3);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  color: var(--paper);
+  max-width: min(92vw, 560px);
+}
+
+@media (max-width: 760px) {
+  .update-bar {
+    bottom: calc(74px + env(safe-area-inset-bottom));
+  }
+}
+
 /* Per-folder choice of where watched arrivals land. */
 .watch-modes {
   display: flex;

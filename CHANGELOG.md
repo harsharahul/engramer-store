@@ -3,6 +3,41 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.32.2] - 2026-08-03
+
+### Added
+- **A running client notices when it is out of date.** This app is
+  built to be left open: a home-screen app, a desktop window that
+  reopens rather than relaunches, a tab that lives for days. When the
+  deployment moves on, the window now says so and offers to reload onto
+  the new build. Offered rather than forced, because a reload during an
+  upload or an unsaved edit is not the app's decision to make. The
+  desktop app picks up releases this way, on a reload, without being
+  rebuilt; only changes to the native shell itself need a new build.
+- **Spreadsheet previews.** Opening a workbook used to offer a download
+  and nothing else. It now shows as a table with a tab per sheet, read
+  on your device, bounded so a preview stays a preview, and saying when
+  it has stopped short.
+- **Watched folders file the way you choose.** Per folder: sorted by
+  kind like any other upload and tagged with the folder's name, so the
+  group stays findable once auto-filing has scattered it; or kept
+  together in a vault folder of the same name, subfolders and all.
+
+### Fixed
+- **PDFs preview everywhere.** They were handed to the browser in a
+  frame, which shows a PDF only where the browser ships a viewer.
+  Safari's WebView does not, so the same document opened on one machine
+  and was blank in the desktop app and on iPhone. They are now drawn on
+  your device, page by page, at screen resolution.
+- **PDFs are recognised by their name as well as their type.** A PDF
+  that arrived with a missing or generic content type, which is routine
+  from a share sheet or a watched folder, was treated as an unknown
+  file: no preview, only a download.
+- **Watched folders no longer re-upload after a refresh.** A watched
+  file counts as new when nothing of that name and size is in the
+  library, but the scan ran before the library had loaded and compared
+  against an empty one, so every refresh uploaded everything again.
+
 ## [0.32.1] - 2026-08-03
 
 ### Fixed

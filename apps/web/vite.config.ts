@@ -131,6 +131,41 @@ function ortAssets(): Plugin {
 }
 
 /**
+ * Writes the version the deployment is serving, for a running client to
+ * compare itself against. Small and uncached on purpose: it is the one file
+ * that must never be answered from a cache, or a client will believe it is
+ * current forever. Served in development too, so the check is exercised
+ * there rather than only in production.
+ */
+function versionFile(): Plugin {
+  const body = `${JSON.stringify({ version }, null, 2)}\n`;
+  let outDir = "dist";
+  let isBuild = false;
+  return {
+    name: "engram-version-file",
+    configResolved(config) {
+      outDir = config.build.outDir;
+      isBuild = config.command === "build" && !process.env.VITEST;
+    },
+    closeBundle() {
+      if (isBuild) {
+        require("node:fs").writeFileSync(join(outDir, "version.json"), body);
+      }
+    },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if ((req.url ?? "").split("?")[0] !== "/version.json") {
+          return next();
+        }
+        res.setHeader("content-type", "application/json");
+        res.setHeader("cache-control", "no-store");
+        res.end(body);
+      });
+    },
+  };
+}
+
+/**
  * Development mirror of the headers the server sends for the office editor.
  * That editor is framed with an opaque origin, so its own assets are
  * cross-origin to it and its fetches carry a null origin; without these,
@@ -182,6 +217,7 @@ export default defineConfig({
   plugins: [
     react(),
     officeDevHeaders(),
+    versionFile(),
     ocrAssets(),
     ortAssets(),
     VitePWA({
@@ -219,7 +255,7 @@ export default defineConfig({
         // The office editors are hundreds of megabytes fetched only when a
         // document is opened; they belong to the HTTP cache, never the
         // app-shell precache.
-        globIgnores: ["ocr/**", "models/**", "ort/**", "office/**"],
+        globIgnores: ["ocr/**", "models/**", "ort/**", "office/**", "version.json"],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
       },
     }),
