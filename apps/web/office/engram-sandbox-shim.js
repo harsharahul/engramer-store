@@ -110,37 +110,3 @@
     ev.source.postMessage({ t: 'engramEditorRpcResult', id: d.id, value: value, error: error }, '*');
   });
 })();
-
-// --------------------------------------------------------------------------
-// Everything below is PoC INSTRUMENTATION ONLY (BLUEPRINT §6.5 step 3). It
-// re-runs the §6.4.1 isolation probes from inside the patched innermost frame
-// and ships the results to the host. Delete for production.
-(function () {
-  var out = window.parent;   // the shim; its postMessage forwards to the host
-  var r = [];
-  function probe(name, fn) {
-    try { r.push({ name: name, blocked: false, value: String(fn()).slice(0, 90) }); }
-    catch (e) { r.push({ name: name, blocked: true, error: e.name + ': ' + String(e.message).slice(0, 130) }); }
-  }
-  function go() {
-    // window.top is the KEY-HOLDING APP PAGE and is unforgeable, so these three
-    // are the ones that matter: they must still be blocked after patching.
-    probe('[editor] window.top.__MASTER_KEY', function () { return window.top.__MASTER_KEY; });
-    probe('[editor] window.top.document.title', function () { return window.top.document.title; });
-    probe('[editor] window.top.location.href', function () { return window.top.location.href; });
-    probe('[editor] shim exposes only postMessage/APP', function () { return Object.keys(window.parent).join(','); });
-    probe('[editor] shim leaks a real Window?', function () { return String(window.parent.document); });
-    probe('[editor] localStorage', function () { return localStorage.getItem('x'); });
-    probe('[editor] sessionStorage', function () { return sessionStorage.getItem('x'); });
-    probe('[editor] indexedDB.open', function () { return indexedDB.open('probe') && 'request created'; });
-    probe('[editor] document.cookie', function () { return JSON.stringify(document.cookie); });
-    probe('[editor] caches (CacheStorage)', function () { return typeof caches.open; });
-    probe('[editor] navigator.serviceWorker', function () { return typeof navigator.serviceWorker; });
-    probe('[editor] window.origin', function () { return JSON.stringify(window.origin); });
-    fetch(new URL('/whoami', document.baseURI).href, { credentials: 'include' })
-      .then(function (x) { return x.text().then(function (b) { r.push({ name: '[editor] fetch /whoami (credentials:include)', blocked: false, value: 'HTTP ' + x.status + ' ' + b.slice(0, 60) }); }); })
-      .catch(function (e) { r.push({ name: '[editor] fetch /whoami (credentials:include)', blocked: true, error: e.name + ': ' + String(e.message).slice(0, 100) }); })
-      .then(function () { out.postMessage({ t: 'editorProbes', probes: r }, '*'); });
-  }
-  if (document.readyState === 'loading') { window.addEventListener('DOMContentLoaded', go); } else { go(); }
-})();

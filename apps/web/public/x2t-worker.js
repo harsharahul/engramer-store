@@ -134,6 +134,9 @@ self.onmessage = async (event) => {
       return;
     }
     if (op === "export") {
+      // The editor hands back its document as a prefixed string, not raw
+      // bytes ("DOCY;v5;…"), and the converter expects exactly that, so it
+      // is written through untouched rather than decoded here.
       engine.FS.writeFile("/working/save.bin", bytes);
       const out = convert("save.bin", name);
       self.postMessage({ id, bytes: out }, [out.buffer]);

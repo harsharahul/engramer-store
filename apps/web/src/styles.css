@@ -3629,3 +3629,34 @@ span.item-menu {
   word-break: break-word;
   color: var(--paper-dim);
 }
+
+/* ---------- Word and Excel editor ---------- */
+
+.office-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  background: #fff;
+}
+
+/* The editor paints its own chrome edge to edge; the frame carries no
+   border of its own and must not scroll the shell around it. */
+.office-frame {
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  width: 100%;
+}
+
+.office-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  background: var(--ink-1);
+  z-index: 1;
+}
