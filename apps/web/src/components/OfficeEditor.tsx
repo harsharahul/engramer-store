@@ -73,9 +73,23 @@ export function OfficeEditor(props: {
     let cancelled = false;
 
     const opened = fileRef.current;
+
+    // A frame that never reports ready would otherwise spin forever, which is
+    // what a refused asset looks like from the outside. Generous, because the
+    // editor is megabytes and a slow link is not a failure.
+    const startupDeadline = window.setTimeout(() => {
+      if (!cancelled) {
+        setStage((current) => (current === "ready" ? current : "failed"));
+        setError((current) => current ?? "the editor did not start");
+      }
+    }, 150_000);
+
     const session = new EditorSession(frame, fileType, opened.name, {
       onLoading: () => diag("office", "the editor is up and waiting for its document"),
-      onReady: () => setStage("ready"),
+      onReady: () => {
+        window.clearTimeout(startupDeadline);
+        setStage("ready");
+      },
       onChanged: (modified) => {
         // Only ever set. The editor clears its own modified flag as soon as
         // the stand-in collaboration server acknowledges a change, about a
@@ -121,6 +135,7 @@ export function OfficeEditor(props: {
 
     return () => {
       cancelled = true;
+      window.clearTimeout(startupDeadline);
       session.close();
       sessionRef.current = null;
       converter.close();

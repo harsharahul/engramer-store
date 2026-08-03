@@ -198,7 +198,10 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
    * either way.
    */
   const officeCsp = (host: string): string => {
-    const self = `https://${host} http://${host}`;
+    // The host as this server sees it, plus any the deployment is reached on
+    // that a proxy has rewritten away. Naming only the former is how the
+    // editor ends up refusing every one of its own assets.
+    const self = [`https://${host}`, `http://${host}`, ...config.publicOrigins].join(" ");
     return [
       `default-src ${self}`,
       `script-src ${self} 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'`,

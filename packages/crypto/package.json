@@ -1,6 +1,6 @@
 {
   "name": "@engramer/crypto",
-  "version": "0.32.0",
+  "version": "0.32.1",
   "description": "End-to-end encryption core for Engram Store",
   "license": "AGPL-3.0-only",
   "type": "module",
