@@ -543,6 +543,10 @@ a {
   color: var(--paper-dim);
 }
 
+.details-meta .integrity-bad {
+  color: #ff6b60;
+}
+
 /* The files a check could not vouch for, named so they can be acted on. */
 .verify-problems {
   margin: 8px 0 0;
@@ -3376,8 +3380,12 @@ span.item-menu {
 
 @media (max-width: 760px) {
   #root {
+    /* Measured, with the viewport units as the fallback: the reported height
+       at load is not always the height the screen settles on, and a layout
+       built from that leaves a band of empty space under the tab bar. */
     height: 100vh;
     height: 100dvh;
+    height: var(--app-height, 100dvh);
   }
 
   .frame,

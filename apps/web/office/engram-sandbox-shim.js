@@ -277,6 +277,14 @@
       else if (d.method === 'paste') {
         api.asc_PasteData(window.AscCommon.c_oAscClipboardDataFormat.Text, d.arg);
         value = true;
+      } else if (d.method === 'commit') {
+        // Committing on its own, for the moment before a document closes:
+        // an open cell holds text the document does not have yet, so nothing
+        // knows there is anything to lose.
+        try {
+          if (typeof api.asc_closeCellEditor === 'function') { api.asc_closeCellEditor(false); }
+        } catch (e) {}
+        value = true;
       } else if (d.method === 'save') {
         // Whatever the editor is still holding has to be committed first, or
         // it is not in the file. A spreadsheet keeps the cell you are typing

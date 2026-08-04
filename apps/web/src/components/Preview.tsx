@@ -174,6 +174,35 @@ function DocxBody(props: { bytes: Uint8Array; name: string }) {
   const container = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
 
+  /**
+   * A Word page has a paper width, and the renderer draws it at that width
+   * whatever it is being shown in. On a phone, or a narrow window, the page
+   * is wider than the space it has and everything on it sits outside the
+   * visible area: the document reads as a blank sheet, which is exactly what
+   * it looked like. Scale it down to fit instead, the way any document
+   * viewer does, and leave it alone when there is room.
+   */
+  const fitToWidth = () => {
+    const host = container.current;
+    const wrapper = host?.querySelector<HTMLElement>(".docx-wrapper");
+    const page = wrapper?.querySelector<HTMLElement>("section.docx");
+    if (!host || !wrapper || !page) {
+      return;
+    }
+    const available = host.clientWidth;
+    const paper = page.offsetWidth;
+    if (!available || !paper) {
+      return;
+    }
+    const scale = Math.min(available / paper, 1);
+    wrapper.style.transformOrigin = "top left";
+    wrapper.style.transform = scale < 1 ? `scale(${scale})` : "";
+    // The scaled box still occupies its unscaled height, which would leave a
+    // long empty tail below the last page.
+    wrapper.style.height = scale < 1 ? `${wrapper.scrollHeight * scale}px` : "";
+    wrapper.style.width = scale < 1 ? `${paper}px` : "";
+  };
+
   useEffect(() => {
     let cancelled = false;
     void import("docx-preview")
@@ -192,15 +221,22 @@ function DocxBody(props: { bytes: Uint8Array; name: string }) {
           // feature, and a document can arrive from a stranger through a
           // file request, so it stays off.
           renderAltChunks: false, inWrapper: true },
-        );
+        ).then(() => fitToWidth());
       })
       .catch(() => {
         if (!cancelled) {
           setFailed(true);
         }
       });
+    // Rotating a phone or dragging a window narrower has to re-fit it.
+    const host = container.current;
+    const observer = host ? new ResizeObserver(() => fitToWidth()) : null;
+    if (host && observer) {
+      observer.observe(host);
+    }
     return () => {
       cancelled = true;
+      observer?.disconnect();
     };
   }, [props.bytes]);
 
@@ -251,6 +287,8 @@ export function Preview(props: {
         if (cancelled) {
           return;
         }
+        // Reading it through was the check; record that it passed.
+        useStore.getState().markVerified(file.id);
         const empty = { url: null, text: null, docx: null, sheet: null, pdf: null };
         if (kind === "text") {
           setLoaded({ ...empty, text: new TextDecoder().decode(bytes) });
