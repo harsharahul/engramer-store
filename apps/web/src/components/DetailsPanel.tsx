@@ -172,6 +172,16 @@ export function DetailsPanel(props: {
         <dd>{formatDate(file.mtime)}</dd>
         <dt>Added</dt>
         <dd>{formatDate(file.createdAt)}</dd>
+        <dt>Integrity</dt>
+        <dd className={file.corrupt ? "integrity-bad" : undefined}>
+          {file.corrupt
+            ? "Does not match its checksum"
+            : file.verified
+              ? "Checked, matches its checksum"
+              : file.digest
+                ? "Checksum recorded, not read yet"
+                : "No checksum; stored before this existed"}
+        </dd>
       </dl>
 
       <div className="details-tags">

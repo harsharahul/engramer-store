@@ -131,6 +131,18 @@ export class EditorSession {
   }
 
   /**
+   * Commits whatever the editor is still holding, without saving.
+   *
+   * A spreadsheet keeps the cell being typed in open, and its text is not
+   * part of the document until it is committed, so nothing knows there is
+   * anything unsaved. Asking before a document closes is what turns a
+   * silent loss into a question.
+   */
+  async commit(): Promise<void> {
+    await this.call("commit").catch(() => {});
+  }
+
+  /**
    * Hands the keyboard to the editor.
    *
    * Two separate things have to happen and each looks like the other when it

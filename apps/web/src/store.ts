@@ -67,6 +67,9 @@ export interface FileEntry {
   digest?: string;
   /** Set once a read has found the contents disagreeing with that digest. */
   corrupt?: boolean;
+  /** Set once a read in this session has matched it. Not remembered across
+   * reloads: it describes a check that happened, not a property of the file. */
+  verified?: boolean;
   key: Uint8Array;
   hasThumb: boolean;
   trashed: boolean;
@@ -161,6 +164,8 @@ interface StoreState {
   setTags: (id: string, tags: string[]) => Promise<void>;
   /** Records that a read found this file disagreeing with its digest. */
   markCorrupt: (id: string) => void;
+  /** Records that a read matched the digest recorded for this file. */
+  markVerified: (id: string) => void;
   toggleFavorite: (id: string) => Promise<void>;
   moveFile: (id: string, folderId: string | null) => Promise<void>;
   trashFile: (id: string) => Promise<void>;
@@ -877,6 +882,16 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     renameFile: async (id, name) => patchFileMeta(id, { name }),
+
+    markVerified: (id) => {
+      const file = get().files.get(id);
+      if (!file || file.verified || !file.digest) {
+        return;
+      }
+      const files = new Map(get().files);
+      files.set(id, { ...file, verified: true, corrupt: false });
+      set({ files });
+    },
 
     markCorrupt: (id) => {
       const file = get().files.get(id);

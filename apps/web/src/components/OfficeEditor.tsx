@@ -46,6 +46,9 @@ export function OfficeEditor(props: {
   // hands on; it needs whatever save() currently is, not the one that existed
   // when the session was built.
   const saveRef = useRef<() => void>(() => {});
+  // Read synchronously when closing, because the change that a commit
+  // produces arrives after the render that would have updated the state.
+  const dirtyRef = useRef(false);
   // Read at open time only. Saving stores a new version, which replaces this
   // file's entry in the library; if the session depended on that entry, every
   // save would tear the editor down and reopen it on the document that was
@@ -96,6 +99,7 @@ export function OfficeEditor(props: {
         // second after typing; treating that as "saved" would grey out Save
         // and let the document close with the edit only in the editor.
         if (modified) {
+          dirtyRef.current = true;
           setDirty(true);
         }
       },
@@ -172,6 +176,7 @@ export function OfficeEditor(props: {
       const out = await converter.exportDocument(`document.${fileType}`, bin);
       await props.onSave(out);
       setDirty(false);
+      dirtyRef.current = false;
       setSavedAt(Date.now());
       diag("office", `saved ${file.name} (${out.length} bytes)`);
     } catch (err) {
@@ -196,8 +201,12 @@ export function OfficeEditor(props: {
     return () => window.removeEventListener("keydown", onKey);
   }, [save]);
 
-  const close = useCallback(() => {
-    if (dirty && !window.confirm("Close without saving your changes?")) {
+  const close = useCallback(async () => {
+    // A cell still being typed in is not part of the document yet, so ask the
+    // editor to commit before deciding whether anything would be lost.
+    await sessionRef.current?.commit();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    if ((dirty || dirtyRef.current) && !window.confirm("Close without saving your changes?")) {
       return;
     }
     props.onClose();
@@ -224,7 +233,7 @@ export function OfficeEditor(props: {
           {busy ? "Encrypting" : "Save"}
           {!busy && <kbd className="mono save-kbd">⌘S</kbd>}
         </button>
-        <button className="icon-btn" title="Close" onClick={close}>
+        <button className="icon-btn" title="Close" onClick={() => void close()}>
           <XGlyph />
         </button>
       </div>
