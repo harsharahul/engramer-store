@@ -51,6 +51,8 @@ export interface FileRow {
   thumb_size: number;
   /** Size of the encrypted search-text blob, 0 when none. */
   index_size: number;
+  /** Digest of the stored ciphertext, recorded when it was written. */
+  content_hash: string | null;
   /** Which content blob is current: 0 = `<id>`, N = `<id>.g<N>`. */
   generation: number;
   uploaded: number;
@@ -138,6 +140,9 @@ export interface Db {
 export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; type: string }> = [
   { table: "files", column: "generation", type: "BIGINT NOT NULL DEFAULT 0" },
   { table: "files", column: "index_size", type: "BIGINT NOT NULL DEFAULT 0" },
+  // Digest of the stored ciphertext, so storage can be checked against what
+  // was written without anyone downloading or decrypting anything.
+  { table: "files", column: "content_hash", type: "TEXT" },
   { table: "request_uploads", column: "index_size", type: "BIGINT NOT NULL DEFAULT 0" },
   { table: "users", column: "totp_secret", type: "TEXT" },
   { table: "users", column: "totp_enabled", type: "BIGINT NOT NULL DEFAULT 0" },

@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
 import {
+  checkStoredFiles,
+  describeStorageCheck,
   describeVerify,
+  smallestFirst,
   verifyFiles,
+  type FileVerdict,
   type VerifyProgress,
   type VerifyResult,
 } from "../verify";
@@ -67,6 +71,39 @@ export function ProfileView(props: {
   const [verifySummary, setVerifySummary] = useState<string | null>(null);
   const [verifyProblems, setVerifyProblems] = useState<VerifyResult["problems"]>([]);
   const verifyAbort = useRef<AbortController | null>(null);
+  // Named on the button, because the cost is the thing worth knowing first.
+  const totalToCheck = [...store.files.values()]
+    .filter((file) => !file.trashed)
+    .reduce((sum, file) => sum + file.size, 0);
+
+  const runStorageCheck = async () => {
+    const controller = new AbortController();
+    verifyAbort.current = controller;
+    setVerifying(true);
+    setVerifySummary(null);
+    setVerifyProblems([]);
+    const files = smallestFirst(
+      [...store.files.values()]
+        .filter((file) => !file.trashed)
+        .map((file) => ({ id: file.id, name: file.name, size: file.size, digest: file.digest })),
+    );
+    try {
+      const result = await checkStoredFiles(files, {
+        signal: controller.signal,
+        onProgress: setVerifyProgress,
+      });
+      setVerifyProblems(
+        result.problems.map((p) => ({ ...p, verdict: p.verdict as unknown as FileVerdict })),
+      );
+      setVerifySummary(describeStorageCheck(result, controller.signal.aborted));
+    } catch {
+      setVerifySummary("The check could not finish; try again on a steadier connection.");
+    } finally {
+      setVerifying(false);
+      setVerifyProgress(null);
+      verifyAbort.current = null;
+    }
+  };
 
   const runVerify = async () => {
     const controller = new AbortController();
@@ -74,10 +111,14 @@ export function ProfileView(props: {
     setVerifying(true);
     setVerifySummary(null);
     setVerifyProblems([]);
-    const files = [...store.files.values()].filter((file) => !file.trashed);
+    const files = smallestFirst(
+      [...store.files.values()]
+        .filter((file) => !file.trashed)
+        .map((file) => ({ id: file.id, name: file.name, size: file.size, digest: file.digest })),
+    );
     try {
       const result = await verifyFiles(
-        files.map((file) => ({ id: file.id, name: file.name, size: file.size, digest: file.digest })),
+        files,
         async (file) => {
           const entry = store.files.get(file.id)!;
           try {
@@ -97,6 +138,8 @@ export function ProfileView(props: {
           onVerdict: (file, verdict) => {
             if (verdict === "damaged") {
               store.markCorrupt(file.id);
+            } else if (verdict === "ok") {
+              store.markVerified(file.id);
             }
           },
         },
@@ -448,18 +491,26 @@ export function ProfileView(props: {
         <h3>Integrity</h3>
         <div className="profile-row">
           <div className="profile-row-main">
-            <b>Check every file</b>
+            <b>Check stored files</b>
             <div className="profile-row-sub">
-              Reads each file back and compares it against the digest taken when it was
-              uploaded. Nothing else can tell you this: the server cannot read your files, so
-              it cannot check them for you. It downloads everything, so it is worth doing on a
-              connection you do not pay by the megabyte.
+              Asks the server whether what it holds is still what it was given. Nothing is
+              downloaded, so a vault of any size is checked in seconds. This catches what
+              happens to data at rest: a truncated write, a replaced object, bit rot.
             </div>
             {verifying && (
               <div className="profile-row-sub">
-                {verifyProgress
-                  ? `Checked ${verifyProgress.done} of ${verifyProgress.total}: ${verifyProgress.current}`
-                  : "Starting…"}
+                {verifyProgress ? (
+                  <>
+                    Checked {verifyProgress.done} of {verifyProgress.total},{" "}
+                    {formatBytes(verifyProgress.bytesDone)} of {formatBytes(verifyProgress.bytesTotal)}
+                    <br />
+                    Reading {verifyProgress.current} ({formatBytes(verifyProgress.currentBytes)})
+                    {verifyProgress.currentBytes > 50 * 1024 * 1024 &&
+                      ", which takes a while to fetch"}
+                  </>
+                ) : (
+                  "Starting…"
+                )}
               </div>
             )}
             {verifySummary && <div className="profile-row-sub"><b>{verifySummary}</b></div>}
@@ -481,10 +532,28 @@ export function ProfileView(props: {
                 verifyAbort.current?.abort();
                 return;
               }
-              void runVerify();
+              void runStorageCheck();
             }}
           >
-            {verifying ? "Stop" : "Check files"}
+            {verifying ? "Stop" : "Check stored files"}
+          </button>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Deep check</b>
+            <div className="profile-row-sub">
+              Reads every file back and compares it against the digest taken on your device
+              before it was encrypted. It proves the contents, not just the storage, and it
+              is the only thing that can. It downloads everything: {formatBytes(totalToCheck)}
+              , so it is worth doing on a connection you do not pay by the megabyte.
+            </div>
+          </div>
+          <button
+            className="btn"
+            disabled={verifying}
+            onClick={() => void runVerify()}
+          >
+            Deep check
           </button>
         </div>
       </section>
