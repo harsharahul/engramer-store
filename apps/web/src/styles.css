@@ -38,6 +38,12 @@
   box-sizing: border-box;
 }
 
+html {
+  /* Named so it can be measured and reported; env() is otherwise invisible
+     to script, and this is the number most likely to be misread on a phone. */
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 html,
 body,
 #root {
