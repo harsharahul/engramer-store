@@ -3,6 +3,37 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.34.0] - 2026-08-03
+
+### Added
+- **Checking your files no longer means downloading them.** The server
+  cannot read what you store, but it can tell whether what it holds is
+  still what it was handed, so it now records a digest of each stored
+  blob as it writes it and answers a list of files with a verdict for
+  each. A vault of any size is checked in seconds, over a few kilobytes
+  of requests. This catches what happens to data at rest: a truncated
+  write, a replaced object, bit rot.
+- The check that reads every file back is still there, beside it, for
+  proving contents rather than storage, with the download it costs
+  stated on the button. It reads the smallest files first and reports
+  bytes as well as counts, so a large file no longer looks like a hang.
+- **A file says what is known about its integrity** in its details:
+  checked and matching, a checksum recorded but not read yet, not
+  matching, or stored before any of this existed.
+
+### Fixed
+- **Documents fit the screen they are shown on.** A Word page has a
+  paper width and was drawn at that width whatever the space allowed,
+  so on a phone or in a narrow window everything on the page sat
+  outside the visible area and the document read as a blank sheet.
+- **Closing a spreadsheet no longer discards the cell you were typing
+  in.** The cell is not part of the document until you leave it, so
+  nothing knew there was anything unsaved and the question was never
+  asked.
+- **A home-screen app opens at the right height.** The height a browser
+  reports as a page loads is not always what it settles on, which left
+  a band of empty space under the tab bar until something was tapped.
+
 ## [0.33.0] - 2026-08-03
 
 ### Added
