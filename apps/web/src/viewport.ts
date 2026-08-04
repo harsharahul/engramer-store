@@ -13,6 +13,8 @@
  * actually visible, rather than what the page believes it has.
  */
 
+import { diag } from "./diag";
+
 const PROPERTY = "--app-height";
 
 function apply(): void {
@@ -22,9 +24,38 @@ function apply(): void {
   }
 }
 
+/**
+ * What the screen actually reported, written to the activity log.
+ *
+ * A layout that is short by a band of empty space is a disagreement between
+ * numbers this device gives and the space it really has, and those numbers
+ * cannot be seen from anywhere else: no desktop browser reproduces them.
+ * Logged at the moments they are most likely to disagree, so the log can be
+ * read off the phone itself.
+ */
+function report(when: string): void {
+  const view = window.visualViewport;
+  const bar = document.querySelector(".tabbar")?.getBoundingClientRect();
+  const inset = getComputedStyle(document.documentElement).getPropertyValue("--safe-bottom").trim();
+  diag(
+    "viewport",
+    `${when}: inner=${window.innerHeight} visual=${view ? Math.round(view.height) : "n/a"} ` +
+      `offsetTop=${view ? Math.round(view.offsetTop) : "n/a"} screen=${window.screen.height} ` +
+      `clientH=${document.documentElement.clientHeight} app=${
+        getComputedStyle(document.documentElement).getPropertyValue(PROPERTY).trim() || "unset"
+      } safeBottom=${inset || "0px"} ` +
+      `bar=${bar ? `${Math.round(bar.top)}..${Math.round(bar.bottom)}` : "none"} ` +
+      `standalone=${window.matchMedia("(display-mode: standalone)").matches}`,
+  );
+}
+
 /** Starts tracking. Returns a function that stops it. */
 export function trackViewportHeight(): () => void {
   apply();
+  // Read off the phone through the activity log; see report().
+  setTimeout(() => report("at launch"), 400);
+  setTimeout(() => report("2s after launch"), 2000);
+  window.addEventListener("touchstart", () => report("after first touch"), { once: true });
   // The first answer after load is the one most often wrong, so take another
   // once the page has settled rather than trusting it.
   const settle = window.setTimeout(apply, 300);
