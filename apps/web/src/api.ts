@@ -212,6 +212,17 @@ export const api = {
     return new Uint8Array(await response.arrayBuffer());
   },
 
+  /**
+   * Asks the server whether the blobs it holds are still what it was given.
+   * No file content crosses the wire, so a vault of any size can be checked
+   * without downloading it. Bounded per call so the caller drives progress.
+   */
+  verifyStored: (ids: string[]) =>
+    request<{ results: { id: string; verdict: string }[] }>(`/api/files/verify`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
+
   listVersions: (fileId: string) =>
     request<{ versions: FileVersionInfo[] }>(`/api/files/${fileId}/versions`),
 

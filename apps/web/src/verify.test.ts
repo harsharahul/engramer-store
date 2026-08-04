@@ -62,3 +62,36 @@ describe("verifying a vault", () => {
     expect(describeVerify(mixed, true)).toMatch(/^Stopped\. /);
   });
 });
+
+describe("ordering the walk", () => {
+  it("reads the smallest files first", async () => {
+    // A vault that opens with a gigabyte of video shows nothing happening
+    // for minutes and reads as a hang.
+    const { smallestFirst } = await import("./verify");
+    const files = [
+      { id: "a", name: "video.mp4", size: 1_000_000_000 },
+      { id: "b", name: "note.txt", size: 200 },
+      { id: "c", name: "photo.jpg", size: 3_000_000 },
+    ];
+    expect(smallestFirst(files).map((f) => f.name)).toEqual(["note.txt", "photo.jpg", "video.mp4"]);
+    // and leaves the caller's list alone
+    expect(files[0]!.name).toBe("video.mp4");
+  });
+
+  it("reports bytes as well as counts, so a big file still shows movement", async () => {
+    const { verifyFiles } = await import("./verify");
+    const seen: number[] = [];
+    await verifyFiles(
+      [
+        { id: "1", name: "small", size: 100 },
+        { id: "2", name: "big", size: 900 },
+      ],
+      async () => new Uint8Array(1),
+      { onProgress: (p) => seen.push(p.bytesTotal === 1000 ? p.bytesDone : -1) },
+    );
+    expect(seen).toContain(0);
+    expect(seen).toContain(100);
+    expect(seen).toContain(1000);
+    expect(seen).not.toContain(-1);
+  });
+});

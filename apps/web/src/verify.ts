@@ -1,4 +1,5 @@
 import { digestMatches } from "@engramer/crypto";
+import { api } from "./api";
 import { diag } from "./diag";
 
 /**
@@ -39,6 +40,20 @@ export interface VerifyProgress {
   done: number;
   total: number;
   current: string;
+  /** Size of the file being read, so a large one does not look like a hang. */
+  currentBytes: number;
+  bytesDone: number;
+  bytesTotal: number;
+}
+
+/**
+ * Smallest first. The check reads whole files, so a vault that begins with a
+ * gigabyte of video shows nothing happening for minutes and looks stalled.
+ * Going up in size means the count moves immediately and the expensive ones
+ * arrive last, by which point the cost is visible and can be stopped.
+ */
+export function smallestFirst(files: VerifiableFile[]): VerifiableFile[] {
+  return [...files].sort((a, b) => a.size - b.size);
 }
 
 /**
@@ -55,12 +70,21 @@ export async function verifyFiles(
   } = {},
 ): Promise<VerifyResult> {
   const result: VerifyResult = { ok: 0, damaged: 0, unchecked: 0, unreadable: 0, problems: [] };
+  const bytesTotal = files.reduce((sum, file) => sum + file.size, 0);
   let done = 0;
+  let bytesDone = 0;
   for (const file of files) {
     if (options.signal?.aborted) {
       break;
     }
-    options.onProgress?.({ done, total: files.length, current: file.name });
+    options.onProgress?.({
+      done,
+      total: files.length,
+      current: file.name,
+      currentBytes: file.size,
+      bytesDone,
+      bytesTotal,
+    });
     let verdict: FileVerdict;
     try {
       const bytes = await read(file);
@@ -84,9 +108,117 @@ export async function verifyFiles(
     }
     options.onVerdict?.(file, verdict);
     done += 1;
-    options.onProgress?.({ done, total: files.length, current: file.name });
+    bytesDone += file.size;
+    options.onProgress?.({
+      done,
+      total: files.length,
+      current: file.name,
+      currentBytes: file.size,
+      bytesDone,
+      bytesTotal,
+    });
   }
   return result;
+}
+
+export type StorageVerdict = "intact" | "changed" | "recorded" | "unreadable" | "missing";
+
+export interface StorageCheckResult {
+  intact: number;
+  changed: number;
+  /** Had no digest on the server until now; a baseline, not a verification. */
+  recorded: number;
+  unreadable: number;
+  missing: number;
+  problems: { name: string; id: string; verdict: StorageVerdict }[];
+}
+
+/** Small enough that a slow answer is still progress, large enough to be quick. */
+const BATCH = 25;
+
+/**
+ * Asks the server whether what it stores is still what it was given.
+ *
+ * This is the check worth running habitually. It reads nothing back, so a
+ * terabyte costs a few kilobytes of requests, and it catches everything that
+ * happens to data at rest: a truncated write, a half-replaced object, bit
+ * rot. What it cannot see is whether the right bytes were sent in the first
+ * place, because the server only ever saw what it was handed; that is what
+ * the checks at upload are for, and what a deep check re-reads to confirm.
+ */
+export async function checkStoredFiles(
+  files: VerifiableFile[],
+  options: {
+    onProgress?: (progress: VerifyProgress) => void;
+    signal?: AbortSignal;
+  } = {},
+): Promise<StorageCheckResult> {
+  const result: StorageCheckResult = {
+    intact: 0,
+    changed: 0,
+    recorded: 0,
+    unreadable: 0,
+    missing: 0,
+    problems: [],
+  };
+  const byId = new Map(files.map((file) => [file.id, file]));
+  const bytesTotal = files.reduce((sum, file) => sum + file.size, 0);
+  let done = 0;
+  let bytesDone = 0;
+  for (let at = 0; at < files.length; at += BATCH) {
+    if (options.signal?.aborted) {
+      break;
+    }
+    const batch = files.slice(at, at + BATCH);
+    options.onProgress?.({
+      done,
+      total: files.length,
+      current: batch[0]?.name ?? "",
+      currentBytes: 0,
+      bytesDone,
+      bytesTotal,
+    });
+    const { results } = await api.verifyStored(batch.map((file) => file.id));
+    for (const entry of results) {
+      const verdict = entry.verdict as StorageVerdict;
+      const file = byId.get(entry.id);
+      result[verdict] = (result[verdict] ?? 0) + 1;
+      if (verdict !== "intact" && file) {
+        result.problems.push({ name: file.name, id: file.id, verdict });
+      }
+      if (verdict === "changed") {
+        diag("integrity", `${file?.name ?? entry.id} is not what the server was given`);
+      }
+    }
+    done += batch.length;
+    bytesDone += batch.reduce((sum, file) => sum + file.size, 0);
+    options.onProgress?.({
+      done,
+      total: files.length,
+      current: batch[batch.length - 1]?.name ?? "",
+      currentBytes: 0,
+      bytesDone,
+      bytesTotal,
+    });
+  }
+  return result;
+}
+
+/** A plain sentence for a storage check. */
+export function describeStorageCheck(result: StorageCheckResult, stopped: boolean): string {
+  const parts: string[] = [];
+  parts.push(
+    result.changed > 0
+      ? `${result.changed} file${result.changed === 1 ? "" : "s"} no longer match what was stored`
+      : `${result.intact} file${result.intact === 1 ? "" : "s"} still match what was stored`,
+  );
+  if (result.recorded > 0) {
+    parts.push(`${result.recorded} had nothing recorded to compare against and now do`);
+  }
+  if (result.unreadable + result.missing > 0) {
+    parts.push(`${result.unreadable + result.missing} could not be found`);
+  }
+  return `${stopped ? "Stopped. " : ""}${parts.join("; ")}.`;
 }
 
 /** A plain sentence for the result, because counts alone invite squinting. */

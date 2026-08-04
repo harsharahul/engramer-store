@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { Readable } from "node:stream";
+import { PassThrough, type Readable } from "node:stream";
 import { z } from "zod";
 import { BlobTooLargeError, blobKey, type BlobKind } from "../blobs.js";
 import {
@@ -252,8 +252,20 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     const nextGen = replacesContent ? file.generation + 1 : file.generation;
     const targetKey = kind === "data" ? blobKey(id, "data", nextGen) : blobKey(id, kind);
     let written: number;
+    // The bytes are already streaming through; hashing them here costs a pass
+    // over data that is in hand, and is what lets storage be checked later
+    // without anyone downloading or decrypting anything.
+    const hasher = createHash("sha256");
+    const counted = (request.body as Readable).pipe(
+      new PassThrough({
+        transform(chunk, _encoding, next) {
+          hasher.update(chunk as Buffer);
+          next(null, chunk);
+        },
+      }),
+    );
     try {
-      written = await app.blobs.put(targetKey, request.body as Readable, maxBytes);
+      written = await app.blobs.put(targetKey, counted, maxBytes);
     } catch (err) {
       if (err instanceof BlobTooLargeError) {
         return reply.code(413).send({ error: "storage quota exceeded" });
@@ -273,7 +285,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       return { size: written };
     }
 
-    return commitData(reply, uid, id, file, nextGen, targetKey, written);
+    return commitData(reply, uid, id, file, nextGen, targetKey, written, hasher.digest("hex"));
   };
 
   /**
@@ -282,6 +294,63 @@ export function registerStorageRoutes(app: FastifyInstance): void {
    * generation, advance the pointer, prune history. A generation conflict
    * removes the fresh blob and yields 409; the row never moves.
    */
+  /**
+   * Checks stored blobs against the digest recorded when they were written.
+   *
+   * The server cannot read these files, but it can tell whether what it holds
+   * is still what it was handed, which is every way stored data goes wrong on
+   * its own: a truncated write, a half-replaced object, bit rot. It costs the
+   * client nothing but a list of ids, so a vault of any size can be checked
+   * without downloading it.
+   *
+   * Bounded per call so the caller drives it, sees progress and can stop.
+   */
+  app.post(
+    "/api/files/verify",
+    { preHandler: app.authenticate },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const uid = request.user.uid;
+      const body = z.object({ ids: z.array(z.string()).min(1).max(50) }).safeParse(request.body);
+      if (!body.success) {
+        return reply.code(400).send({ error: "invalid request" });
+      }
+      const results: { id: string; verdict: string }[] = [];
+      for (const id of body.data.ids) {
+        const row = await app.db.get<
+          Pick<FileRow, "id" | "generation" | "uploaded" | "content_hash">
+        >(
+          "SELECT id, generation, uploaded, content_hash FROM files WHERE id = ? AND user_id = ? AND deleted = 0",
+          id,
+          uid,
+        );
+        if (!row || row.uploaded !== 1) {
+          results.push({ id, verdict: "missing" });
+          continue;
+        }
+        const key = blobKey(id, "data", row.generation);
+        try {
+          const hasher = createHash("sha256");
+          const stream = await app.blobs.get(key);
+          for await (const chunk of stream) {
+            hasher.update(chunk as Buffer);
+          }
+          const actual = hasher.digest("hex");
+          if (!row.content_hash) {
+            // Nothing to compare against: record what is there now so the
+            // next check has a reference. Says "recorded", never "verified".
+            await app.db.run("UPDATE files SET content_hash = ? WHERE id = ?", actual, id);
+            results.push({ id, verdict: "recorded" });
+          } else {
+            results.push({ id, verdict: actual === row.content_hash ? "intact" : "changed" });
+          }
+        } catch {
+          results.push({ id, verdict: "unreadable" });
+        }
+      }
+      return { results };
+    },
+  );
+
   const commitData = async (
     reply: FastifyReply,
     uid: number,
@@ -290,6 +359,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     nextGen: number,
     targetKey: string,
     written: number,
+    contentHash: string | null,
   ) => {
     const keepsVersions = app.config.maxVersions > 0;
     const replacesContent = file.uploaded === 1;
@@ -322,9 +392,10 @@ export function registerStorageRoutes(app: FastifyInstance): void {
           }
         }
         await t.run(
-          "UPDATE files SET size = ?, generation = ?, uploaded = 1, update_seq = ?, updated_at = ? WHERE id = ?",
+          "UPDATE files SET size = ?, generation = ?, uploaded = 1, content_hash = ?, update_seq = ?, updated_at = ? WHERE id = ?",
           written,
           nextGen,
+          contentHash,
           await nextSeq(t, uid),
           Date.now(),
           id,
@@ -548,7 +619,10 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       parts.map((p) => ({ partNo: Number(p.part_no), etag: p.etag ?? undefined })),
     );
     const nextGen = file.uploaded === 1 ? file.generation + 1 : file.generation;
-    const result = await commitData(reply, uid, id, file, nextGen, row.blob_key, total);
+    // A blob assembled from parts was never in one stream to hash, so it has
+    // no digest until something reads it. The check records one then, and
+    // says so, rather than pretending the file was verified on arrival.
+    const result = await commitData(reply, uid, id, file, nextGen, row.blob_key, total, null);
     await app.db.run("DELETE FROM upload_parts WHERE session_id = ?", row.id);
     await app.db.run("DELETE FROM upload_sessions WHERE id = ?", row.id);
     return result;
