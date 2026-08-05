@@ -73,9 +73,16 @@ export function sourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? source;
 }
 
-/** "insurance policy expiring 30 April 2027". */
+/**
+ * "insurance policy expiring 30 April 2027", or, for a label the system does
+ * not know, the document's own words: "“Benefit End Date”: 19 October 2027".
+ * The quotes are the honesty: the system is repeating, not interpreting.
+ */
 export function describeFact(fact: Fact): string {
   const at = fact.time ? ` at ${fact.time}` : "";
+  if (fact.kind === "dated" && fact.label) {
+    return `“${fact.label}”: ${shown(fact.value)}${at}`;
+  }
   return `${documentLabel(fact.document)} ${KIND_VERBS[fact.kind] ?? "dated"} ${shown(
     fact.value,
   )}${at}`;

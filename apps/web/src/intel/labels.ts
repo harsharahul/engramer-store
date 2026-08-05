@@ -99,6 +99,66 @@ export function labelledFacts(text: string): Fact[] {
   return [...byId.values()];
 }
 
+/** How much of a line's left side can plausibly be a label. */
+const MAX_LABEL_CHARS = 48;
+
+/** A line shaped like a form field: something, a separator, a value. */
+const FIELD_LINE = /^\s*([^:\n]{2,48}?)\s*:\s*(.+)$/;
+
+/**
+ * Labels that are refused outright. Birth dates on the same principle as the
+ * machine-readable-zone reader: nothing here needs one and it is the most
+ * sensitive date a document carries. Print and generation stamps because
+ * they describe the paper, not the obligation.
+ */
+const REFUSED_LABELS = /\b(birth|born|dob\b|print|generat|creat|download|scan)/i;
+
+/**
+ * Every labelled date in the document, with the label attached verbatim.
+ *
+ * The vocabulary above can never be finished: one benefits form says "Valid Till", a
+ * gym contract says something else, a Korean tax form says it in Korean.
+ * What generalizes is the structure, a label beside a date, plus the owner
+ * reading their own document's words. The card quotes the label; the human
+ * supplies the meaning once. Values the vocabulary already claimed are
+ * skipped, so a known label is typed and an unknown one still surfaces.
+ */
+export function structuralDatedFacts(text: string, claimed: ReadonlySet<string>): Fact[] {
+  const document = guessDocumentKind(text);
+  const byId = new Map<string, Fact>();
+  for (const line of text.split(/\r?\n/)) {
+    const field = FIELD_LINE.exec(line);
+    if (!field) {
+      continue;
+    }
+    const label = field[1]!.replace(/\s+/g, " ").trim();
+    if (!/[A-Za-z]/.test(label) || REFUSED_LABELS.test(label)) {
+      continue;
+    }
+    const parsed = parseDate(field[2]!.slice(0, WINDOW));
+    if (!parsed || claimed.has(parsed.iso)) {
+      continue;
+    }
+    const id = factId("dated", parsed.iso);
+    if (byId.has(id)) {
+      continue;
+    }
+    byId.set(id, {
+      id,
+      kind: "dated",
+      document,
+      value: parsed.iso,
+      label: label.slice(0, MAX_LABEL_CHARS),
+      source: "label",
+      // Below a typed label, above bare harvesting: the anchor is real but
+      // its meaning is the owner's to supply.
+      confidence: 0.4,
+      ...(parsed.ambiguous ? { ambiguous: true } : {}),
+    });
+  }
+  return [...byId.values()];
+}
+
 const SYMBOL_CURRENCY: Record<string, string> = {
   $: "USD",
   "£": "GBP",

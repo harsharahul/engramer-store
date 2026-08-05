@@ -51,6 +51,21 @@ describe("scanForFacts", () => {
     expect(out.facts.filter((f) => f.kind === "expiry")).toEqual([]);
   });
 
+  it("reads the form that exposed the vocabulary's limit", async () => {
+    const out = await scanForFacts({
+      name: "benefits-statement.pdf",
+      mime: "application/pdf",
+      text: "Enrollment Record Number: X90000012B3\nEnrollment/Issued Date: 2027 April 12\nCoverage Class: R2\nBenefit End Date: 2027 October 19",
+    });
+    // The controlling date, quoted in the document's own words.
+    expect(out.facts.find((f) => f.kind === "dated")).toMatchObject({
+      value: "2027-10-19",
+      label: "Benefit End Date",
+    });
+    expect(out.facts.find((f) => f.kind === "issued")?.value).toBe("2027-04-12");
+    expect(out.facts.find((f) => f.kind === "identifier")?.masked).toBe("12B3");
+  });
+
   it("returns nothing at all for a file with no text and no bytes", async () => {
     const out = await scanForFacts({ name: "a.zip", mime: "application/zip" });
     expect(out.facts).toEqual([]);

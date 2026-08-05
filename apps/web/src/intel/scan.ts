@@ -24,7 +24,7 @@ import {
   type Fact,
   type FactEvidence,
 } from "./facts";
-import { harvestFacts, labelledFacts } from "./labels";
+import { harvestFacts, labelledFacts, structuralDatedFacts } from "./labels";
 import { mrzFacts } from "./mrz";
 
 const PREF_KEY = "engram-facts";
@@ -84,7 +84,12 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
   const text = input.text ?? "";
   if (text) {
     found.push(...mrzFacts(text));
-    found.push(...labelledFacts(text));
+    const typed = labelledFacts(text);
+    found.push(...typed);
+    // Labels the vocabulary knows are typed; every other labelled date still
+    // surfaces with the document's own words attached. Values already
+    // claimed by a typed fact are skipped so nothing appears twice.
+    found.push(...structuralDatedFacts(text, new Set(typed.map((fact) => fact.value))));
     found.push(...harvestFacts(text));
   }
   if (found.length === 0) {
