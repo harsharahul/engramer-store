@@ -184,6 +184,13 @@ interface StoreState {
    * is the entire reason metadata carries only the last four characters.
    */
   factEvidence: (id: string) => Promise<FactEvidence[]>;
+  /**
+   * Records a checksum for a file that has none, from bytes just read.
+   * A baseline for future checks, not a verification of the past: nothing
+   * can know what a digest-less file held before today, which is why this
+   * only ever fills an absence and never overwrites a recorded digest.
+   */
+  recordDigest: (id: string, bytes: Uint8Array) => Promise<void>;
   /** Records that a read found this file disagreeing with its digest. */
   markCorrupt: (id: string) => void;
   /** Records that a read matched the digest recorded for this file. */
@@ -990,6 +997,17 @@ export const useStore = create<StoreState>((set, get) => {
       const files = new Map(get().files);
       files.set(id, { ...file, verified: true, corrupt: false });
       set({ files });
+    },
+
+    recordDigest: async (id, bytes) => {
+      const file = get().files.get(id);
+      if (!file || file.digest) {
+        // Never overwrite: an existing digest is a record of the past, and
+        // replacing it with the present would erase exactly the disagreement
+        // a check exists to find.
+        return;
+      }
+      await patchFileMeta(id, { digest: contentDigest(bytes) });
     },
 
     markCorrupt: (id) => {
