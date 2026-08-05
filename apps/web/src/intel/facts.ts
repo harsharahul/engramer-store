@@ -391,10 +391,16 @@ function renderings(fact: Fact): string[] {
     `${day}/${month}/${yy}`,
     `${year}-${month}-${day}`,
     `${year}${month}${day}`,
+    // Written months, with the day both bare and zero-padded: documents
+    // print "April 2" and "April 02" interchangeably, and a fact discarded
+    // because of a leading zero would be grounding failing at its own job.
     `${day} ${name} ${year}`,
+    `${d} ${name} ${year}`,
     `${name} ${d} ${year}`,
-    // The year-first written form US government documents use.
+    `${name} ${day} ${year}`,
+    // The year-first written form some documents use.
     `${year} ${name} ${d}`,
+    `${year} ${name} ${day}`,
     // A month and a year with no day: how cards and some permits print an
     // expiry. Looser than the rest on purpose, because refusing to ground a
     // real month-and-year expiry would be the worse failure.

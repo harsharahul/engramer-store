@@ -36,6 +36,13 @@ describe("groundFacts", () => {
     expect(groundFacts([fact()], "Valid until March 12, 2029")).toHaveLength(1);
   });
 
+  it("matches a zero-padded day, which documents print interchangeably", () => {
+    const early = fact({ value: "2029-03-02" });
+    expect(groundFacts([early], "Valid until March 02, 2029")).toHaveLength(1);
+    expect(groundFacts([early], "Valid until 2029 March 02")).toHaveLength(1);
+    expect(groundFacts([early], "Valid until 02 March 2029")).toHaveLength(1);
+  });
+
   it("never discards a fact the user entered by hand", () => {
     const typed = fact({ source: "user", value: "2031-01-01" });
     expect(groundFacts([typed], "nothing relevant here")).toHaveLength(1);
