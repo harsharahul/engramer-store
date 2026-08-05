@@ -29,6 +29,14 @@ export interface Insight {
   ruleId: string;
   /** The file it came from. Absent when the observation is library-wide. */
   fileId?: string;
+  /**
+   * The whole point, in a few words. This is what gets read: an alert column
+   * is scanned, not studied, and a paragraph in it is a paragraph nobody
+   * finishes. Everything a rule wants to explain goes in `text`, behind a
+   * click, where it is available to whoever wants the reasoning.
+   */
+  title: string;
+  /** Why, for when the title has earned the attention. */
   text: string;
   severity: Severity;
 }
@@ -106,10 +114,14 @@ const RULES: Rule[] = [
             fileId: file.id,
             severity:
               days < 0 ? "overdue" : daysUntil(useful, now) <= 0 ? ("soon" as const) : "info",
+            title:
+              days < 0
+                ? `Passport expired ${shown(fact.value)}`
+                : `Passport is travel-ready only until ${shown(useful)}`,
             text:
-              `Your passport expires ${shown(fact.value)}. Many countries require six ` +
-              `months of validity, so it stops being useful for travel around ` +
-              `${shown(useful)}. Renewals commonly take six to eight weeks.`,
+              `It expires ${shown(fact.value)}, but many countries require six months ` +
+              `of validity on arrival, so it stops being useful for travel about six ` +
+              `months earlier. Renewals commonly take six to eight weeks.`,
           } satisfies Finding,
         ];
       });
@@ -131,6 +143,7 @@ const RULES: Rule[] = [
         .map(({ file, fact }) => ({
           fileId: file.id,
           severity: "info" as const,
+          title: "Outlives the passport it is attached to",
           text:
             `This runs to ${shown(fact.value)}, but the passport it is attached to ` +
             `expires ${shown(passport)}.`,
@@ -150,9 +163,10 @@ const RULES: Rule[] = [
         .map(({ file, fact }) => ({
           fileId: file.id,
           severity: "overdue" as const,
+          title: `Insurance lapsed ${shown(fact.value)}`,
           text:
-            `This insurance period ended ${shown(fact.value)} and nothing newer has ` +
-            `been added.`,
+            "The period ended and nothing newer has been added, so there may be no " +
+            "cover in force right now.",
         }));
     },
   },
@@ -167,9 +181,8 @@ const RULES: Rule[] = [
         .map(({ file, fact }) => ({
           fileId: file.id,
           severity: "soon" as const,
-          text: `The warranty on this ends in ${daysUntil(fact.value, now)} days, on ${shown(
-            fact.value,
-          )}. Last window to claim.`,
+          title: `Warranty ends in ${daysUntil(fact.value, now)} days`,
+          text: `Cover runs out on ${shown(fact.value)}. This is the last window to make a claim.`,
         }));
     },
   },
@@ -182,32 +195,19 @@ const RULES: Rule[] = [
           .map((fact) => ({
             fileId: file.id,
             severity: "overdue" as const,
-            text: `This was due ${shown(fact.value)}, ${-daysUntil(fact.value, now)} days ago.`,
+            title: `Overdue by ${-daysUntil(fact.value, now)} days`,
+            text: `This was due ${shown(fact.value)}.`,
           })),
       );
     },
   },
-  {
-    id: "unconfirmed-expiries",
-    run(files) {
-      const waiting = files.filter((file) =>
-        file.facts.some((fact) => fact.kind === "expiry" && !fact.confirmed && !fact.dismissed),
-      );
-      if (waiting.length === 0) {
-        return [];
-      }
-      return [
-        {
-          severity: "info" as const,
-          text:
-            waiting.length === 1
-              ? "One document carries an expiry date you have not tracked yet."
-              : `${waiting.length} documents carry expiry dates you have not tracked yet.`,
-        },
-      ];
-    },
-  },
 ];
+
+// There was a rule here counting expiry dates nobody had confirmed yet. It
+// was removed rather than fixed: the bar above the files lists those very
+// documents, by name, with the answer buttons attached. A rule that narrates
+// what is already on screen is not an insight, and it teaches people that
+// this section is filler.
 
 const ORDER: Record<Severity, number> = { overdue: 0, soon: 1, info: 2 };
 
