@@ -115,6 +115,71 @@ export function ProfileView(props: {
     }
   };
 
+  // Files with nothing to check against: stored before digests existed, or
+  // renamed while a metadata patch still dropped the digest.
+  const digestless = (() => {
+    const files = [...store.files.values()].filter((f) => !f.trashed && !f.digest);
+    return { count: files.length, bytes: files.reduce((sum, f) => sum + f.size, 0) };
+  })();
+
+  /**
+   * Reads each digest-less file back and records a checksum for what it
+   * holds now. Deliberately named recording rather than verifying: it gives
+   * every later check something to compare against, and it cannot know what
+   * these files held before today. That honesty is why it is a button and
+   * not something that happens quietly.
+   */
+  const runBackfill = async () => {
+    const controller = new AbortController();
+    verifyAbort.current = controller;
+    setVerifying(true);
+    setVerifySummary(null);
+    setVerifyProblems([]);
+    const files = smallestFirst(
+      [...store.files.values()]
+        .filter((file) => !file.trashed && !file.digest)
+        .map((file) => ({ id: file.id, name: file.name, size: file.size })),
+    );
+    let recorded = 0;
+    let failed = 0;
+    const bytesTotal = files.reduce((sum, file) => sum + file.size, 0);
+    let bytesDone = 0;
+    try {
+      for (let i = 0; i < files.length; i++) {
+        if (controller.signal.aborted) {
+          break;
+        }
+        const file = files[i]!;
+        setVerifyProgress({
+          done: i,
+          total: files.length,
+          current: file.name,
+          currentBytes: file.size,
+          bytesDone,
+          bytesTotal,
+        });
+        try {
+          const entry = store.files.get(file.id)!;
+          const bytes = await downloadAndDecrypt(entry.id, entry.key);
+          await store.recordDigest(file.id, bytes);
+          recorded++;
+        } catch {
+          failed++;
+        }
+        bytesDone += file.size;
+      }
+      setVerifySummary(
+        `${controller.signal.aborted ? "Stopped. " : ""}Recorded checksums for ${recorded} file${
+          recorded === 1 ? "" : "s"
+        }${failed > 0 ? `; ${failed} could not be read` : ""}. Future checks can now verify them.`,
+      );
+    } finally {
+      setVerifying(false);
+      setVerifyProgress(null);
+      verifyAbort.current = null;
+    }
+  };
+
   const runVerify = async () => {
     const controller = new AbortController();
     verifyAbort.current = controller;
@@ -587,6 +652,28 @@ export function ProfileView(props: {
             Deep check
           </button>
         </div>
+        {digestless.count > 0 && (
+          <div className="profile-row">
+            <div className="profile-row-main">
+              <b>Record missing checksums</b>
+              <div className="profile-row-sub">
+                {digestless.count} file{digestless.count === 1 ? "" : "s"} carry no checksum:
+                stored before checksums existed, or renamed while an old bug dropped them.
+                This reads each one back ({formatBytes(digestless.bytes)}) and records a
+                checksum for what it holds today, so every later check has something to
+                compare against. It is a baseline, not a verification: it cannot know what
+                these files held before now.
+              </div>
+            </div>
+            <button
+              className="btn"
+              disabled={verifying}
+              onClick={() => void runBackfill()}
+            >
+              Record
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="profile-card">
