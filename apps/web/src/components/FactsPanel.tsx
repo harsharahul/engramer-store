@@ -11,11 +11,13 @@
 
 import { useEffect, useState } from "react";
 import { useStore, type FileEntry } from "../store";
-import type { Fact, FactEvidence } from "../intel/facts";
+import { DATED_KINDS, type Fact, type FactEvidence } from "../intel/facts";
 import { describeFact, shown, sourceLabel, whenLabel } from "../intel/describe";
 import { insightsFor, type Insight } from "../intel/insights";
 import { duplicatesByDigest } from "../intel/duplicates";
 import { daysUntil } from "../intel/dates";
+import { factToCalendar } from "../intel/ics";
+import { triggerDownload } from "../download";
 import { ClockGlyph, CopyGlyph, InfoGlyph, XGlyph } from "./Icon";
 
 /** Near enough to be worth saying without being asked. */
@@ -26,6 +28,7 @@ const RECENTLY_PAST_DAYS = 30;
 
 export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) => void }) {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const dismissFact = useStore((s) => s.dismissFact);
   const now = Date.now();
   const live = props.files.filter((file) => !file.trashed);
 
@@ -71,15 +74,25 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
             <ClockGlyph size={12} /> Coming up
           </h4>
           {upcoming.slice(0, 6).map(({ file, fact, days }) => (
-            <button
-              key={`${file.id}:${fact.id}`}
-              className={`intel-row${days < 0 ? " overdue" : ""}`}
-              onClick={() => props.onOpen(file.id)}
-            >
-              <span className="intel-when">{whenLabel(fact.value, now)}</span>
-              <span className="intel-what">{describeFact(fact)}</span>
-              <span className="intel-file">{file.name}</span>
-            </button>
+            <div key={`${file.id}:${fact.id}`} className={`intel-row${days < 0 ? " overdue" : ""}`}>
+              <button className="intel-row-open" onClick={() => props.onOpen(file.id)}>
+                <span className="intel-when">{whenLabel(fact.value, now)}</span>
+                <span className="intel-what">{describeFact(fact)}</span>
+                <span className="intel-file">{file.name}</span>
+              </button>
+              {days < 0 && (
+                // A deadline that was handled should retire gracefully. Most
+                // of them recur, and the renewal arriving as a new document
+                // is the eventual automatic version of this button.
+                <button
+                  className="linky quiet"
+                  title="Handled; stop tracking this"
+                  onClick={() => void dismissFact(file.id, fact.id)}
+                >
+                  Done
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -132,7 +145,7 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
 }
 
 function isDated(fact: Fact): boolean {
-  return fact.kind === "expiry" || fact.kind === "due" || fact.kind === "event";
+  return DATED_KINDS.has(fact.kind);
 }
 
 /**
@@ -248,6 +261,28 @@ export function FileFacts(props: { file: FileEntry }) {
                     · file changed since
                   </span>
                 )}
+                {isDated(fact) && (
+                  <button
+                    className="linky"
+                    title="Download a calendar event with a reminder built in"
+                    onClick={() => {
+                      const event = factToCalendar(fact, props.file.name, Date.now());
+                      triggerDownload(
+                        new Blob([event.ics], { type: "text/calendar" }),
+                        event.filename,
+                      );
+                    }}
+                  >
+                    Add to calendar
+                  </button>
+                )}
+                <button
+                  className="linky quiet"
+                  title="Stop tracking this date"
+                  onClick={() => void dismissFact(props.file.id, fact.id)}
+                >
+                  Stop tracking
+                </button>
               </>
             ) : (
               <>

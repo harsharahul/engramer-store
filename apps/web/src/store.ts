@@ -25,7 +25,7 @@ import { analyzeFile, downloadAndDecrypt, downloadThumbnail, encryptAndUpload } 
 import { recognizeImage, recognizePdf } from "./intel/ocr";
 import { isPdf } from "./intel/extract";
 import { embedImage } from "./intel/semantic";
-import { asFacts, reconcileFacts, type Fact, type FactEvidence } from "./intel/facts";
+import { asFacts, mergeFacts, reconcileFacts, type Fact, type FactEvidence } from "./intel/facts";
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
@@ -173,6 +173,11 @@ interface StoreState {
   confirmFact: (id: string, factId: string, value?: string) => Promise<void>;
   /** Puts a fact away. It is not offered again by a later scan. */
   dismissFact: (id: string, factId: string) => Promise<void>;
+  /** Answers several of one file's facts in a single metadata write. */
+  resolveFacts: (
+    id: string,
+    decisions: { confirm?: string[]; dismiss?: string[] },
+  ) => Promise<void>;
   /**
    * The evidence behind a file's facts: the complete reference numbers and
    * the passages they came from. Fetched on request rather than held, which
@@ -427,7 +432,10 @@ export const useStore = create<StoreState>((set, get) => {
     text: string | undefined,
     digest: string,
   ): Promise<{ facts: Fact[]; evidence: FactEvidence[] } | null> => {
-    if (!factsEnabled() || file.facts.length === 0) {
+    // Whether or not the file carried facts before: an edit can introduce
+    // the first labelled date a document has ever had, and skipping the
+    // scan then would mean saves never discover anything, only lose it.
+    if (!factsEnabled()) {
       return null;
     }
     const found = await scanForFacts({ name: file.name, mime: file.mime, text }).catch(
@@ -1006,6 +1014,13 @@ export const useStore = create<StoreState>((set, get) => {
         // by it. Re-deriving the id would let the original wrong suggestion
         // come back and sit beside the corrected one.
         if (value !== undefined) {
+          if (value !== fact.value) {
+            // A corrected value is the owner's statement, not the scan's,
+            // and the panel should say so instead of claiming a label read
+            // something the document may not even contain.
+            confirmed.source = "user";
+            confirmed.confidence = 1;
+          }
           confirmed.value = value;
         }
         delete confirmed.ambiguous;
@@ -1014,6 +1029,27 @@ export const useStore = create<StoreState>((set, get) => {
 
     dismissFact: async (id, factId) =>
       updateFact(id, factId, (fact) => ({ ...fact, dismissed: true })),
+
+    resolveFacts: async (id, decisions) => {
+      const file = get().files.get(id);
+      if (!file) {
+        return;
+      }
+      // One patch for the whole file, however many facts were answered. A
+      // bulk decision over a thousand-file upload must cost one write per
+      // file, not one per click.
+      const confirm = new Set(decisions.confirm ?? []);
+      const dismiss = new Set(decisions.dismiss ?? []);
+      const facts = file.facts.map((fact) => {
+        if (confirm.has(fact.id)) {
+          const done: Fact = { ...fact, confirmed: true };
+          delete done.ambiguous;
+          return done;
+        }
+        return dismiss.has(fact.id) ? { ...fact, dismissed: true } : fact;
+      });
+      await patchFileMeta(id, { facts });
+    },
 
     factEvidence: async (id) => {
       const file = get().files.get(id);
@@ -1200,7 +1236,14 @@ export const useStore = create<StoreState>((set, get) => {
      */
     scanLibraryForFacts: async () => {
       const candidates = [...get().files.values()].filter(
-        (file) => !file.trashed && file.facts.length === 0 && (file.hasText || file.text !== undefined),
+        (file) =>
+          !file.trashed &&
+          // Untouched by a human: nothing confirmed, nothing dismissed. A
+          // file whose facts are all unanswered is fair game for a rescan,
+          // which is what lets a reader improvement reach documents that
+          // were read badly the first time.
+          file.facts.every((fact) => !fact.confirmed && !fact.dismissed) &&
+          (file.hasText || file.text !== undefined),
       );
       let found = 0;
       for (let i = 0; i < candidates.length; i++) {
@@ -1237,8 +1280,15 @@ export const useStore = create<StoreState>((set, get) => {
               current.key,
             ),
           );
+          // Merged rather than replaced: the sweep now revisits files whose
+          // facts are all unanswered, and a rescan folding into what exists
+          // is what lets a better reader supersede a worse reading without
+          // duplicating what it merely re-found.
           await patchFileMeta(file.id, {
-            facts: scanned.facts.map((fact) => ({ ...fact, digest: current.digest })),
+            facts: mergeFacts(
+              current.facts,
+              scanned.facts.map((fact) => ({ ...fact, digest: current.digest })),
+            ),
           });
           found++;
         } catch {
