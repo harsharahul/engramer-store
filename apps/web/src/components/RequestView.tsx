@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation, useParams } from "react-router";
 import {
   ready,
+  contentDigest,
   encryptBytes,
   utf8Encode,
   encryptFileMetadata,
@@ -82,12 +83,19 @@ export function RequestView() {
         }
         const prepared = await analyzeFile(file);
         const fileKey = generateKey();
+        // The digest is taken here, on the sender's device, before any
+        // encryption: the recipient can never prove what the sender's file
+        // held, only that storage returned what it was given. Without this
+        // line every received file stayed unverifiable forever.
+        const plaintext = new Uint8Array(await file.arrayBuffer());
+        if (plaintext.length !== file.size) {
+          throw new ApiError(400, "the browser returned the wrong number of bytes");
+        }
         const { id } = await api.publicRequestCreateFile(
           token!,
           sealToPublicKey(fileKey, publicKey),
-          encryptFileMetadata(prepared.meta, fileKey),
+          encryptFileMetadata({ ...prepared.meta, digest: contentDigest(plaintext) }, fileKey),
         );
-        const plaintext = new Uint8Array(await file.arrayBuffer());
         await uploadRequestBlob(token!, id, "data", encryptBytes(plaintext, fileKey), (fraction) =>
           update({ status: "uploading", progress: fraction }),
         );
