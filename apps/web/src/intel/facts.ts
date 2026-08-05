@@ -1,3 +1,5 @@
+import { daysUntil } from "./dates";
+
 /**
  * Typed facts read out of documents: an expiry, an amount due, a reference
  * number. Pure functions over strings, like categorize.ts, so the reading can
@@ -37,7 +39,18 @@ export type FactKind =
   /** Something happens at this date, and often at a time: a departure, a
    * check-in, an appointment. Unlike an expiry it is not a deadline that
    * passes quietly; it is a thing to be somewhere for. */
-  | "event";
+  | "event"
+  /**
+   * A labelled date whose meaning the system does not know.
+   *
+   * The label vocabulary can never be finished: one benefits form says "Valid Till",
+   * a gym contract says something else, and a Korean tax form says it in
+   * Korean. What generalizes is the structure, a label beside a date, plus
+   * the owner reading their own document's words. So the label rides along
+   * verbatim in `label`, the card quotes it, and the human supplies the
+   * meaning once. Rules never read these; they need semantics.
+   */
+  | "dated";
 
 export type DocumentKind =
   | "passport"
@@ -96,6 +109,9 @@ export interface Fact {
   time?: string;
   /** The IANA zone the time belongs to, on the rare occasion it is known. */
   zone?: string;
+  /** The document's own words for what this date is, verbatim. Always set on
+   * "dated" facts, since the label is the only meaning they carry. */
+  label?: string;
   /** Currency for amounts, or the issuing authority. */
   unit?: string;
   /** Last four characters. The full value lives in the evidence blob. */
@@ -129,7 +145,47 @@ export interface FactEvidence {
 export const MAX_FACTS_PER_FILE = 12;
 
 /** Kinds that name a moment worth being reminded about. */
-export const DATED_KINDS: ReadonlySet<string> = new Set(["expiry", "due", "event"]);
+export const DATED_KINDS: ReadonlySet<string> = new Set(["expiry", "due", "event", "dated"]);
+
+/**
+ * A deadline slightly past is still actionable; one long past is history.
+ * An invoice due last week is worth surfacing, a licence that expired in
+ * 2019 is not a reminder, it is an archive.
+ */
+export const RECENT_PAST_OFFER_DAYS = 60;
+
+/**
+ * The facts worth asking the owner about: unanswered, dated, and not stale
+ * history.
+ *
+ * The future-only filter is what keeps a bulk upload from burying the
+ * screen. A thousand old documents carry mostly past dates: print dates,
+ * old due dates, spent expiries. None of them is a deadline anymore, so
+ * none is offered; the facts still exist on each file, quietly. What
+ * survives this filter is the small set of dates that are still ahead of
+ * the owner, which is the only set worth their attention.
+ */
+export function offeredFacts(
+  files: { id: string; trashed: boolean; facts: Fact[] }[],
+  now: number,
+): { fileId: string; fact: Fact }[] {
+  const offered: { fileId: string; fact: Fact }[] = [];
+  for (const file of files) {
+    if (file.trashed) {
+      continue;
+    }
+    for (const fact of file.facts) {
+      if (fact.confirmed || fact.dismissed || !DATED_KINDS.has(fact.kind)) {
+        continue;
+      }
+      if (daysUntil(fact.value, now) < -RECENT_PAST_OFFER_DAYS) {
+        continue;
+      }
+      offered.push({ fileId: file.id, fact });
+    }
+  }
+  return offered;
+}
 
 /**
  * The nearest date a file is actually tracking, or nothing if it tracks none.
@@ -337,6 +393,8 @@ function renderings(fact: Fact): string[] {
     `${year}${month}${day}`,
     `${day} ${name} ${year}`,
     `${name} ${d} ${year}`,
+    // The year-first written form US government documents use.
+    `${year} ${name} ${d}`,
     // A month and a year with no day: how cards and some permits print an
     // expiry. Looser than the rest on purpose, because refusing to ground a
     // real month-and-year expiry would be the worse failure.
@@ -354,13 +412,22 @@ function renderings(fact: Fact): string[] {
  */
 export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
   const merged = new Map<string, Fact>();
+  // Values the owner already confirmed, under whatever identity. A fact
+  // corrected from 10 May to 19 October keeps its original id, so a later
+  // rescan finds 19 October under a new id and would offer it as news; the
+  // owner already said it, so it is not.
+  const confirmedValues = new Set(
+    existing.filter((fact) => fact.confirmed).map((fact) => `${fact.kind}:${fact.value}`),
+  );
   for (const fact of existing) {
     merged.set(fact.id, fact);
   }
   for (const fact of found) {
     const prior = merged.get(fact.id);
     if (!prior) {
-      merged.set(fact.id, fact);
+      if (!confirmedValues.has(`${fact.kind}:${fact.value}`)) {
+        merged.set(fact.id, fact);
+      }
       continue;
     }
     if (prior.confirmed || prior.dismissed) {

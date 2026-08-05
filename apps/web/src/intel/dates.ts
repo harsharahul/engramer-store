@@ -41,8 +41,14 @@ const MONTHS = [
 ];
 
 const ISO = /\b(\d{4})-(\d{2})-(\d{2})\b/;
+// The year-first written form United States government documents use: an
+// benefits statement prints "Benefit End Date: 2027 October 19". A named month and a
+// four-digit year leave nothing to misread.
+const YEAR_FIRST_NAMED = /\b(\d{4})\s+([A-Za-z]{3,9})\.?\s+(\d{1,2})\b/;
 const DAY_FIRST_NAMED = /\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{2,4})\b/;
 const MONTH_FIRST_NAMED = /\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{2,4})\b/;
+// Year-first numeric only reads one way: nobody writes year, day, month.
+const YEAR_FIRST_NUMERIC = /\b(\d{4})[/.](\d{1,2})[/.](\d{1,2})\b/;
 const NUMERIC = /\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})\b/;
 const COMPACT = /\b(\d{8})\b/;
 
@@ -115,6 +121,15 @@ export function parseDate(text: string, order?: DateOrder): ParsedDate | null {
     }
   }
 
+  const yearFirst = YEAR_FIRST_NAMED.exec(text);
+  if (yearFirst) {
+    const month = monthFromName(yearFirst[2]!);
+    if (month !== null) {
+      const built = build(Number(yearFirst[1]), month, Number(yearFirst[3]));
+      return built ? { iso: built, ambiguous: false } : null;
+    }
+  }
+
   const dayFirst = DAY_FIRST_NAMED.exec(text);
   if (dayFirst) {
     const month = monthFromName(dayFirst[2]!);
@@ -133,6 +148,12 @@ export function parseDate(text: string, order?: DateOrder): ParsedDate | null {
       const built = build(expandYear(monthFirst[3]!), month, Number(monthFirst[2]));
       return built ? { iso: built, ambiguous: false } : null;
     }
+  }
+
+  const yearNumeric = YEAR_FIRST_NUMERIC.exec(text);
+  if (yearNumeric) {
+    const built = build(Number(yearNumeric[1]), Number(yearNumeric[2]), Number(yearNumeric[3]));
+    return built ? { iso: built, ambiguous: false } : null;
   }
 
   const numeric = NUMERIC.exec(text);

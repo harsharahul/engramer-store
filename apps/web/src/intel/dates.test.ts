@@ -34,6 +34,27 @@ describe("parseDate", () => {
     expect(parseDate("2029-03-12")).toEqual({ iso: "2029-03-12", ambiguous: false });
   });
 
+  it("reads the year-first written form US government documents use", () => {
+    // A benefits statement prints "Benefit End Date: 2027 October 19", and that date is
+    // the controlling one on the page.
+    expect(parseDate("2027 October 19")).toEqual({ iso: "2027-10-19", ambiguous: false });
+    expect(parseDate("Benefit End Date: 2027 October 19")).toEqual({
+      iso: "2027-10-19",
+      ambiguous: false,
+    });
+    expect(parseDate("Enrollment/Issued Date: 2027 April 12")?.iso).toBe("2027-04-12");
+  });
+
+  it("reads a year-first numeric date, which only reads one way", () => {
+    expect(parseDate("2027/10/19")).toEqual({ iso: "2027-10-19", ambiguous: false });
+    expect(parseDate("2027.10.19")?.iso).toBe("2027-10-19");
+  });
+
+  it("rejects an impossible year-first date rather than shifting it", () => {
+    expect(parseDate("2019 October 32")).toBeNull();
+    expect(parseDate("2026/13/05")).toBeNull();
+  });
+
   it("reads a compact eight-digit date when told the order", () => {
     expect(parseDate("20290312", "ymd")).toEqual({ iso: "2029-03-12", ambiguous: false });
     expect(parseDate("03122029", "mdy")).toEqual({ iso: "2029-03-12", ambiguous: false });

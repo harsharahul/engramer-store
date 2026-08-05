@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guessDocumentKind, harvestFacts, labelledFacts } from "./labels";
+import { guessDocumentKind, harvestFacts, labelledFacts, structuralDatedFacts } from "./labels";
 
 describe("labelledFacts", () => {
   it("reads an expiry behind its label", () => {
@@ -58,6 +58,68 @@ describe("labelledFacts", () => {
   it("finds every label in a document, not only the first", () => {
     const facts = labelledFacts("Expires 2029-03-12\nPayment due 2026-09-01");
     expect(facts.map((f) => f.kind).sort()).toEqual(["due", "expiry"]);
+  });
+});
+
+describe("structuralDatedFacts", () => {
+  // The shape that exposed the vocabulary's limit, recreated with synthetic values.
+  const STATEMENT = `Enrollment Record Number: X90000012B3
+Enrollment/Issued Date: 2027 April 12
+Coverage Class: R2
+Benefit End Date: 2027 October 19
+Details provided on the enrollment form:`;
+
+  it("surfaces a labelled date the vocabulary does not know, label attached", () => {
+    const facts = structuralDatedFacts(STATEMENT, new Set());
+    const admit = facts.find((f) => f.value === "2027-10-19");
+    expect(admit).toMatchObject({
+      kind: "dated",
+      label: "Benefit End Date",
+      source: "label",
+    });
+  });
+
+  it("skips a value the vocabulary already claimed, so nothing appears twice", () => {
+    expect(
+      structuralDatedFacts("Valid until: 2027-04-30", new Set(["2027-04-30"])),
+    ).toEqual([]);
+  });
+
+  it("refuses a date of birth outright", () => {
+    expect(structuralDatedFacts("Date of Birth: 1978-01-31", new Set())).toEqual([]);
+  });
+
+  it("refuses print and generation stamps, which describe the paper", () => {
+    expect(structuralDatedFacts("Printed on: 2026-01-02", new Set())).toEqual([]);
+    expect(structuralDatedFacts("Generated: 2026-01-02", new Set())).toEqual([]);
+  });
+
+  it("ignores a field whose value holds no date", () => {
+    expect(structuralDatedFacts("Coverage Class: R2", new Set())).toEqual([]);
+  });
+
+  it("carries ambiguity through, so the card can ask which reading", () => {
+    const [fact] = structuralDatedFacts("Fecha de vencimiento: 03/04/2028", new Set());
+    expect(fact).toMatchObject({ kind: "dated", ambiguous: true });
+  });
+});
+
+describe("the whole statement, end to end through the readers", () => {
+  const STATEMENT = `Enrollment Record Number: X90000012B3
+Enrollment/Issued Date: 2027 April 12
+Coverage Class: R2
+Benefit End Date: 2027 October 19`;
+
+  it("types what it knows and quotes what it does not", () => {
+    const typed = labelledFacts(STATEMENT);
+    // "Enrollment/Issued Date" carries a label the vocabulary knows.
+    expect(typed.find((f) => f.kind === "issued")?.value).toBe("2027-04-12");
+    const claimed = new Set(typed.map((f) => f.value));
+    const generic = structuralDatedFacts(STATEMENT, claimed);
+    // The controlling date surfaces with the document's own words, even
+    // though nothing here knows what a benefits statement is.
+    expect(generic).toHaveLength(1);
+    expect(generic[0]).toMatchObject({ value: "2027-10-19", label: "Benefit End Date" });
   });
 });
 

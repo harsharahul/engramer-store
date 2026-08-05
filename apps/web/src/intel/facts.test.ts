@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { asFacts, groundFacts, maskTail, mergeFacts, reconcileFacts, type Fact } from "./facts";
+import {
+  asFacts,
+  groundFacts,
+  maskTail,
+  mergeFacts,
+  offeredFacts,
+  reconcileFacts,
+  type Fact,
+} from "./facts";
 
 const fact = (over: Partial<Fact> = {}): Fact => ({
   id: "f1",
@@ -56,6 +64,51 @@ describe("groundFacts", () => {
     const amount = fact({ kind: "amount", value: "410.00", source: "pattern" });
     expect(groundFacts([amount], "Total due: $410.00")).toHaveLength(1);
     expect(groundFacts([amount], "Total due: $9.99")).toHaveLength(0);
+  });
+});
+
+describe("offeredFacts", () => {
+  const NOW = Date.UTC(2026, 7, 5);
+  const shelf = (facts: Fact[]) => [{ id: "f1", trashed: false, facts }];
+
+  it("offers an unanswered future date", () => {
+    expect(offeredFacts(shelf([fact({ value: "2027-10-19" })]), NOW)).toHaveLength(1);
+  });
+
+  it("keeps a long-past date out of the queue, however unanswered", () => {
+    // A thousand old documents carry mostly past dates. None of them is a
+    // deadline anymore, so a bulk upload must not bury the owner in cards.
+    expect(offeredFacts(shelf([fact({ value: "2019-05-01" })]), NOW)).toHaveLength(0);
+  });
+
+  it("still offers a recently missed deadline, which is actionable", () => {
+    expect(offeredFacts(shelf([fact({ kind: "due", value: "2026-07-28" })]), NOW)).toHaveLength(1);
+  });
+
+  it("offers a labelled date whose meaning is unknown", () => {
+    const generic = fact({ kind: "dated", value: "2027-10-19", label: "Benefit End Date" });
+    expect(offeredFacts(shelf([generic]), NOW)).toHaveLength(1);
+  });
+
+  it("never re-offers what is answered, and never reads trash", () => {
+    expect(offeredFacts(shelf([fact({ value: "2027-10-19", confirmed: true })]), NOW)).toHaveLength(0);
+    expect(offeredFacts(shelf([fact({ value: "2027-10-19", dismissed: true })]), NOW)).toHaveLength(0);
+    expect(
+      offeredFacts([{ id: "f1", trashed: true, facts: [fact({ value: "2027-10-19" })] }], NOW),
+    ).toHaveLength(0);
+  });
+});
+
+describe("mergeFacts and corrected values", () => {
+  it("does not re-offer a value the owner already confirmed under another identity", () => {
+    // A fact corrected from 10 May to 19 October keeps its original id.
+    // A rescan then finds 19 October under a new id; the owner already
+    // said it, so it is not news.
+    const corrected = fact({ id: "expiry:2027-05-10", value: "2027-10-19", confirmed: true });
+    const refound = fact({ id: "expiry:2027-10-19", value: "2027-10-19" });
+    const merged = mergeFacts([corrected], [refound]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.id).toBe("expiry:2027-05-10");
   });
 });
 
