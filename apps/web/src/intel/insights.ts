@@ -200,8 +200,9 @@ const RULES: Rule[] = [
         {
           severity: "info" as const,
           text:
-            `${waiting.length} document${waiting.length === 1 ? "" : "s"} carry expiry ` +
-            `dates you have not tracked yet.`,
+            waiting.length === 1
+              ? "One document carries an expiry date you have not tracked yet."
+              : `${waiting.length} documents carry expiry dates you have not tracked yet.`,
         },
       ];
     },

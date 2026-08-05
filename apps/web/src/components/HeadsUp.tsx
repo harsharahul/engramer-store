@@ -91,6 +91,12 @@ function describe(fact: Fact): string {
   return `${noun} ${verb} ${shown(fact.value)}${at}`;
 }
 
+/** "an invoice", not "a invoice". Cheap, and its absence is the first thing
+ * anyone notices about a sentence a machine wrote. */
+function withArticle(phrase: string): string {
+  return `${/^[aeiou]/i.test(phrase) ? "an" : "a"} ${phrase}`;
+}
+
 interface Waiting {
   file: FileEntry;
   fact: Fact;
@@ -272,7 +278,7 @@ function ConfirmCard(props: {
   return (
     <div className="headsup-card">
       <div className="headsup-card-text">
-        This looks like a {describe(props.fact)}.{" "}
+        This looks like {withArticle(describe(props.fact))}.{" "}
         <button className="linky" onClick={props.onOpen}>
           {props.file.name}
         </button>

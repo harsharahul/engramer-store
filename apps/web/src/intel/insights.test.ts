@@ -114,6 +114,15 @@ describe("what the rules will and will not read", () => {
     expect(out.find((i) => i.ruleId === "unconfirmed-expiries")!.text).toContain("2");
   });
 
+  it("says it in singular when there is one, rather than one document carry", () => {
+    const out = insightsFor(
+      [file("f1", "a.pdf", [fact({ value: "2027-01-01", confirmed: false })])],
+      NOW,
+    );
+    const text = out.find((i) => i.ruleId === "unconfirmed-expiries")!.text;
+    expect(text).toBe("One document carries an expiry date you have not tracked yet.");
+  });
+
   it("ignores facts the owner has not confirmed when applying a rule", () => {
     const out = ruleIds([
       file("f1", "p.pdf", [fact({ document: "passport", value: "2027-02-14", confirmed: false })]),
