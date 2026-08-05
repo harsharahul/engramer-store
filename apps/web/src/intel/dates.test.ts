@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { daysUntil, parseDate } from "./dates";
+import { daysUntil, parseDate, parseTime } from "./dates";
 
 describe("parseDate", () => {
   it("reads an unambiguous slash date, where the first number cannot be a month", () => {
@@ -62,6 +62,46 @@ describe("parseDate", () => {
 
   it("finds a date inside a longer phrase", () => {
     expect(parseDate("Expires on 2029-03-12 unless renewed")?.iso).toBe("2029-03-12");
+  });
+});
+
+describe("parseTime", () => {
+  it("reads a twenty-four hour time", () => {
+    expect(parseTime("09:40")).toBe("09:40");
+    expect(parseTime("21:05")).toBe("21:05");
+  });
+
+  it("pads a single-digit hour", () => {
+    expect(parseTime("9:40")).toBe("09:40");
+  });
+
+  it("reads a twelve hour time with its marker", () => {
+    expect(parseTime("9:40 PM")).toBe("21:40");
+    expect(parseTime("9:40 am")).toBe("09:40");
+    expect(parseTime("9:40p.m.")).toBe("21:40");
+  });
+
+  it("gets midnight and noon the right way round", () => {
+    expect(parseTime("12:00 AM")).toBe("00:00");
+    expect(parseTime("12:00 PM")).toBe("12:00");
+  });
+
+  it("finds a time inside a longer phrase", () => {
+    expect(parseTime("Departs 09:40 from Terminal 4")).toBe("09:40");
+  });
+
+  it("does not mistake a dotted date for a time", () => {
+    expect(parseTime("12.30.2029")).toBeNull();
+  });
+
+  it("rejects an impossible time", () => {
+    expect(parseTime("25:00")).toBeNull();
+    expect(parseTime("09:75")).toBeNull();
+  });
+
+  it("returns null when there is no time", () => {
+    expect(parseTime("no time here")).toBeNull();
+    expect(parseTime("")).toBeNull();
   });
 });
 

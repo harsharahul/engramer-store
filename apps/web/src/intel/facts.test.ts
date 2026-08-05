@@ -37,6 +37,21 @@ describe("groundFacts", () => {
     expect(groundFacts([fact({ source: "barcode" })], "")).toHaveLength(1);
   });
 
+  it("keeps a fact whose time also appears in the source", () => {
+    const flight = fact({ kind: "event", time: "09:40" });
+    expect(groundFacts([flight], "Departs 12 March 2029 at 09:40")).toHaveLength(1);
+  });
+
+  it("matches a time the document wrote the twelve hour way", () => {
+    const flight = fact({ kind: "event", time: "21:40" });
+    expect(groundFacts([flight], "Departs 12 March 2029 at 9:40 PM")).toHaveLength(1);
+  });
+
+  it("discards a fact whose date is right but whose time is not in the source", () => {
+    const flight = fact({ kind: "event", time: "09:40" });
+    expect(groundFacts([flight], "Departs 12 March 2029 at 18:15")).toHaveLength(0);
+  });
+
   it("grounds a non-date value literally", () => {
     const amount = fact({ kind: "amount", value: "410.00", source: "pattern" });
     expect(groundFacts([amount], "Total due: $410.00")).toHaveLength(1);

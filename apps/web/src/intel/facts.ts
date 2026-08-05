@@ -33,7 +33,11 @@ export type FactKind =
   /** A sum of money. */
   | "amount"
   /** A reference number. */
-  | "identifier";
+  | "identifier"
+  /** Something happens at this date, and often at a time: a departure, a
+   * check-in, an appointment. Unlike an expiry it is not a deadline that
+   * passes quietly; it is a thing to be somewhere for. */
+  | "event";
 
 export type DocumentKind =
   | "passport"
@@ -47,6 +51,15 @@ export type DocumentKind =
   | "vehicle-registration"
   | "certification"
   | "invoice"
+  // Travel. Nothing produces these yet; they are named here because the kind
+  // is stored inside encrypted metadata, and agreeing on the vocabulary
+  // before anything writes it is what keeps a later reader from meeting a
+  // value it has never heard of.
+  | "boarding-pass"
+  | "hotel-booking"
+  | "itinerary"
+  | "car-rental"
+  | "event-ticket"
   | "other";
 
 export type FactSource =
@@ -70,6 +83,19 @@ export interface Fact {
   document: DocumentKind;
   /** ISO date for date-shaped facts, a decimal string for amounts. */
   value: string;
+  /**
+   * A time of day as "HH:MM", where the document gave one.
+   *
+   * Local to whatever the document is talking about, and kept separate from
+   * the date rather than folded into an instant. A departure printed on a
+   * ticket is the time at that airport; converting it to UTC without knowing
+   * the airport's zone would produce an answer that looks precise and is
+   * hours wrong, which is exactly the kind of confident error this whole
+   * design refuses to make.
+   */
+  time?: string;
+  /** The IANA zone the time belongs to, on the rare occasion it is known. */
+  zone?: string;
   /** Currency for amounts, or the issuing authority. */
   unit?: string;
   /** Last four characters. The full value lives in the evidence blob. */
@@ -146,12 +172,37 @@ export function groundFacts(facts: Fact[], source: string): Fact[] {
     if (STRUCTURED.has(fact.source)) {
       return true;
     }
-    return renderings(fact).some((form) => haystack.includes(normalize(form)));
+    if (!renderings(fact).some((form) => haystack.includes(normalize(form)))) {
+      return false;
+    }
+    // A time has to be found too. A fact carrying the right date and a time
+    // the document never mentions is exactly the plausible-looking error that
+    // grounding exists to catch, and it is worse than the date alone because
+    // it is the part someone would set an alarm by.
+    if (fact.time !== undefined) {
+      return timeRenderings(fact.time).some((form) => haystack.includes(normalize(form)));
+    }
+    return true;
   });
 }
 
 function normalize(text: string): string {
-  return text.toLowerCase().replace(/[\s.,/\\_-]+/g, "");
+  return text.toLowerCase().replace(/[\s.,/\\_:-]+/g, "");
+}
+
+/**
+ * The two ways a time is written, and deliberately not a third.
+ *
+ * The unpadded twenty-four hour form ("9:40") is left out: once separators are
+ * stripped it is a substring of "19:40", so including it would ground an
+ * evening fact against a morning document. Missing a real match is the safer
+ * direction to be wrong in.
+ */
+function timeRenderings(time: string): string[] {
+  const [hh, mm] = time.split(":") as [string, string];
+  const hour = Number(hh);
+  const half = hour % 12 === 0 ? 12 : hour % 12;
+  return [`${hh}:${mm}`, `${half}:${mm}${hour < 12 ? "am" : "pm"}`];
 }
 
 /** Every way a stored value might plausibly have been written. */
