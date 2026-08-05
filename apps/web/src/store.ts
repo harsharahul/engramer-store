@@ -226,7 +226,16 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
   };
 }
 
-function metadataOf(file: FileEntry): FileMetadata {
+/**
+ * The entry, back in the shape it is stored in.
+ *
+ * Every patch rebuilds metadata from here and sends the result, so a field
+ * this function forgets is destroyed the next time the file is renamed,
+ * tagged or favorited. That failure is silent, which is why it has its own
+ * tests: nothing errors, the file still opens, and the loss only surfaces
+ * later when something that needed the field cannot run.
+ */
+export function metadataOf(file: FileEntry): FileMetadata {
   return {
     name: file.name,
     mime: file.mime,
@@ -242,6 +251,11 @@ function metadataOf(file: FileEntry): FileMetadata {
     category: file.category,
     tags: file.tags,
     favorite: file.favorite,
+    // Without this a rename erased the digest, and with it the only record of
+    // what the file held when it was stored. Nothing failed at the time; the
+    // file simply became unverifiable, and "Verify my vault" would report it
+    // as never checked forever after.
+    digest: file.digest,
   };
 }
 
