@@ -74,7 +74,13 @@ Search never issues a network request; the index is the decrypted metadata alrea
 
 The sidebar's Library section lists auto-categories with live counts (Photos, Screenshots, Documents, Receipts, and any other non-empty category) plus Favorites. These are smart views computed from tags, independent of physical folder location.
 
-## Planned
+## Semantic image search
 
-- Semantic image search with an on-device CLIP-family model through transformers.js, following Ente's MobileCLIP approach; embeddings would join the encrypted metadata like every other derived signal.
-- Additional OCR languages beyond English, selectable so only the models you need are downloaded.
+Opt-in, alongside OCR. A CLIP-family model (MobileCLIP-S0, through
+transformers.js) turns images and typed queries into vectors whose similarity
+is meaning rather than spelling, so "dog on a beach" finds the photo even when
+nothing in its name or its text says so. The model, its tokenizer, and the ONNX
+runtime are all served from the app's own origin; the page's content security
+policy would reject a CDN fetch even if one were attempted. Embeddings ride in
+the same encrypted index blob as extracted text, and videos contribute several
+sampled frames so any scene matches, not only the poster.

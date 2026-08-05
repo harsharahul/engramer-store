@@ -85,27 +85,3 @@ Cross-origin browser access is off unless origins are listed explicitly,
 and the pre-login endpoint returns a stable decoy salt for unknown
 addresses so it cannot be used to discover who has an account.
 
-## Planned: bring-your-own SSO (OpenID Connect)
-
-The design, so self-hosters can front the vault with their own identity
-provider (Keycloak, Authentik, Authelia, Google, Entra, or any compliant
-issuer):
-
-- Configuration by environment: issuer URL, client id, client secret; the
-  server reads the issuer's discovery document and validates ID tokens
-  against its JWKS. Authorization-code flow with PKCE.
-- OIDC replaces the **password proof**, not the password: a successful OIDC
-  login yields the session token and the account's key attributes, after
-  which the client asks for the vault password purely to unwrap keys locally.
-  Nothing about the key hierarchy changes, and the identity provider never
-  sees a password or a key.
-- Accounts link to an OIDC subject explicitly (by verified email match or a
-  one-time link step while signed in); auto-provisioning of new accounts is a
-  deliberate configuration flag, off by default.
-- Two-factor policy stays coherent: if the identity provider already enforces
-  a second factor, the local TOTP step can be marked satisfied by
-  configuration; otherwise both apply.
-
-This keeps the zero-knowledge property intact under SSO: the identity
-provider decides who may talk to the server; only the vault password decides
-who can read anything.

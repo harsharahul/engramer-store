@@ -25,19 +25,6 @@ Word and Excel documents (.docx, .xlsx):
 - The engine is vendored third-party code, and it runs in a frame with an opaque origin: it cannot reach the page holding your keys, that page's storage, its cookies or its session. It receives bytes and returns bytes. How that is arranged, and what it costs, is in [office-editing.md](office-editing.md).
 - Fidelity is that of the engine behind a widely deployed office suite rather than a JavaScript approximation, which matters most for spreadsheets, where a workbook is a calculation graph with charts and pivot caches rather than a stream of text. The download action always returns exactly the stored bytes, so a round trip is never the only copy.
 
-## Roadmap: live collaboration
-
-The collaborative layer follows the architecture CryptPad proved and secsync documents for Yjs:
-
-1. **CRDT documents.** Notes become Yjs documents edited through a rich-text editor component. CRDTs merge concurrent edits deterministically on the client, so the server never needs to understand content to resolve conflicts.
-2. **Encrypted relay.** The server gains one deliberately dumb endpoint: an ordered, append-only channel per document over WebSocket. Clients encrypt every Yjs update with the file key before sending; the relay stores and broadcasts opaque bytes in arrival order. Presence and cursors travel as encrypted ephemeral messages on the same channel.
-3. **Snapshots.** Clients periodically write an encrypted snapshot (the compacted document state) so new participants load one blob plus a short update tail instead of full history. Snapshots use the existing blob store.
-4. **Sharing.** A collaborator needs the channel id (server-visible) and the file key (shared via the existing mechanisms: sealed box to an account's public key, or a link fragment). The relay learns who connects to which channel and how much they send, and nothing else.
-
-Text and rich text come first, which is the fidelity envelope Proton Docs
-launched with. Full Word and Excel editing is a harder problem, addressed
-below.
-
 ## Rich document editing: Word and Excel
 
 The requirement is real Office editing (DOCX, XLSX), and the constraint is
@@ -88,51 +75,21 @@ LibreOffice WASM) preserve them.
 Presentations (PPTX) come with the OnlyOffice path for free and are otherwise
 deferred.
 
-## Planned capabilities
+## What was chosen
 
-Editing Office files under E2EE is, at most, matched by CryptPad and Proton, and
-neither is an open, self-hostable product. The capabilities planned on top of the
-editor:
-
-1. **CRDT co-editing over an encrypted relay, applied to a rich Office model.**
-   secsync gives an end-to-end-encrypted CRDT protocol on Yjs, with anti-rollback
-   guarantees, but nobody has married it to a high-fidelity OOXML model. CryptPad
-   has encrypted realtime but not clean CRDT semantics (its fast mode drops undo);
-   Proton is closed. An encrypted Yjs relay driving the OnlyOffice client model
-   would be genuinely new.
-2. **Encrypted presence.** Cursors, selections, and who-is-editing as ephemeral
-   end-to-end-encrypted messages. The primitive exists in secsync; no Office
-   product ships polished encrypted presence.
-3. **Offline-first with the CRDT as the source of truth.** Keep the canonical
-   document in an encrypted CRDT and treat DOCX and XLSX as import and export
-   skins, re-serialising only changed regions so round-trip loss shrinks toward
-   zero. Nobody in the E2EE space does format-preserving edits this way.
-4. **Client-side AI over decrypted content.** Because decryption already happens
-   in the browser, an on-device model can summarise, answer questions across your
-   documents, generate formulas, and clean up text, over the plaintext, without
-   the server ever seeing it. Ente does on-device intelligence for photos; nobody
-   does it for documents and spreadsheets in an E2EE store. This is the feature
-   that makes the product both private and genuinely smart.
-
-## Recommendation
-
-There is no permissively licensed, drop-in, high-fidelity option; it is a
+There is no permissively licensed, drop-in, high-fidelity option, so this was a
 licence-versus-fidelity choice, and because Engram Store is already AGPL-3.0 the
-usual blocker on the strongest candidates does not apply to us. The plan, with
-steps 1 and 2 now shipped:
+usual blocker on the strongest candidates does not apply here.
 
 1. A browser-native OOXML editor delivered everyday Word editing first, with
    docx-preview for fast read-only rendering. Preview still uses it; editing
-   has since moved to step 2.
-2. **Shipped:** the OnlyOffice client-side engine in the CryptPad style (the
-   editor canvas plus the x2t conversion engine compiled to WebAssembly, all
-   assets self-hosted), which is the only path to native-model fidelity with no
-   server, and which brings spreadsheets with it. The cost is a large asset
-   payload and an integration layer of our own, described in
+   has since moved to the engine below.
+2. The OnlyOffice client-side engine in the CryptPad style: the editor canvas
+   plus the x2t conversion engine compiled to WebAssembly, all assets
+   self-hosted. This is the only path to native-model fidelity with no server,
+   and it brings spreadsheets with it. The cost is a large asset payload and an
+   integration layer of our own, described in
    [office-editing.md](office-editing.md).
-3. Wrap the editor in a secsync-style encrypted Yjs relay for real-time
-   co-editing, encrypted presence, and offline-first, and add client-side AI over
-   the decrypted document. That combination is what no incumbent has shipped.
 
 ## References
 
