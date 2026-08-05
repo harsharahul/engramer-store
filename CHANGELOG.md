@@ -3,6 +3,65 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.35.0] - 2026-08-05
+
+### Added
+- **Your documents can tell you what they say.** Turn on "Read dates in
+  documents" and an upload is read for the things it states about
+  itself: when it expires, when a payment is due, when it was issued,
+  and the reference numbers that identify it. All of the reading happens
+  on your device, and the results live inside the encrypted metadata
+  like every other derived signal.
+
+  The accurate half comes from documents that state their own data in a
+  structured form. A North American driver's licence carries its expiry
+  in the barcode on the back, as a field rather than as printed
+  characters. A passport carries a machine-readable zone whose fields
+  are protected by check digits, so a misread is detectable; a failed
+  check discards the whole read rather than producing a fact with lower
+  confidence, because knowing a scan went wrong is the only thing that
+  made the zone better than a guess in the first place.
+
+  Everywhere else, dates are claimed only where a document labelled one.
+  An unlabelled date is nearly always a print date, and a wrong expiry
+  date is worse than no expiry date because it gets relied on. Nothing
+  is acted on until you confirm it, and a date that could be read two
+  ways offers both readings rather than choosing.
+- **Barcodes are now readable at all.** Character recognition reads
+  printed text and cannot read a barcode, so the code on a ticket, the
+  QR on an invoice and the block on a licence were invisible to search
+  no matter how good the text extraction became. Every symbology the
+  decoder knows is enabled and every decoded payload joins the
+  searchable text, so a booking reference is findable by being readable.
+  The decoder is WebAssembly served from your own host, like the text
+  recognizer and the model runtime, and it loads only when used.
+- **A few observations worth interrupting for.** A passport expiring in
+  February stops being useful for travel around the previous August,
+  because many countries require six months of validity; that date
+  appears on no document you own. A residence permit can outlive the
+  passport it is attached to. An insurance period can end with nothing
+  newer stored. These read across more than one document at once, which
+  only something that can see your whole library can do.
+- **An Expiring soon view**, the facts read out of each file shown on
+  the file itself with the source of each, and "Find dates in my
+  documents" in the command palette to read a library stored before any
+  of this existed, working from text the vault already holds.
+
+### Fixed
+- **Renaming or tagging a file erased its content digest.** Every
+  metadata change rebuilt the stored metadata and left the digest out,
+  so the record of what a file held when it was stored was destroyed the
+  first time it was renamed. Nothing failed at the time; the file simply
+  became permanently unverifiable and reported as never checked. Files
+  affected before this release need a re-upload to become verifiable
+  again.
+- **Saving a Word or Excel document left the previous version's digest
+  on the new contents**, which would have made a verification pass
+  report a healthy file as damaged. Both save paths now record the
+  digest of what they actually wrote.
+- The details panel compressed its own contents instead of scrolling
+  when it had more to show than room to show it.
+
 ## [0.34.0] - 2026-08-03
 
 ### Added
