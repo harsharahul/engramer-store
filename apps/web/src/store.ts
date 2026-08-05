@@ -25,7 +25,8 @@ import { analyzeFile, downloadAndDecrypt, downloadThumbnail, encryptAndUpload } 
 import { recognizeImage, recognizePdf } from "./intel/ocr";
 import { isPdf } from "./intel/extract";
 import { embedImage } from "./intel/semantic";
-import { asFacts, type Fact } from "./intel/facts";
+import { asFacts, reconcileFacts, type Fact, type FactEvidence } from "./intel/facts";
+import { factsEnabled, scanForFacts } from "./intel/scan";
 import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
 import { blankDocument, DOCX_MIME, XLSX_MIME } from "./office/templates";
@@ -402,6 +403,32 @@ export const useStore = create<StoreState>((set, get) => {
       encryptedMeta: encryptFileMetadata({ ...metadataOf(file), ...patch }, file.key),
     });
     applyFile(dto);
+  };
+
+  /**
+   * Facts for contents that have just been replaced.
+   *
+   * A fact describes contents, so a save has to make every one of them answer
+   * for itself. Returns what should be stored, and the evidence to write
+   * beside it. Cheap when the preference is off, in which case the facts a
+   * file already carries are left exactly as they are rather than discarded:
+   * turning the setting off should stop new reading, not erase old answers.
+   */
+  const rescanFacts = async (
+    file: FileEntry,
+    text: string | undefined,
+    digest: string,
+  ): Promise<{ facts: Fact[]; evidence: FactEvidence[] } | null> => {
+    if (!factsEnabled() || file.facts.length === 0) {
+      return null;
+    }
+    const found = await scanForFacts({ name: file.name, mime: file.mime, text }).catch(
+      () => null,
+    );
+    if (!found) {
+      return null;
+    }
+    return { facts: reconcileFacts(file.facts, found.facts, digest), evidence: found.evidence };
   };
 
   /** Applies a change to one fact and stores the whole set back. */
@@ -814,11 +841,17 @@ export const useStore = create<StoreState>((set, get) => {
       await uploadBlob(id, "data", encryptBytes(bytes, file.key));
       const digest = contentDigest(bytes);
       const searchText = text.slice(0, 100_000);
+      const rescanned = await rescanFacts(file, searchText, digest);
       await uploadBlob(
         id,
         "index",
         encryptBytes(
-          encodeIndexPayload({ text: searchText, clip: file.clip, clips: file.clips }),
+          encodeIndexPayload({
+            text: searchText,
+            clip: file.clip,
+            clips: file.clips,
+            evidence: rescanned?.evidence,
+          }),
           file.key,
         ),
       );
@@ -828,6 +861,7 @@ export const useStore = create<StoreState>((set, get) => {
         hasText: true,
         text: undefined,
         digest,
+        ...(rescanned ? { facts: rescanned.facts } : {}),
       });
       setEntryText(id, searchText, false);
       await get().refreshUsage();
@@ -851,12 +885,18 @@ export const useStore = create<StoreState>((set, get) => {
       }
       await uploadBlob(id, "data", sealed);
       const digest = contentDigest(bytes);
-      if (searchText !== undefined) {
+      const rescanned = await rescanFacts(file, searchText, digest);
+      if (searchText !== undefined || rescanned) {
         await uploadBlob(
           id,
           "index",
           encryptBytes(
-            encodeIndexPayload({ text: searchText.slice(0, 100_000), clip: file.clip, clips: file.clips }),
+            encodeIndexPayload({
+              text: searchText?.slice(0, 100_000),
+              clip: file.clip,
+              clips: file.clips,
+              evidence: rescanned?.evidence,
+            }),
             file.key,
           ),
         );
@@ -864,7 +904,14 @@ export const useStore = create<StoreState>((set, get) => {
       await patchFileMeta(id, {
         size: bytes.length,
         mtime: Date.now(),
+        // The digest describes the bytes just written. It was computed here
+        // and then dropped, which was survivable only while metadata forgot
+        // the digest entirely; now that a patch preserves it, omitting it
+        // would leave the previous version's digest attached to new content
+        // and a verification pass would call a healthy file damaged.
+        digest,
         ...(searchText !== undefined ? { hasText: true, text: undefined } : {}),
+        ...(rescanned ? { facts: rescanned.facts } : {}),
       });
       if (searchText !== undefined) {
         setEntryText(id, searchText.slice(0, 100_000), false);
