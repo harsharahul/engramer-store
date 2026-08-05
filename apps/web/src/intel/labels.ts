@@ -68,7 +68,7 @@ function windowAfter(text: string, from: number): string {
 }
 
 /** Dates that a document labelled, which is the only kind worth trusting. */
-export function labelledFacts(text: string, fileId: string): Fact[] {
+export function labelledFacts(text: string): Fact[] {
   const document = guessDocumentKind(text);
   const byId = new Map<string, Fact>();
   for (const { kind, labels } of KINDS) {
@@ -78,7 +78,7 @@ export function labelledFacts(text: string, fileId: string): Fact[] {
       if (!parsed) {
         continue;
       }
-      const id = factId(fileId, kind, parsed.iso);
+      const id = factId(kind, parsed.iso);
       if (byId.has(id)) {
         continue;
       }
@@ -123,13 +123,13 @@ const HARVEST_CONFIDENCE = 0.3;
  * Amounts and reference numbers from any document, including kinds no rule
  * anticipated. Never emits a date: see the note at the top of this file.
  */
-export function harvestFacts(text: string, fileId: string): Fact[] {
+export function harvestFacts(text: string): Fact[] {
   const document = guessDocumentKind(text);
   const byId = new Map<string, Fact>();
 
   const addAmount = (raw: string, unit: string) => {
     const value = raw.replace(/,/g, "");
-    const id = factId(fileId, "amount", value);
+    const id = factId("amount", value);
     if (!byId.has(id)) {
       byId.set(id, {
         id,
@@ -162,7 +162,7 @@ export function harvestFacts(text: string, fileId: string): Fact[] {
     if (!/[A-Za-z]/.test(token) || !/\d/.test(token)) {
       continue;
     }
-    const id = factId(fileId, "identifier", token);
+    const id = factId("identifier", token);
     if (!byId.has(id)) {
       byId.set(id, {
         id,

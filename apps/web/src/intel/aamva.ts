@@ -100,7 +100,7 @@ function elements(payload: string): Map<string, string> {
  * own; one bad element does not discard the rest, because unlike a
  * machine-readable zone there is no checksum tying the fields together.
  */
-export function aamvaFacts(payload: string, fileId: string): Fact[] {
+export function aamvaFacts(payload: string): Fact[] {
   if (!payload || !HEADER.test(payload)) {
     return [];
   }
@@ -117,7 +117,7 @@ export function aamvaFacts(payload: string, fileId: string): Fact[] {
     const date = aamvaDate(found.get(code) ?? "");
     if (date) {
       facts.push({
-        id: factId(fileId, kind, date),
+        id: factId(kind, date),
         kind,
         document,
         value: date,
@@ -130,7 +130,7 @@ export function aamvaFacts(payload: string, fileId: string): Fact[] {
   const number = found.get(LICENCE_NUMBER);
   if (number) {
     facts.push({
-      id: factId(fileId, "identifier", number),
+      id: factId("identifier", number),
       kind: "identifier",
       document,
       value: number,

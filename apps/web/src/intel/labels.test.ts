@@ -3,7 +3,7 @@ import { guessDocumentKind, harvestFacts, labelledFacts } from "./labels";
 
 describe("labelledFacts", () => {
   it("reads an expiry behind its label", () => {
-    const [fact] = labelledFacts("Policy holder: H R\nExpires 12 March 2029", "f1");
+    const [fact] = labelledFacts("Policy holder: H R\nExpires 12 March 2029");
     expect(fact).toMatchObject({ kind: "expiry", value: "2029-03-12", source: "label" });
   });
 
@@ -17,53 +17,53 @@ describe("labelledFacts", () => {
       "Renewal date",
       "Good through",
     ]) {
-      expect(labelledFacts(`${label}: 2029-03-12`, "f1")[0]?.kind).toBe("expiry");
+      expect(labelledFacts(`${label}: 2029-03-12`)[0]?.kind).toBe("expiry");
     }
   });
 
   it("separates a payment due date from an expiry", () => {
-    const [fact] = labelledFacts("Payment due 2026-09-01", "f1");
+    const [fact] = labelledFacts("Payment due 2026-09-01");
     expect(fact).toMatchObject({ kind: "due", value: "2026-09-01" });
   });
 
   it("reads an issue date", () => {
-    expect(labelledFacts("Date of issue: 2021-08-24", "f1")[0]?.kind).toBe("issued");
+    expect(labelledFacts("Date of issue: 2021-08-24")[0]?.kind).toBe("issued");
   });
 
   it("carries ambiguity through from the date reader", () => {
-    const [fact] = labelledFacts("Expires 03/04/2028", "f1");
+    const [fact] = labelledFacts("Expires 03/04/2028");
     expect(fact!.ambiguous).toBe(true);
     expect(fact!.confidence).toBeLessThan(0.7);
   });
 
   it("is more confident about a date that could only be read one way", () => {
-    expect(labelledFacts("Expires 2029-03-12", "f1")[0]!.confidence).toBe(0.7);
+    expect(labelledFacts("Expires 2029-03-12")[0]!.confidence).toBe(0.7);
   });
 
   it("ignores a label with no date anywhere near it", () => {
-    expect(labelledFacts("Expires when the policy is cancelled.", "f1")).toEqual([]);
+    expect(labelledFacts("Expires when the policy is cancelled.")).toEqual([]);
   });
 
   it("does not reach across a paragraph for its date", () => {
     const text = `Expires\n\n${"filler line\n".repeat(12)}2029-03-12`;
-    expect(labelledFacts(text, "f1")).toEqual([]);
+    expect(labelledFacts(text)).toEqual([]);
   });
 
   it("gives two facts with the same value distinct identities by kind", () => {
-    const facts = labelledFacts("Issued 2029-03-12. Expires 2029-03-12.", "f1");
+    const facts = labelledFacts("Issued 2029-03-12. Expires 2029-03-12.");
     const ids = new Set(facts.map((f) => f.id));
     expect(ids.size).toBe(facts.length);
   });
 
   it("finds every label in a document, not only the first", () => {
-    const facts = labelledFacts("Expires 2029-03-12\nPayment due 2026-09-01", "f1");
+    const facts = labelledFacts("Expires 2029-03-12\nPayment due 2026-09-01");
     expect(facts.map((f) => f.kind).sort()).toEqual(["due", "expiry"]);
   });
 });
 
 describe("harvestFacts", () => {
   it("finds a currency amount and marks it low confidence", () => {
-    const [fact] = harvestFacts("Total due: $410.00", "f1");
+    const [fact] = harvestFacts("Total due: $410.00");
     expect(fact).toMatchObject({
       kind: "amount",
       value: "410.00",
@@ -74,24 +74,24 @@ describe("harvestFacts", () => {
   });
 
   it("reads a currency written as a code", () => {
-    expect(harvestFacts("Amount: EUR 1250.50", "f1")[0]).toMatchObject({
+    expect(harvestFacts("Amount: EUR 1250.50")[0]).toMatchObject({
       value: "1250.50",
       unit: "EUR",
     });
   });
 
   it("never proposes a bare date with no label as an expiry", () => {
-    expect(harvestFacts("Printed 2026-01-02", "f1").some((f) => f.kind === "expiry")).toBe(false);
+    expect(harvestFacts("Printed 2026-01-02").some((f) => f.kind === "expiry")).toBe(false);
   });
 
   it("masks a reference number rather than carrying it whole", () => {
-    const id = harvestFacts("Policy number AB1234567890", "f1").find((f) => f.kind === "identifier");
+    const id = harvestFacts("Policy number AB1234567890").find((f) => f.kind === "identifier");
     expect(id!.masked).toBe("7890");
     expect(id!.value).toBe("AB1234567890");
   });
 
   it("does not treat an ordinary word as a reference number", () => {
-    expect(harvestFacts("thank you for your business", "f1")).toEqual([]);
+    expect(harvestFacts("thank you for your business")).toEqual([]);
   });
 });
 
