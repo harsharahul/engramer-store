@@ -144,7 +144,13 @@ function FileCard(props: {
     <div className="pending-card">
       <div className="pending-card-text">
         {single ? (
-          <>This looks like {withArticle(describeFact(facts[0]!))}. </>
+          facts[0]!.kind === "dated" ? (
+            // The system is repeating the document, not interpreting it,
+            // and the sentence should sound like that.
+            <>The document says {describeFact(facts[0]!)}. </>
+          ) : (
+            <>This looks like {withArticle(describeFact(facts[0]!))}. </>
+          )
         ) : (
           <>This document mentions {facts.length} dates. Which matter? </>
         )}
