@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asFacts, groundFacts, maskTail, mergeFacts, type Fact } from "./facts";
+import { asFacts, groundFacts, maskTail, mergeFacts, reconcileFacts, type Fact } from "./facts";
 
 const fact = (over: Partial<Fact> = {}): Fact => ({
   id: "f1",
@@ -56,6 +56,53 @@ describe("groundFacts", () => {
     const amount = fact({ kind: "amount", value: "410.00", source: "pattern" });
     expect(groundFacts([amount], "Total due: $410.00")).toHaveLength(1);
     expect(groundFacts([amount], "Total due: $9.99")).toHaveLength(0);
+  });
+});
+
+describe("reconcileFacts", () => {
+  const confirmed = fact({ digest: "d1", confirmed: true });
+
+  it("keeps a confirmed fact the new contents still say, and moves it forward", () => {
+    const [out] = reconcileFacts([confirmed], [fact({ digest: "d2" })], "d2");
+    expect(out).toMatchObject({ confirmed: true, digest: "d2" });
+    expect(out!.stale).toBeFalsy();
+  });
+
+  it("keeps a confirmed fact the new contents dropped, and says so", () => {
+    const [out] = reconcileFacts([confirmed], [], "d2");
+    expect(out).toMatchObject({ confirmed: true, stale: true });
+  });
+
+  it("leaves a stale fact pointing at the contents it actually came from", () => {
+    expect(reconcileFacts([confirmed], [], "d2")[0]!.digest).toBe("d1");
+  });
+
+  it("drops an unconfirmed fact the new contents no longer support", () => {
+    expect(reconcileFacts([fact({ digest: "d1" })], [], "d2")).toEqual([]);
+  });
+
+  it("clears staleness when a later edit puts the value back", () => {
+    const stale = fact({ digest: "d1", confirmed: true, stale: true });
+    expect(reconcileFacts([stale], [fact({ digest: "d3" })], "d3")[0]!.stale).toBeFalsy();
+  });
+
+  it("does not bring back something the owner dismissed", () => {
+    const dismissed = fact({ digest: "d1", dismissed: true });
+    const [out] = reconcileFacts([dismissed], [fact({ digest: "d2" })], "d2");
+    expect(out!.dismissed).toBe(true);
+  });
+
+  it("adds what the new contents introduced, unconfirmed", () => {
+    const fresh = fact({ id: "f2", kind: "due", value: "2026-09-01" });
+    const out = reconcileFacts([], [fresh], "d2");
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ id: "f2", digest: "d2" });
+    expect(out[0]!.confirmed).toBeFalsy();
+  });
+
+  it("still caps what one file may carry", () => {
+    const many = Array.from({ length: 30 }, (_, i) => fact({ id: `f${i}` }));
+    expect(reconcileFacts([], many, "d2").length).toBe(12);
   });
 });
 

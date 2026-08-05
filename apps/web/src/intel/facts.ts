@@ -161,6 +161,56 @@ export function factId(fileId: string, kind: FactKind, value: string): string {
 }
 
 /**
+ * Folds a rescan into what a file carried, after its contents changed.
+ *
+ * Version history is not limited to office documents: any file whose contents
+ * are replaced keeps its previous generation, so a note, a spreadsheet and a
+ * re-saved PDF all pass through here. A fact describes contents, and the
+ * contents just changed, so every fact has to answer for itself.
+ *
+ * The case that matters is the middle one. A confirmed fact the new contents
+ * no longer support is kept and marked, not deleted and not left asserting
+ * something the document stopped saying. Deleting it would take away a
+ * reminder the owner asked for, without telling them; keeping it unmarked
+ * would put words in the document's mouth. Neither is acceptable, so it is
+ * kept, flagged, and reported.
+ *
+ * A stale fact keeps the digest it was actually read from rather than taking
+ * the new one, because that is where it came from and pretending otherwise
+ * would lose the only evidence of the disagreement.
+ */
+export function reconcileFacts(existing: Fact[], rescanned: Fact[], digest: string): Fact[] {
+  const found = new Map(rescanned.map((fact) => [fact.id, fact]));
+  const kept: Fact[] = [];
+  for (const fact of existing) {
+    const again = found.get(fact.id);
+    found.delete(fact.id);
+    if (fact.dismissed) {
+      // A tombstone. Whether the contents still say it is beside the point:
+      // the owner put it away, and a rescan is not a reason to ask again.
+      kept.push(fact);
+      continue;
+    }
+    if (again) {
+      const forward: Fact = { ...fact, digest };
+      delete forward.stale;
+      kept.push(forward);
+      continue;
+    }
+    if (fact.confirmed) {
+      kept.push({ ...fact, stale: true });
+    }
+    // An unconfirmed fact that lost its evidence simply goes. Nothing was
+    // relying on it, and re-offering a suggestion the document no longer
+    // supports would be worse than silence.
+  }
+  for (const fresh of found.values()) {
+    kept.push({ ...fresh, digest });
+  }
+  return kept.slice(0, MAX_FACTS_PER_FILE);
+}
+
+/**
  * Facts as they come back out of decrypted metadata.
  *
  * The check is structural, not a vocabulary check, and that distinction
