@@ -187,6 +187,23 @@ export function parseDate(text: string, order?: DateOrder): ParsedDate | null {
 }
 
 /**
+ * The other way an ambiguous date could have been read, with the day and the
+ * month exchanged. Null when the swap is not a real date, which is what makes
+ * the reading unambiguous after all.
+ *
+ * This exists so a confirmation card can offer both readings as they are,
+ * rather than asking someone to think in date formats.
+ */
+export function swappedReading(isoDate: string): string | null {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!parts) {
+    return null;
+  }
+  const [, year, month, day] = parts as unknown as [string, string, string, string];
+  return build(Number(year), Number(day), Number(month));
+}
+
+/**
  * A time of day, requiring a colon.
  *
  * Only a colon, deliberately: a dotted date like 12.30.2029 would otherwise

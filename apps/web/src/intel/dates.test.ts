@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { daysUntil, parseDate, parseTime } from "./dates";
+import { daysUntil, parseDate, parseTime, swappedReading } from "./dates";
 
 describe("parseDate", () => {
   it("reads an unambiguous slash date, where the first number cannot be a month", () => {
@@ -62,6 +62,21 @@ describe("parseDate", () => {
 
   it("finds a date inside a longer phrase", () => {
     expect(parseDate("Expires on 2029-03-12 unless renewed")?.iso).toBe("2029-03-12");
+  });
+});
+
+describe("swappedReading", () => {
+  it("offers the other reading of an ambiguous date", () => {
+    expect(swappedReading("2028-03-04")).toBe("2028-04-03");
+  });
+
+  it("returns null when the swap is not a real date", () => {
+    expect(swappedReading("2028-03-25")).toBeNull();
+    expect(swappedReading("2028-02-30")).toBeNull();
+  });
+
+  it("returns null for anything that is not an ISO date", () => {
+    expect(swappedReading("410.00")).toBeNull();
   });
 });
 

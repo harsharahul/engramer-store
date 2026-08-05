@@ -128,6 +128,27 @@ export interface FactEvidence {
 /** Metadata is synced everywhere; a document cannot grow it without bound. */
 export const MAX_FACTS_PER_FILE = 12;
 
+/** Kinds that name a moment worth being reminded about. */
+export const DATED_KINDS: ReadonlySet<string> = new Set(["expiry", "due", "event"]);
+
+/**
+ * The nearest date a file is actually tracking, or nothing if it tracks none.
+ * Only confirmed facts count: an unconfirmed reading has not been agreed to,
+ * and listing a file by a date nobody accepted would be acting on a guess.
+ */
+export function soonestDated(facts: Fact[]): string | undefined {
+  let soonest: string | undefined;
+  for (const fact of facts) {
+    if (!fact.confirmed || fact.dismissed || !DATED_KINDS.has(fact.kind)) {
+      continue;
+    }
+    if (soonest === undefined || fact.value < soonest) {
+      soonest = fact.value;
+    }
+  }
+  return soonest;
+}
+
 /**
  * Sources that read a structured field rather than surrounding prose. There is
  * no free text to ground them against, and their own check digits or fixed
