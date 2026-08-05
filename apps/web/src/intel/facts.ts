@@ -155,9 +155,16 @@ export function maskTail(value: string): string {
   return value.length <= 4 ? value : value.slice(-4);
 }
 
-/** Stable across rescans, so a confirmation survives one. */
-export function factId(fileId: string, kind: FactKind, value: string): string {
-  return `${fileId}:${kind}:${value}`;
+/**
+ * Stable across rescans, so a confirmation survives one.
+ *
+ * Scoped to the file it lives in and nothing wider, because that is the only
+ * scope a fact has: it is stored inside one file's metadata and only ever
+ * compared with that file's other facts. It also cannot be any wider, since a
+ * file's identity is assigned by the server after the reading is already done.
+ */
+export function factId(kind: FactKind, value: string): string {
+  return `${kind}:${value}`;
 }
 
 /**

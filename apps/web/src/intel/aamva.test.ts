@@ -23,7 +23,7 @@ const CA = US.replace("636000", "636012")
 
 describe("aamvaFacts", () => {
   it("reads the expiry from a United States licence, month first", () => {
-    const expiry = aamvaFacts(US, "f1").find((f) => f.kind === "expiry");
+    const expiry = aamvaFacts(US).find((f) => f.kind === "expiry");
     expect(expiry).toMatchObject({
       value: "2029-08-24",
       document: "drivers-license",
@@ -34,21 +34,21 @@ describe("aamvaFacts", () => {
   });
 
   it("reads a Canadian licence, where the year comes first", () => {
-    expect(aamvaFacts(CA, "f1").find((f) => f.kind === "expiry")!.value).toBe("2029-08-24");
+    expect(aamvaFacts(CA).find((f) => f.kind === "expiry")!.value).toBe("2029-08-24");
   });
 
   it("masks the licence number in the summary", () => {
-    const id = aamvaFacts(US, "f1").find((f) => f.kind === "identifier");
+    const id = aamvaFacts(US).find((f) => f.kind === "identifier");
     expect(id!.value).toBe("D12345678");
     expect(id!.masked).toBe("5678");
   });
 
   it("reads the issue date", () => {
-    expect(aamvaFacts(US, "f1").find((f) => f.kind === "issued")!.value).toBe("2021-08-24");
+    expect(aamvaFacts(US).find((f) => f.kind === "issued")!.value).toBe("2021-08-24");
   });
 
   it("does not record the date of birth", () => {
-    const values = aamvaFacts(US, "f1").map((f) => f.value);
+    const values = aamvaFacts(US).map((f) => f.value);
     expect(values).not.toContain("1978-01-31");
     expect(values).not.toContain("1978-31-01");
   });
@@ -56,21 +56,21 @@ describe("aamvaFacts", () => {
   it("skips a field whose digits are not a real date", () => {
     const broken = US.replace("DBA08242029", "DBA02302029");
     expect(broken).toContain("DBA02302029");
-    expect(aamvaFacts(broken, "f1").some((f) => f.kind === "expiry")).toBe(false);
+    expect(aamvaFacts(broken).some((f) => f.kind === "expiry")).toBe(false);
   });
 
   it("skips a licence marked as never expiring rather than inventing a date", () => {
     const forever = US.replace("DBA08242029", "DBA        ");
-    expect(aamvaFacts(forever, "f1").some((f) => f.kind === "expiry")).toBe(false);
+    expect(aamvaFacts(forever).some((f) => f.kind === "expiry")).toBe(false);
   });
 
   it("still reads the other fields when one is unreadable", () => {
     const broken = US.replace("DBA08242029", "DBA02302029");
-    expect(aamvaFacts(broken, "f1").find((f) => f.kind === "identifier")!.value).toBe("D12345678");
+    expect(aamvaFacts(broken).find((f) => f.kind === "identifier")!.value).toBe("D12345678");
   });
 
   it("returns nothing for a payload that is not an AAMVA record", () => {
-    expect(aamvaFacts("https://example.com", "f1")).toEqual([]);
-    expect(aamvaFacts("", "f1")).toEqual([]);
+    expect(aamvaFacts("https://example.com")).toEqual([]);
+    expect(aamvaFacts("")).toEqual([]);
   });
 });

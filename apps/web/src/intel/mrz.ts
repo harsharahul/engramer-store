@@ -162,7 +162,7 @@ function readTd1(rows: string[]): Read | null {
 }
 
 /** The facts a zone yields, or nothing at all if any check disagreed. */
-export function mrzFacts(text: string, fileId: string): Fact[] {
+export function mrzFacts(text: string): Fact[] {
   if (!text) {
     return [];
   }
@@ -188,7 +188,7 @@ export function mrzFacts(text: string, fileId: string): Fact[] {
   const document = read.passport ? "passport" : "id-card";
   const facts: Fact[] = [
     {
-      id: factId(fileId, "expiry", read.expiry),
+      id: factId("expiry", read.expiry),
       kind: "expiry",
       document,
       value: read.expiry,
@@ -198,7 +198,7 @@ export function mrzFacts(text: string, fileId: string): Fact[] {
   ];
   if (read.documentNumber) {
     facts.push({
-      id: factId(fileId, "identifier", read.documentNumber),
+      id: factId("identifier", read.documentNumber),
       kind: "identifier",
       document,
       value: read.documentNumber,
