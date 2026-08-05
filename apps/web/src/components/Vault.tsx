@@ -991,6 +991,24 @@ export function Vault() {
         },
       },
       {
+        id: "facts-all",
+        label: "Find dates in my documents",
+        hint: "reads text already stored; nothing is downloaded",
+        run: () => {
+          if (!factsEnabled()) {
+            setFactsEnabled(true);
+            setFactsOn(true);
+          }
+          void store.scanLibraryForFacts().then((found) => {
+            showToast(
+              found > 0
+                ? `Found dates in ${found} document${found === 1 ? "" : "s"}. Confirm the ones worth tracking.`
+                : "No dates found in what is already stored.",
+            );
+          });
+        },
+      },
+      {
         id: "resync",
         label: "Resync library",
         hint: "rebuild this device's cache",

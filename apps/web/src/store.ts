@@ -195,6 +195,8 @@ interface StoreState {
   ingestRequestUploads: () => Promise<number>;
   recognizeFile: (id: string) => Promise<boolean>;
   recognizeAllImages: () => Promise<number>;
+  /** Reads dates out of documents stored before this feature existed. */
+  scanLibraryForFacts: () => Promise<number>;
   embedFile: (id: string) => Promise<boolean>;
   embedAllImages: () => Promise<number>;
   restoreVersion: (id: string, generation: number) => Promise<void>;
@@ -1181,6 +1183,66 @@ export const useStore = create<StoreState>((set, get) => {
           }
         } catch {
           // One unreadable image never stops the sweep.
+        }
+      }
+      set({ ocrProgress: null });
+      return found;
+    },
+
+    /**
+     * Reads dates out of a library that was stored before this existed.
+     *
+     * Facts come from text the vault already holds, so nothing is downloaded
+     * for anything indexed earlier: the sweep is arithmetic over decrypted
+     * metadata and the per-file index blob. Without it the feature appears
+     * broken on an existing library, because only new uploads would ever be
+     * read, which is the whole reason it is not optional.
+     */
+    scanLibraryForFacts: async () => {
+      const candidates = [...get().files.values()].filter(
+        (file) => !file.trashed && file.facts.length === 0 && (file.hasText || file.text !== undefined),
+      );
+      let found = 0;
+      for (let i = 0; i < candidates.length; i++) {
+        const file = candidates[i]!;
+        set({ ocrProgress: { done: i, total: candidates.length, current: file.name } });
+        try {
+          // Whatever is already in memory, else the file's own index blob.
+          let text = get().files.get(file.id)?.text;
+          if (text === undefined) {
+            const bytes = await api.downloadBlob(file.id, "index");
+            text = decodeIndexPayload(decryptBytes(bytes, file.key)).text;
+          }
+          if (!text) {
+            continue;
+          }
+          const scanned = await scanForFacts({ name: file.name, mime: file.mime, text });
+          if (scanned.facts.length === 0) {
+            continue;
+          }
+          const current = get().files.get(file.id);
+          if (!current) {
+            continue;
+          }
+          await uploadBlob(
+            file.id,
+            "index",
+            encryptBytes(
+              encodeIndexPayload({
+                text,
+                clip: current.clip,
+                clips: current.clips,
+                evidence: scanned.evidence,
+              }),
+              current.key,
+            ),
+          );
+          await patchFileMeta(file.id, {
+            facts: scanned.facts.map((fact) => ({ ...fact, digest: current.digest })),
+          });
+          found++;
+        } catch {
+          // One unreadable file never stops the sweep.
         }
       }
       set({ ocrProgress: null });
