@@ -84,3 +84,68 @@ runtime are all served from the app's own origin; the page's content security
 policy would reject a CDN fetch even if one were attempted. Embeddings ride in
 the same encrypted index blob as extracted text, and videos contribute several
 sampled frames so any scene matches, not only the poster.
+
+## Dates and reference numbers in documents
+
+Opt-in, off by default. When it is on, an upload is read for the things a
+document states about itself: when something expires, when a payment is due,
+when it was issued, and the reference numbers that identify it. All of the
+reading happens on the device, and the results live inside the encrypted
+metadata and index blob like every other derived signal.
+
+**Where the values come from**, strongest first:
+
+- **Barcodes.** The block on the back of a North American driver's licence
+  (AAMVA) states the expiry as a structured field, so nothing is guessed from
+  recognized characters. Every symbology the decoder knows is enabled, so QR,
+  Aztec and Data Matrix are read too, and their payloads join the searchable
+  text. That is content no character recognizer can reach at all.
+- **Machine-readable zones.** The two lines at the foot of a passport carry
+  check digits, so a misread is detectable. A failed check discards the whole
+  read rather than lowering its confidence, because being able to tell that a
+  scan went wrong is the only reason to prefer the zone over the printed text.
+- **Labelled dates.** "Expires", "Valid until", "Renewal date", "Payment due"
+  and their common variants, over the text extraction already produces. A
+  deadline is claimed only where the document labelled one; an unlabelled date
+  is almost always a print date.
+- **Amounts and reference numbers**, at low confidence, from any document,
+  including kinds no rule anticipated.
+
+**Nothing is acted on until you confirm it.** Facts arrive as suggestions in a
+single line above your files and move into the library once accepted. A date
+that could be read two ways (`03/04/2028`) offers both readings as dates rather
+than picking one. A wrong expiry date is worse than no expiry date, because it
+gets relied on.
+
+**Reference numbers are kept short.** Metadata carries the last four
+characters; the whole value lives in the file's index blob and is fetched only
+when you ask to see it. Metadata is decrypted on every device on every sync,
+which is not where a licence number belongs.
+
+**What it notices.** A small table of rules turns confirmed facts into the few
+observations worth interrupting for, several of which read more than one
+document at once:
+
+- A passport expiring 14 Feb 2027 stops being useful for travel around 14 Aug
+  2026, because many countries require six months of validity. That date
+  appears on no document you own.
+- A residence permit that outlives the passport it is attached to.
+- An insurance period that ended with nothing newer stored.
+- A warranty in its last thirty days, or an invoice past its due date.
+
+These appear in the panel beside your files, with the reasoning behind each one
+a click away, and an **Expiring soon** view lists everything being tracked.
+Facts read out of a file also appear on the file itself, each naming where it
+came from, since how far to trust a date depends on whether a check digit stood
+behind it.
+
+Documents stored before this existed are read by "Find dates in my documents"
+in the command palette, which works from text the vault already holds and
+downloads nothing.
+
+**Facts follow contents.** Every fact records the contents it was read from.
+When a file is saved over, a fact the new version still supports keeps its
+confirmation, one that was never confirmed and lost its evidence is dropped,
+and a confirmed one whose line has been edited away is kept and marked rather
+than silently deleted. Restoring an older version restores that version's
+facts, because facts describe contents.
