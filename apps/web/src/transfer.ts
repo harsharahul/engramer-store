@@ -32,6 +32,8 @@ import { categorize, type Analysis } from "./intel/categorize";
 import { extractExif, extractText, isPdf } from "./intel/extract";
 import { ocrEnabled, recognizeImage, recognizePdf } from "./intel/ocr";
 import { embedImage, semanticEnabled } from "./intel/semantic";
+import { factsEnabled, scanForFacts } from "./intel/scan";
+import type { Fact, FactEvidence } from "./intel/facts";
 import { encodeIndexPayload } from "./indexblob";
 import { computeBlur } from "./intel/blur";
 import { diag } from "./diag";
@@ -307,6 +309,8 @@ export interface PreparedFile {
   clip?: Float32Array;
   /** All meaning vectors for videos: poster plus sampled frames. */
   clips?: Float32Array[];
+  /** Where each fact came from; rides in the same index blob. */
+  evidence?: FactEvidence[];
 }
 
 /**
@@ -383,6 +387,34 @@ export async function analyzeFile(
     }
   }
   cancelled();
+  // Opt-in: dates and reference numbers read out of the document itself.
+  // Scanning must never fail an upload, so a failure here is swallowed the
+  // same way extraction's already is; the file stores without facts.
+  let facts: Fact[] = [];
+  let evidence: FactEvidence[] = [];
+  if (factsEnabled()) {
+    onPhase?.("reading dates");
+    const found = await withDeadline(
+      scanForFacts({
+        name: file.name,
+        mime: file.type || "application/octet-stream",
+        text,
+        file,
+      }),
+      ANALYSIS_DEADLINE_MS * 2,
+      signal,
+    ).catch(() => undefined);
+    if (found) {
+      facts = found.facts;
+      evidence = found.evidence;
+      // A decoded barcode is text the document carries that no character
+      // recognizer could reach, so it joins what search looks through.
+      if (found.decoded.length > 0) {
+        text = [text ?? "", ...found.decoded].join("\n").trim();
+      }
+    }
+  }
+  cancelled();
   const analysis = categorize({
     name: file.name,
     mime: file.type || "application/octet-stream",
@@ -401,8 +433,9 @@ export async function analyzeFile(
     ...(thumbnail?.blur ? { blur: thumbnail.blur } : {}),
     ...(text !== undefined ? { hasText: true } : {}),
     ...(clip ? { hasClip: true } : {}),
+    ...(facts.length > 0 ? { facts } : {}),
   };
-  return { meta, analysis, thumbnail, text, clip, clips };
+  return { meta, analysis, thumbnail, text, clip, clips, evidence };
 }
 
 export interface UploadResult {
@@ -712,7 +745,12 @@ export async function encryptAndUpload(
       dto.id,
       "index",
       encryptBytes(
-        encodeIndexPayload({ text: prepared.text, clip: prepared.clip, clips: prepared.clips }),
+        encodeIndexPayload({
+          text: prepared.text,
+          clip: prepared.clip,
+          clips: prepared.clips,
+          evidence: prepared.evidence,
+        }),
         fileKey,
       ),
       undefined,
