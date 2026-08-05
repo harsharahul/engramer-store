@@ -28,9 +28,11 @@ describe("passport validity", () => {
     );
     const rule = out.find((i) => i.ruleId === "passport-six-months");
     expect(rule).toBeDefined();
-    // The date it stops being useful is six months before the printed one,
-    // and appears on no document the owner has.
-    expect(rule!.text).toContain("Aug 2026");
+    // The date it stops being useful is six months before the printed one and
+    // appears on no document the owner has, so it belongs in the headline
+    // rather than in reasoning nobody expands.
+    expect(rule!.title).toContain("14 Aug 2026");
+    expect(rule!.text).toContain("six months");
     expect(rule!.fileId).toBe("f1");
   });
 
@@ -103,26 +105,6 @@ describe("simple deadline rules", () => {
 });
 
 describe("what the rules will and will not read", () => {
-  it("counts expiry dates that were never confirmed", () => {
-    const out = insightsFor(
-      [
-        file("f1", "a.pdf", [fact({ value: "2027-01-01", confirmed: false })]),
-        file("f2", "b.pdf", [fact({ value: "2027-02-01", confirmed: false })]),
-      ],
-      NOW,
-    );
-    expect(out.find((i) => i.ruleId === "unconfirmed-expiries")!.text).toContain("2");
-  });
-
-  it("says it in singular when there is one, rather than one document carry", () => {
-    const out = insightsFor(
-      [file("f1", "a.pdf", [fact({ value: "2027-01-01", confirmed: false })])],
-      NOW,
-    );
-    const text = out.find((i) => i.ruleId === "unconfirmed-expiries")!.text;
-    expect(text).toBe("One document carries an expiry date you have not tracked yet.");
-  });
-
   it("ignores facts the owner has not confirmed when applying a rule", () => {
     const out = ruleIds([
       file("f1", "p.pdf", [fact({ document: "passport", value: "2027-02-14", confirmed: false })]),

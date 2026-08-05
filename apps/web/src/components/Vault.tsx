@@ -1672,6 +1672,7 @@ export function Vault() {
         view.kind !== "shared" && (
           <DetailsPanel
             file={selectedFile}
+            allFiles={liveFiles}
             selectionCount={selection.size}
             onOpen={openFile}
             onEdit={(id) => setEditorId(id)}

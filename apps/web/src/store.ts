@@ -173,6 +173,12 @@ interface StoreState {
   confirmFact: (id: string, factId: string, value?: string) => Promise<void>;
   /** Puts a fact away. It is not offered again by a later scan. */
   dismissFact: (id: string, factId: string) => Promise<void>;
+  /**
+   * The evidence behind a file's facts: the complete reference numbers and
+   * the passages they came from. Fetched on request rather than held, which
+   * is the entire reason metadata carries only the last four characters.
+   */
+  factEvidence: (id: string) => Promise<FactEvidence[]>;
   /** Records that a read found this file disagreeing with its digest. */
   markCorrupt: (id: string) => void;
   /** Records that a read matched the digest recorded for this file. */
@@ -1006,6 +1012,20 @@ export const useStore = create<StoreState>((set, get) => {
 
     dismissFact: async (id, factId) =>
       updateFact(id, factId, (fact) => ({ ...fact, dismissed: true })),
+
+    factEvidence: async (id) => {
+      const file = get().files.get(id);
+      if (!file) {
+        return [];
+      }
+      try {
+        const bytes = await api.downloadBlob(file.id, "index");
+        return decodeIndexPayload(decryptBytes(bytes, file.key)).evidence ?? [];
+      } catch {
+        // A file stored before facts existed has no index blob to read.
+        return [];
+      }
+    },
 
     toggleFavorite: async (id) => {
       const file = get().files.get(id);

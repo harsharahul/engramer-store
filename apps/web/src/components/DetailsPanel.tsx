@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { decryptContent, decryptFileMetadata } from "@engramer/crypto";
 import { api, type FileVersionInfo } from "../api";
+import { FileFacts, LibraryIntel } from "./FactsPanel";
 import { useStore, type FileEntry } from "../store";
 import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
@@ -23,6 +24,8 @@ import {
  */
 export function DetailsPanel(props: {
   file: FileEntry | null;
+  /** Everything live, for the library intelligence shown when nothing is picked. */
+  allFiles: FileEntry[];
   selectionCount: number;
   onOpen: (id: string) => void;
   onEdit: (id: string) => void;
@@ -89,16 +92,24 @@ export function DetailsPanel(props: {
       <aside className="details">
         <header>
           <span className="details-title">
-            {props.selectionCount > 1 ? `${props.selectionCount} selected` : "Details"}
+            {props.selectionCount > 1
+              ? `${props.selectionCount} selected`
+              : // Nothing is selected, so the panel is not describing a file
+                // and should not claim to be.
+                "Right now"}
           </span>
           <button className="icon-btn" title="Close" onClick={props.onClose}>
             <XGlyph size={14} />
           </button>
         </header>
         <div className="details-empty">
-          {props.selectionCount > 1
-            ? "Use the bar below for bulk actions."
-            : "Select a file to inspect it."}
+          {props.selectionCount > 1 ? (
+            "Use the bar below for bulk actions."
+          ) : (
+            // Nothing selected is the panel's usual state, so it is worth
+            // more than a sentence telling you to select something.
+            <LibraryIntel files={props.allFiles} onOpen={props.onOpen} />
+          )}
         </div>
       </aside>
     );
@@ -183,6 +194,8 @@ export function DetailsPanel(props: {
                 : "No checksum; stored before this existed"}
         </dd>
       </dl>
+
+      <FileFacts file={file} />
 
       <div className="details-tags">
         <span className="details-label">Tags</span>
