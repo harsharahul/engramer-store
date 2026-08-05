@@ -37,7 +37,15 @@ import {
 } from "../watchfolders";
 import { diagEntries, diagText, onDiag } from "../diag";
 import { AdminBody } from "./AdminPanel";
-import { KeyGlyph, LockGlyph, MoonGlyph, ScanTextGlyph, SparkGlyph, SunGlyph } from "./Icon";
+import {
+  ClockGlyph,
+  KeyGlyph,
+  LockGlyph,
+  MoonGlyph,
+  ScanTextGlyph,
+  SparkGlyph,
+  SunGlyph,
+} from "./Icon";
 
 type UnlockState = "checking" | "on" | "available" | "native" | "unsupported";
 
@@ -51,6 +59,8 @@ export function ProfileView(props: {
   onToggleOcr: () => void;
   semanticOn: boolean;
   onToggleSemantic: () => void;
+  factsOn: boolean;
+  onToggleFacts: () => void;
   theme: ThemeMode;
   onToggleTheme: () => void;
   accent: string;
@@ -394,6 +404,27 @@ export function ProfileView(props: {
             onClick={props.onToggleSemantic}
           >
             <span className={`switch${props.semanticOn ? " on" : ""}`} />
+          </button>
+        </div>
+
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>
+              <ClockGlyph size={13} /> Read dates in documents
+            </b>
+            <div className="profile-row-sub">
+              Finds expiry dates, amounts due and reference numbers in what you store, and tells
+              you before they matter. Everything is read on this device, nothing is acted on until
+              you confirm it, and reference numbers are kept as their last four digits.
+            </div>
+          </div>
+          <button
+            className="profile-switch"
+            role="switch"
+            aria-checked={props.factsOn}
+            onClick={props.onToggleFacts}
+          >
+            <span className={`switch${props.factsOn ? " on" : ""}`} />
           </button>
         </div>
       </section>

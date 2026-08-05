@@ -38,6 +38,9 @@ import { reloadForUpdate, watchForUpdate } from "../update";
 import { startWatchSync } from "../watchfolders";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
 import { cosine, embedQuery, semanticEnabled, setSemanticEnabled } from "../intel/semantic";
+import { factsEnabled, setFactsEnabled } from "../intel/scan";
+import { soonestDated } from "../intel/facts";
+import { HeadsUp } from "./HeadsUp";
 import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { saveDecryptedFile } from "../download";
@@ -121,6 +124,7 @@ type View =
   | { kind: "favorites" }
   | { kind: "shared" }
   | { kind: "profile" }
+  | { kind: "expiring" }
   | { kind: "category"; name: string };
 
 const CATEGORY_ORDER = [
@@ -237,6 +241,7 @@ export function Vault() {
   const [recentSearches, setRecentSearches] = useState<string[]>(() => loadRecentSearches());
   const [ocrOn, setOcrOn] = useState(() => ocrEnabled());
   const [semanticOn, setSemanticOn] = useState(() => semanticEnabled());
+  const [factsOn, setFactsOn] = useState(() => factsEnabled());
   const [semanticHits, setSemanticHits] = useState<SearchHit[]>([]);
   const [similarTo, setSimilarTo] = useState<FileEntry | null>(null);
   const [similarHits, setSimilarHits] = useState<SearchHit[]>([]);
@@ -342,6 +347,15 @@ export function Vault() {
       case "favorites":
         files = liveFiles.filter((f) => f.favorite);
         break;
+      case "expiring": {
+        // Sorted by the date itself rather than by the usual sort, because
+        // the whole point of this view is what happens next.
+        const dated = liveFiles
+          .map((file) => ({ file, at: soonestDated(file.facts) }))
+          .filter((entry): entry is { file: FileEntry; at: string } => entry.at !== undefined);
+        dated.sort((a, b) => a.at.localeCompare(b.at));
+        return dated.map((entry) => entry.file);
+      }
       case "category":
         files = liveFiles.filter((f) => (f.category ?? "Other") === view.name);
         break;
@@ -1043,6 +1057,10 @@ export function Vault() {
 
   const libraryCategories = CATEGORY_ORDER.filter((c) => (categoryCounts.get(c) ?? 0) > 0);
 
+  // The entry appears only once something is being tracked, so a vault that
+  // has never used this never sees a view that would always be empty.
+  const expiringCount = liveFiles.filter((f) => soonestDated(f.facts) !== undefined).length;
+
   const viewTitle = searching
     ? `${hits.length} result${hits.length === 1 ? "" : "s"}`
     : view.kind === "folder"
@@ -1053,6 +1071,8 @@ export function Vault() {
           ? "Recent"
           : view.kind === "favorites"
             ? "Favorites"
+            : view.kind === "expiring"
+              ? "Expiring soon"
             : view.kind === "shared"
               ? "Shared"
               : view.kind === "profile"
@@ -1121,6 +1141,14 @@ export function Vault() {
           "Favorites",
           liveFiles.filter((f) => f.favorite).length,
         )}
+        {expiringCount > 0 &&
+          navButton(
+            view.kind === "expiring",
+            () => setView({ kind: "expiring" }),
+            <ClockGlyph />,
+            "Expiring soon",
+            expiringCount,
+          )}
         {navButton(view.kind === "shared", () => setView({ kind: "shared" }), <LinkGlyph />, "Shared")}
         {navButton(view.kind === "trash", () => setView({ kind: "trash" }), <TrashGlyph />, "Trash")}
 
@@ -1507,6 +1535,17 @@ export function Vault() {
         </div>
 
         <div className="content" onClick={(e) => e.target === e.currentTarget && clearSelection()}>
+          {/* Above the files, and only when it has something to say. It is
+              deliberately not shown while searching or in trash: both are
+              places you arrived at with a question of your own. */}
+          {!searching && (view.kind === "folder" || view.kind === "expiring") && (
+            <HeadsUp
+              files={liveFiles}
+              onOpen={(id) => openFile(id)}
+              onConfirm={(fileId, factId, value) => void store.confirmFact(fileId, factId, value)}
+              onDismiss={(fileId, factId) => void store.dismissFact(fileId, factId)}
+            />
+          )}
           {searching ? (
             <SearchResults
               hits={[...hits, ...semanticHits.filter((s) => !hits.some((h) => h.file.id === s.file.id))]}
@@ -1535,6 +1574,12 @@ export function Vault() {
               onToggleOcr={toggleOcr}
               semanticOn={semanticOn}
               onToggleSemantic={toggleSemantic}
+              factsOn={factsOn}
+              onToggleFacts={() => {
+                const next = !factsOn;
+                setFactsEnabled(next);
+                setFactsOn(next);
+              }}
               theme={theme}
               onToggleTheme={toggleTheme}
               accent={accent}
@@ -1970,6 +2015,18 @@ function EmptyState(props: {
         <span className="empty-mark">⌘</span>
         <h3>Decrypting your library</h3>
         <p>One moment.</p>
+      </div>
+    );
+  }
+  if (props.view.kind === "expiring") {
+    return (
+      <div className="empty">
+        <span className="empty-mark">◷</span>
+        <h3>Nothing is expiring</h3>
+        <p>
+          Dates found in your documents appear here once you confirm them. Turn on "Read dates in
+          documents" in your profile to start looking.
+        </p>
       </div>
     );
   }
