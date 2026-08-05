@@ -3,6 +3,46 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.36.0] - 2026-08-06
+
+### Added
+- **Every labelled date is found now, not only the ones with familiar
+  labels.** Real documents carry their controlling dates under labels no
+  vocabulary anticipates, sometimes in formats no pattern expected, and
+  a date the reader cannot see loses to a lesser date it can. The reader
+  now surfaces every labelled date in a document and, when it does not
+  recognize the label, quotes the document's own words and asks; you
+  supply the meaning once. Labels it does recognize are typed as before,
+  dates labelled anything birth-shaped are refused outright, as are
+  print and generation stamps, and the date grammar learned the
+  year-first forms some documents use.
+- **Any date can be corrected on the spot.** "Wrong date?" opens an
+  editor prefilled with the reading; the corrected value is stored as
+  your statement, marked "entered by you", and a later rescan can
+  neither resurrect the wrong reading nor re-offer your correction as
+  news.
+- **Add to calendar.** Any tracked date becomes a calendar event with
+  the reminder built in, generated entirely on your device and handed
+  to the calendar you already trust. A time a document gave stays
+  floating local time, because a departure is local to its airport.
+- **Bulk answers.** A document with several dates is one card asking
+  which matter, and above a handful of pending documents everything
+  listed can be tracked or ignored at once, costing one write per file.
+  Only dates still ahead of you, or recently enough past to act on, are
+  offered at all: a thousand-file upload of old documents records its
+  facts quietly and asks about almost nothing.
+- **Done.** A tracked date that has passed can be retired in one click
+  instead of nagging forever.
+
+### Fixed
+- Files sent to you through a file request now record a content
+  checksum on the sender's device, before encryption. Previously every
+  received file stayed unverifiable forever.
+- The library sweep now revisits documents whose suggestions were never
+  answered, so a better reader reaches files that were read badly the
+  first time; saving over a file now discovers facts even when the file
+  had none before.
+
 ## [0.35.0] - 2026-08-05
 
 ### Added
