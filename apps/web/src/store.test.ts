@@ -20,6 +20,7 @@ const entry = (over: Partial<FileEntry> = {}): FileEntry => ({
   hasClip: false,
   inlineText: false,
   tags: ["documents"],
+  facts: [],
   favorite: false,
   key: new Uint8Array(32),
   hasThumb: false,
@@ -33,6 +34,25 @@ describe("metadataOf", () => {
   it("keeps the content digest, which a patch would otherwise erase", () => {
     const digest = "b1946ac92492d2347c6235b4d2611184";
     expect(metadataOf(entry({ digest })).digest).toBe(digest);
+  });
+
+  it("keeps the facts read out of the file", () => {
+    const facts = [
+      {
+        id: "f1:expiry:2029-03-12",
+        kind: "expiry" as const,
+        document: "passport" as const,
+        value: "2029-03-12",
+        source: "mrz" as const,
+        confidence: 1,
+        confirmed: true,
+      },
+    ];
+    expect(metadataOf(entry({ facts })).facts).toEqual(facts);
+  });
+
+  it("writes no facts field at all for a file that carries none", () => {
+    expect(metadataOf(entry())).not.toHaveProperty("facts");
   });
 
   it("still carries the fields it always did", () => {

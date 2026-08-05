@@ -25,6 +25,7 @@ import { analyzeFile, downloadAndDecrypt, downloadThumbnail, encryptAndUpload } 
 import { recognizeImage, recognizePdf } from "./intel/ocr";
 import { isPdf } from "./intel/extract";
 import { embedImage } from "./intel/semantic";
+import { asFacts, type Fact } from "./intel/facts";
 import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
 import { blankDocument, DOCX_MIME, XLSX_MIME } from "./office/templates";
@@ -62,6 +63,8 @@ export interface FileEntry {
   inlineText: boolean;
   category?: string;
   tags: string[];
+  /** Facts read out of the contents, summarized. Evidence is in the index blob. */
+  facts: Fact[];
   favorite: boolean;
   /** Digest of the contents, recorded on the device that uploaded them. */
   digest?: string;
@@ -162,6 +165,13 @@ interface StoreState {
   ) => Promise<string>;
   renameFile: (id: string, name: string) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
+  /**
+   * Pins a fact the owner accepted. Pass `value` when they corrected an
+   * ambiguous reading; nothing acts on a fact until this has been called.
+   */
+  confirmFact: (id: string, factId: string, value?: string) => Promise<void>;
+  /** Puts a fact away. It is not offered again by a later scan. */
+  dismissFact: (id: string, factId: string) => Promise<void>;
   /** Records that a read found this file disagreeing with its digest. */
   markCorrupt: (id: string) => void;
   /** Records that a read matched the digest recorded for this file. */
@@ -216,6 +226,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
+    facts: asFacts(meta.facts),
     digest: meta.digest,
     favorite: meta.favorite ?? false,
     key,
@@ -250,6 +261,7 @@ export function metadataOf(file: FileEntry): FileMetadata {
     ...(file.hasClip ? { hasClip: true } : {}),
     category: file.category,
     tags: file.tags,
+    ...(file.facts.length > 0 ? { facts: file.facts } : {}),
     favorite: file.favorite,
     // Without this a rename erased the digest, and with it the only record of
     // what the file held when it was stored. Nothing failed at the time; the
@@ -390,6 +402,16 @@ export const useStore = create<StoreState>((set, get) => {
       encryptedMeta: encryptFileMetadata({ ...metadataOf(file), ...patch }, file.key),
     });
     applyFile(dto);
+  };
+
+  /** Applies a change to one fact and stores the whole set back. */
+  const updateFact = async (id: string, factId: string, change: (fact: Fact) => Fact) => {
+    const file = get().files.get(id);
+    if (!file) {
+      return;
+    }
+    const facts = file.facts.map((fact) => (fact.id === factId ? change(fact) : fact));
+    await patchFileMeta(id, { facts });
   };
 
   /** Find or create a root folder for a category. Deduplicates concurrent creates. */
@@ -919,6 +941,24 @@ export const useStore = create<StoreState>((set, get) => {
 
     setTags: async (id, tags) =>
       patchFileMeta(id, { tags: [...new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))] }),
+
+    confirmFact: async (id, factId, value) =>
+      updateFact(id, factId, (fact) => {
+        const confirmed: Fact = { ...fact, confirmed: true };
+        // The identity stays as it was even when the value is corrected.
+        // An id is derived from the reading a scan produced, so keeping it
+        // is what lets a later rescan recognize this fact and be suppressed
+        // by it. Re-deriving the id would let the original wrong suggestion
+        // come back and sit beside the corrected one.
+        if (value !== undefined) {
+          confirmed.value = value;
+        }
+        delete confirmed.ambiguous;
+        return confirmed;
+      }),
+
+    dismissFact: async (id, factId) =>
+      updateFact(id, factId, (fact) => ({ ...fact, dismissed: true })),
 
     toggleFavorite: async (id) => {
       const file = get().files.get(id);

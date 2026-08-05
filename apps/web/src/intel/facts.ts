@@ -161,6 +161,38 @@ export function factId(fileId: string, kind: FactKind, value: string): string {
 }
 
 /**
+ * Facts as they come back out of decrypted metadata.
+ *
+ * The check is structural, not a vocabulary check, and that distinction
+ * matters: a client meeting a `kind` it has never heard of keeps it and stores
+ * it back unchanged, because metadata is rewritten from what was read and
+ * rejecting an unfamiliar value here would silently delete something a newer
+ * version wrote. Rules simply never match a kind they do not know, which is
+ * the right place for that ignorance to live.
+ */
+export function asFacts(raw: unknown): Fact[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.filter(isFactShaped).slice(0, MAX_FACTS_PER_FILE);
+}
+
+function isFactShaped(value: unknown): value is Fact {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<Fact>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.kind === "string" &&
+    typeof candidate.document === "string" &&
+    typeof candidate.value === "string" &&
+    typeof candidate.source === "string" &&
+    typeof candidate.confidence === "number"
+  );
+}
+
+/**
  * Drops any fact whose value cannot be found in the document it came from.
  *
  * Separators and case are ignored on both sides, because a date is written a
