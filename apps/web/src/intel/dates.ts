@@ -186,6 +186,46 @@ export function parseDate(text: string, order?: DateOrder): ParsedDate | null {
   return null;
 }
 
+/**
+ * A time of day, requiring a colon.
+ *
+ * Only a colon, deliberately: a dotted date like 12.30.2029 would otherwise
+ * read as half past twelve, and four bare digits are as often a reference
+ * number as a departure. A time that has to be found without a separator
+ * belongs to whatever parser knows the format it is reading.
+ */
+const TIME = /\b(\d{1,2}):([0-5]\d)\s*([ap])\.?\s*m\.?/i;
+const TIME_24 = /\b([01]?\d|2[0-3]):([0-5]\d)\b/;
+
+/**
+ * A local time of day as "HH:MM".
+ *
+ * Local to whatever the document is talking about, and deliberately not
+ * converted to an instant: a departure printed on a ticket is the time at that
+ * airport, and turning it into UTC without knowing the airport's zone would
+ * produce an answer that looks precise and is hours wrong.
+ */
+export function parseTime(text: string): string | null {
+  if (!text) {
+    return null;
+  }
+  const meridiem = TIME.exec(text);
+  if (meridiem) {
+    const raw = Number(meridiem[1]);
+    if (raw < 1 || raw > 12) {
+      return null;
+    }
+    const pm = meridiem[3]!.toLowerCase() === "p";
+    const hour = raw === 12 ? (pm ? 12 : 0) : pm ? raw + 12 : raw;
+    return `${String(hour).padStart(2, "0")}:${meridiem[2]}`;
+  }
+  const plain = TIME_24.exec(text);
+  if (plain) {
+    return `${String(Number(plain[1])).padStart(2, "0")}:${plain[2]}`;
+  }
+  return null;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Whole calendar days from today, negative once the date has passed. */
