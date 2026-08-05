@@ -7,8 +7,27 @@
 
 const MAGIC = "EIDX1:";
 
+/**
+ * The half of a fact that does not belong in metadata: the complete reference
+ * number, and the passage it was read from so a fact can show its work.
+ * Fetched only when someone opens a fact, which is what keeps the most
+ * sensitive string in the vault out of the structure every device decrypts on
+ * every sync.
+ */
+export interface FactEvidence {
+  /** Matches the fact's id in metadata. */
+  id: string;
+  /** The complete value, of which metadata carries the last four characters. */
+  full?: string;
+  /** The passage the value came from. */
+  span?: string;
+  page?: number;
+}
+
 export interface IndexPayload {
   text?: string;
+  /** Where each fact in this file's metadata came from. */
+  evidence?: FactEvidence[];
   /** The primary meaning vector: the image, or a video's poster frame. */
   clip?: Float32Array;
   /** Every meaning vector, when there is more than one: videos sample
@@ -39,9 +58,17 @@ function vectorToBase64(vector: Float32Array): string {
 }
 
 export function encodeIndexPayload(payload: IndexPayload): Uint8Array {
-  const body: { text?: string; clip?: string; clips?: string[] } = {};
+  const body: {
+    text?: string;
+    clip?: string;
+    clips?: string[];
+    evidence?: FactEvidence[];
+  } = {};
   if (payload.text !== undefined) {
     body.text = payload.text;
+  }
+  if (payload.evidence !== undefined && payload.evidence.length > 0) {
+    body.evidence = payload.evidence;
   }
   const primary = payload.clip ?? payload.clips?.[0];
   if (primary !== undefined) {
@@ -64,10 +91,16 @@ export function decodeIndexPayload(bytes: Uint8Array): IndexPayload {
       text?: string;
       clip?: string;
       clips?: string[];
+      evidence?: FactEvidence[];
     };
     const payload: IndexPayload = {};
     if (typeof body.text === "string") {
       payload.text = body.text;
+    }
+    if (Array.isArray(body.evidence)) {
+      payload.evidence = body.evidence.filter(
+        (entry) => entry !== null && typeof entry === "object" && typeof entry.id === "string",
+      );
     }
     const decodeVector = (encoded: string) => {
       const raw = fromBase64(encoded);

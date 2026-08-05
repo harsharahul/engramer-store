@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groundFacts, maskTail, mergeFacts, type Fact } from "./facts";
+import { asFacts, groundFacts, maskTail, mergeFacts, type Fact } from "./facts";
 
 const fact = (over: Partial<Fact> = {}): Fact => ({
   id: "f1",
@@ -56,6 +56,36 @@ describe("groundFacts", () => {
     const amount = fact({ kind: "amount", value: "410.00", source: "pattern" });
     expect(groundFacts([amount], "Total due: $410.00")).toHaveLength(1);
     expect(groundFacts([amount], "Total due: $9.99")).toHaveLength(0);
+  });
+});
+
+describe("asFacts", () => {
+  it("reads facts back out of what metadata carried", () => {
+    const stored = [{ ...fact(), confirmed: true }];
+    expect(asFacts(stored)).toEqual(stored);
+  });
+
+  it("returns nothing for a file that carries none", () => {
+    expect(asFacts(undefined)).toEqual([]);
+    expect(asFacts(null)).toEqual([]);
+    expect(asFacts("not a list")).toEqual([]);
+  });
+
+  it("drops an entry missing a field every fact must have", () => {
+    expect(asFacts([{ id: "a", kind: "expiry" }])).toEqual([]);
+    expect(asFacts([{ ...fact(), confidence: "high" }])).toEqual([]);
+  });
+
+  it("keeps a kind it does not recognize, rather than deleting what a newer version wrote", () => {
+    // An older client reading metadata a newer one wrote must store it back
+    // unchanged. Validating the vocabulary here would quietly destroy it.
+    const future = { ...fact(), kind: "carbon-offset", id: "f9" };
+    expect(asFacts([future])).toEqual([future]);
+  });
+
+  it("caps what one file may carry, however much metadata claimed", () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({ ...fact(), id: `f${i}` }));
+    expect(asFacts(many).length).toBe(12);
   });
 });
 

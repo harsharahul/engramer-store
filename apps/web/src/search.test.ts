@@ -11,6 +11,7 @@ function file(partial: Partial<FileEntry>): FileEntry {
     size: 1,
     mtime: partial.mtime ?? 0,
     tags: partial.tags ?? [],
+    facts: partial.facts ?? [],
     favorite: partial.favorite ?? false,
     text: partial.text,
     hasClip: false,

@@ -54,6 +54,36 @@ describe("index blob envelope", () => {
     expect([...decoded.clip!]).toEqual([0.5, 0.5]);
   });
 
+  it("carries the evidence behind a fact alongside the text", () => {
+    const evidence = [
+      { id: "f1:expiry:2029-03-12", full: "D12345678", span: "Expires 12 March 2029" },
+    ];
+    const decoded = decodeIndexPayload(
+      encodeIndexPayload({ text: "Expires 12 March 2029", evidence }),
+    );
+    expect(decoded.text).toBe("Expires 12 March 2029");
+    expect(decoded.evidence).toEqual(evidence);
+  });
+
+  it("leaves evidence absent when a file has none, rather than storing an empty list", () => {
+    expect(decodeIndexPayload(encodeIndexPayload({ text: "plain" })).evidence).toBeUndefined();
+    expect(decodeIndexPayload(encodeIndexPayload({ text: "x", evidence: [] })).evidence)
+      .toBeUndefined();
+  });
+
+  it("still reads a blob written before evidence existed", () => {
+    const decoded = decodeIndexPayload(new TextEncoder().encode("legacy search text"));
+    expect(decoded.text).toBe("legacy search text");
+    expect(decoded.evidence).toBeUndefined();
+  });
+
+  it("drops a malformed evidence entry rather than carrying it", () => {
+    const decoded = decodeIndexPayload(
+      encodeIndexPayload({ evidence: [{ id: "ok" }, { full: "no id" }] as never }),
+    );
+    expect(decoded.evidence).toEqual([{ id: "ok" }]);
+  });
+
   it("survives corrupt envelope bodies by yielding nothing", () => {
     const bytes = encodeIndexPayload({ text: "ok" });
     const corrupted = bytes.slice(0, bytes.length - 3);
