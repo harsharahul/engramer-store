@@ -131,6 +131,55 @@ function ortAssets(): Plugin {
 }
 
 /**
+ * Serves the barcode reader's WebAssembly under /zxing, for the same reason as
+ * the two above: the decoder resolves its .wasm by filename at runtime, and
+ * the strict CSP would refuse a CDN even if the default were left alone.
+ */
+function zxingAssets(): Plugin {
+  // Exports maps hide the package root, so resolve the entry and walk to the
+  // wasm that sits beside the bundled readers.
+  const readerEntry = require.resolve("zxing-wasm/reader");
+  const files = [
+    {
+      from: join(dirname(readerEntry), "..", "..", "reader", "zxing_reader.wasm"),
+      name: "zxing_reader.wasm",
+    },
+  ];
+  let outDir = "dist";
+  let isBuild = false;
+  return {
+    name: "engram-zxing-assets",
+    configResolved(config) {
+      outDir = config.build.outDir;
+      isBuild = config.command === "build" && !process.env.VITEST;
+    },
+    closeBundle() {
+      if (!isBuild) {
+        return;
+      }
+      const target = join(outDir, "zxing");
+      mkdirSync(target, { recursive: true });
+      for (const file of files) {
+        if (existsSync(file.from)) {
+          cpSync(file.from, join(target, file.name));
+        }
+      }
+    },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const path = (req.url ?? "").split("?")[0];
+        const hit = files.find((f) => path === `/zxing/${f.name}`);
+        if (!hit) {
+          return next();
+        }
+        res.setHeader("content-type", "application/wasm");
+        res.end(require("node:fs").readFileSync(hit.from));
+      });
+    },
+  };
+}
+
+/**
  * Writes the version the deployment is serving, for a running client to
  * compare itself against. Small and uncached on purpose: it is the one file
  * that must never be answered from a cache, or a client will believe it is
@@ -220,6 +269,7 @@ export default defineConfig({
     versionFile(),
     ocrAssets(),
     ortAssets(),
+    zxingAssets(),
     VitePWA({
       strategies: "injectManifest",
       srcDir: "src",
