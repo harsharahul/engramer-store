@@ -78,4 +78,50 @@ describe("scanForFacts", () => {
     const out = await scanForFacts({ ...base, text: many });
     expect(out.facts.length).toBeLessThanOrEqual(12);
   });
+
+  it("reads a saved confirmation's own reservation data, zones intact", async () => {
+    const raw = `<html><script type="application/ld+json">{
+      "@type": "LodgingReservation",
+      "reservationNumber": "LRK-449022",
+      "reservationFor": { "name": "The Larkspur Hotel" },
+      "checkinTime": "2027-03-04T15:00:00-05:00"
+    }</script></html>`;
+    const out = await scanForFacts({ name: "confirmation.html", mime: "text/html", raw });
+    expect(out.facts.find((f) => f.kind === "event")).toMatchObject({
+      value: "2027-03-04",
+      time: "15:00",
+      zone: "-05:00",
+      source: "jsonld",
+    });
+    // The confirmation number is an identifier like any other: masked in the
+    // summary, whole only in the evidence.
+    const id = out.facts.find((f) => f.kind === "identifier");
+    expect(id!.value).toBe("9022");
+    expect(JSON.stringify(out.facts)).not.toContain("LRK-449022");
+    expect(out.evidence.find((e) => e.id === id!.id)!.full).toBe("LRK-449022");
+  });
+
+  it("grounds nothing away from a reservation, which is structured", async () => {
+    const raw = `<html><script type="application/ld+json">{
+      "@type": "LodgingReservation",
+      "reservationFor": { "name": "Inn" },
+      "checkinTime": "2027-03-04T15:00:00"
+    }</script></html>`;
+    // The page's visible text never mentions the date; the fact survives.
+    const out = await scanForFacts({ name: "c.html", mime: "text/html", raw, text: "Thanks!" });
+    expect(out.facts.some((f) => f.kind === "event" && f.value === "2027-03-04")).toBe(true);
+  });
+
+  it("carries a travel event with its time through the whole pipeline", async () => {
+    const out = await scanForFacts({
+      ...base,
+      text: "Boarding pass\nDeparture: 4 March 2027 09:40",
+    });
+    expect(out.facts.find((f) => f.kind === "event")).toMatchObject({
+      value: "2027-03-04",
+      time: "09:40",
+      document: "boarding-pass",
+      label: "Departure",
+    });
+  });
 });

@@ -31,7 +31,7 @@ const ISSUED_LABELS = /\b(?:date\s+of\s+issue|issue\s+date|issued(?:\s+on)?)\b/g
  * when the window carries one.
  */
 const EVENT_LABELS =
-  /\b(?:check[- ]?in|check[- ]?out|departure|departs|boarding(?:\s+time)?|arrival|arrives|pick[- ]?up|drop[- ]?off)\b/gi;
+  /\b(?:check[- ]?in|check[- ]?out|departure|departs|boarding(?:\s+time)?(?!\s+pass)|arrival|arrives|pick[- ]?up|drop[- ]?off)\b/gi;
 
 const KINDS: { kind: Fact["kind"]; labels: RegExp }[] = [
   { kind: "expiry", labels: EXPIRY_LABELS },

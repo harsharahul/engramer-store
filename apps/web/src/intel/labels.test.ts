@@ -195,6 +195,11 @@ describe("travel vocabulary", () => {
     expect(labelledFacts("Check-in desk is on level 2")).toEqual([]);
   });
 
+  it("does not mistake the words boarding pass for a boarding time", () => {
+    const facts = labelledFacts("Boarding pass\nDeparture: 4 March 2027 09:40");
+    expect(facts.map((f) => f.label)).toEqual(["Departure"]);
+  });
+
   it("recognizes travel documents by kind", () => {
     expect(guessDocumentKind("BOARDING PASS  Gate C12  Seat 14C")).toBe("boarding-pass");
     expect(guessDocumentKind("Hotel Reservation. Confirmation number LRK-1")).toBe("hotel-booking");

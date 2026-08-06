@@ -30,7 +30,7 @@ import {
 } from "./api";
 import { categorize, type Analysis } from "./intel/categorize";
 import { extractExif, extractText, isPdf } from "./intel/extract";
-import { ocrEnabled, recognizeImage, recognizePdf } from "./intel/ocr";
+import { ocrEnabled, recognizeImage, recognizePdf, renderPdfPage } from "./intel/ocr";
 import { embedImage, semanticEnabled } from "./intel/semantic";
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import type { Fact, FactEvidence } from "./intel/facts";
@@ -394,12 +394,31 @@ export async function analyzeFile(
   let evidence: FactEvidence[] = [];
   if (factsEnabled()) {
     onPhase?.("reading dates");
+    // Bytes worth scanning for a barcode: an image as it is; for a PDF, its
+    // first page rendered at recognition width, because a printed pass's
+    // code needs more resolution than the thumbnail carries.
+    const barcodeSource = file.type.startsWith("image/")
+      ? file
+      : isPdf(file.name, file.type)
+        ? await withDeadline(renderPdfPage(file), ANALYSIS_DEADLINE_MS, signal).catch(() => null)
+        : null;
+    // Saved confirmations carry schema.org reservation data in their markup,
+    // which text extraction strips; the reader wants the document as written.
+    const keepsMarkup =
+      file.type === "text/html" ||
+      file.type === "message/rfc822" ||
+      /\.(?:html?|eml)$/i.test(file.name);
+    const raw = keepsMarkup
+      ? await withDeadline(file.text(), ANALYSIS_DEADLINE_MS, signal).catch(() => undefined)
+      : undefined;
     const found = await withDeadline(
       scanForFacts({
         name: file.name,
         mime: file.type || "application/octet-stream",
         text,
-        file,
+        ...(raw !== undefined ? { raw } : {}),
+        ...(barcodeSource ? { file: barcodeSource } : {}),
+        storedAt: file.lastModified || Date.now(),
       }),
       ANALYSIS_DEADLINE_MS * 2,
       signal,

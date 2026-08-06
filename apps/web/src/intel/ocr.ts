@@ -111,6 +111,48 @@ const MAX_PDF_BYTES = 50 * 1024 * 1024;
 const MAX_OCR_PAGES = 20;
 const PDF_RENDER_WIDTH = 1600;
 
+import type { PDFPageProxy } from "pdfjs-dist";
+
+async function pageToBlob(page: PDFPageProxy, width: number): Promise<Blob | null> {
+  const base = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale: Math.max(1, width / base.width) });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return null;
+  }
+  await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+  return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+}
+
+/**
+ * Renders one page of a PDF to an image at recognition width. The barcode
+ * reader borrows this: a printed boarding pass is usually stored as a PDF,
+ * and its code needs more resolution than a thumbnail carries.
+ */
+export async function renderPdfPage(pdf: Blob, pageNumber = 1): Promise<Blob | null> {
+  if (pdf.size === 0 || pdf.size > MAX_PDF_BYTES) {
+    return null;
+  }
+  const pdfjs = await import("pdfjs-dist");
+  const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+  const loadingTask = pdfjs.getDocument({ data: await pdf.arrayBuffer() });
+  try {
+    const doc = await loadingTask.promise;
+    if (pageNumber > doc.numPages) {
+      return null;
+    }
+    return await pageToBlob(await doc.getPage(pageNumber), PDF_RENDER_WIDTH);
+  } catch {
+    return null;
+  } finally {
+    await loadingTask.destroy();
+  }
+}
+
 /**
  * Recognizes text in a scanned PDF: pages render to canvas and go through
  * the same on-device engine as photos. Documents with a real text layer
@@ -131,18 +173,7 @@ export async function recognizePdf(pdf: Blob): Promise<string | undefined> {
     const pages = Math.min(doc.numPages, MAX_OCR_PAGES);
     let total = 0;
     for (let i = 1; i <= pages && total < TEXT_STORE_LIMIT; i++) {
-      const page = await doc.getPage(i);
-      const base = page.getViewport({ scale: 1 });
-      const viewport = page.getViewport({ scale: Math.max(1, PDF_RENDER_WIDTH / base.width) });
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(viewport.width);
-      canvas.height = Math.round(viewport.height);
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        break;
-      }
-      await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      const blob = await pageToBlob(await doc.getPage(i), PDF_RENDER_WIDTH);
       if (!blob) {
         continue;
       }
