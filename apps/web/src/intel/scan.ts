@@ -16,6 +16,7 @@
 
 import { aamvaFacts } from "./aamva";
 import { readSymbols } from "./barcode";
+import { bcbpFacts } from "./bcbp";
 import {
   factId,
   groundFacts,
@@ -26,6 +27,7 @@ import {
 } from "./facts";
 import { harvestFacts, labelledFacts, structuralDatedFacts } from "./labels";
 import { mrzFacts } from "./mrz";
+import { reservationFacts } from "./reservation";
 
 const PREF_KEY = "engram-facts";
 
@@ -50,8 +52,14 @@ export interface ScanInput {
   mime: string;
   /** Text already extracted from the document, if any. */
   text?: string;
-  /** The bytes, when reading a barcode off them is worth attempting. */
+  /** The document as written, when its format carries structured data that
+   * text extraction strips: saved confirmation pages and emails. */
+  raw?: string;
+  /** Image bytes worth attempting a barcode read on. The caller chooses:
+   * an image as it is, or a PDF's first page rendered at real resolution. */
   file?: Blob;
+  /** When the document was stored; anchors inferences like a flight's year. */
+  storedAt?: number;
 }
 
 export interface ScanResult {
@@ -74,11 +82,17 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
 
   // Machine-encoded first: exact, and it can settle what the printed text can
   // only suggest.
-  if (input.file && input.mime.startsWith("image/")) {
+  if (input.file) {
     for (const symbol of await readSymbols(input.file)) {
       decoded.push(symbol.text);
       found.push(...aamvaFacts(symbol.text));
+      found.push(...bcbpFacts(symbol.text, input.storedAt ?? Date.now()));
     }
+  }
+  // A reservation the document states about itself is the same tier: exact,
+  // and exempt from prose grounding for the same reason barcodes are.
+  if (input.raw) {
+    found.push(...reservationFacts(input.raw));
   }
 
   const text = input.text ?? "";
