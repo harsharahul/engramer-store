@@ -3,7 +3,7 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## [Unreleased]
+## [0.37.0] - 2026-08-06
 
 ### Added
 - **Travel intelligence.** The documents a trip generates become the trip.
@@ -37,7 +37,15 @@ All notable changes to Engram Store are documented here, following
   slides. Saving from the built-in editor refreshes the index too, so
   an edited document is findable by what it says now.
 - **The iOS app.** The native shell now builds for iPhone from the same
-  crate as the desktop app, distributed through TestFlight.
+  crate as the desktop app, distributed through TestFlight. And it
+  behaves like an iPhone app: Face ID unlocks the vault the moment the
+  app opens, video playback uses the shell's native streaming path
+  with a whole-file fallback where streaming cannot reach yet, and the
+  words on every surface say Face ID on a phone and Touch ID on a Mac.
+- **Trip cards worth looking at.** Flights read as one row with both
+  ends, clocks over dates over places; stays and rentals read as a
+  short rail of moments with real day names; every segment carries a
+  properly drawn glyph matched to the app's stroke style.
 
 ### Fixed
 - The words "boarding pass" no longer read as a boarding time.
