@@ -149,3 +149,67 @@ confirmation, one that was never confirmed and lost its evidence is dropped,
 and a confirmed one whose line has been edited away is kept and marked rather
 than silently deleted. Restoring an older version restores that version's
 facts, because facts describe contents.
+
+## Travel
+
+Documents a trip generates each carry a piece of the trip: the boarding pass
+knows the airports, the confirmation knows the hotel and its nights, and no
+single one knows the trip. When date reading is on, the pieces are read and,
+with confirmation, assembled.
+
+**Where the values come from**, strongest first:
+
+- **Boarding pass barcodes.** IATA BCBP rides in the PDF417 on printed
+  passes and the Aztec or QR on mobile ones, and states the route, flight
+  and booking reference exactly. Its date has no year, so the year is
+  inferred from when the document was stored and the flight is offered for
+  confirmation rather than asserted; the barcode carries no departure time
+  at all, which the printed text supplies. For a PDF, the first page is
+  rendered at recognition width before the read, because a pass's code
+  needs more resolution than a thumbnail keeps.
+- **Reservation data.** Airlines, hotels and rental agencies embed
+  schema.org JSON-LD in their confirmations so mail clients can assemble
+  trips; a saved confirmation page or email is an entire reservation as
+  structured data. Flights, stays, rentals and trains become events with
+  their local times and printed offsets, at full confidence.
+- **Travel vocabulary.** Check-in, check-out, departure, boarding, arrival,
+  pick-up and drop-off type labelled dates as events, with a time when the
+  window carries one and the label kept verbatim.
+
+**Times stay local.** A departure time is local to its airport, and
+converting it without knowing the zone produces an answer that looks precise
+and is hours wrong. Times are stored as printed; a zone rides along only
+where it is genuinely known, from a reservation's own offset or the offline
+airport table (about 3,700 scheduled-service airports with their zones,
+shipped with the app), which is also what turns JFK into New York on a card.
+
+**Trips are proposed, never assumed.** Documents whose confirmed events fall
+near each other, share a booking-reference tail, or point at the same
+destination are offered as one trip, with the evidence stated in words.
+Accepting writes a shared tag to the members and nothing more; the trip's
+name, span and itinerary derive from the members' facts, so a correction
+reshapes the trip on its own. The itinerary reads in city names with each
+leg's time as printed, exports any leg as a calendar event, and offers the
+place in Maps: a handoff to the system, because door-to-door timing would
+mean sending your location and route somewhere, and this feature refuses
+that. The one computed line is the airport lead time, three hours
+international and two domestic, stated only when both ends of the flight
+resolve.
+
+Cross-document rules run on confirmed facts: a passport checked against
+every trip's return date, a permit that expires mid-trip, the night between
+landing and check-in that nothing covers, and check-in opening the day
+before a flight.
+
+**The calendar** shows the month with tracked dates as dots and trips as
+named spans. Clicking a day lists what it holds, and the entries open their
+files. It appears in the sidebar once something is on it.
+
+**Finding connections without a shared reference** is the one place a model
+enters, and only on request. A small zero-shot entity extractor (GLiNER,
+about 180MB, staged by the same script as the semantic-search model and
+served only from this origin) reads the already-decrypted text for place
+names when the "Find connections" button is pressed. Its output is
+spans: pointers into the text, so it cannot invent a value. The places it
+finds feed the same deterministic clustering, are never stored, and never
+leave the device. Opt-in beside the other reading toggles.

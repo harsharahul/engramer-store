@@ -79,9 +79,17 @@ export function bcbpFacts(payload: string, storedAt: number): Fact[] {
     return [];
   }
   const storedYear = new Date(storedAt).getUTCFullYear();
+  // Nearest year wins, except that a pass does not describe a flight months
+  // gone: a candidate far behind the stored day yields to the coming
+  // occurrence. Only a recently flown date, a pass stored just after the
+  // trip, may resolve into the past.
+  const GRACE_PAST_MS = 45 * 86_400_000;
   let best = { iso: "", gap: Number.POSITIVE_INFINITY };
   for (const year of [storedYear - 1, storedYear, storedYear + 1]) {
     const at = Date.UTC(year, 0, leg.julian);
+    if (storedAt - at > GRACE_PAST_MS) {
+      continue;
+    }
     const gap = Math.abs(at - storedAt);
     if (gap < best.gap) {
       best = { iso: isoOf(at), gap };

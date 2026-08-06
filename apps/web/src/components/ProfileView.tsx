@@ -497,13 +497,13 @@ export function ProfileView(props: {
         <div className="profile-row">
           <div className="profile-row-main">
             <b>
-              <SparkGlyph size={13} /> Find travel connections
+              <SparkGlyph size={13} /> Find connections
             </b>
             <div className="profile-row-sub">
-              Lets a small on-device model find place names in travel documents, so a booking and
-              a hotel that share no reference can still be offered as one trip. Runs only when you
-              ask, downloads about 180MB from this server the first time, and nothing it finds is
-              stored or sent anywhere.
+              Lets a small on-device model find the names and places your documents mention, so
+              files that share no printed reference can still be offered together, a booking and
+              its hotel as one trip. Runs only when you ask, downloads about 180MB from this
+              server the first time, and nothing it finds is stored or sent anywhere.
             </div>
           </div>
           <button

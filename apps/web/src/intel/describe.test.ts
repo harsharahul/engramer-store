@@ -74,3 +74,26 @@ describe("whenLabel", () => {
     expect(whenLabel("2027-08-05", NOW)).toBe("in a year");
   });
 });
+
+describe("events speak their labels", () => {
+  it("names a flight by the document's words, never as a generic pass", () => {
+    const flight = fact({
+      kind: "event",
+      document: "boarding-pass",
+      label: "Flight AQ 214 SFO to JFK",
+      value: "2027-03-04",
+    });
+    expect(describeFact(flight)).toBe("Flight AQ 214 SFO to JFK, 4 March 2027");
+  });
+
+  it("carries the time when the event has one", () => {
+    const checkin = fact({
+      kind: "event",
+      document: "hotel-booking",
+      label: "Check-in: The Larkspur Hotel",
+      value: "2027-03-04",
+      time: "15:00",
+    });
+    expect(describeFact(checkin)).toBe("Check-in: The Larkspur Hotel, 4 March 2027 at 15:00");
+  });
+});

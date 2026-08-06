@@ -24,6 +24,7 @@ import { swappedReading } from "../intel/dates";
 import { describeFact, shown, withArticle } from "../intel/describe";
 import {
   dismissedTrips,
+  factsFingerprint,
   rememberTripDismissal,
   suggestTrips,
   tripTag,
@@ -156,11 +157,10 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
   const [linking, setLinking] = useState(false);
   const [linked, setLinked] = useState<Map<string, Set<string>> | null>(null);
   const live = props.files.filter((file) => !file.trashed);
-  // Membership only shifts when facts or tags do; the fingerprint keeps the
-  // async recomputation (the airport table loads lazily) off every render.
-  const fingerprint = live
-    .map((file) => `${file.id}:${file.facts.length}:${file.tags.length}`)
-    .join("|");
+  // The fingerprint covers answers and values, not just counts: confirming
+  // a fact changes no length, and it is precisely the moment clustering is
+  // allowed to begin.
+  const fingerprint = factsFingerprint(live);
   useEffect(() => {
     let stale = false;
     void suggestTrips(
@@ -249,7 +249,7 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
               disabled={linking}
               onClick={() => void findConnections()}
             >
-              {linking ? "Looking…" : "Find travel connections"}
+              {linking ? "Looking…" : "Find connections"}
             </button>
           </div>
         )}
@@ -316,7 +316,7 @@ function FileCard(props: {
     <div className="pending-card">
       <div className="pending-card-text">
         {single ? (
-          facts[0]!.kind === "dated" ? (
+          facts[0]!.kind === "dated" || (facts[0]!.kind === "event" && facts[0]!.label) ? (
             // The system is repeating the document, not interpreting it,
             // and the sentence should sound like that.
             <>The document says {describeFact(facts[0]!)}. </>

@@ -83,6 +83,12 @@ export function describeFact(fact: Fact): string {
   if (fact.kind === "dated" && fact.label) {
     return `“${fact.label}”: ${shown(fact.value)}${at}`;
   }
+  // An event's label is its name: a flight, a check-in, a pick-up. Saying
+  // "a boarding pass on 4 March" when the label says which flight would
+  // discard the most useful words the document had.
+  if (fact.kind === "event" && fact.label) {
+    return `${fact.label}, ${shown(fact.value)}${at}`;
+  }
   return `${documentLabel(fact.document)} ${KIND_VERBS[fact.kind] ?? "dated"} ${shown(
     fact.value,
   )}${at}`;

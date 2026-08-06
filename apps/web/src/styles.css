@@ -4531,3 +4531,112 @@ span.item-menu {
     min-height: 48px;
   }
 }
+
+/* ------------------------------------------------------------ trip card v2 */
+
+.trip-range {
+  margin: -2px 0 8px;
+  font-size: 12px;
+  opacity: 0.65;
+}
+.trip-seg {
+  border: 1px solid var(--ink-3);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.trip-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin-bottom: 6px;
+}
+.trip-flight-ends {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+.trip-end {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.trip-end.right {
+  text-align: right;
+  align-items: flex-end;
+}
+.trip-cap {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+.trip-big {
+  font-size: 17px;
+  font-weight: 640;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+.trip-sub {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.trip-sub.place {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.trip-flight-line {
+  flex: 0 1 46px;
+  align-self: center;
+  border-top: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  margin-top: 10px;
+}
+.trip-rail {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.trip-rail::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.trip-stop {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-left: 14px;
+}
+.trip-stop-dot {
+  position: absolute;
+  left: 0;
+  top: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-2);
+}
+.trip-stop-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.trip-seg .trip-leg-actions {
+  margin-top: 6px;
+}

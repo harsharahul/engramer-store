@@ -112,6 +112,21 @@ describe("scanForFacts", () => {
     expect(out.facts.some((f) => f.kind === "event" && f.value === "2027-03-04")).toBe(true);
   });
 
+  it("keeps one statement when the reservation and the text agree", async () => {
+    const raw = `<script type="application/ld+json">{"@type":"LodgingReservation",
+      "reservationFor":{"name":"The Larkspur Hotel"},
+      "checkinTime":"2027-03-04T15:00:00-05:00"}</script>`;
+    const out = await scanForFacts({
+      name: "c.html",
+      mime: "text/html",
+      raw,
+      text: "The Larkspur Hotel\nCheck-in: March 04, 2027 from 15:00",
+    });
+    const events = out.facts.filter((f) => f.kind === "event" && f.value === "2027-03-04");
+    expect(events).toHaveLength(1);
+    expect(events[0]!.source).toBe("jsonld");
+  });
+
   it("carries a travel event with its time through the whole pipeline", async () => {
     const out = await scanForFacts({
       ...base,
