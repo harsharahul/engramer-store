@@ -18,6 +18,7 @@ import { duplicatesByDigest } from "../intel/duplicates";
 import { daysUntil } from "../intel/dates";
 import { factToCalendar } from "../intel/ics";
 import { triggerDownload } from "../download";
+import { TripCard } from "./TripCard";
 import { ClockGlyph, CopyGlyph, InfoGlyph, XGlyph } from "./Icon";
 
 /** Near enough to be worth saying without being asked. */
@@ -42,6 +43,17 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
   // twice in one column is how a panel starts being ignored.
   const spokenFor = new Set(insights.map((insight) => insight.fileId).filter(Boolean));
 
+  // Confirmed trips are shared tags; the members' events are the itinerary.
+  const tripsByTag = new Map<string, FileEntry[]>();
+  for (const file of live) {
+    for (const tag of file.tags) {
+      if (tag.startsWith("trip:")) {
+        tripsByTag.set(tag, [...(tripsByTag.get(tag) ?? []), file]);
+      }
+    }
+  }
+  const inTrip = new Set([...tripsByTag.values()].flat().map((file) => file.id));
+
   const upcoming = live
     .flatMap((file) =>
       file.facts
@@ -52,13 +64,21 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
       (entry) =>
         entry.days > -RECENTLY_PAST_DAYS &&
         entry.days < HORIZON_DAYS &&
-        !spokenFor.has(entry.file.id),
+        !spokenFor.has(entry.file.id) &&
+        // A trip card already presents its members' events as an itinerary;
+        // repeating them here would say everything twice.
+        !(entry.fact.kind === "event" && inTrip.has(entry.file.id)),
     )
     .sort((a, b) => a.days - b.days);
 
   const duplicates = duplicatesByDigest(live);
 
-  if (upcoming.length === 0 && insights.length === 0 && duplicates.length === 0) {
+  if (
+    upcoming.length === 0 &&
+    insights.length === 0 &&
+    duplicates.length === 0 &&
+    tripsByTag.size === 0
+  ) {
     return (
       <p className="panel-quiet">
         Nothing needs your attention. Select a file to inspect it.
@@ -68,6 +88,11 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
 
   return (
     <div className="intel">
+      {[...tripsByTag.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([tag, members]) => (
+          <TripCard key={tag} tag={tag} members={members} onOpen={props.onOpen} />
+        ))}
       {upcoming.length > 0 && (
         <div className="intel-group">
           <h4>

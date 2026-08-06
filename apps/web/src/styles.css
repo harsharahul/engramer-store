@@ -4319,3 +4319,50 @@ span.item-menu {
   flex-shrink: 0;
   font-size: 11px;
 }
+
+/* ------------------------------------------------------------------ trips */
+
+.trip-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 4px 0;
+}
+.trip-files .linky {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.trip-why {
+  margin: 4px 0;
+  font-size: 12px;
+}
+.trip-why summary {
+  cursor: pointer;
+  opacity: 0.65;
+}
+.trip-why ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  opacity: 0.8;
+}
+.trip-card h4 {
+  color: var(--accent-2);
+}
+.trip-leg-actions {
+  display: inline-flex;
+  gap: 10px;
+  flex-shrink: 0;
+  align-items: center;
+}
+.trip-leg .intel-row {
+  align-items: center;
+  gap: 8px;
+}
+.trip-advice {
+  margin: 2px 0 8px;
+  font-size: 12px;
+  color: var(--accent-2);
+  opacity: 0.9;
+}

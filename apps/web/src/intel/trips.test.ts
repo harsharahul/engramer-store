@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Fact } from "./facts";
-import { assembleItinerary, suggestTrips, tripTag, type TripFile } from "./trips";
+import { assembleItinerary, departureAdvice, suggestTrips, tripTag, tripTitle, type TripFile } from "./trips";
 
 const NOW = Date.UTC(2027, 1, 1); // 1 Feb 2027, ahead of the trips below.
 
@@ -146,5 +146,43 @@ describe("assembleItinerary", () => {
     };
     const legs = await assembleItinerary([padded]);
     expect(legs.some((leg) => leg.title === "Arrival")).toBe(false);
+  });
+});
+
+describe("departureAdvice", () => {
+  it("advises a domestic departure two hours ahead, from both legs' codes", async () => {
+    const legs = await assembleItinerary([flight()]);
+    const advice = await departureAdvice(legs);
+    expect(advice!.text).toBe("Domestic departure, so be at the airport by 07:40.");
+  });
+
+  it("advises an international departure three hours ahead", async () => {
+    const abroad: TripFile = {
+      id: "f-abroad",
+      name: "abroad.html",
+      facts: [
+        event("2027-05-02", "Flight AQ 88 departs SFO", { time: "18:30" }),
+        event("2027-05-03", "Flight AQ 88 arrives LHR", { time: "12:45" }),
+      ],
+    };
+    const advice = await departureAdvice(await assembleItinerary([abroad]));
+    expect(advice!.text).toBe("International departure, so be at the airport by 15:30.");
+  });
+
+  it("stays quiet when the airports cannot be placed", async () => {
+    const legs = await assembleItinerary([
+      {
+        id: "f-x",
+        name: "x.txt",
+        facts: [event("2027-03-04", "Flight 1 departs QQQ", { time: "09:40" })],
+      },
+    ]);
+    expect(await departureAdvice(legs)).toBeNull();
+  });
+});
+
+describe("tripTitle", () => {
+  it("renders a tag back into words", () => {
+    expect(tripTitle("trip:new-york-2027-03")).toBe("New York, Mar 2027");
   });
 });

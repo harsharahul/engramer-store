@@ -40,7 +40,7 @@ import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
 import { cosine, embedQuery, semanticEnabled, setSemanticEnabled } from "../intel/semantic";
 import { factsEnabled, setFactsEnabled } from "../intel/scan";
 import { soonestDated } from "../intel/facts";
-import { HeadsUp } from "./HeadsUp";
+import { HeadsUp, TripHeadsUp } from "./HeadsUp";
 import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { saveDecryptedFile } from "../download";
@@ -1557,12 +1557,15 @@ export function Vault() {
               deliberately not shown while searching or in trash: both are
               places you arrived at with a question of your own. */}
           {!searching && (view.kind === "folder" || view.kind === "expiring") && (
-            <HeadsUp
-              files={liveFiles}
-              onOpen={(id) => openFile(id)}
-              onConfirm={(fileId, factId, value) => void store.confirmFact(fileId, factId, value)}
-              onDismiss={(fileId, factId) => void store.dismissFact(fileId, factId)}
-            />
+            <>
+              <HeadsUp
+                files={liveFiles}
+                onOpen={(id) => openFile(id)}
+                onConfirm={(fileId, factId, value) => void store.confirmFact(fileId, factId, value)}
+                onDismiss={(fileId, factId) => void store.dismissFact(fileId, factId)}
+              />
+              <TripHeadsUp files={liveFiles} onOpen={(id) => openFile(id)} />
+            </>
           )}
           {searching ? (
             <SearchResults

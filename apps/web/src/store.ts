@@ -27,6 +27,7 @@ import { isPdf } from "./intel/extract";
 import { embedImage } from "./intel/semantic";
 import { asFacts, mergeFacts, reconcileFacts, type Fact, type FactEvidence } from "./intel/facts";
 import { factsEnabled, scanForFacts } from "./intel/scan";
+import { tripTag, type TripSuggestion } from "./intel/trips";
 import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
 import { blankDocument, DOCX_MIME, XLSX_MIME } from "./office/templates";
@@ -178,6 +179,11 @@ interface StoreState {
     id: string,
     decisions: { confirm?: string[]; dismiss?: string[] },
   ) => Promise<void>;
+  /**
+   * Accepts a suggested trip: the trip's tag lands on every member, one
+   * metadata write per file, and the Library's tag machinery does the rest.
+   */
+  confirmTrip: (suggestion: TripSuggestion) => Promise<void>;
   /**
    * The evidence behind a file's facts: the complete reference numbers and
    * the passages they came from. Fetched on request rather than held, which
@@ -1067,6 +1073,17 @@ export const useStore = create<StoreState>((set, get) => {
         return dismiss.has(fact.id) ? { ...fact, dismissed: true } : fact;
       });
       await patchFileMeta(id, { facts });
+    },
+
+    confirmTrip: async (suggestion) => {
+      const tag = tripTag(suggestion);
+      for (const fileId of suggestion.fileIds) {
+        const file = get().files.get(fileId);
+        if (!file || file.tags.includes(tag)) {
+          continue;
+        }
+        await patchFileMeta(fileId, { tags: [...file.tags, tag] });
+      }
     },
 
     factEvidence: async (id) => {

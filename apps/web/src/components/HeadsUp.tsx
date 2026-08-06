@@ -15,13 +15,21 @@
  * documents wants to see the folder.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FileEntry } from "../store";
 import { useStore } from "../store";
 import type { Fact } from "../intel/facts";
 import { offeredFacts } from "../intel/facts";
 import { swappedReading } from "../intel/dates";
 import { describeFact, shown, withArticle } from "../intel/describe";
+import {
+  dismissedTrips,
+  rememberTripDismissal,
+  suggestTrips,
+  tripTag,
+  tripTitle,
+  type TripSuggestion,
+} from "../intel/trips";
 import { SparkGlyph, XGlyph } from "./Icon";
 
 /** More than this and the bar stays shut until asked; one is not a queue. */
@@ -127,6 +135,101 @@ export function HeadsUp(props: {
           )}
         </div>
       )}
+    </section>
+  );
+}
+
+/**
+ * Trips proposed above the files, in the queue's discipline: a card that
+ * disappears the moment it is answered. Grouping never happens on its own;
+ * the owner ratifies every trip, a confirmation is nothing more than a
+ * shared tag on the members, and a refusal is remembered on this device.
+ */
+export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string) => void }) {
+  const confirmTrip = useStore((s) => s.confirmTrip);
+  const [trips, setTrips] = useState<TripSuggestion[]>([]);
+  const [refused, setRefused] = useState<Set<string>>(dismissedTrips);
+  const [busy, setBusy] = useState<string | null>(null);
+  const live = props.files.filter((file) => !file.trashed);
+  // Membership only shifts when facts or tags do; the fingerprint keeps the
+  // async recomputation (the airport table loads lazily) off every render.
+  const fingerprint = live
+    .map((file) => `${file.id}:${file.facts.length}:${file.tags.length}`)
+    .join("|");
+  useEffect(() => {
+    let stale = false;
+    void suggestTrips(
+      live.map((file) => ({ id: file.id, name: file.name, facts: file.facts })),
+      Date.now(),
+    ).then((all) => {
+      if (!stale) {
+        setTrips(all);
+      }
+    });
+    return () => {
+      stale = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fingerprint]);
+
+  const tagsOf = new Map(live.map((file) => [file.id, file.tags]));
+  const open = trips.filter(
+    (trip) =>
+      !refused.has(trip.id) &&
+      !trip.fileIds.every((id) => tagsOf.get(id)?.includes(tripTag(trip))),
+  );
+  if (open.length === 0) {
+    return null;
+  }
+  return (
+    <section className="pending" aria-label="Trips worth grouping">
+      <div className="pending-list">
+        {open.map((trip) => (
+          <div key={trip.id} className="pending-card">
+            <div className="pending-card-text">
+              These {trip.fileIds.length} documents look like one trip
+              {trip.destination ? ` to ${trip.destination}` : ""}, {shown(trip.start)} to{" "}
+              {shown(trip.end)}. Group them?
+            </div>
+            <div className="trip-files">
+              {trip.fileIds.map((id) => (
+                <button key={id} className="linky" onClick={() => props.onOpen(id)}>
+                  {live.find((file) => file.id === id)?.name ?? id}
+                </button>
+              ))}
+            </div>
+            <details className="trip-why">
+              <summary>Why these?</summary>
+              <ul>
+                {trip.why.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </details>
+            <div className="pending-card-actions">
+              <button
+                className="btn btn-small btn-primary"
+                disabled={busy === trip.id}
+                onClick={() => {
+                  setBusy(trip.id);
+                  void confirmTrip(trip).finally(() => setBusy(null));
+                }}
+              >
+                Group as {tripTitle(tripTag(trip))}
+              </button>
+              <button
+                className="btn btn-small btn-quiet"
+                onClick={() => {
+                  rememberTripDismissal(trip.id);
+                  setRefused((prior) => new Set(prior).add(trip.id));
+                }}
+              >
+                <XGlyph size={12} /> Ignore
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }

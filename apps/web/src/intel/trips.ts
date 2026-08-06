@@ -43,6 +43,10 @@ export interface ItineraryLeg {
   zone?: string;
   title: string;
   fileId: string;
+  /** The fact this leg came from, so a card can act on it (calendar export). */
+  factId: string;
+  /** Airport codes the title mentions, resolved against the table. */
+  codes?: string[];
   kind: "flight" | "stay" | "car" | "other";
 }
 
@@ -303,8 +307,9 @@ function legKind(fact: Fact): ItineraryLeg["kind"] {
 }
 
 /** Airport codes resolved into the words a person recognizes. */
-async function inCityWords(label: string): Promise<string> {
-  let out = label;
+async function inCityWords(label: string): Promise<{ text: string; codes: string[] }> {
+  let text = label;
+  const codes: string[] = [];
   const seen = new Set<string>();
   CODE.lastIndex = 0;
   for (let match = CODE.exec(label); match; match = CODE.exec(label)) {
@@ -315,10 +320,11 @@ async function inCityWords(label: string): Promise<string> {
     seen.add(code);
     const airport = await lookupAirport(code);
     if (airport) {
-      out = out.split(code).join(`${airport.city} (${code})`);
+      codes.push(code);
+      text = text.split(code).join(`${airport.city} (${code})`);
     }
   }
-  return out;
+  return { text, codes };
 }
 
 /**
@@ -334,16 +340,108 @@ export async function assembleItinerary(members: TripFile[]): Promise<ItineraryL
       if (fact.kind !== "event" || !usable(fact)) {
         continue;
       }
+      const { text, codes } = await inCityWords(fact.label ?? "Event");
       legs.push({
         at: fact.value,
         ...(fact.time ? { time: fact.time } : {}),
         ...(fact.zone ? { zone: fact.zone } : {}),
-        title: await inCityWords(fact.label ?? "Event"),
+        title: text,
         fileId: file.id,
+        factId: fact.id,
+        ...(codes.length > 0 ? { codes } : {}),
         kind: legKind(fact),
       });
     }
   }
   legs.sort((a, b) => `${a.at} ${a.time ?? ""}`.localeCompare(`${b.at} ${b.time ?? ""}`));
   return legs;
+}
+
+/**
+ * The static lead-time line: three hours for an international departure,
+ * two for a domestic one. Computed only when the flight's airports resolve,
+ * because an airport the table cannot place makes the arithmetic a guess,
+ * and this card never guesses. Deliberately not "leave now": door-to-door
+ * timing would need a routing service and your location, and the card
+ * offers a Maps handoff instead.
+ */
+export async function departureAdvice(
+  legs: ItineraryLeg[],
+): Promise<{ leg: ItineraryLeg; text: string } | null> {
+  for (const leg of legs) {
+    if (leg.kind !== "flight" || !leg.time || !/\bdeparts?\b|\bto\b/i.test(leg.title)) {
+      continue;
+    }
+    // Every leg of one flight shares a title prefix; their codes together
+    // name both ends even when this leg only mentions one.
+    const prefix = leg.title.split(/\s+(?:departs|arrives)\s+/i)[0]!;
+    const codes = new Set<string>();
+    for (const other of legs) {
+      if (other.kind === "flight" && other.title.startsWith(prefix)) {
+        for (const code of other.codes ?? []) {
+          codes.add(code);
+        }
+      }
+    }
+    const countries = new Set<string>();
+    for (const code of codes) {
+      const airport = await lookupAirport(code);
+      if (airport) {
+        countries.add(airport.country);
+      }
+    }
+    if (codes.size < 2 || countries.size === 0) {
+      continue;
+    }
+    const international = countries.size > 1;
+    const [hour, minute] = leg.time.split(":").map(Number);
+    const total = hour! * 60 + minute! - (international ? 180 : 120);
+    if (total < 0) {
+      continue;
+    }
+    const at = `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+    return {
+      leg,
+      text: `${international ? "International" : "Domestic"} departure, so be at the airport by ${at}.`,
+    };
+  }
+  return null;
+}
+
+/** The tag rendered back into words: "trip:new-york-2027-03" reads as a title. */
+export function tripTitle(tag: string): string {
+  const match = /^trip:(.+)-(\d{4})-(\d{2})$/.exec(tag);
+  if (!match) {
+    return tag;
+  }
+  const words = match[1]!
+    .split("-")
+    .map((word) => (word ? word[0]!.toUpperCase() + word.slice(1) : word))
+    .join(" ");
+  return `${words}, ${MONTHS[Number(match[3]) - 1]} ${match[2]}`;
+}
+
+const DISMISSED_KEY = "engram-trips-dismissed";
+
+/**
+ * Per-device memory of refused groupings. A dismissal is a view preference
+ * rather than vault data; the worst case of keeping it local is that another
+ * device asks the same question once.
+ */
+export function dismissedTrips(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? "[]") as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+export function rememberTripDismissal(id: string): void {
+  try {
+    const all = dismissedTrips();
+    all.add(id);
+    localStorage.setItem(DISMISSED_KEY, JSON.stringify([...all]));
+  } catch {
+    // Best-effort; the worst case is asking again.
+  }
 }
