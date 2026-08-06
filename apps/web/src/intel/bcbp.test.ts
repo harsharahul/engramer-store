@@ -55,3 +55,17 @@ describe("bcbpFacts", () => {
     expect(bcbpFacts("M1 garbage", STORED)).toEqual([]);
   });
 });
+
+describe("year inference boundaries", () => {
+  it("refuses to resolve a flight into the distant past", () => {
+    // Day 063 stored in August: that March is long gone; the pass means the
+    // coming one, not the nearest one.
+    const [event] = bcbpFacts(PASS, Date.UTC(2026, 7, 5)).filter((f) => f.kind === "event");
+    expect(event!.value).toBe("2027-03-04");
+  });
+
+  it("lets a pass stored just after the trip keep its recent date", () => {
+    const [event] = bcbpFacts(PASS, Date.UTC(2027, 2, 10)).filter((f) => f.kind === "event");
+    expect(event!.value).toBe("2027-03-04");
+  });
+});

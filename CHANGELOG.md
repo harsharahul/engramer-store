@@ -3,6 +3,42 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Added
+- **Travel intelligence.** The documents a trip generates become the trip.
+  Boarding-pass barcodes (IATA BCBP, on photos and on PDFs), the
+  schema.org reservation data airlines and hotels embed in saved
+  confirmations, and a travel vocabulary for check-in, departure,
+  boarding and their kin all feed the same on-device reader, with times
+  kept local to their places and zones carried only where genuinely
+  known, backed by an offline table of 3,700 airports.
+- **Trips are proposed, never assumed.** Documents with nearby confirmed
+  dates, a shared booking-reference tail, or a common destination are
+  offered as one trip with the evidence in words; accepting writes a
+  shared tag and nothing more. The itinerary derives live from the
+  members' facts: legs in city names, calendar export per leg, a Maps
+  handoff instead of any routing, and the airport lead-time line
+  computed only when both ends of the flight resolve.
+- **Cross-document travel rules.** A passport is checked against every
+  trip's return date, a permit that dies mid-trip is called out, so is
+  the night between landing and check-in that nothing covers, and
+  check-in opening the day before a flight.
+- **A calendar.** Tracked dates as dots, trips as named spans across the
+  month, days that list what they hold, keyboard navigation throughout.
+- **Find connections.** An optional on-device entity extractor
+  links travel documents that share nothing exact, on request only. It
+  can only point at words that exist in the text, its findings feed the
+  same deterministic grouping, and nothing it finds is stored or sent
+  anywhere.
+- **The iOS app.** The native shell now builds for iPhone from the same
+  crate as the desktop app, distributed through TestFlight.
+
+### Fixed
+- The words "boarding pass" no longer read as a boarding time.
+- The desktop app's watched-folder and tray features are compile-gated
+  so every other platform keeps a clean shell.
+
 ## [0.36.0] - 2026-08-06
 
 ### Added

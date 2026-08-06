@@ -19,7 +19,7 @@ import { useMemo, useRef, useState } from "react";
 import type { FileEntry } from "../store";
 import { DATED_KINDS, type Fact } from "../intel/facts";
 import { describeFact, shown } from "../intel/describe";
-import { tripTitle } from "../intel/trips";
+import { factsFingerprint, tripTitle } from "../intel/trips";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = [
@@ -87,6 +87,9 @@ export function CalendarView(props: { files: FileEntry[]; onOpen: (id: string) =
   const cells = useRef(new Map<string, HTMLButtonElement>());
 
   const live = props.files.filter((file) => !file.trashed);
+  // Covers answers and values, not just counts: a fact confirmed a moment
+  // ago must appear on the month without a reload.
+  const fingerprint = factsFingerprint(live);
 
   const byDay = useMemo(() => {
     const map = new Map<string, DayEntry[]>();
@@ -99,7 +102,7 @@ export function CalendarView(props: { files: FileEntry[]; onOpen: (id: string) =
     }
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live.map((f) => `${f.id}:${f.facts.length}`).join("|")]);
+  }, [fingerprint]);
 
   const trips = useMemo(() => {
     const byTag = new Map<string, string[]>();
@@ -122,7 +125,7 @@ export function CalendarView(props: { files: FileEntry[]; onOpen: (id: string) =
       });
     return laneTrips(raw);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live.map((f) => `${f.id}:${f.tags.join()}:${f.facts.length}`).join("|")]);
+  }, [fingerprint]);
 
   // The visible weeks: leading blanks, the days, trailing blanks.
   const weeks = useMemo(() => {

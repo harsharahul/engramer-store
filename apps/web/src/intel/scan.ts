@@ -113,7 +113,26 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
   // Grounded against everything the document said, decoded payloads included:
   // a value read out of a barcode is part of what the document contains.
   const source = [text, ...decoded].join("\n");
-  const kept = mergeFacts([], groundFacts(found, source));
+  const merged = mergeFacts([], groundFacts(found, source));
+
+  // A reservation block and the printed text often state the same moment.
+  // One statement is enough: where a structured source and a text reading
+  // agree on the date and clock, the text reading is the echo and drops.
+  const soft = (fact: Fact) =>
+    fact.source === "label" || fact.source === "pattern" || fact.source === "model";
+  const structuredMoments = new Set(
+    merged
+      .filter((fact) => fact.kind === "event" && !soft(fact))
+      .flatMap((fact) => [`${fact.value}|${fact.time ?? ""}`, `${fact.value}|`]),
+  );
+  const kept = merged.filter(
+    (fact) =>
+      !(
+        fact.kind === "event" &&
+        soft(fact) &&
+        structuredMoments.has(`${fact.value}|${fact.time ?? ""}`)
+      ),
+  );
 
   const facts: Fact[] = [];
   const evidence: FactEvidence[] = [];

@@ -87,8 +87,16 @@ function shown(iso: string): string {
   return `${Number(day)} ${MONTHS[Number(month) - 1]} ${year}`;
 }
 
-const CODE = /\b([A-Z]{3})\b/g;
 const ARRIVAL = /\b(?:to|arrives)\s+([A-Z]{3})\b/;
+
+/**
+ * Airport-code shaped tokens in a label. A fresh iterator per call on
+ * purpose: a shared global regex carries lastIndex across the awaits these
+ * loops do, and two interleaved calls silently skip each other's matches.
+ */
+function codesIn(label: string): string[] {
+  return [...label.matchAll(/\b([A-Z]{3})\b/g)].map((match) => match[1]!);
+}
 
 interface Member {
   file: TripFile;
@@ -125,9 +133,8 @@ async function memberOf(file: TripFile, extra: ReadonlySet<string>): Promise<Mem
   const arrivals = new Set<string>();
   for (const fact of events) {
     const label = fact.label ?? "";
-    CODE.lastIndex = 0;
-    for (let match = CODE.exec(label); match; match = CODE.exec(label)) {
-      const airport = await lookupAirport(match[1]!);
+    for (const code of codesIn(label)) {
+      const airport = await lookupAirport(code);
       if (airport) {
         cities.add(airport.city);
       }
@@ -352,6 +359,28 @@ function slug(text: string): string {
     .replace(/^-|-$/g, "");
 }
 
+/**
+ * A change-detection key over everything trips read: identities, values,
+ * answers, times and tags. A length alone misses the moment an owner
+ * confirms a fact, which is precisely the moment everything here is allowed
+ * to begin; that miss shipped once and cost a reload to see one's own trip.
+ */
+export function factsFingerprint(
+  files: readonly { id: string; facts: readonly Fact[]; tags?: readonly string[] }[],
+): string {
+  return files
+    .map(
+      (file) =>
+        `${file.id}:${file.tags?.join() ?? ""}:${file.facts
+          .map(
+            (fact) =>
+              `${fact.id}${fact.confirmed ? "+" : ""}${fact.dismissed ? "-" : ""}${fact.value}${fact.time ?? ""}`,
+          )
+          .join(",")}`,
+    )
+    .join("|");
+}
+
 /** The shared tag a confirmation writes: the trip's name in the Library. */
 export function tripTag(suggestion: TripSuggestion): string {
   const where = suggestion.destination ? slug(suggestion.destination) : suggestion.start;
@@ -376,14 +405,7 @@ function legKind(fact: Fact): ItineraryLeg["kind"] {
 async function inCityWords(label: string): Promise<{ text: string; codes: string[] }> {
   let text = label;
   const codes: string[] = [];
-  const seen = new Set<string>();
-  CODE.lastIndex = 0;
-  for (let match = CODE.exec(label); match; match = CODE.exec(label)) {
-    const code = match[1]!;
-    if (seen.has(code)) {
-      continue;
-    }
-    seen.add(code);
+  for (const code of new Set(codesIn(label))) {
     const airport = await lookupAirport(code);
     if (airport) {
       codes.push(code);
