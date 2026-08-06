@@ -61,6 +61,8 @@ export function ProfileView(props: {
   onToggleSemantic: () => void;
   factsOn: boolean;
   onToggleFacts: () => void;
+  entitiesOn: boolean;
+  onToggleEntities: () => void;
   theme: ThemeMode;
   onToggleTheme: () => void;
   accent: string;
@@ -490,6 +492,27 @@ export function ProfileView(props: {
             onClick={props.onToggleFacts}
           >
             <span className={`switch${props.factsOn ? " on" : ""}`} />
+          </button>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>
+              <SparkGlyph size={13} /> Find travel connections
+            </b>
+            <div className="profile-row-sub">
+              Lets a small on-device model find place names in travel documents, so a booking and
+              a hotel that share no reference can still be offered as one trip. Runs only when you
+              ask, downloads about 180MB from this server the first time, and nothing it finds is
+              stored or sent anywhere.
+            </div>
+          </div>
+          <button
+            className="profile-switch"
+            role="switch"
+            aria-checked={props.entitiesOn}
+            onClick={props.onToggleEntities}
+          >
+            <span className={`switch${props.entitiesOn ? " on" : ""}`} />
           </button>
         </div>
       </section>

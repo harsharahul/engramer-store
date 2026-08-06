@@ -180,6 +180,60 @@ function zxingAssets(): Plugin {
 }
 
 /**
+ * Serves the entity extractor's WebAssembly runtime under /gliner-ort. The
+ * extractor pins its own onnxruntime-web, a different version from the one
+ * the meaning models use, so the two runtimes stage side by side and neither
+ * ever loads the other's files.
+ */
+function glinerAssets(): Plugin {
+  const glinerEntry = require.resolve("gliner");
+  const ortEntry = require.resolve("onnxruntime-web", { paths: [dirname(glinerEntry)] });
+  const ortDist = dirname(ortEntry);
+  const names = [
+    "ort-wasm-simd-threaded.mjs",
+    "ort-wasm-simd-threaded.wasm",
+    "ort-wasm-simd-threaded.jsep.mjs",
+    "ort-wasm-simd-threaded.jsep.wasm",
+  ];
+  const files = names.map((name) => ({ from: join(ortDist, name), name }));
+  let outDir = "dist";
+  let isBuild = false;
+  return {
+    name: "engram-gliner-assets",
+    configResolved(config) {
+      outDir = config.build.outDir;
+      isBuild = config.command === "build" && !process.env.VITEST;
+    },
+    closeBundle() {
+      if (!isBuild) {
+        return;
+      }
+      const target = join(outDir, "gliner-ort");
+      mkdirSync(target, { recursive: true });
+      for (const file of files) {
+        if (existsSync(file.from)) {
+          cpSync(file.from, join(target, file.name));
+        }
+      }
+    },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const path = (req.url ?? "").split("?")[0];
+        const hit = files.find((f) => path === `/gliner-ort/${f.name}`);
+        if (!hit) {
+          return next();
+        }
+        res.setHeader(
+          "content-type",
+          hit.name.endsWith(".wasm") ? "application/wasm" : "text/javascript",
+        );
+        res.end(require("node:fs").readFileSync(hit.from));
+      });
+    },
+  };
+}
+
+/**
  * Writes the version the deployment is serving, for a running client to
  * compare itself against. Small and uncached on purpose: it is the one file
  * that must never be answered from a cache, or a client will believe it is
@@ -270,6 +324,7 @@ export default defineConfig({
     ocrAssets(),
     ortAssets(),
     zxingAssets(),
+    glinerAssets(),
     VitePWA({
       strategies: "injectManifest",
       srcDir: "src",

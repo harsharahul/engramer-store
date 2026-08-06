@@ -98,10 +98,12 @@ interface Member {
   tails: Set<string>;
   cities: Set<string>;
   arrivals: Set<string>;
+  /** Destination-grade places: arrivals plus anything the caller supplied. */
+  reach: Set<string>;
 }
 
 /** What one file contributes: its usable events, references and places. */
-async function memberOf(file: TripFile): Promise<Member | null> {
+async function memberOf(file: TripFile, extra: ReadonlySet<string>): Promise<Member | null> {
   if (file.trashed) {
     return null;
   }
@@ -138,7 +140,16 @@ async function memberOf(file: TripFile): Promise<Member | null> {
       }
     }
   }
-  return { file, events, start: dates[0]!, end: dates[dates.length - 1]!, tails, cities, arrivals };
+  return {
+    file,
+    events,
+    start: dates[0]!,
+    end: dates[dates.length - 1]!,
+    tails,
+    cities,
+    arrivals,
+    reach: new Set([...arrivals, ...extra]),
+  };
 }
 
 export interface TravelSpan {
@@ -255,11 +266,18 @@ function commonest(all: string[]): string | undefined {
 /**
  * Every group of documents that looks like one trip, ready to be offered.
  * Deterministic: the same library always yields the same suggestions.
+ * `extraPlaces` carries destination tokens found outside this module, the
+ * entity extractor's contribution, for documents that share nothing exact.
  */
-export async function suggestTrips(files: TripFile[], now: number): Promise<TripSuggestion[]> {
+export async function suggestTrips(
+  files: TripFile[],
+  now: number,
+  extraPlaces?: ReadonlyMap<string, ReadonlySet<string>>,
+): Promise<TripSuggestion[]> {
+  const none: ReadonlySet<string> = new Set();
   const members: Member[] = [];
   for (const file of files) {
-    const member = await memberOf(file);
+    const member = await memberOf(file, extraPlaces?.get(file.id) ?? none);
     if (member) {
       members.push(member);
     }
@@ -280,7 +298,7 @@ export async function suggestTrips(files: TripFile[], now: number): Promise<Trip
   }
   // Then the bridges: a shared reference tail, a shared destination.
   mergeWhere(clusters, (a, b) => shares(a, b, (m) => m.tails) !== null);
-  mergeWhere(clusters, (a, b) => shares(a, b, (m) => m.arrivals) !== null);
+  mergeWhere(clusters, (a, b) => shares(a, b, (m) => m.reach) !== null);
 
   const nowDay = now / 86_400_000;
   const suggestions: TripSuggestion[] = [];
@@ -294,7 +312,7 @@ export async function suggestTrips(files: TripFile[], now: number): Promise<Trip
     }
     const fileIds = cluster.members.map((member) => member.file.id).sort();
     const destination =
-      commonest(cluster.members.flatMap((m) => [...m.arrivals])) ??
+      commonest(cluster.members.flatMap((m) => [...m.reach])) ??
       commonest(
         cluster.members
           .flatMap((m) => [...m.cities])
