@@ -15,9 +15,41 @@ export function isPdf(name: string, mime: string): boolean {
   return mime === "application/pdf" || /\.pdf$/i.test(name);
 }
 
+const OFFICE_READ_LIMIT = 30 * 1024 * 1024;
+
+function isDocx(name: string, mime: string): boolean {
+  return (
+    mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    /\.docx$/i.test(name)
+  );
+}
+
+function isXlsx(name: string, mime: string): boolean {
+  return (
+    mime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    /\.xlsx$/i.test(name)
+  );
+}
+
+function isPptx(name: string, mime: string): boolean {
+  return (
+    mime === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+    /\.pptx$/i.test(name)
+  );
+}
+
+function isOffice(file: File): boolean {
+  return (
+    isDocx(file.name, file.type) || isXlsx(file.name, file.type) || isPptx(file.name, file.type)
+  );
+}
+
 /**
  * Extracts searchable text on the client: plain text and code directly,
- * PDF through pdf.js (lazy-loaded so the viewer never pays for it upfront).
+ * PDF through pdf.js, and Office documents at the data level: a .docx,
+ * .xlsx or .pptx is a zip of XML, so the words come out of document.xml,
+ * the shared-strings table and the slides without any renderer involved.
+ * Everything lazy-loaded so the viewer never pays for it upfront.
  */
 export async function extractText(file: File): Promise<string | undefined> {
   try {
@@ -28,10 +60,58 @@ export async function extractText(file: File): Promise<string | undefined> {
     if (isPdf(file.name, file.type)) {
       return await extractPdfText(file);
     }
+    if (isOffice(file) && file.size <= OFFICE_READ_LIMIT) {
+      return await extractOfficeText(file);
+    }
   } catch {
     // Extraction is best-effort; the file still uploads without search text.
   }
   return undefined;
+}
+
+/** Tags stripped, paragraph boundaries kept, entities restored. */
+function xmlToText(xml: string, paragraphEnd: RegExp): string {
+  return xml
+    .replace(paragraphEnd, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+async function extractOfficeText(file: File): Promise<string | undefined> {
+  const { unzipSync, strFromU8 } = await import("fflate");
+  const wanted = (path: string) =>
+    path === "word/document.xml" ||
+    path === "xl/sharedStrings.xml" ||
+    /^ppt\/slides\/slide\d+\.xml$/.test(path);
+  // Only the entries that carry words are inflated; the images and themes
+  // riding inside the same zip never get touched.
+  const zip = unzipSync(new Uint8Array(await file.arrayBuffer()), {
+    filter: (entry) => wanted(entry.name),
+  });
+  const parts: string[] = [];
+  if (zip["word/document.xml"]) {
+    parts.push(xmlToText(strFromU8(zip["word/document.xml"]!), /<\/w:p>/g));
+  }
+  if (zip["xl/sharedStrings.xml"]) {
+    // One line per shared string: the cell texts, which is what someone
+    // searching a spreadsheet is looking for.
+    parts.push(xmlToText(strFromU8(zip["xl/sharedStrings.xml"]!), /<\/si>/g));
+  }
+  for (const path of Object.keys(zip)
+    .filter((entry) => /^ppt\/slides\/slide\d+\.xml$/.test(entry))
+    .sort()) {
+    parts.push(xmlToText(strFromU8(zip[path]!), /<\/a:p>/g));
+  }
+  const text = parts.join("\n").slice(0, TEXT_STORE_LIMIT).trim();
+  return text || undefined;
 }
 
 async function extractPdfText(file: File): Promise<string | undefined> {

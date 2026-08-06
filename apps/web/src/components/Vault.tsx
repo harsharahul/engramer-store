@@ -41,6 +41,7 @@ import { cosine, embedQuery, semanticEnabled, setSemanticEnabled } from "../inte
 import { factsEnabled, setFactsEnabled } from "../intel/scan";
 import { entitiesEnabled, setEntitiesEnabled } from "../intel/entities";
 import { DATED_KINDS, soonestDated } from "../intel/facts";
+import { extractText } from "../intel/extract";
 import { CalendarView } from "./CalendarView";
 import { HeadsUp, TripHeadsUp } from "./HeadsUp";
 import { thumbnailUrl } from "../thumbs";
@@ -1890,7 +1891,16 @@ export function Vault() {
           <OfficeEditor
             file={editorFile}
             fileType={officeKind(editorFile)!}
-            onSave={(bytes) => store.saveFileBinary(editorFile.id, bytes)}
+            onSave={async (bytes) => {
+              // The saved bytes are a fresh document; its words join the
+              // search index the same way an upload's do.
+              const text = await extractText(
+                new File([bytes.slice().buffer as ArrayBuffer], editorFile.name, {
+                  type: editorFile.mime,
+                }),
+              ).catch(() => undefined);
+              await store.saveFileBinary(editorFile.id, bytes, text);
+            }}
             onClose={() => setEditorId(null)}
           />
         </Suspense>

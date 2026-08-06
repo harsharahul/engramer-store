@@ -31,6 +31,11 @@ All notable changes to Engram Store are documented here, following
   can only point at words that exist in the text, its findings feed the
   same deterministic grouping, and nothing it finds is stored or sent
   anywhere.
+- **Search inside Word, Excel and PowerPoint files.** Their words are
+  read at the data level on your device, the same as PDFs and plain
+  text: a document's paragraphs, a spreadsheet's cell texts, a deck's
+  slides. Saving from the built-in editor refreshes the index too, so
+  an edited document is findable by what it says now.
 - **The iOS app.** The native shell now builds for iPhone from the same
   crate as the desktop app, distributed through TestFlight.
 
