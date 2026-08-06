@@ -33,7 +33,7 @@ import {
 } from "../intel/trips";
 import { entitiesEnabled, extractEntities } from "../intel/entities";
 import { lookupAirport } from "../intel/airports";
-import { SparkGlyph, XGlyph } from "./Icon";
+import { PlaneGlyph, SparkGlyph, XGlyph } from "./Icon";
 
 /** More than this and the bar stays shut until asked; one is not a queue. */
 const COLLAPSE_ABOVE = 1;
@@ -256,7 +256,7 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
         {open.map((trip) => (
           <div key={trip.id} className="pending-card">
             <div className="pending-card-text">
-              These {trip.fileIds.length} documents look like one trip
+              <PlaneGlyph size={13} /> These {trip.fileIds.length} documents look like one trip
               {trip.destination ? ` to ${trip.destination}` : ""}, {shown(trip.start)} to{" "}
               {shown(trip.end)}. Group them?
             </div>

@@ -4640,3 +4640,12 @@ span.item-menu {
 .trip-seg .trip-leg-actions {
   margin-top: 6px;
 }
+
+.pending-card-text svg {
+  vertical-align: -2px;
+  margin-right: 3px;
+  color: var(--accent-2);
+}
+.trip-eyebrow svg {
+  color: var(--accent-2);
+}

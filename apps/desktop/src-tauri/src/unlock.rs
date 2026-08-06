@@ -1,11 +1,12 @@
-//! Native device unlock: an opaque secret in the login Keychain, released
-//! only after a LocalAuthentication check (Touch ID, or the login password
-//! on Macs without it). The secret means nothing on its own; the web layer
+//! Native device unlock: an opaque secret in the keychain, released only
+//! after a LocalAuthentication check. On a Mac that is Touch ID or the
+//! login password; on an iPhone it is Face ID or the passcode, through the
+//! same two frameworks. The secret means nothing on its own; the web layer
 //! wraps the vault keys under a key derived from it, so neither side alone
 //! can open anything.
 
-#[cfg(target_os = "macos")]
-mod macos {
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+mod apple {
     use block2::RcBlock;
     use objc2_foundation::NSString;
     use objc2_local_authentication::{LAContext, LAPolicy};
@@ -46,7 +47,7 @@ mod macos {
     }
 
     pub fn store(email: &str, secret: &str) -> Result<(), String> {
-        authenticate("set up Touch ID unlock for your vault")?;
+        authenticate("set up device unlock for your vault")?;
         passwords::set_generic_password(SERVICE, email, secret.as_bytes())
             .map_err(|err| format!("keychain refused the secret: {err}"))
     }
@@ -66,11 +67,11 @@ mod macos {
 
 #[tauri::command]
 pub fn native_unlock_available() -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
-        macos::available()
+        apple::available()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     {
         false
     }
@@ -78,13 +79,13 @@ pub fn native_unlock_available() -> bool {
 
 #[tauri::command]
 pub async fn unlock_secret_store(email: String, secret: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
-        tauri::async_runtime::spawn_blocking(move || macos::store(&email, &secret))
+        tauri::async_runtime::spawn_blocking(move || apple::store(&email, &secret))
             .await
             .map_err(|err| err.to_string())?
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     {
         let _ = (email, secret);
         Err("not supported on this platform".to_string())
@@ -93,13 +94,13 @@ pub async fn unlock_secret_store(email: String, secret: String) -> Result<(), St
 
 #[tauri::command]
 pub async fn unlock_secret_get(email: String) -> Result<String, String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
-        tauri::async_runtime::spawn_blocking(move || macos::get(&email))
+        tauri::async_runtime::spawn_blocking(move || apple::get(&email))
             .await
             .map_err(|err| err.to_string())?
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     {
         let _ = email;
         Err("not supported on this platform".to_string())
@@ -108,13 +109,13 @@ pub async fn unlock_secret_get(email: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn unlock_secret_delete(email: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
-        tauri::async_runtime::spawn_blocking(move || macos::delete(&email))
+        tauri::async_runtime::spawn_blocking(move || apple::delete(&email))
             .await
             .map_err(|err| err.to_string())?
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     {
         let _ = email;
         Ok(())

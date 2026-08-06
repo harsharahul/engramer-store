@@ -76,6 +76,9 @@ export function ProfileView(props: {
   const [unlockState, setUnlockState] = useState<UnlockState>("checking");
   const [enrolling, setEnrolling] = useState(false);
   const [shell] = useState(() => nativeShell());
+  // The same shell crate runs on Macs and iPhones; the words should say
+  // which device is talking. WKWebView reports iPhone/iPad in the agent.
+  const [phoneShell] = useState(() => nativeShell() && /iPhone|iPad/i.test(navigator.userAgent));
   const [watched, setWatched] = useState<string[]>([]);
   const [modes, setModes] = useState<Record<string, WatchMode>>({});
   const [verifying, setVerifying] = useState(false);
@@ -380,13 +383,19 @@ export function ProfileView(props: {
             <b>Device unlock</b>
             <div className="profile-row-sub">
               {unlockState === "on"
-                ? "On for this device: Touch ID or a passkey opens the vault."
+                ? phoneShell
+                  ? "On for this device: Face ID opens the vault."
+                  : "On for this device: Touch ID or a passkey opens the vault."
                 : unlockState === "native"
-                  ? "Skip typing the password: Touch ID guards the vault through the Mac's Keychain."
+                  ? phoneShell
+                    ? "Skip typing the password: Face ID guards the vault through this device's keychain."
+                    : "Skip typing the password: Touch ID guards the vault through the Mac's Keychain."
                   : unlockState === "available"
                     ? "Skip typing the password: unlock with Touch ID or a passkey."
                     : unlockState === "unsupported"
-                      ? "Not available in this browser. Safari, Chrome, and the desktop app support it."
+                      ? shell
+                        ? "Not available on this device yet."
+                        : "Not available in this browser. Safari, Chrome, and the apps support it."
                       : "Checking this device…"}
             </div>
           </div>

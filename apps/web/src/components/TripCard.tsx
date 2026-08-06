@@ -25,7 +25,7 @@ import {
 import { factToCalendar } from "../intel/ics";
 import { triggerDownload } from "../download";
 import { whenLabel } from "../intel/describe";
-import { PlaneGlyph, SparkGlyph } from "./Icon";
+import { BedGlyph, CarGlyph, PlaneGlyph, SparkGlyph, TicketGlyph } from "./Icon";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -58,7 +58,7 @@ interface Stop {
 
 type Seg =
   | { type: "flight"; order: string; designator: string; from?: End; to?: End }
-  | { type: "rail"; order: string; place: string; stops: Stop[] }
+  | { type: "rail"; order: string; mode: "stay" | "car"; place: string; stops: Stop[] }
   | { type: "other"; order: string; leg: ItineraryLeg };
 
 /** Legs folded into traveller-shaped segments, ordered as the trip runs. */
@@ -109,6 +109,7 @@ function segmentsOf(legs: ItineraryLeg[]): Seg[] {
         seg = {
           type: "rail",
           order,
+          mode: leg.kind,
           place: place || (leg.kind === "car" ? "Rental" : "Stay"),
           stops: [],
         };
@@ -250,7 +251,9 @@ export function TripCard(props: {
         if (seg.type === "rail") {
           return (
             <div className="trip-seg" key={`r:${seg.place}:${seg.order}`}>
-              <span className="trip-eyebrow">{seg.place}</span>
+              <span className="trip-eyebrow">
+                {seg.mode === "car" ? <CarGlyph size={12} /> : <BedGlyph size={12} />} {seg.place}
+              </span>
               <div className="trip-rail">
                 {seg.stops.map((stop) => (
                   <div className="trip-stop" key={stop.factId}>
@@ -271,6 +274,9 @@ export function TripCard(props: {
         }
         return (
           <div className="trip-seg" key={`o:${seg.leg.factId}`}>
+            <span className="trip-eyebrow">
+              <TicketGlyph size={12} /> Event
+            </span>
             <div className="trip-stop-main">
               <b className="trip-big">{shortDay(seg.leg.at)}</b>
               <span className="trip-cap">

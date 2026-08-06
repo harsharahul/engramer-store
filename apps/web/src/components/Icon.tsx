@@ -1,6 +1,16 @@
+import { BedDouble, Calendar, CarFront, Plane, Ticket } from "lucide-react";
+
 interface IconProps {
   size?: number;
 }
+
+/**
+ * Lucide supplies the drawings where its language matches this file's:
+ * 24-grid strokes, round caps and joins. Each one is wrapped so the rest of
+ * the app keeps naming glyphs in one place, and the stroke weight is pinned
+ * to the house 1.6 so both families read as one set.
+ */
+const lucide = { strokeWidth: 1.6, "aria-hidden": true } as const;
 
 const stroke = {
   fill: "none",
@@ -46,18 +56,15 @@ export const ClockGlyph = ({ size = 16 }: IconProps) => (
   </Svg>
 );
 
-export const PlaneGlyph = ({ size = 16 }: IconProps) => (
-  <Svg size={size}>
-    <path d="M10.5 21v-1.5l1.5-2v-4.7L3.5 15v-2l8.5-4.5V4.25a1.25 1.25 0 0 1 2.5 0V8.5L21 13v2l-8.5-2.2v4.7l1.5 2V21l-2.25-.75Z" />
-  </Svg>
-);
+export const PlaneGlyph = ({ size = 16 }: IconProps) => <Plane size={size} {...lucide} />;
 
-export const CalendarGlyph = ({ size = 16 }: IconProps) => (
-  <Svg size={size}>
-    <rect x="3.5" y="5" width="17" height="15.5" rx="1.5" />
-    <path d="M3.5 9.5h17M8 3v4M16 3v4" />
-  </Svg>
-);
+export const BedGlyph = ({ size = 16 }: IconProps) => <BedDouble size={size} {...lucide} />;
+
+export const CarGlyph = ({ size = 16 }: IconProps) => <CarFront size={size} {...lucide} />;
+
+export const TicketGlyph = ({ size = 16 }: IconProps) => <Ticket size={size} {...lucide} />;
+
+export const CalendarGlyph = ({ size = 16 }: IconProps) => <Calendar size={size} {...lucide} />;
 
 export const TrashGlyph = ({ size = 16 }: IconProps) => (
   <Svg size={size}>
