@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node scripts/instance-config.mjs && tauri dev --config src-tauri/tauri.instance.json",
     "bundle": "node scripts/instance-config.mjs && tauri build --config src-tauri/tauri.instance.json",
-    "ios:init": "tauri ios init",
+    "ios:init": "tauri ios init && node scripts/ios-project-fix.mjs",
     "ios:dev": "node scripts/instance-config.mjs && tauri ios dev --config src-tauri/tauri.instance.json",
     "ios:bundle": "node scripts/instance-config.mjs && tauri ios build --config src-tauri/tauri.instance.json --export-method app-store-connect",
     "tauri": "tauri"
