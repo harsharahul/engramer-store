@@ -3,18 +3,28 @@
 //! every cryptographic step stay in the web layer. The watcher emits an
 //! event when a file settles; the webview reads it through a command that
 //! refuses any path outside a registered folder.
+//!
+//! iOS has no arbitrary folders to watch, so there the same commands answer
+//! with empty lists and the web layer sees one shell everywhere.
 
+#[cfg(desktop)]
 use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager};
+#[cfg(desktop)]
+use std::time::Duration;
+use std::time::UNIX_EPOCH;
+#[cfg(desktop)]
+use tauri::Emitter;
+use tauri::{AppHandle, Manager};
 
 #[derive(Default)]
 pub struct WatchState {
+    #[cfg(desktop)]
     folders: Vec<PathBuf>,
+    #[cfg(desktop)]
     watchers: Vec<notify::RecommendedWatcher>,
 }
 
@@ -111,6 +121,7 @@ fn scan_folder(root: &Path) -> Vec<WatchedFile> {
 
 /// Waits for a file to stop changing size, so a copy in progress is not
 /// uploaded half-written. Gives up quietly on files that keep growing.
+#[cfg(desktop)]
 fn wait_until_stable(path: &Path) -> Option<u64> {
     let mut last = std::fs::metadata(path).ok()?.len();
     for _ in 0..60 {
@@ -124,6 +135,7 @@ fn wait_until_stable(path: &Path) -> Option<u64> {
     None
 }
 
+#[cfg(desktop)]
 fn spawn_watcher(app: AppHandle, root: PathBuf) -> Option<notify::RecommendedWatcher> {
     let emit_root = root.clone();
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
@@ -156,6 +168,7 @@ fn spawn_watcher(app: AppHandle, root: PathBuf) -> Option<notify::RecommendedWat
 
 /// Rebuilds every watcher from the stored folder list; called at startup
 /// and after each add or remove.
+#[cfg(desktop)]
 pub fn rebuild_watchers(app: &AppHandle) {
     let folders = load_folders(app);
     let state: tauri::State<SharedWatchState> = app.state();
@@ -168,6 +181,11 @@ pub fn rebuild_watchers(app: &AppHandle) {
         }
     }
 }
+
+/// Nothing to rebuild where nothing can be watched; the call keeps startup
+/// identical on every platform.
+#[cfg(mobile)]
+pub fn rebuild_watchers(_app: &AppHandle) {}
 
 #[tauri::command]
 pub fn watched_folders(app: AppHandle) -> Vec<String> {

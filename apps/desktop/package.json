@@ -2,10 +2,13 @@
   "name": "@engramer/desktop",
   "version": "0.36.0",
   "private": true,
-  "description": "Engram Store desktop app: native shell, watch folders, and Keychain unlock.",
+  "description": "Engram Store native shell: desktop tray, watch folders, Keychain unlock, and the iOS app.",
   "scripts": {
     "dev": "node scripts/instance-config.mjs && tauri dev --config src-tauri/tauri.instance.json",
     "bundle": "node scripts/instance-config.mjs && tauri build --config src-tauri/tauri.instance.json",
+    "ios:init": "tauri ios init",
+    "ios:dev": "node scripts/instance-config.mjs && tauri ios dev --config src-tauri/tauri.instance.json",
+    "ios:bundle": "node scripts/instance-config.mjs && tauri ios build --config src-tauri/tauri.instance.json",
     "tauri": "tauri"
   },
   "devDependencies": {
