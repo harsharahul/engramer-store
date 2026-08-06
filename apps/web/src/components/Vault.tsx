@@ -39,7 +39,8 @@ import { startWatchSync } from "../watchfolders";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
 import { cosine, embedQuery, semanticEnabled, setSemanticEnabled } from "../intel/semantic";
 import { factsEnabled, setFactsEnabled } from "../intel/scan";
-import { soonestDated } from "../intel/facts";
+import { DATED_KINDS, soonestDated } from "../intel/facts";
+import { CalendarView } from "./CalendarView";
 import { HeadsUp, TripHeadsUp } from "./HeadsUp";
 import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
@@ -78,6 +79,7 @@ import {
   BookGlyph,
   BoxGlyph,
   CameraGlyph,
+  CalendarGlyph,
   ClockGlyph,
   CodeGlyph,
   DocGlyph,
@@ -125,6 +127,7 @@ type View =
   | { kind: "shared" }
   | { kind: "profile" }
   | { kind: "expiring" }
+  | { kind: "calendar" }
   | { kind: "category"; name: string };
 
 const CATEGORY_ORDER = [
@@ -356,6 +359,9 @@ export function Vault() {
         dated.sort((a, b) => a.at.localeCompare(b.at));
         return dated.map((entry) => entry.file);
       }
+      case "calendar":
+        // The calendar renders itself; the grid under it shows nothing.
+        return [];
       case "category":
         files = liveFiles.filter((f) => (f.category ?? "Other") === view.name);
         break;
@@ -1078,6 +1084,13 @@ export function Vault() {
   // The entry appears only once something is being tracked, so a vault that
   // has never used this never sees a view that would always be empty.
   const expiringCount = liveFiles.filter((f) => soonestDated(f.facts) !== undefined).length;
+  // The calendar earns its place once anything is on it: a confirmed dated
+  // fact or a trip. Before that, the sidebar stays as short as it was.
+  const calendarWorthy = liveFiles.some(
+    (f) =>
+      f.tags.some((tag) => tag.startsWith("trip:")) ||
+      f.facts.some((fact) => fact.confirmed && !fact.dismissed && DATED_KINDS.has(fact.kind)),
+  );
 
   const viewTitle = searching
     ? `${hits.length} result${hits.length === 1 ? "" : "s"}`
@@ -1091,6 +1104,8 @@ export function Vault() {
             ? "Favorites"
             : view.kind === "expiring"
               ? "Expiring soon"
+            : view.kind === "calendar"
+              ? "Calendar"
             : view.kind === "shared"
               ? "Shared"
               : view.kind === "profile"
@@ -1166,6 +1181,13 @@ export function Vault() {
             <ClockGlyph />,
             "Expiring soon",
             expiringCount,
+          )}
+        {calendarWorthy &&
+          navButton(
+            view.kind === "calendar",
+            () => setView({ kind: "calendar" }),
+            <CalendarGlyph />,
+            "Calendar",
           )}
         {navButton(view.kind === "shared", () => setView({ kind: "shared" }), <LinkGlyph />, "Shared")}
         {navButton(view.kind === "trash", () => setView({ kind: "trash" }), <TrashGlyph />, "Trash")}
@@ -1589,6 +1611,8 @@ export function Vault() {
             />
           ) : view.kind === "shared" ? (
             <SharedView onToast={showToast} />
+          ) : view.kind === "calendar" ? (
+            <CalendarView files={liveFiles} onOpen={openFile} />
           ) : view.kind === "profile" ? (
             <ProfileView
               ocrOn={ocrOn}
