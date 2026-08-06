@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore, type FileEntry } from "../store";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
 import { bridgeMediaUrl, mediaBridgeAvailable, mediaUrl, onMediaProgress, registerMediaKey } from "../mediastream";
+import { nativeShell } from "../native";
 import { fileKind, formatBytes } from "../format";
 import { triggerDownload } from "../download";
 import { DownloadGlyph, PencilGlyph, ShareGlyph, TagGlyph, XGlyph } from "./Icon";
@@ -262,6 +263,44 @@ export function Preview(props: {
   const [unreadable, setUnreadable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const blobUrl = useRef<string | null>(null);
+  const blobTried = useRef(false);
+
+  /**
+   * The last rung of playback: decrypt the whole file and play it from
+   * memory. Only reached where the native protocol failed and no service
+   * worker exists to bridge (iOS today), and only within a cap, because a
+   * phone should not be asked to hold a feature-length film in RAM.
+   */
+  const WHOLE_FILE_CAP = 150 * 1024 * 1024;
+  const playDecryptedWhole = async (el: HTMLMediaElement) => {
+    if (blobTried.current) {
+      return;
+    }
+    blobTried.current = true;
+    if (file.size > WHOLE_FILE_CAP) {
+      diag(
+        "playback",
+        `${file.name} too large to decrypt whole (${Math.round(file.size / 1048576)}MB)`,
+      );
+      setError("This file is too large to play on this device yet.");
+      return;
+    }
+    try {
+      const bytes = await downloadAndDecrypt(file.id, file.key, file.digest);
+      const url = URL.createObjectURL(
+        new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime }),
+      );
+      blobUrl.current = url;
+      el.src = url;
+      el.load();
+      void el.play().catch(() => {});
+      diag("playback", `${file.name} playing decrypted whole`);
+    } catch {
+      diag("playback", `${file.name} whole-file playback failed`);
+      setError("Playback failed.");
+    }
+  };
 
   useEffect(() => {
     let url: string | null = null;
@@ -270,9 +309,13 @@ export function Preview(props: {
     setUnreadable(false);
     setError(null);
     setProgress(null);
-    // Video and audio stream through the service worker's media bridge:
-    // decrypted on the fly, range requests answered, nothing buffered whole.
-    if ((kind === "video" || kind === "audio") && mediaBridgeAvailable()) {
+    // Video and audio stream: through the shell's native protocol where
+    // there is one, else through the service worker's media bridge. Both
+    // decrypt on the fly and answer range requests; nothing buffers whole.
+    // The shell qualifies on its own, because the worker does not exist in
+    // every webview (iOS), and requiring it here silently benched the
+    // native path on exactly the platform that needed it most.
+    if ((kind === "video" || kind === "audio") && (nativeShell() || mediaBridgeAvailable())) {
       registerMediaKey(file.id);
       setLoaded({ url: mediaUrl(file.id), text: null, docx: null, sheet: null, pdf: null });
       const stopProgress = onMediaProgress(file.id, (done, total) =>
@@ -280,6 +323,11 @@ export function Preview(props: {
       );
       return () => {
         stopProgress();
+        if (blobUrl.current) {
+          URL.revokeObjectURL(blobUrl.current);
+          blobUrl.current = null;
+        }
+        blobTried.current = false;
       };
     }
     void downloadAndDecrypt(file.id, file.key, file.digest)
@@ -401,12 +449,19 @@ export function Preview(props: {
               onError={(e) => {
                 const el = e.currentTarget;
                 if (el.src.startsWith("stream:")) {
-                  // The shell's native protocol failed; the service worker
-                  // path always remains as the safety net.
-                  diag("playback", `${file.name} native path failed; using the bridge`);
-                  el.src = bridgeMediaUrl(file.id);
-                  el.load();
-                  void el.play().catch(() => {});
+                  if (mediaBridgeAvailable()) {
+                    // The shell's native protocol failed; the service
+                    // worker path remains as the safety net.
+                    diag("playback", `${file.name} native path failed; using the bridge`);
+                    el.src = bridgeMediaUrl(file.id);
+                    el.load();
+                    void el.play().catch(() => {});
+                  } else {
+                    // No worker in this webview: the last rung is the
+                    // whole file, decrypted and played from memory.
+                    diag("playback", `${file.name} native path failed; no bridge here`);
+                    void playDecryptedWhole(el);
+                  }
                   return;
                 }
                 diag("playback", `${file.name} playback error`);
