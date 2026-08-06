@@ -12,9 +12,6 @@ permissions:
 jobs:
   test:
     name: Tests (Node ${{ matrix.node-version }})
-    # The Gitea mirror also reads this directory; there, release.yml
-    # builds the production image instead and this workflow stays put.
-    if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -54,7 +51,6 @@ jobs:
 
   docker:
     name: Docker image
-    if: github.server_url == 'https://github.com'
     needs: test
     runs-on: ubuntu-latest
     permissions:
