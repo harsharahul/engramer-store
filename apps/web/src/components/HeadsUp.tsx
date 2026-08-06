@@ -30,6 +30,8 @@ import {
   tripTitle,
   type TripSuggestion,
 } from "../intel/trips";
+import { entitiesEnabled, extractEntities } from "../intel/entities";
+import { lookupAirport } from "../intel/airports";
 import { SparkGlyph, XGlyph } from "./Icon";
 
 /** More than this and the bar stays shut until asked; one is not a queue. */
@@ -147,9 +149,12 @@ export function HeadsUp(props: {
  */
 export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string) => void }) {
   const confirmTrip = useStore((s) => s.confirmTrip);
+  const warmSearchIndex = useStore((s) => s.warmSearchIndex);
   const [trips, setTrips] = useState<TripSuggestion[]>([]);
   const [refused, setRefused] = useState<Set<string>>(dismissedTrips);
   const [busy, setBusy] = useState<string | null>(null);
+  const [linking, setLinking] = useState(false);
+  const [linked, setLinked] = useState<Map<string, Set<string>> | null>(null);
   const live = props.files.filter((file) => !file.trashed);
   // Membership only shifts when facts or tags do; the fingerprint keeps the
   // async recomputation (the airport table loads lazily) off every render.
@@ -161,6 +166,7 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
     void suggestTrips(
       live.map((file) => ({ id: file.id, name: file.name, facts: file.facts })),
       Date.now(),
+      linked ?? undefined,
     ).then((all) => {
       if (!stale) {
         setTrips(all);
@@ -170,7 +176,52 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
       stale = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fingerprint]);
+  }, [fingerprint, linked]);
+
+  /**
+   * The entity pass, strictly on request. It reads the already-decrypted
+   * search text, asks the local extractor for places, and feeds them to the
+   * same deterministic clustering; spans are never stored anywhere.
+   */
+  const findConnections = async () => {
+    setLinking(true);
+    try {
+      await warmSearchIndex();
+      const fresh = useStore.getState().files;
+      const extra = new Map<string, Set<string>>();
+      for (const file of props.files) {
+        const entry = fresh.get(file.id);
+        const text = entry?.text;
+        if (!entry || entry.trashed || !text) {
+          continue;
+        }
+        if (!entry.facts.some((fact) => fact.kind === "event")) {
+          continue;
+        }
+        const spans = await extractEntities(text.slice(0, 2000), ["airport", "city"]);
+        const places = new Set<string>();
+        for (const span of spans) {
+          if (span.label === "airport" && /^[A-Za-z]{3}$/.test(span.text)) {
+            const airport = await lookupAirport(span.text);
+            if (airport) {
+              places.add(airport.city);
+            }
+          } else if (span.label === "city") {
+            places.add(span.text.trim());
+          }
+        }
+        if (places.size > 0) {
+          extra.set(entry.id, places);
+        }
+      }
+      setLinked(extra);
+    } catch {
+      // The model may still be downloading, or absent on this deployment;
+      // the button stays and a second press tries again.
+    } finally {
+      setLinking(false);
+    }
+  };
 
   const tagsOf = new Map(live.map((file) => [file.id, file.tags]));
   const open = trips.filter(
@@ -178,12 +229,30 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
       !refused.has(trip.id) &&
       !trip.fileIds.every((id) => tagsOf.get(id)?.includes(tripTag(trip))),
   );
-  if (open.length === 0) {
+  const loose = live.filter(
+    (file) =>
+      file.facts.some((fact) => fact.kind === "event" && !fact.dismissed) &&
+      !file.tags.some((tag) => tag.startsWith("trip:")),
+  );
+  const canLink = entitiesEnabled() && linked === null && loose.length >= 2;
+  if (open.length === 0 && !canLink) {
     return null;
   }
   return (
     <section className="pending" aria-label="Trips worth grouping">
       <div className="pending-list">
+        {canLink && (
+          <div className="pending-bulk">
+            <span>Documents that share no reference can still belong together.</span>
+            <button
+              className="btn btn-small"
+              disabled={linking}
+              onClick={() => void findConnections()}
+            >
+              {linking ? "Looking…" : "Find travel connections"}
+            </button>
+          </div>
+        )}
         {open.map((trip) => (
           <div key={trip.id} className="pending-card">
             <div className="pending-card-text">

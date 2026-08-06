@@ -116,6 +116,23 @@ describe("suggestTrips", () => {
     expect(trips[0]!.fileIds).not.toContain("f-gone");
   });
 
+  it("bridges through places a model found, when documents share nothing exact", async () => {
+    const stay: TripFile = {
+      id: "f-stay",
+      name: "brooklyn-inn.txt",
+      facts: [
+        event("2027-03-20", "Check-in: Brooklyn Inn", { source: "user" }),
+        event("2027-03-24", "Check-out: Brooklyn Inn", { source: "user" }),
+      ],
+    };
+    // Sixteen days from the flight and no shared reference: apart on their own.
+    expect(await suggestTrips([flight(), stay], NOW)).toEqual([]);
+    const extra = new Map([["f-stay", new Set(["New York"])]]);
+    const trips = await suggestTrips([flight(), stay], NOW, extra);
+    expect(trips).toHaveLength(1);
+    expect(trips[0]!.destination).toBe("New York");
+  });
+
   it("is stable: the same library yields the same suggestion identity", async () => {
     const a = await suggestTrips([flight(), hotel()], NOW);
     const b = await suggestTrips([hotel(), flight()], NOW);

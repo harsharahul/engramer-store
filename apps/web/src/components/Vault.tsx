@@ -39,6 +39,7 @@ import { startWatchSync } from "../watchfolders";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
 import { cosine, embedQuery, semanticEnabled, setSemanticEnabled } from "../intel/semantic";
 import { factsEnabled, setFactsEnabled } from "../intel/scan";
+import { entitiesEnabled, setEntitiesEnabled } from "../intel/entities";
 import { DATED_KINDS, soonestDated } from "../intel/facts";
 import { CalendarView } from "./CalendarView";
 import { HeadsUp, TripHeadsUp } from "./HeadsUp";
@@ -245,6 +246,7 @@ export function Vault() {
   const [ocrOn, setOcrOn] = useState(() => ocrEnabled());
   const [semanticOn, setSemanticOn] = useState(() => semanticEnabled());
   const [factsOn, setFactsOn] = useState(() => factsEnabled());
+  const [entitiesOn, setEntitiesOn] = useState(() => entitiesEnabled());
   const [semanticHits, setSemanticHits] = useState<SearchHit[]>([]);
   const [similarTo, setSimilarTo] = useState<FileEntry | null>(null);
   const [similarHits, setSimilarHits] = useState<SearchHit[]>([]);
@@ -1624,6 +1626,12 @@ export function Vault() {
                 const next = !factsOn;
                 setFactsEnabled(next);
                 setFactsOn(next);
+              }}
+              entitiesOn={entitiesOn}
+              onToggleEntities={() => {
+                const next = !entitiesOn;
+                setEntitiesEnabled(next);
+                setEntitiesOn(next);
               }}
               theme={theme}
               onToggleTheme={toggleTheme}
