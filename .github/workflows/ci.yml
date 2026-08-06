@@ -58,6 +58,16 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+      - name: Free runner disk for the image build
+        # The image stages the on-device models and office assets, and the
+        # two-architecture build doubles every layer; the hosted runner's
+        # ~14GB headroom is not enough with its preinstalled toolchains
+        # still aboard. None of these are used by this build.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /usr/local/share/powershell
+          sudo docker image prune -af
+          df -h /
       - uses: docker/setup-qemu-action@v4
         if: github.event_name == 'push' # arm64 emulation only needed for the multi-arch push
       - uses: docker/setup-buildx-action@v4
