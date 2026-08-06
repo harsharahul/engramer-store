@@ -46,6 +46,13 @@ export const ClockGlyph = ({ size = 16 }: IconProps) => (
   </Svg>
 );
 
+export const CalendarGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <rect x="3.5" y="5" width="17" height="15.5" rx="1.5" />
+    <path d="M3.5 9.5h17M8 3v4M16 3v4" />
+  </Svg>
+);
+
 export const TrashGlyph = ({ size = 16 }: IconProps) => (
   <Svg size={size}>
     <path d="M4.5 6.5h15M9.5 6V4.5h5V6M6.5 6.5 7.5 20h9l1-13.5M10 10.5v6M14 10.5v6" />
