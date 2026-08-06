@@ -18,6 +18,12 @@
  *    rounded corners to full bleed (iOS applies its own corner mask)
  *    and flattened, because the App Store icon may not carry an alpha
  *    channel.
+ *  - The generated Info.plist carries no privacy usage descriptions.
+ *    Without NSFaceIDUsageDescription iOS refuses biometrics and the
+ *    unlock prompt degrades to the device passcode; without the photo
+ *    and camera strings iOS kills the app the moment the upload
+ *    picker touches either. The strings live in Info.ios.plist next
+ *    to tauri.conf.json; this copies any that are missing.
  */
 import { execFileSync } from "node:child_process";
 import { copyFileSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -68,3 +74,18 @@ for (const name of readdirSync(source)) {
   stamped++;
 }
 console.log(`ios project: stamped ${stamped} brand icons over the placeholder set`);
+
+const infoPlist = join(apple, "engram-store-desktop_iOS", "Info.plist");
+const wanted = readFileSync(join(tauriDir, "Info.ios.plist"), "utf8");
+let info = readFileSync(infoPlist, "utf8");
+let added = 0;
+for (const match of wanted.matchAll(/(<key>\w+<\/key>)\s*(<string>[^<]*<\/string>)/g)) {
+  const [, key, value] = match;
+  if (info.includes(key)) continue;
+  info = info.replace("</dict>\n</plist>", `\t${key}\n\t${value}\n</dict>\n</plist>`);
+  added++;
+}
+if (added) {
+  writeFileSync(infoPlist, info);
+}
+console.log(`ios project: ${added ? `added ${added} privacy usage descriptions` : "privacy usage descriptions already present"}`);

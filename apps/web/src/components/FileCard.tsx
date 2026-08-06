@@ -90,8 +90,10 @@ export function FileCard(props: {
         props.onMenu(e.clientX, e.clientY);
       }}
       {...longPress}
-      draggable
-      onDragStart={props.onDragStart}
+      /* A draggable element claims the long-press for its drag lift on
+         iOS, so the menu gesture only works with dragging off there. */
+      draggable={!coarse}
+      onDragStart={coarse ? undefined : props.onDragStart}
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === "Enter") {

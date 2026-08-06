@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Engram Store unlocks your vault with Face ID.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Engram Store opens the camera only when you choose to capture a photo into your vault.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Engram Store reads only the photos you pick to add them to your vault.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Engram Store saves photos to your library only when you export them.</string>
+</dict>
+</plist>

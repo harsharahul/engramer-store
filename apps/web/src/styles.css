@@ -42,6 +42,11 @@ html {
   /* Named so it can be measured and reported; env() is otherwise invisible
      to script, and this is the number most likely to be misread on a phone. */
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* iOS paints its own grey flash on every tap and inflates type in
+     landscape; both fight the design system. */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 html,
@@ -3712,6 +3717,9 @@ span.item-menu {
   border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
   padding: 20px 22px;
+  /* A grid item's implicit min-width is its content, so one long
+     unbroken value would push the card past a phone edge. */
+  min-width: 0;
 }
 
 .profile-card h3 {
@@ -3759,6 +3767,7 @@ span.item-menu {
   color: var(--paper-faint);
   font-size: 12.5px;
   margin-top: 2px;
+  overflow-wrap: anywhere;
 }
 
 .profile-row {
@@ -3790,6 +3799,7 @@ span.item-menu {
   font-size: 12.5px;
   margin-top: 3px;
   max-width: 52ch;
+  overflow-wrap: anywhere;
 }
 
 .profile-meter {
