@@ -11,7 +11,7 @@
  */
 
 import { type DocumentKind, type Fact, factId, maskTail } from "./facts";
-import { parseDate } from "./dates";
+import { parseDate, parseTime } from "./dates";
 
 /** How far past a label to look for its date. */
 const WINDOW = 60;
@@ -24,6 +24,14 @@ const EXPIRY_LABELS =
 const DUE_LABELS =
   /\b(?:payment\s+due|amount\s+due\s+by|due\s+date|due\s+on|pay\s+by)\b/gi;
 const ISSUED_LABELS = /\b(?:date\s+of\s+issue|issue\s+date|issued(?:\s+on)?)\b/gi;
+
+/**
+ * Moments rather than deadlines, which is what travel documents are made of.
+ * These get the same window discipline as the deadline labels, plus a time
+ * when the window carries one.
+ */
+const EVENT_LABELS =
+  /\b(?:check[- ]?in|check[- ]?out|departure|departs|boarding(?:\s+time)?|arrival|arrives|pick[- ]?up|drop[- ]?off)\b/gi;
 
 const KINDS: { kind: Fact["kind"]; labels: RegExp }[] = [
   { kind: "expiry", labels: EXPIRY_LABELS },
@@ -42,6 +50,10 @@ const DOCUMENT_KINDS: { kind: DocumentKind; pattern: RegExp }[] = [
   { kind: "residence-permit", pattern: /\bresidence\s+(?:permit|card)\b|\bwork\s+permit\b/i },
   { kind: "visa", pattern: /\bvisa\b/i },
   { kind: "id-card", pattern: /\bidentity\s+card\b|\bid\s+card\b|\bnational\s+id\b/i },
+  { kind: "boarding-pass", pattern: /\bboarding\s+pass\b/i },
+  { kind: "hotel-booking", pattern: /\bhotel\b[\s\S]{0,80}?\b(?:reservation|confirmation|booking)\b/i },
+  { kind: "car-rental", pattern: /\bcar\s+rental\b|\brental\s+agreement\b/i },
+  { kind: "itinerary", pattern: /\bflight\s+(?:confirmation|itinerary)\b|\be-?ticket\b|\bitinerary\b/i },
   { kind: "insurance", pattern: /\binsurance\b|\bpolicy\s+(?:number|holder|period)\b/i },
   { kind: "warranty", pattern: /\bwarrant(?:y|ies)\b|\bguarantee\s+period\b/i },
   { kind: "vehicle-registration", pattern: /\bvehicle\s+registration\b|\bregistration\s+certificate\b/i },
@@ -95,6 +107,33 @@ export function labelledFacts(text: string): Fact[] {
         ...(parsed.ambiguous ? { ambiguous: true } : {}),
       });
     }
+  }
+  EVENT_LABELS.lastIndex = 0;
+  for (let match = EVENT_LABELS.exec(text); match; match = EVENT_LABELS.exec(text)) {
+    const window = windowAfter(text, match.index + match[0].length);
+    const parsed = parseDate(window);
+    if (!parsed) {
+      continue;
+    }
+    const label = match[0].trim();
+    // The label joins the identity: a check-in and a check-out can share a
+    // day, and a date alone would collapse them into one fact.
+    const id = factId("event", `${parsed.iso} ${label.toLowerCase()}`);
+    if (byId.has(id)) {
+      continue;
+    }
+    const time = parseTime(window);
+    byId.set(id, {
+      id,
+      kind: "event",
+      document,
+      value: parsed.iso,
+      label,
+      ...(time ? { time } : {}),
+      source: "label",
+      confidence: parsed.ambiguous ? 0.5 : 0.7,
+      ...(parsed.ambiguous ? { ambiguous: true } : {}),
+    });
   }
   return [...byId.values()];
 }
