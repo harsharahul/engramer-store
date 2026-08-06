@@ -80,6 +80,8 @@ export type FactSource =
   | "barcode"
   /** A machine-readable zone, validated by its own check digits. */
   | "mrz"
+  /** schema.org reservation data a document carries about itself. */
+  | "jsonld"
   /** A labelled date in extracted text. */
   | "label"
   /** Generic harvesting, the weakest signal. */
@@ -107,7 +109,8 @@ export interface Fact {
    * design refuses to make.
    */
   time?: string;
-  /** The IANA zone the time belongs to, on the rare occasion it is known. */
+  /** The IANA zone the time belongs to, or the fixed offset the document
+   * itself printed, on the rare occasion either is genuinely known. */
   zone?: string;
   /** The document's own words for what this date is, verbatim. Always set on
    * "dated" facts, since the label is the only meaning they carry. */
@@ -210,7 +213,7 @@ export function soonestDated(facts: Fact[]): string | undefined {
  * no free text to ground them against, and their own check digits or fixed
  * field positions already proved them.
  */
-const STRUCTURED: ReadonlySet<FactSource> = new Set(["barcode", "mrz", "user"]);
+const STRUCTURED: ReadonlySet<FactSource> = new Set(["barcode", "mrz", "jsonld", "user"]);
 
 const MONTHS = [
   "january",
