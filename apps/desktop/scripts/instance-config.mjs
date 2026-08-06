@@ -9,10 +9,16 @@
  *
  *   ENGRAM_APP_URL=https://vault.example.com pnpm --filter @engramer/desktop bundle
  *
+ * The Apple signing team is the builder's property in the same way, so iOS
+ * builds name it in the environment too:
+ *
+ *   APPLE_DEVELOPMENT_TEAM=XXXXXXXXXX ENGRAM_APP_URL=... pnpm --filter @engramer/desktop ios:bundle
+ *
  * Both files this writes are derived and ignored by git, so a build can
- * never leave a builder's own address in a tracked file. Two things need it:
- * the window's address, and the capability that lets that origin call the
- * shell's unlock commands, which is what makes Touch ID work.
+ * never leave a builder's own address or team in a tracked file. Two things
+ * need the address: the window's URL, and the capability that lets that
+ * origin call the shell's unlock commands, which is what makes Touch ID
+ * work.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -46,9 +52,14 @@ config.build.frontendDist = origin;
 for (const window of config.app.windows ?? []) {
   window.url = origin;
 }
+const instance = { build: config.build, app: { windows: config.app.windows } };
+const team = (process.env.APPLE_DEVELOPMENT_TEAM ?? "").trim();
+if (team) {
+  instance.bundle = { iOS: { developmentTeam: team } };
+}
 writeFileSync(
   join(tauriDir, "tauri.instance.json"),
-  `${JSON.stringify({ build: config.build, app: { windows: config.app.windows } }, null, 2)}\n`,
+  `${JSON.stringify(instance, null, 2)}\n`,
 );
 
 const capability = JSON.parse(readFileSync(join(tauriDir, "capabilities", "default.json"), "utf8"));
