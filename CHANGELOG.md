@@ -3,6 +3,20 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.37.1] - 2026-08-06
+
+### Fixed
+- **iPhone privacy permissions.** The iOS app now declares why it uses
+  Face ID, the camera, and the photo library. Unlocking the vault asks
+  for Face ID instead of falling back to the device passcode, and
+  adding files through the photo picker no longer closes the app.
+- **Long-press on files.** On touchscreens a long-press reliably opens
+  the file actions menu, including tags and details; it no longer
+  competes with drag and drop, which stays a pointer feature.
+- **Profile on small screens.** Long values wrap instead of pushing
+  the profile cards past the screen edge, and taps no longer flash
+  the system highlight rectangle.
+
 ## [0.37.0] - 2026-08-06
 
 ### Added
