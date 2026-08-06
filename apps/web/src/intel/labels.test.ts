@@ -171,3 +171,34 @@ describe("guessDocumentKind", () => {
     expect(guessDocumentKind("a shopping list")).toBe("other");
   });
 });
+
+describe("travel vocabulary", () => {
+  it("types a check-in date as an event and carries its time", () => {
+    const [fact] = labelledFacts("The Larkspur Hotel\nCheck-in: March 04, 2027 from 15:00");
+    expect(fact).toMatchObject({ kind: "event", value: "2027-03-04", time: "15:00" });
+    expect(fact!.label).toBe("Check-in");
+  });
+
+  it("types departure and boarding, keeping labels as written", () => {
+    const facts = labelledFacts("Departure: 4 March 2027 09:40\nBoarding time: 4 March 2027 09:10");
+    expect(facts.map((f) => f.label)).toEqual(["Departure", "Boarding time"]);
+    expect(facts.every((f) => f.kind === "event")).toBe(true);
+    expect(facts.map((f) => f.time)).toEqual(["09:40", "09:10"]);
+  });
+
+  it("keeps two same-day events apart", () => {
+    const facts = labelledFacts("Check-in: 4 March 2027\nCheck-out: 4 March 2027");
+    expect(facts).toHaveLength(2);
+  });
+
+  it("emits nothing for an event label with no date in reach", () => {
+    expect(labelledFacts("Check-in desk is on level 2")).toEqual([]);
+  });
+
+  it("recognizes travel documents by kind", () => {
+    expect(guessDocumentKind("BOARDING PASS  Gate C12  Seat 14C")).toBe("boarding-pass");
+    expect(guessDocumentKind("Hotel Reservation. Confirmation number LRK-1")).toBe("hotel-booking");
+    expect(guessDocumentKind("Car Rental Agreement")).toBe("car-rental");
+    expect(guessDocumentKind("Your flight itinerary")).toBe("itinerary");
+  });
+});
