@@ -144,3 +144,90 @@ describe("ordering and identity", () => {
     expect(insightsFor(files, NOW)[0]!.id).toContain("f1");
   });
 });
+
+describe("travel rules", () => {
+  // A confirmed September trip: out on the 10th, back on the 18th.
+  const trip = (over: Partial<Fact> = {}) => [
+    fact({ kind: "event", value: "2026-09-10", label: "Flight AQ 214 departs SFO", time: "09:40", ...over }),
+    fact({ kind: "event", value: "2026-09-10", label: "Flight AQ 214 arrives JFK", ...over }),
+    fact({ kind: "event", value: "2026-09-18", label: "Flight AQ 215 departs JFK", ...over }),
+  ];
+
+  it("says when a trip returns inside the passport's six-month window", () => {
+    const files = [
+      file("fp", "passport.pdf", [fact({ document: "passport", value: "2027-01-02" })]),
+      file("ft", "flights.html", trip()),
+    ];
+    const out = insightsFor(files, NOW).find((i) => i.ruleId === "passport-short-for-trip");
+    expect(out).toBeDefined();
+    expect(out!.severity).toBe("soon");
+    expect(out!.text).toContain("18 Sep 2026");
+    expect(out!.text).toContain("2 Jan 2027");
+  });
+
+  it("escalates when the passport expires during the trip itself", () => {
+    const files = [
+      file("fp", "passport.pdf", [fact({ document: "passport", value: "2026-09-15" })]),
+      file("ft", "flights.html", trip()),
+    ];
+    const out = insightsFor(files, NOW).find((i) => i.ruleId === "passport-short-for-trip");
+    expect(out!.severity).toBe("overdue");
+    expect(out!.title).toBe("Passport expires during this trip");
+  });
+
+  it("stays entirely quiet about trips built on unconfirmed events", () => {
+    const files = [
+      file("fp", "passport.pdf", [fact({ document: "passport", value: "2026-10-01" })]),
+      file("ft", "flights.html", trip({ confirmed: false })),
+    ];
+    expect(ruleIds(files)).not.toContain("passport-short-for-trip");
+  });
+
+  it("notices a permit that dies mid-trip", () => {
+    const files = [
+      file("fv", "visa.pdf", [fact({ document: "visa", value: "2026-09-12" })]),
+      file("ft", "flights.html", trip()),
+    ];
+    const out = insightsFor(files, NOW).find((i) => i.ruleId === "permit-ends-mid-trip");
+    expect(out).toBeDefined();
+    expect(out!.fileId).toBe("fv");
+  });
+
+  it("sees the night between landing and check-in", () => {
+    const files = [
+      file("ft", "flight.html", [
+        fact({ kind: "event", value: "2026-09-10", label: "Flight AQ 214 arrives JFK" }),
+      ]),
+      file("fh", "hotel.html", [
+        fact({ kind: "event", value: "2026-09-11", label: "Check-in: The Larkspur Hotel" }),
+      ]),
+    ];
+    const out = insightsFor(files, NOW).find((i) => i.ruleId === "checkin-gap");
+    expect(out).toBeDefined();
+    expect(out!.fileId).toBe("fh");
+    expect(out!.text).toContain("10 Sep 2026");
+  });
+
+  it("keeps quiet when the room starts the day you land", () => {
+    const files = [
+      file("ft", "flight.html", [
+        fact({ kind: "event", value: "2026-09-10", label: "Flight arrives JFK" }),
+      ]),
+      file("fh", "hotel.html", [fact({ kind: "event", value: "2026-09-10", label: "Check-in: Inn" })]),
+    ];
+    expect(ruleIds(files)).not.toContain("checkin-gap");
+  });
+
+  it("mentions check-in opening exactly the day before the flight", () => {
+    const files = [
+      file("ft", "pass.pdf", [
+        fact({ kind: "event", value: "2026-08-05", label: "Flight AQ 214 departs SFO", time: "09:40" }),
+      ]),
+    ];
+    const out = insightsFor(files, NOW).find((i) => i.ruleId === "checkin-opens");
+    expect(out).toBeDefined();
+    expect(out!.text).toContain("09:40");
+    const dayOf = insightsFor(files, Date.UTC(2026, 7, 5)).map((i) => i.ruleId);
+    expect(dayOf).not.toContain("checkin-opens");
+  });
+});

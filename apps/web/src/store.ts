@@ -27,7 +27,7 @@ import { isPdf } from "./intel/extract";
 import { embedImage } from "./intel/semantic";
 import { asFacts, mergeFacts, reconcileFacts, type Fact, type FactEvidence } from "./intel/facts";
 import { factsEnabled, scanForFacts } from "./intel/scan";
-import { tripTag, type TripSuggestion } from "./intel/trips";
+import { EXACT_SOURCES, tripTag, type TripSuggestion } from "./intel/trips";
 import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
 import { blankDocument, DOCX_MIME, XLSX_MIME } from "./office/templates";
@@ -1082,7 +1082,21 @@ export const useStore = create<StoreState>((set, get) => {
         if (!file || file.tags.includes(tag)) {
           continue;
         }
-        await patchFileMeta(fileId, { tags: [...file.tags, tag] });
+        // Accepting the group is ratification: the exact events that formed
+        // it become confirmed in the same write, so the rules that speak
+        // only on confirmed facts may now speak about this trip. Soft
+        // unconfirmed facts never took part in the grouping and stay
+        // unconfirmed; nobody has looked at them yet.
+        const facts = file.facts.map((fact) =>
+          fact.kind === "event" &&
+          !fact.dismissed &&
+          !fact.confirmed &&
+          fact.confidence === 1 &&
+          EXACT_SOURCES.has(fact.source)
+            ? { ...fact, confirmed: true }
+            : fact,
+        );
+        await patchFileMeta(fileId, { tags: [...file.tags, tag], facts });
       }
     },
 

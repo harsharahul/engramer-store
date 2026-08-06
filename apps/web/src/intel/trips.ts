@@ -51,7 +51,12 @@ export interface ItineraryLeg {
 }
 
 /** Sources whose full-confidence facts may cluster without confirmation. */
-const EXACT: ReadonlySet<Fact["source"]> = new Set(["barcode", "mrz", "jsonld", "user"]);
+export const EXACT_SOURCES: ReadonlySet<Fact["source"]> = new Set([
+  "barcode",
+  "mrz",
+  "jsonld",
+  "user",
+]);
 
 /** Events this many days apart still belong to one candidate. */
 const WINDOW_DAYS = 14;
@@ -64,7 +69,7 @@ function usable(fact: Fact): boolean {
   if (fact.dismissed) {
     return false;
   }
-  return fact.confirmed === true || (fact.confidence === 1 && EXACT.has(fact.source));
+  return fact.confirmed === true || (fact.confidence === 1 && EXACT_SOURCES.has(fact.source));
 }
 
 function dayOf(iso: string): number {
@@ -134,6 +139,49 @@ async function memberOf(file: TripFile): Promise<Member | null> {
     }
   }
   return { file, events, start: dates[0]!, end: dates[dates.length - 1]!, tails, cities, arrivals };
+}
+
+export interface TravelSpan {
+  start: string;
+  end: string;
+  events: { fileId: string; fileName: string; fact: Fact }[];
+}
+
+/**
+ * Windows of travel activity: events chained by the same fortnight rule
+ * clustering uses. Synchronous on purpose, so insight rules can read spans
+ * without the airport table; the predicate decides which facts count, and
+ * rules pass a stricter one than clustering does.
+ */
+export function travelSpans(
+  files: TripFile[],
+  allow: (fact: Fact) => boolean = usable,
+): TravelSpan[] {
+  const dated: TravelSpan["events"] = [];
+  for (const file of files) {
+    if (file.trashed) {
+      continue;
+    }
+    for (const fact of file.facts) {
+      if (fact.kind === "event" && allow(fact)) {
+        dated.push({ fileId: file.id, fileName: file.name, fact });
+      }
+    }
+  }
+  dated.sort((a, b) => a.fact.value.localeCompare(b.fact.value));
+  const spans: TravelSpan[] = [];
+  for (const entry of dated) {
+    const current = spans[spans.length - 1];
+    if (current && dayOf(entry.fact.value) <= dayOf(current.end) + WINDOW_DAYS) {
+      current.events.push(entry);
+      if (entry.fact.value > current.end) {
+        current.end = entry.fact.value;
+      }
+    } else {
+      spans.push({ start: entry.fact.value, end: entry.fact.value, events: [entry] });
+    }
+  }
+  return spans;
 }
 
 interface Cluster {
