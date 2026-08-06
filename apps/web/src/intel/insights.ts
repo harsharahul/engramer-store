@@ -20,6 +20,7 @@
 
 import type { Fact } from "./facts";
 import { daysUntil } from "./dates";
+import { travelSpans, type TravelSpan } from "./trips";
 
 export type Severity = "overdue" | "soon" | "info";
 
@@ -98,6 +99,22 @@ function expiriesOf(files: FactfulFile[], document: Fact["document"]) {
 const PASSPORT_RULE_MONTHS = 6;
 const PASSPORT_WARN_DAYS = 270;
 const WARRANTY_WARN_DAYS = 30;
+
+/**
+ * Travel windows built from confirmed events only. The clustering machinery
+ * accepts exact unconfirmed sources; a rule speaking in the product's most
+ * authoritative voice does not, and accepting a trip proposal confirms its
+ * exact events, so a ratified trip passes this bar on its own.
+ */
+function confirmedSpans(files: FactfulFile[], now: number): TravelSpan[] {
+  return travelSpans(files, (fact) => fact.confirmed === true && !fact.dismissed).filter(
+    (span) => daysUntil(span.end, now) >= 0,
+  );
+}
+
+const ARRIVES = /\barriv/i;
+const CHECKIN = /^check[- ]?in\b/i;
+const FLIGHT = /\bflight\b|\bdepart/i;
 
 const RULES: Rule[] = [
   {
@@ -184,6 +201,116 @@ const RULES: Rule[] = [
           title: `Warranty ends in ${daysUntil(fact.value, now)} days`,
           text: `Cover runs out on ${shown(fact.value)}. This is the last window to make a claim.`,
         }));
+    },
+  },
+  {
+    // The founding example of the whole feature: neither document says it,
+    // and only a reader holding both the passport and the trip can.
+    id: "passport-short-for-trip",
+    run(files, now) {
+      const passport = expiriesOf(files, "passport")
+        .sort((a, b) => a.fact.value.localeCompare(b.fact.value))
+        .at(-1);
+      if (!passport) {
+        return [];
+      }
+      const expiry = passport.fact.value;
+      const cutoff = monthsBefore(expiry, PASSPORT_RULE_MONTHS);
+      return confirmedSpans(files, now).flatMap((span): Finding[] => {
+        if (span.end >= expiry) {
+          return [
+            {
+              fileId: passport.file.id,
+              severity: "overdue" as const,
+              title: "Passport expires during this trip",
+              text:
+                `The trip runs to ${shown(span.end)} and the passport expires ` +
+                `${shown(expiry)}. Renew before travelling.`,
+            } satisfies Finding,
+          ];
+        }
+        if (span.end > cutoff) {
+          return [
+            {
+              fileId: passport.file.id,
+              severity: "soon" as const,
+              title: "This trip returns inside the passport's six-month window",
+              text:
+                `The trip returns ${shown(span.end)} and the passport expires ` +
+                `${shown(expiry)}, under six months later. Many destinations require ` +
+                `six months of validity on arrival.`,
+            } satisfies Finding,
+          ];
+        }
+        return [];
+      });
+    },
+  },
+  {
+    id: "permit-ends-mid-trip",
+    run(files, now) {
+      const attached = [...expiriesOf(files, "residence-permit"), ...expiriesOf(files, "visa")];
+      return confirmedSpans(files, now).flatMap((span) =>
+        attached
+          .filter(({ fact }) => fact.value >= span.start && fact.value <= span.end)
+          .map(({ file, fact }) => ({
+            fileId: file.id,
+            severity: "soon" as const,
+            title: "Expires during the trip",
+            text:
+              `This expires ${shown(fact.value)}, inside the ${shown(span.start)} to ` +
+              `${shown(span.end)} trip.`,
+          })),
+      );
+    },
+  },
+  {
+    id: "checkin-gap",
+    run(files, now) {
+      return confirmedSpans(files, now).flatMap((span) => {
+        const landing = span.events
+          .filter(({ fact }) => ARRIVES.test(fact.label ?? ""))
+          .map(({ fact }) => fact.value)
+          .sort()[0];
+        const stay = span.events
+          .filter(({ fact }) => CHECKIN.test(fact.label ?? ""))
+          .sort((a, b) => a.fact.value.localeCompare(b.fact.value))[0];
+        if (!landing || !stay || stay.fact.value <= landing) {
+          return [];
+        }
+        return [
+          {
+            fileId: stay.fileId,
+            severity: "info" as const,
+            title: "A gap between landing and check-in",
+            text:
+              `You land ${shown(landing)} but the room starts ${shown(stay.fact.value)}. ` +
+              `One night is not covered by anything stored here.`,
+          } satisfies Finding,
+        ];
+      });
+    },
+  },
+  {
+    id: "checkin-opens",
+    run(files, now) {
+      return files.flatMap((file) =>
+        usable(file)
+          .filter(
+            (fact) =>
+              fact.kind === "event" &&
+              FLIGHT.test(fact.label ?? "") &&
+              daysUntil(fact.value, now) === 1,
+          )
+          .map((fact) => ({
+            fileId: file.id,
+            severity: "info" as const,
+            title: "Flight check-in likely opens today",
+            text:
+              `The flight leaves ${shown(fact.value)}${fact.time ? ` at ${fact.time}` : ""}, ` +
+              `and airlines commonly open check-in 24 hours before departure.`,
+          })),
+      );
     },
   },
   {
