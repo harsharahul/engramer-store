@@ -20,6 +20,7 @@ import {
 import { ApiError, api, uploadBlob, withRetry, type FileDto, type FolderDto, type SharedFileDto } from "./api";
 import { openSharedFileKey, sealFileKeyFor } from "./collab";
 import { SaveConflictError, copyName } from "./conflict";
+import { uploadLanes, withAnalysisSlot } from "./analysisslot";
 import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { clearSession, suspendSession, type Session } from "./session";
@@ -871,10 +872,10 @@ export const useStore = create<StoreState>((set, get) => {
       const revealItems: RevealItem[] = [];
       const cancel = transferScope();
       holdTransferLock();
-      // The same bounded pool the folder path has always had: a phone's
-      // multi-photo pick was walking this one file at a time, paying every
-      // pipeline in series.
-      await boundedRun(fileList, 4, async (file) => {
+      // Transfers overlap; READING the files does not, beyond what the
+      // device can hold. Analysing four photos at once exhausted an
+      // iPhone's memory and iOS killed the app mid-upload.
+      await boundedRun(fileList, uploadLanes(), async (file) => {
         if (cancel.signal.aborted) {
           return;
         }
@@ -890,8 +891,8 @@ export const useStore = create<StoreState>((set, get) => {
             uploads: get().uploads.map((u) => (u.id === uploadId ? { ...u, ...patch } : u)),
           });
         try {
-          const prepared = await analyzeFile(file, cancel.signal, (phase) =>
-            update({ detail: phase }),
+          const prepared = await withAnalysisSlot(() =>
+            analyzeFile(file, cancel.signal, (phase) => update({ detail: phase })),
           );
           update({ detail: "encrypting" });
           // Root uploads are auto-filed into a category folder; uploads into a
@@ -976,7 +977,7 @@ export const useStore = create<StoreState>((set, get) => {
       }
 
       const revealItems: RevealItem[] = [];
-      await boundedRun(items, 4, async (item) => {
+      await boundedRun(items, uploadLanes(), async (item) => {
         if (cancel.signal.aborted) {
           const skipped = get().batch;
           set({ batch: skipped ? { ...skipped, failed: skipped.failed + 1 } : null });
@@ -985,7 +986,7 @@ export const useStore = create<StoreState>((set, get) => {
         const current = get().batch;
         set({ batch: current ? { ...current, current: item.file.name } : null });
         try {
-          const analyzed = await analyzeFile(item.file, cancel.signal);
+          const analyzed = await withAnalysisSlot(() => analyzeFile(item.file, cancel.signal));
           // Caller-supplied tags join the analysis rather than replace it, so
           // a watched file keeps its category and gains its origin.
           const prepared = item.tags?.length
