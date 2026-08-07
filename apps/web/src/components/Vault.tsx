@@ -1988,6 +1988,16 @@ export function Vault() {
               ).catch(() => undefined);
               await store.saveFileBinary(editorFile.id, bytes, text);
             }}
+            onSaveCopy={async (bytes) => {
+              const text = await extractText(
+                new File([bytes.slice().buffer as ArrayBuffer], editorFile.name, {
+                  type: editorFile.mime,
+                }),
+              ).catch(() => undefined);
+              const id = await store.saveFileCopy(editorFile.id, bytes, text);
+              setEditorId(id);
+              showToast("Saved as your own copy.");
+            }}
             onClose={() => setEditorId(null)}
           />
         </Suspense>

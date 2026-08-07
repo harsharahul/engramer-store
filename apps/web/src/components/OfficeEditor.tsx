@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FileEntry } from "../store";
+import { useStore, type FileEntry } from "../store";
 import { downloadAndDecrypt } from "../transfer";
+import { SaveConflictError, describeConflict } from "../conflict";
 import { Converter } from "../office/x2t";
 import { EditorSession, editorFrameUrl } from "../office/session";
 import { diag } from "../diag";
@@ -35,6 +36,8 @@ export function OfficeEditor(props: {
   file: FileEntry;
   fileType: "docx" | "xlsx";
   onSave: (bytes: Uint8Array) => Promise<void>;
+  /** A conflicting save kept as a new file of the editor's own. */
+  onSaveCopy: (bytes: Uint8Array) => Promise<void>;
   onClose: () => void;
 }) {
   const { file, fileType } = props;
@@ -60,6 +63,14 @@ export function OfficeEditor(props: {
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  // Someone else's save landed first; the exported bytes wait here for the
+  // choice between reloading theirs and keeping these as a copy.
+  const [conflict, setConflict] = useState<{ bytes: Uint8Array | null } | null>(null);
+  // The entry's stamp when this editor opened it; a strictly newer stamp on
+  // the store's entry means somebody saved meanwhile.
+  const openedAtRef = useRef(file.updatedAt);
+  // Forces the open effect to run again for "Reload theirs".
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   // The frame's address depends only on the kind of document, so the editor
   // begins loading its several megabytes immediately, while this file is
@@ -76,6 +87,8 @@ export function OfficeEditor(props: {
     let cancelled = false;
 
     const opened = fileRef.current;
+    openedAtRef.current = opened.updatedAt;
+    setConflict(null);
 
     // A frame that never reports ready would otherwise spin forever, which is
     // what a refused asset looks like from the outside. Generous, because the
@@ -145,7 +158,7 @@ export function OfficeEditor(props: {
       converter.close();
       converterRef.current = null;
     };
-  }, [fileId, fileType]);
+  }, [fileId, fileType, reloadNonce]);
 
   /**
    * Hand the keyboard over once the document is ready, and not a moment
@@ -163,28 +176,85 @@ export function OfficeEditor(props: {
   const save = useCallback(async () => {
     const converter = converterRef.current;
     const session = sessionRef.current;
-    if (!converter || !session || busy || stage !== "ready") {
+    if (!converter || !session || busy || stage !== "ready" || conflict) {
+      return;
+    }
+    // Most conflicts can be caught before the work of exporting: if the
+    // library's entry moved since this editor opened, someone else already
+    // saved, and the question gets asked now rather than after a 409.
+    const current = useStore.getState().files.get(fileId);
+    if (current && describeConflict(openedAtRef.current, current.updatedAt) === "stale") {
+      setConflict({ bytes: null });
       return;
     }
     setBusy(true);
     setError(null);
+    let out: Uint8Array | null = null;
     try {
       const bin = await session.save();
       if (!bin) {
         throw new Error("the editor returned nothing to save");
       }
-      const out = await converter.exportDocument(`document.${fileType}`, bin);
+      out = await converter.exportDocument(`document.${fileType}`, bin);
       await props.onSave(out);
       setDirty(false);
       dirtyRef.current = false;
       setSavedAt(Date.now());
+      openedAtRef.current = useStore.getState().files.get(fileId)?.updatedAt ?? Date.now();
       diag("office", `saved ${file.name} (${out.length} bytes)`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      if (err instanceof SaveConflictError) {
+        // The export already happened; stash the very bytes that were
+        // refused so "Save as a copy" keeps exactly what was typed.
+        setConflict({ bytes: out });
+      } else {
+        setError(err instanceof Error ? err.message : "save failed");
+      }
     } finally {
       setBusy(false);
     }
-  }, [busy, stage, fileType, props, file.name]);
+  }, [busy, stage, conflict, fileId, fileType, props, file.name]);
+
+  /** Discards this editor's changes and reopens the winner's document. */
+  const reloadTheirs = useCallback(async () => {
+    setConflict(null);
+    setDirty(false);
+    dirtyRef.current = false;
+    setStage("decrypting");
+    await useStore
+      .getState()
+      .refresh()
+      .catch(() => {});
+    setReloadNonce((n) => n + 1);
+  }, []);
+
+  /** Keeps this editor's changes as a new file of the editor's own. */
+  const saveAsCopy = useCallback(async () => {
+    const converter = converterRef.current;
+    const session = sessionRef.current;
+    if (!converter || !session) {
+      return;
+    }
+    setBusy(true);
+    try {
+      let out = conflict?.bytes ?? null;
+      if (!out) {
+        const bin = await session.save();
+        out = bin ? await converter.exportDocument(`document.${fileType}`, bin) : null;
+      }
+      if (!out) {
+        throw new Error("the editor returned nothing to save");
+      }
+      await props.onSaveCopy(out);
+      setConflict(null);
+      setDirty(false);
+      dirtyRef.current = false;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "could not save a copy");
+    } finally {
+      setBusy(false);
+    }
+  }, [conflict, fileType, props]);
 
   useEffect(() => {
     saveRef.current = () => void save();
@@ -224,15 +294,29 @@ export function OfficeEditor(props: {
         </span>
         <div className="grow" />
         {error && <span className="error-text">{error}</span>}
-        <button
-          className="btn btn-primary"
-          onClick={() => void save()}
-          disabled={stage !== "ready" || busy}
-        >
-          {busy ? <span className="spinner" /> : null}
-          {busy ? "Encrypting" : "Save"}
-          {!busy && <kbd className="mono save-kbd">⌘S</kbd>}
-        </button>
+        {conflict ? (
+          <>
+            <span className="error-text">Someone else saved this document first.</span>
+            <button className="btn" onClick={() => void reloadTheirs()} disabled={busy}>
+              Reload theirs
+              <span className="btn-label"> (discards your changes)</span>
+            </button>
+            <button className="btn btn-primary" onClick={() => void saveAsCopy()} disabled={busy}>
+              {busy ? <span className="spinner" /> : null}
+              Save as a copy
+            </button>
+          </>
+        ) : (
+          <button
+            className="btn btn-primary"
+            onClick={() => void save()}
+            disabled={stage !== "ready" || busy}
+          >
+            {busy ? <span className="spinner" /> : null}
+            {busy ? "Encrypting" : "Save"}
+            {!busy && <kbd className="mono save-kbd">⌘S</kbd>}
+          </button>
+        )}
         <button className="icon-btn" title="Close" onClick={() => void close()}>
           <XGlyph />
         </button>
