@@ -3,6 +3,40 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Added
+- **Sharing with people, not just links.** A file can be shared to another
+  account as a viewer or an editor. The invitation is a claim-once link
+  that carries no key material; the recipient claims it signed in, the
+  owner's device seals the file key to exactly that account, and the file
+  appears in the recipient's new **Shared with me** view. No endpoint maps
+  an email to an account, and every dead invitation answers identically,
+  so accounts cannot be enumerated.
+- **Safe concurrent editing.** When two people save the same document, the
+  server accepts one save and refuses the other atomically; the refused
+  editor chooses between reloading the winner's document and keeping their
+  own work as a new file they own. Nothing is silently overwritten.
+- **Key rotation.** Removing a collaborator can also rotate the file's
+  key: content, thumbnail, and search index are re-encrypted under a fresh
+  key, which is re-sealed to every remaining member automatically.
+- **HEIC photos keep their original bytes.** A dedicated photo picker
+  stops iOS converting HEIC to JPEG on the way in, and an on-device
+  decoder (loaded only when needed) renders HEIC thumbnails, previews,
+  text recognition and meaning search in browsers without native support.
+
+### Fixed
+- **Editing documents on iPhone no longer zooms the page.** The office
+  editors' hidden input sat below the size at which iOS zooms to a
+  focused field; it is now pinned above it inside the editor frame, and
+  double-tap zoom is quieted there too.
+- **Faster photo uploads.** Picked photos upload through the same bounded
+  pool folder uploads always had, and each file's follow-up requests
+  (checksum, thumbnail, search index) travel together instead of one
+  after another.
+- **A visible Details button.** The file preview toolbar gains an explicit
+  Details button alongside the existing routes to the panel.
+
 ## [0.37.1] - 2026-08-06
 
 ### Fixed
