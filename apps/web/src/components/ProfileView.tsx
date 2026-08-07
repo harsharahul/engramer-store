@@ -11,6 +11,7 @@ import {
   type VerifyResult,
 } from "../verify";
 import { useStore } from "../store";
+import { api } from "../api";
 import { formatBytes } from "../format";
 import { ACCENTS, type ThemeMode } from "../theme";
 import {
@@ -74,11 +75,20 @@ export function ProfileView(props: {
 }) {
   const store = useStore();
   const [unlockState, setUnlockState] = useState<UnlockState>("checking");
+  const [nameDraft, setNameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
   const [enrolling, setEnrolling] = useState(false);
   const [shell] = useState(() => nativeShell());
   // The same shell crate runs on Macs and iPhones; the words should say
   // which device is talking. WKWebView reports iPhone/iPad in the agent.
   const [phoneShell] = useState(() => nativeShell() && /iPhone|iPad/i.test(navigator.userAgent));
+
+  useEffect(() => {
+    void api
+      .user()
+      .then((account) => setNameDraft(account.displayName ?? ""))
+      .catch(() => {});
+  }, []);
   const [watched, setWatched] = useState<string[]>([]);
   const [modes, setModes] = useState<Record<string, WatchMode>>({});
   const [verifying, setVerifying] = useState(false);
@@ -344,6 +354,38 @@ export function ProfileView(props: {
             onClick={props.onSignOut}
           >
             Sign out
+          </button>
+        </div>
+      </section>
+
+      <section className="profile-card">
+        <h3>Your name</h3>
+        <p className="profile-note">
+          Shown to people you share a document with while you edit it together.
+          Leave it empty and they see your email address instead. Only people
+          invited to a document you are both in can see this.
+        </p>
+        <div className="profile-row">
+          <input
+            type="text"
+            maxLength={64}
+            placeholder="Your name"
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+          />
+          <button
+            className="btn"
+            disabled={savingName}
+            onClick={() => {
+              setSavingName(true);
+              void api
+                .setDisplayName(nameDraft.trim() || null)
+                .then(() => props.onToast("Saved. This is what collaborators will see."))
+                .catch(() => props.onToast("Could not save that name."))
+                .finally(() => setSavingName(false));
+            }}
+          >
+            Save
           </button>
         </div>
       </section>

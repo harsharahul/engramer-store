@@ -3,6 +3,14 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Added
+- **Choose the name collaborators see.** Profile has a name field. Set it
+  and the people you edit a document with see that name beside your
+  cursor; leave it empty and they see your email address, as before. The
+  name is visible only to people invited to a document you are both in.
+
 ## [0.39.3] - 2026-08-07
 
 ### Fixed
