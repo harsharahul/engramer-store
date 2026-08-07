@@ -10,6 +10,7 @@ import {
   type DragEvent,
 } from "react";
 import { useStore, type FileEntry, type FolderEntry } from "../store";
+import { api } from "../api";
 import {
   ACCENTS,
   applyAccent,
@@ -96,6 +97,7 @@ import {
   LayoutGridGlyph,
   LayoutListGlyph,
   LinkGlyph,
+  PeopleGlyph,
   LockGlyph,
   MenuGlyph,
   MonitorGlyph,
@@ -127,6 +129,7 @@ type View =
   | { kind: "trash" }
   | { kind: "favorites" }
   | { kind: "shared" }
+  | { kind: "shared-with-me" }
   | { kind: "profile" }
   | { kind: "expiring" }
   | { kind: "calendar" }
@@ -300,11 +303,21 @@ export function Vault() {
   const categoryCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const file of liveFiles) {
+      // Shared items live in Shared with me, never in the library counts:
+      // their folder and category belong to their owner's organization.
+      if (file.shared) {
+        continue;
+      }
       const category = file.category ?? "Other";
       counts.set(category, (counts.get(category) ?? 0) + 1);
     }
     return counts;
   }, [liveFiles]);
+
+  const sharedWithMeCount = useMemo(
+    () => liveFiles.reduce((n, f) => n + (f.shared ? 1 : 0), 0),
+    [liveFiles],
+  );
 
   const breadcrumbs = useMemo(() => {
     const chain: Array<{ id: string; name: string }> = [];
@@ -351,6 +364,9 @@ export function Vault() {
         return [...liveFiles].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 60);
       case "shared":
         return [];
+      case "shared-with-me":
+        files = liveFiles.filter((f) => f.shared);
+        break;
       case "favorites":
         files = liveFiles.filter((f) => f.favorite);
         break;
@@ -367,14 +383,16 @@ export function Vault() {
         // The calendar renders itself; the grid under it shows nothing.
         return [];
       case "category":
-        files = liveFiles.filter((f) => (f.category ?? "Other") === view.name);
+        files = liveFiles.filter((f) => !f.shared && (f.category ?? "Other") === view.name);
         break;
       case "trash":
         return [...store.files.values()]
           .filter((f) => f.trashed)
           .sort((a, b) => b.updatedAt - a.updatedAt);
       default:
-        files = liveFiles.filter((f) => f.folderId === currentFolderId);
+        // Shared items carry no place in this account's tree (their
+        // folderId is the owner's business), so folder views skip them.
+        files = liveFiles.filter((f) => !f.shared && f.folderId === currentFolderId);
     }
     return sortFiles(files, sort);
   }, [view, liveFiles, store.files, currentFolderId, sort]);
@@ -511,33 +529,66 @@ export function Vault() {
         ]
       : []),
     { id: "download", label: "Download", icon: <DownloadGlyph size={13} />, run: () => download(file) },
-    { id: "share", label: "Share", icon: <ShareGlyph size={13} />, run: () => setShareId(file.id) },
+    // Sharing, moving and trashing belong to the file's owner; a shared
+    // entry offers Leave instead, and only an editor may touch metadata.
+    ...(file.shared
+      ? []
+      : [{ id: "share", label: "Share", icon: <ShareGlyph size={13} />, run: () => setShareId(file.id) }]),
     { id: "d1", label: "", divider: true, run: () => {} },
-    {
-      id: "favorite",
-      label: file.favorite ? "Remove favorite" : "Add to favorites",
-      icon: <StarGlyph size={13} filled={file.favorite} />,
-      run: () => void store.toggleFavorite(file.id),
-    },
+    ...(!file.shared || file.role === "editor"
+      ? [
+          {
+            id: "favorite",
+            label: file.favorite ? "Remove favorite" : "Add to favorites",
+            icon: <StarGlyph size={13} filled={file.favorite} />,
+            run: () => void store.toggleFavorite(file.id),
+          },
+        ]
+      : []),
     { id: "tags", label: "Tags and details", icon: <TagGlyph size={13} />, run: () => inspect(file.id) },
-    { id: "rename", label: "Rename", icon: <PencilGlyph size={13} />, run: () => setRenameFileId(file.id) },
-    {
-      id: "move",
-      label: "Move to…",
-      icon: <MoveGlyph size={13} />,
-      run: () => setMoveIds(selection.has(file.id) && selection.size > 1 ? [...selection] : [file.id]),
-    },
+    ...(!file.shared || file.role === "editor"
+      ? [{ id: "rename", label: "Rename", icon: <PencilGlyph size={13} />, run: () => setRenameFileId(file.id) }]
+      : []),
+    ...(file.shared
+      ? []
+      : [
+          {
+            id: "move",
+            label: "Move to…",
+            icon: <MoveGlyph size={13} />,
+            run: () =>
+              setMoveIds(selection.has(file.id) && selection.size > 1 ? [...selection] : [file.id]),
+          },
+        ]),
     { id: "d2", label: "", divider: true, run: () => {} },
-    {
-      id: "trash",
-      label: "Move to trash",
-      icon: <TrashGlyph size={13} />,
-      danger: true,
-      run: () => {
-        void store.trashFile(file.id);
-        clearSelection();
-      },
-    },
+    ...(file.shared
+      ? [
+          {
+            id: "leave",
+            label: "Leave shared file",
+            icon: <TrashGlyph size={13} />,
+            danger: true,
+            run: () => {
+              void api
+                .leaveShared(file.id)
+                .then(() => store.refresh())
+                .catch(() => showToast("Could not leave this file."));
+              clearSelection();
+            },
+          },
+        ]
+      : [
+          {
+            id: "trash",
+            label: "Move to trash",
+            icon: <TrashGlyph size={13} />,
+            danger: true,
+            run: () => {
+              void store.trashFile(file.id);
+              clearSelection();
+            },
+          },
+        ]),
   ];
 
   /** Ranks every indexed photo and video by closeness to this file's stored
@@ -1036,6 +1087,11 @@ export function Vault() {
         },
       },
       { id: "go-files", label: "Go to All files", run: () => setView({ kind: "folder", id: null }) },
+      {
+        id: "go-shared-with-me",
+        label: "Go to Shared with me",
+        run: () => setView({ kind: "shared-with-me" }),
+      },
       { id: "go-recent", label: "Go to Recent", run: () => setView({ kind: "recent" }) },
       { id: "go-favorites", label: "Go to Favorites", run: () => setView({ kind: "favorites" }) },
       { id: "go-shared", label: "Go to Shared", run: () => setView({ kind: "shared" }) },
@@ -1118,6 +1174,8 @@ export function Vault() {
               ? "Calendar"
             : view.kind === "shared"
               ? "Shared"
+              : view.kind === "shared-with-me"
+                ? "Shared with me"
               : view.kind === "profile"
                 ? "Profile"
                 : "Trash";
@@ -1200,6 +1258,14 @@ export function Vault() {
             "Calendar",
           )}
         {navButton(view.kind === "shared", () => setView({ kind: "shared" }), <LinkGlyph />, "Shared")}
+        {sharedWithMeCount > 0 &&
+          navButton(
+            view.kind === "shared-with-me",
+            () => setView({ kind: "shared-with-me" }),
+            <PeopleGlyph />,
+            "Shared with me",
+            sharedWithMeCount,
+          )}
         {navButton(view.kind === "trash", () => setView({ kind: "trash" }), <TrashGlyph />, "Trash")}
 
         {libraryCategories.length > 0 && (

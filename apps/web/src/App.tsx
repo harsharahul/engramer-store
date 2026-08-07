@@ -9,6 +9,7 @@ import { UnlockGate } from "./components/UnlockGate";
 import { Vault } from "./components/Vault";
 import { ShareView } from "./components/ShareView";
 import { RequestView } from "./components/RequestView";
+import { CollabInviteView } from "./components/CollabInviteView";
 
 export function App() {
   const session = useStore((s) => s.session);
@@ -46,6 +47,7 @@ export function App() {
     <Routes>
       <Route path="/s/:token" element={<ShareView />} />
       <Route path="/r/:token" element={<RequestView />} />
+      <Route path="/c/:token" element={<CollabInviteView />} />
       <Route
         path="*"
         element={

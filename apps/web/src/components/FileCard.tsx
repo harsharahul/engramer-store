@@ -3,7 +3,7 @@ import type { FileEntry } from "../store";
 import { thumbnailUrl } from "../thumbs";
 import { blurUrl } from "../intel/blur";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
-import { DotsGlyph, StarGlyph } from "./Icon";
+import { DotsGlyph, PeopleGlyph, StarGlyph } from "./Icon";
 import { FolderArt, KIND_ACCENTS, SheetArt } from "./FileArt";
 import { useLongPress } from "../longpress";
 
@@ -132,6 +132,16 @@ export function FileCard(props: {
             {file.name}
           </div>
           <div className="sub">
+            {file.shared && (
+              <span
+                className="fav-mark"
+                title={`Shared by ${file.ownerEmail ?? "another account"} · you can ${
+                  file.role === "editor" ? "edit" : "view"
+                }`}
+              >
+                <PeopleGlyph size={11} />
+              </span>
+            )}
             {formatBytes(file.size)} · {formatDate(file.mtime)}
           </div>
         </div>
