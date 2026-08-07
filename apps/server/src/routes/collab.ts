@@ -228,8 +228,8 @@ export function registerCollabRoutes(app: FastifyInstance): void {
     if (!(await ownedFile(fileId, uid))) {
       return reply.code(404).send({ error: "file not found" });
     }
-    const rows = await app.db.all<FileCollaboratorRow & { email: string }>(
-      `SELECT c.*, u.email FROM file_collaborators c JOIN users u ON u.id = c.user_id
+    const rows = await app.db.all<FileCollaboratorRow & { email: string; key_attributes: string }>(
+      `SELECT c.*, u.email, u.key_attributes FROM file_collaborators c JOIN users u ON u.id = c.user_id
        WHERE c.file_id = ? AND c.revoked = 0 ORDER BY c.created_at`,
       fileId,
     );
@@ -237,6 +237,9 @@ export function registerCollabRoutes(app: FastifyInstance): void {
       collaborators: rows.map((row) => ({
         userId: row.user_id,
         email: row.email,
+        // The member's account public key, so the owner can re-seal a
+        // rotated file key without hunting through invite records.
+        publicKey: publicKeyOf(row),
         role: row.role,
         keyEpoch: row.key_epoch,
         createdAt: row.created_at,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { toB64, protectShareKey } from "@engramer/crypto";
 import { api, type CollabInviteInfo, type CollaboratorInfo, type ShareInfo, type ShareOptions } from "../api";
-import type { FileEntry } from "../store";
+import { useStore, type FileEntry } from "../store";
 import { inviteLink, sealFileKeyFor } from "../collab";
 import { formatDate } from "../format";
 import { CopyGlyph, KeyGlyph, PeopleGlyph, TrashGlyph, XGlyph } from "./Icon";
@@ -171,7 +171,23 @@ export function ShareDialog(props: {
   const removePerson = async (userId: number) => {
     await api.removeCollaborator(file.id, userId);
     await load();
-    props.onToast("Access removed. They keep what they already read; the file stops updating for them.");
+    // Honest about the limit: revocation stops future access, it cannot
+    // unsee what was already read. Rotation is what makes it stick for
+    // everything the document becomes from here on.
+    if (
+      window.confirm(
+        "Access removed. Also rotate this document's key? They already have the current contents; rotating stops them reading anything saved from now on.",
+      )
+    ) {
+      try {
+        await useStore.getState().rotateFileKey(file.id);
+        props.onToast("Key rotated. Remaining people were re-keyed automatically.");
+      } catch {
+        props.onToast("Could not rotate the key. You can retry from this dialog by removing access again.");
+      }
+    } else {
+      props.onToast("Access removed. They keep what they already read; the file stops updating for them.");
+    }
   };
 
   return (
