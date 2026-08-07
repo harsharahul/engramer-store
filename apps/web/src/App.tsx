@@ -5,6 +5,7 @@ import { restoreSession } from "./session";
 import { hasDeviceUnlock } from "./unlock";
 import { useStore } from "./store";
 import { Auth } from "./components/Auth";
+import { diag } from "./diag";
 import { UnlockGate } from "./components/UnlockGate";
 import { Vault } from "./components/Vault";
 import { ShareView } from "./components/ShareView";
@@ -19,6 +20,12 @@ export function App() {
   const [locked, setLocked] = useState(false);
 
   useEffect(() => {
+    // Why this page is here at all. "It went back to the start" reads the
+    // same whether React remounted or the whole web view reloaded under
+    // it, and only one of those is a bug in this code.
+    const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+    diag("app", `page loaded by ${nav?.type ?? "unknown"}`);
+
     setUnauthorizedHandler(() => logout());
     void restoreSession()
       .then(async (restored) => {
@@ -36,6 +43,7 @@ export function App() {
     // freeze killed; a clean reload puts the state machine back on rails.
     const onPageShow = (event: PageTransitionEvent) => {
       if (event.persisted) {
+        diag("app", "restored from the back/forward cache; reloading");
         location.reload();
       }
     };
