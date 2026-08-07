@@ -11,6 +11,12 @@ All notable changes to Engram Store are documented here, following
   element into a bottom sheet, so the sheet mounted at `display: none`:
   present, correct, and invisible. Tapping Details appeared to do nothing.
 
+### Added
+- **Move between files without leaving the viewer.** Swipe left or right on
+  a phone, use the arrow buttons or the arrow keys elsewhere. It steps
+  through whatever the current view is showing, in the order it is showing
+  it, and stops at the ends rather than looping.
+
 ### Changed
 - **A file's facts are visible without scrolling.** The preview in the
   details sheet took a 4:3 slice of the screen, pushing Where, Type, Size
