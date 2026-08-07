@@ -624,3 +624,42 @@ describe("collaborator metadata patch", () => {
     expect(body.encryptedMeta).toBeDefined();
   });
 });
+
+describe("history stays the owner's", () => {
+  it("hides version history and its contents from a collaborator", async () => {
+    const file = await uploadFile(owner, "historic.docx", utf8Encode("v1"));
+    // A second save, so there is history to expose.
+    await app.inject({
+      method: "PUT",
+      url: `/api/files/${file.id}/data`,
+      headers: { ...auth(owner), "content-type": "application/octet-stream" },
+      payload: Buffer.from(encryptBytes(utf8Encode("v2"), file.fileKey)),
+    });
+    await shareWith(recipient, file.id, file.fileKey, "editor");
+
+    // Versions predate the share and are never re-keyed: a collaborator
+    // holding today's key could otherwise read content removed before
+    // they were ever invited.
+    const list = await app.inject({
+      method: "GET",
+      url: `/api/files/${file.id}/versions`,
+      headers: auth(recipient),
+    });
+    expect(list.statusCode).toBe(404);
+    const old = await app.inject({
+      method: "GET",
+      url: `/api/files/${file.id}/versions/0/data`,
+      headers: auth(recipient),
+    });
+    expect(old.statusCode).toBe(404);
+
+    // The owner still has both.
+    const ownerList = await app.inject({
+      method: "GET",
+      url: `/api/files/${file.id}/versions`,
+      headers: auth(owner),
+    });
+    expect(ownerList.statusCode).toBe(200);
+    expect((ownerList.json().versions as unknown[]).length).toBeGreaterThan(0);
+  });
+});

@@ -35,8 +35,10 @@ const rekeySchema = z.object({
 export function registerCollabRoutes(app: FastifyInstance): void {
   const auth = { preHandler: [app.authenticate] };
   const throttle = new AuthThrottle(app.db);
-  const throttleKey = (request: FastifyRequest, token: string) =>
-    `${request.ip}|invite:${token}`;
+  // Keyed on the caller, NOT on the token: including the token gave every
+  // guess its own fresh budget, so grinding the token space was never
+  // slowed by the backoff this endpoint claimed to have.
+  const throttleKey = (request: FastifyRequest) => `${request.ip}|invite`;
 
   const NOT_AVAILABLE = { error: "this invitation is no longer available" };
 
@@ -125,7 +127,7 @@ export function registerCollabRoutes(app: FastifyInstance): void {
     const { token } = request.params as { token: string };
     const uid = request.user.uid;
     // Grinding tokens gets the sign-in backoff; every failure below counts.
-    const blockedFor = await throttle.check(throttleKey(request, token));
+    const blockedFor = await throttle.check(throttleKey(request));
     if (!blockedFor.allowed) {
       return reply
         .code(429)
@@ -133,7 +135,7 @@ export function registerCollabRoutes(app: FastifyInstance): void {
         .send({ error: "too many attempts" });
     }
     const refuse = async () => {
-      await throttle.fail(throttleKey(request, token));
+      await throttle.fail(throttleKey(request));
       return reply.code(404).send(NOT_AVAILABLE);
     };
     const invite = await app.db.get<CollabInviteRow>(
@@ -168,7 +170,7 @@ export function registerCollabRoutes(app: FastifyInstance): void {
     if (claimed.changes === 0) {
       return refuse();
     }
-    await throttle.succeed(throttleKey(request, token));
+    await throttle.succeed(throttleKey(request));
     // Nothing about the file: the claimant learns who is sharing and at what
     // role, and sees the document only once the owner releases the key.
     return { ownerEmail: owner.email, role: invite.role };
