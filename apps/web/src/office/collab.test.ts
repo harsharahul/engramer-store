@@ -182,3 +182,37 @@ describe("tail replay", () => {
     expect(JSON.parse((message.changes as Array<{ change: string }>)[0]!.change)).toBe("old-edit");
   });
 });
+
+/**
+ * "member 2" tells a person nothing about who is typing beside them. The
+ * editor shows whatever the participant list carries, so the name has to
+ * survive the trip from the relay into the engine's own idea of a user.
+ */
+describe("participants are people", () => {
+  it("passes each member's name to the editor", () => {
+    const b = new CollabBridge({
+      fileId: "file-1",
+      selfConnId: "conn-self",
+      selfIndex: 1,
+      members: [
+        { connId: "conn-self", index: 1, name: "alpha@example.com" },
+        { connId: "conn-peer", index: 2, name: "beta@example.com" },
+      ],
+    });
+    const auth = b.onEngineMessage({ type: "auth" }).toEditor.find((m) => m.type === "auth")!;
+    const names = (auth.participants as Array<{ username: string }>).map((p) => p.username);
+    expect(names).toContain("alpha@example.com");
+    expect(names).toContain("beta@example.com");
+  });
+
+  it("falls back to a number when a name is missing, rather than showing nothing", () => {
+    const b = new CollabBridge({
+      fileId: "file-1",
+      selfConnId: "conn-self",
+      selfIndex: 3,
+      members: [{ connId: "conn-self", index: 3 }],
+    });
+    const auth = b.onEngineMessage({ type: "auth" }).toEditor.find((m) => m.type === "auth")!;
+    expect((auth.participants as Array<{ username: string }>)[0]!.username).toBe("member 3");
+  });
+});

@@ -44,6 +44,8 @@ export interface BridgeEffects {
 interface Member {
   connId: string;
   index: number;
+  /** Who this is, shown beside their cursor and in the participant list. */
+  name?: string;
 }
 
 interface PendingPost {
@@ -62,7 +64,7 @@ function participant(member: Member) {
   return {
     id: String(member.index),
     idOriginal: String(member.index),
-    username: `member ${member.index}`,
+    username: member.name ?? `member ${member.index}`,
     indexUser: member.index,
     connectionId: member.connId,
   };
