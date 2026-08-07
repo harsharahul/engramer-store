@@ -17,6 +17,8 @@ export interface FileDto {
   folderId: string | null;
   encryptedKey: SecretBox;
   encryptedMeta: SecretBox;
+  /** Rotation counter; absent on rows cached before it existed. */
+  keyEpoch?: number;
   size: number;
   thumbSize: number;
   indexSize: number;
@@ -68,6 +70,8 @@ export interface CollabInviteInfo {
 export interface CollaboratorInfo {
   userId: number;
   email: string;
+  /** The member's account public key, for re-sealing a rotated file key. */
+  publicKey: string;
   role: "viewer" | "editor";
   keyEpoch: number;
   createdAt: number;
@@ -277,8 +281,10 @@ export const api = {
       body: JSON.stringify({ folderId, encryptedKey, encryptedMeta }),
     }),
 
-  patchFile: (id: string, patch: { folderId?: string | null; encryptedMeta?: SecretBox }) =>
-    request<FileDto>(`/api/files/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  patchFile: (
+    id: string,
+    patch: { folderId?: string | null; encryptedMeta?: SecretBox; encryptedKey?: SecretBox },
+  ) => request<FileDto>(`/api/files/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
 
   trashFile: (id: string) => request<void>(`/api/files/${id}`, { method: "DELETE" }),
   restoreFile: (id: string) => request<void>(`/api/trash/${id}/restore`, { method: "POST" }),

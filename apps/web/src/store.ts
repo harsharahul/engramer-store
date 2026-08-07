@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import {
+  chunkedEncrypt,
   contentDigest,
   decryptBytes,
   digestMatches,
@@ -177,6 +178,9 @@ interface StoreState {
   ) => Promise<string>;
   /** A conflicting save kept as this account's own new file. */
   saveFileCopy: (sourceId: string, bytes: Uint8Array, searchText?: string) => Promise<string>;
+  /** Owner only: re-encrypts everything under a fresh key and re-seals it
+   * for every remaining member. Revocation's second half. */
+  rotateFileKey: (id: string) => Promise<void>;
   renameFile: (id: string, name: string) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
   /**
@@ -275,6 +279,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
     trashed: dto.trashed,
     createdAt: dto.createdAt,
     updatedAt: dto.updatedAt,
+    keyEpoch: dto.keyEpoch ?? 0,
   };
 }
 
@@ -1113,6 +1118,55 @@ export const useStore = create<StoreState>((set, get) => {
       await uploadBlob(dto.id, "data", encryptBytes(bytes, fileKey));
       applyFile({ ...dto, uploaded: true, size: bytes.length });
       return dto.id;
+    },
+
+    /**
+     * Rotates a file's key after a collaborator loses access. Everything the
+     * file has — content, thumbnail, search index — is re-encrypted under a
+     * fresh key, the row flips its wrapped key (which advances the epoch),
+     * and every REMAINING member gets the new key sealed to them. Order is
+     * fail-closed: new blobs first, the flip second, the re-seals last, so a
+     * failure part-way can lock members out until retried but never leaves
+     * the revoked key valid for new content.
+     */
+    rotateFileKey: async (id) => {
+      const file = get().files.get(id);
+      if (!file || file.shared) {
+        throw new Error("only the owner can rotate a file's key");
+      }
+      const plaintext = await downloadAndDecrypt(id, file.key, file.digest);
+      const newKey = generateKey();
+      const isMedia = file.mime.startsWith("video/") || file.mime.startsWith("audio/");
+      await uploadBlob(
+        id,
+        "data",
+        isMedia ? chunkedEncrypt(plaintext, newKey) : encryptBytes(plaintext, newKey),
+      );
+      if (file.hasThumb) {
+        const thumb = decryptBytes(await api.downloadBlob(id, "thumbnail"), file.key);
+        await uploadBlob(id, "thumbnail", encryptBytes(thumb, newKey));
+      }
+      if (file.hasText || file.hasClip) {
+        const index = decryptBytes(await api.downloadBlob(id, "index"), file.key);
+        await uploadBlob(id, "index", encryptBytes(index, newKey));
+      }
+      const meta = { ...metadataOf(file), digest: contentDigest(plaintext) };
+      const dto = await api.patchFile(id, {
+        encryptedKey: secretBoxSeal(newKey, masterKey()),
+        encryptedMeta: encryptFileMetadata(meta, newKey),
+      });
+      applyFile(dto);
+      const { collaborators } = await api.listCollaborators(id);
+      if (collaborators.length > 0) {
+        await api.rekeyShared(
+          id,
+          (file.keyEpoch ?? 0) + 1,
+          collaborators.map((member) => ({
+            userId: member.userId,
+            sealedKey: sealFileKeyFor(newKey, member.publicKey),
+          })),
+        );
+      }
     },
 
     /**

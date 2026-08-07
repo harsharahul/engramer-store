@@ -42,6 +42,8 @@ const createFileSchema = z.object({
 const patchFileSchema = z.object({
   folderId: z.string().nullable().optional(),
   encryptedMeta: secretBoxSchema.optional(),
+  /** Owner only: a rotated file key, freshly wrapped. Bumps the key epoch. */
+  encryptedKey: secretBoxSchema.optional(),
 });
 
 function folderToDto(row: FolderRow) {
@@ -63,6 +65,7 @@ export function fileToDto(row: FileRow) {
     folderId: row.folder_id,
     encryptedKey: JSON.parse(row.encrypted_key) as unknown,
     encryptedMeta: JSON.parse(row.encrypted_meta) as unknown,
+    keyEpoch: row.key_epoch,
     size: row.size,
     thumbSize: row.thumb_size,
     indexSize: row.index_size,
@@ -795,6 +798,11 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     if (access.role !== "owner" && body.folderId !== undefined) {
       return reply.code(403).send({ error: "only the owner can move this file" });
     }
+    // The wrapped key is the rotation lever, and rotation is what makes a
+    // revocation stick; only the owner holds it.
+    if (access.role !== "owner" && body.encryptedKey !== undefined) {
+      return reply.code(403).send({ error: "only the owner can rotate this file's key" });
+    }
     if (
       body.folderId !== undefined &&
       body.folderId !== null &&
@@ -808,11 +816,15 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         `UPDATE files SET
            folder_id = CASE WHEN ? = 1 THEN ? ELSE folder_id END,
            encrypted_meta = COALESCE(?, encrypted_meta),
+           encrypted_key = COALESCE(?, encrypted_key),
+           key_epoch = key_epoch + ?,
            update_seq = ?, updated_at = ?
          WHERE id = ?`,
         body.folderId !== undefined ? 1 : 0,
         body.folderId ?? null,
         body.encryptedMeta ? JSON.stringify(body.encryptedMeta) : null,
+        body.encryptedKey ? JSON.stringify(body.encryptedKey) : null,
+        body.encryptedKey ? 1 : 0,
         await nextSeq(t, access.file.user_id),
         now,
         id,

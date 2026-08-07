@@ -488,3 +488,110 @@ describe("shared rows in sync", () => {
     expect(rows.every((row) => row.id !== file.id)).toBe(true);
   });
 });
+
+describe("key rotation", () => {
+  it("re-keys remaining members and leaves the revoked holding a dead key", async () => {
+    const content = utf8Encode("rotation body v1");
+    const file = await uploadFile(owner, "rotatable.docx", content);
+    const revoked = await shareWith(recipient, file.id, file.fileKey, "editor");
+    await shareWith(stranger, file.id, file.fileKey, "viewer");
+
+    const members = await app.inject({
+      method: "GET",
+      url: `/api/collab/files/${file.id}/collaborators`,
+      headers: auth(owner),
+    });
+    const rows = members.json().collaborators as Array<{ userId: number; email: string }>;
+    const recipientUid = rows.find((r) => r.email === recipient.email)!.userId;
+    const strangerUid = rows.find((r) => r.email === stranger.email)!.userId;
+    await app.inject({
+      method: "DELETE",
+      url: `/api/collab/files/${file.id}/collaborators/${recipientUid}`,
+      headers: auth(owner),
+    });
+
+    // The rotation: new key, re-encrypted content, then the row flips its
+    // wrapped key (owner only) and the survivors get fresh seals.
+    const newKey = generateKey();
+    const put = await app.inject({
+      method: "PUT",
+      url: `/api/files/${file.id}/data`,
+      headers: { ...auth(owner), "content-type": "application/octet-stream" },
+      payload: Buffer.from(encryptBytes(content, newKey)),
+    });
+    expect(put.statusCode).toBe(200);
+    const patched = await app.inject({
+      method: "PATCH",
+      url: `/api/files/${file.id}`,
+      headers: auth(owner),
+      payload: {
+        encryptedKey: secretBoxSeal(newKey, owner.keys.masterKey),
+        encryptedMeta: encryptFileMetadata(
+          { name: "rotatable.docx", mime: "application/octet-stream", size: content.length, mtime: 1 },
+          newKey,
+        ),
+      },
+    });
+    expect(patched.statusCode).toBe(200);
+    expect(patched.json().keyEpoch).toBe(1);
+    const rekeyed = await app.inject({
+      method: "POST",
+      url: `/api/collab/files/${file.id}/rekey`,
+      headers: auth(owner),
+      payload: {
+        epoch: 1,
+        keys: [
+          {
+            userId: strangerUid,
+            sealedKey: sealToPublicKey(newKey, stranger.keys.keyAttributes.publicKey),
+          },
+        ],
+      },
+    });
+    expect(rekeyed.statusCode).toBe(204);
+
+    // The survivor syncs the new seal and reads the new bytes with it.
+    const sync = await app.inject({ method: "GET", url: "/api/sync?since=0", headers: auth(stranger) });
+    const row = (sync.json().shared as Array<Record<string, unknown>>).find(
+      (r) => r.id === file.id,
+    )!;
+    expect(row.keyEpoch).toBe(1);
+    const survivorKey = openSealed(
+      row.sealedKey as string,
+      stranger.keys.keyAttributes.publicKey,
+      stranger.keys.privateKey,
+    );
+    const download = await app.inject({
+      method: "GET",
+      url: `/api/files/${file.id}/data`,
+      headers: auth(stranger),
+    });
+    expect(decryptBytes(new Uint8Array(download.rawPayload), survivorKey)).toEqual(content);
+
+    // The revoked member's stored seal opens only the OLD key, which no
+    // longer decrypts the current bytes even if the ciphertext leaked.
+    const deadKey = openSealed(
+      revoked.sealedKey,
+      recipient.keys.keyAttributes.publicKey,
+      recipient.keys.privateKey,
+    );
+    expect(() => decryptBytes(new Uint8Array(download.rawPayload), deadKey)).toThrow();
+  });
+
+  it("refuses a collaborator patching the wrapped key", async () => {
+    const file = await uploadFile(owner, "keyfence.docx", utf8Encode("x"));
+    const { sealedKey } = await shareWith(recipient, file.id, file.fileKey, "editor");
+    const key = openSealed(
+      sealedKey,
+      recipient.keys.keyAttributes.publicKey,
+      recipient.keys.privateKey,
+    );
+    const attempt = await app.inject({
+      method: "PATCH",
+      url: `/api/files/${file.id}`,
+      headers: auth(recipient),
+      payload: { encryptedKey: secretBoxSeal(generateKey(), recipient.keys.masterKey), encryptedMeta: encryptFileMetadata({ name: "x", mime: "application/octet-stream", size: 1, mtime: 1 }, key) },
+    });
+    expect(attempt.statusCode).toBe(403);
+  });
+});
