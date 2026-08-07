@@ -71,6 +71,7 @@ export function registerChannelRoutes(app: FastifyInstance): void {
       const ticket = String((request.query as { ticket?: string }).ticket ?? "");
       const connId = randomUUID();
       let joined = false;
+      let memberIndex = 0;
 
       const conn: Connection = {
         id: connId,
@@ -88,12 +89,12 @@ export function registerChannelRoutes(app: FastifyInstance): void {
       const membersFrame = async () => ({
         t: "members",
         members: (
-          await app.db.all<{ conn_id: string }>(
-            "SELECT conn_id FROM channel_presence WHERE file_id = ? AND last_seen > ?",
+          await app.db.all<{ conn_id: string; user_index: number }>(
+            "SELECT conn_id, user_index FROM channel_presence WHERE file_id = ? AND last_seen > ?",
             fileId,
             Date.now() - PRESENCE_TTL_MS,
           )
-        ).map((row) => row.conn_id),
+        ).map((row) => ({ connId: row.conn_id, index: row.user_index })),
       });
 
       void (async () => {
@@ -113,13 +114,26 @@ export function registerChannelRoutes(app: FastifyInstance): void {
           return refuse(4403);
         }
         const now = Date.now();
+        // A sticky per-channel index, never reused: the engine namespaces
+        // object ids by participant index, and a recycled index would let
+        // two histories mint colliding ids.
+        const counted = await app.db.get<{ member_counter: number }>(
+          `INSERT INTO channel_state (file_id, member_counter, updated_at) VALUES (?, 1, ?)
+           ON CONFLICT (file_id) DO UPDATE SET member_counter = channel_state.member_counter + 1, updated_at = ?
+           RETURNING member_counter`,
+          fileId,
+          now,
+          now,
+        );
+        memberIndex = counted!.member_counter;
         await app.db.run(
-          `INSERT INTO channel_presence (file_id, conn_id, pod_id, user_id, joined_at, last_seen)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO channel_presence (file_id, conn_id, pod_id, user_id, user_index, joined_at, last_seen)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           fileId,
           connId,
           app.podId,
           claimed.user_id,
+          memberIndex,
           now,
           now,
         );
@@ -155,6 +169,7 @@ export function registerChannelRoutes(app: FastifyInstance): void {
                 snapshotGeneration: state?.snapshot_generation ?? 0,
                 snapshotSeq: state?.snapshot_seq ?? 0,
                 you: connId,
+                yourIndex: memberIndex,
                 members: (await membersFrame()).members,
               });
               const since = Number(frame.lastSeq ?? 0);

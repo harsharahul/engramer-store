@@ -292,3 +292,31 @@ describe("the ordered channel", () => {
     probe.close();
   });
 });
+
+describe("member indexes", () => {
+  it("assigns each joiner a distinct sticky index that survives others leaving", async () => {
+    const a = await connect(owner);
+    const welcomeA = await a.next((f) => f.t === "welcome");
+    const b = await connect(member);
+    const welcomeB = await b.next((f) => f.t === "welcome");
+    expect(typeof welcomeA.yourIndex).toBe("number");
+    expect(typeof welcomeB.yourIndex).toBe("number");
+    expect(welcomeA.yourIndex).not.toBe(welcomeB.yourIndex);
+
+    // A third joiner after the first leaves must NOT reuse the freed index:
+    // the engine namespaces object ids by participant index, and a reused
+    // index would let two histories mint colliding ids.
+    a.close();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const c = await connect(owner);
+    const welcomeC = await c.next((f) => f.t === "welcome");
+    expect(welcomeC.yourIndex).not.toBe(welcomeA.yourIndex);
+    expect(welcomeC.yourIndex).not.toBe(welcomeB.yourIndex);
+
+    // Members lists carry each connection's index alongside its id.
+    const members = welcomeC.members as Array<{ connId: string; index: number }>;
+    expect(members.some((m) => m.index === welcomeB.yourIndex)).toBe(true);
+    b.close();
+    c.close();
+  });
+});
