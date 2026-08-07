@@ -1,0 +1,34 @@
+# The shell's own commands, which the hosted app calls over IPC.
+#
+# These need declaring because the window loads the vault from a URL rather
+# than from bundled files. Tauri treats such a window as remote and enforces
+# its access list on every call, and a command that is not named here is
+# refused with "not allowed. Plugin not found" before it reaches any Rust.
+# The refusal is invisible to the page unless it logs it, so a feature
+# silently degrades to its fallback instead of failing.
+#
+# Nothing here widens what the shell can do: these are the same commands the
+# app has always defined, and the window is already restricted to the vault's
+# own origins by the `remote.urls` list in each capability.
+
+[[permission]]
+identifier = "shell-commands"
+description = """
+Lets the hosted vault app call the shell's own commands: the device unlock
+secret, watched folders, the media stream bridge, and the photo picker.
+"""
+commands.allow = [
+    "pick_photos",
+    "picked_file_read",
+    "native_unlock_available",
+    "unlock_secret_store",
+    "unlock_secret_get",
+    "unlock_secret_delete",
+    "watched_folders",
+    "watched_add",
+    "watched_remove",
+    "watched_scan",
+    "watched_file_read",
+    "media_register",
+    "media_clear",
+]

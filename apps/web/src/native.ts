@@ -6,6 +6,8 @@
  * key material still lives and is used only inside this web context.
  */
 
+import { diag } from "./diag";
+
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 function tauriInvoke(): TauriInvoke | null {
@@ -181,23 +183,38 @@ export function mimeFromName(name: string): string {
 export async function pickPhotos(): Promise<File[] | null> {
   const invoke = tauriInvoke();
   if (!invoke) {
+    // Distinct from a failed call: no shell at all, or its bridge was never
+    // injected into this page, which is what a capability mismatch looks like.
+    diag("photos", "no shell bridge on this page; using the file input");
     return null;
   }
   let paths: unknown;
   try {
     paths = await invoke("pick_photos", {});
-  } catch {
-    // An older shell, or a platform without the picker.
+  } catch (err) {
+    // An older shell, or a platform without the picker. Falling back is
+    // right, but silently is not: it looks identical to the picker running
+    // and handing back a transcoded file, which is the bug it exists to fix.
+    diag("photos", `native picker unavailable: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
   if (!Array.isArray(paths)) {
+    diag("photos", `native picker returned ${typeof paths}, not a list of paths`);
     return null;
   }
+  diag("photos", `native picker returned ${paths.length} item(s)`);
   const files: File[] = [];
   for (const path of paths as string[]) {
     const name = path.split("/").pop() || "photo";
-    const bytes = fileBytes(await invoke("watched_file_read", { path }));
-    files.push(new File([bytes as BlobPart], name, { type: mimeFromName(name) }));
+    try {
+      const bytes = fileBytes(await invoke("picked_file_read", { path }));
+      files.push(new File([bytes as BlobPart], name, { type: mimeFromName(name) }));
+    } catch (err) {
+      // Skip the one that failed rather than abandoning the batch, and never
+      // fall back to the file input from here: the picker DID hand over
+      // originals, and quietly re-picking them would transcode instead.
+      diag("photos", `could not read a picked file: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
   return files;
 }

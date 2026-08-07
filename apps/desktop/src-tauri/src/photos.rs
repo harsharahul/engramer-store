@@ -34,6 +34,10 @@ mod ios {
     extern_class!(
         #[unsafe(super(UIViewController, UIResponder, NSObject))]
         #[thread_kind = MainThreadOnly]
+        // The runtime name, which is NOT taken from the Rust one: without
+        // this it looks up a class called "PickerController", finds nothing,
+        // and panics inside a callback that cannot unwind, aborting the app.
+        #[name = "PHPickerViewController"]
         #[derive(Debug)]
         struct PickerController;
     );
@@ -134,7 +138,7 @@ mod ios {
     fn copy_out(url: &NSURL) -> Option<String> {
         let from = PathBuf::from(url.path()?.to_string());
         let name = from.file_name()?.to_owned();
-        let dir = std::env::temp_dir().join("engram-picked");
+        let dir = super::picked_dir();
         std::fs::create_dir_all(&dir).ok()?;
         let to = dir.join(name);
         std::fs::copy(&from, &to).ok()?;
@@ -188,6 +192,42 @@ mod ios {
         }
         Ok(())
     }
+}
+
+/// Where picked files wait for the web layer to read them.
+///
+/// Its own directory rather than the temp root, because reading is scoped to
+/// exactly this path: the shell will not hand the page bytes from anywhere
+/// else, and the page has no say in where that is.
+pub fn picked_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("engram-picked")
+}
+
+/// Reads a file the picker produced, then removes it.
+///
+/// Separate from `watched_file_read`, which may only read inside folders the
+/// person explicitly chose to watch; a picked photo is in neither, and
+/// widening that command to reach the temp directory would have handed the
+/// page a way to read far more than it was ever offered. Deleting after the
+/// read keeps the directory from growing for the life of the app.
+#[tauri::command]
+pub async fn picked_file_read(path: String) -> Result<tauri::ipc::Response, String> {
+    let requested = std::path::PathBuf::from(&path);
+    let canonical = requested.canonicalize().map_err(|err| err.to_string())?;
+    let root = picked_dir()
+        .canonicalize()
+        .map_err(|_| "nothing has been picked".to_string())?;
+    if !canonical.starts_with(&root) {
+        return Err("that file did not come from the picker".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = std::fs::read(&canonical).map_err(|err| err.to_string())?;
+        // Best effort: a file left behind is untidy, not incorrect.
+        let _ = std::fs::remove_file(&canonical);
+        Ok(tauri::ipc::Response::new(bytes))
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 /// Paths to the photos and videos the person chose, as their original files.
