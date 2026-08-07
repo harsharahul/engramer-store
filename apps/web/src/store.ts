@@ -698,9 +698,12 @@ export const useStore = create<StoreState>((set, get) => {
       const revealItems: RevealItem[] = [];
       const cancel = transferScope();
       holdTransferLock();
-      for (const file of fileList) {
+      // The same bounded pool the folder path has always had: a phone's
+      // multi-photo pick was walking this one file at a time, paying every
+      // pipeline in series.
+      await boundedRun(fileList, 4, async (file) => {
         if (cancel.signal.aborted) {
-          break;
+          return;
         }
         const uploadId = crypto.randomUUID();
         set({
@@ -757,7 +760,7 @@ export const useStore = create<StoreState>((set, get) => {
                 : "upload failed",
           });
         }
-      }
+      });
       releaseTransferLock();
       if (revealItems.length > 0) {
         set({ reveal: { items: revealItems, at: Date.now() } });

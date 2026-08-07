@@ -359,8 +359,16 @@ export default defineConfig({
         // when OCR actually runs; they never belong in the app-shell cache.
         // The office editors are hundreds of megabytes fetched only when a
         // document is opened; they belong to the HTTP cache, never the
-        // app-shell precache.
-        globIgnores: ["ocr/**", "models/**", "ort/**", "office/**", "version.json"],
+        // app-shell precache. The HEIC decoder is a megabyte that only
+        // browsers without a native decoder ever request.
+        globIgnores: [
+          "ocr/**",
+          "models/**",
+          "ort/**",
+          "office/**",
+          "version.json",
+          "**/heic-decode-*.js",
+        ],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
       },
     }),

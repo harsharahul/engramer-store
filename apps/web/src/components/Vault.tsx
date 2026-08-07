@@ -260,6 +260,7 @@ export function Vault() {
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -914,6 +915,12 @@ export function Vault() {
       title: "Add to your vault",
       items: [
         { id: "upload", label: "Upload files", icon: <UploadGlyph size={15} />, run: () => fileInput.current?.click() },
+        {
+          id: "photos",
+          label: "Photos and videos",
+          icon: <PhotoGlyph size={15} />,
+          run: () => photoInput.current?.click(),
+        },
         { id: "camera", label: "Take photo", icon: <CameraGlyph size={15} />, run: () => cameraInput.current?.click() },
         {
           id: "tree",
@@ -1464,8 +1471,22 @@ export function Vault() {
           <input
             ref={cameraInput}
             type="file"
-            accept="image/*"
+            accept="image/*,image/heic,image/heif"
             capture="environment"
+            hidden
+            onChange={(e) => {
+              uploadTo([...(e.target.files ?? [])]);
+              e.target.value = "";
+            }}
+          />
+          {/* Declaring heic is what stops iOS transcoding picked photos to
+              JPEG before the page ever sees them; the general Upload input
+              stays accept-less so it takes any file at all. */}
+          <input
+            ref={photoInput}
+            type="file"
+            accept="image/*,video/*,image/heic,image/heif,.heic,.heif"
+            multiple
             hidden
             onChange={(e) => {
               uploadTo([...(e.target.files ?? [])]);
@@ -1866,7 +1887,7 @@ export function Vault() {
             setPreviewId(null);
           }}
           onRename={() => setRenameFileId(previewFile.id)}
-          onEditTags={() => {
+          onDetails={() => {
             setPreviewId(null);
             inspect(previewFile.id);
           }}

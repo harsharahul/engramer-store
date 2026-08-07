@@ -12,6 +12,7 @@ import {
   CLIPVisionModelWithProjection,
   RawImage,
 } from "@huggingface/transformers";
+import { decodeHeic, isHeicLike } from "./heic";
 
 const MODEL = "Xenova/mobileclip_s0";
 
@@ -80,7 +81,17 @@ self.onmessage = async (event: MessageEvent<EmbedRequest>) => {
       embedding = normalized(output.text_embeds.data as Float32Array);
     } else {
       const blob = new Blob([image!], { type: mime ?? "image/jpeg" });
-      const raw = await RawImage.fromBlob(blob);
+      let raw: RawImage;
+      try {
+        raw = await RawImage.fromBlob(blob);
+      } catch (err) {
+        // HEIC where the platform cannot decode it; ours can.
+        if (!isHeicLike(mime ?? "", "")) {
+          throw err;
+        }
+        const decoded = await decodeHeic(new Uint8Array(image!));
+        raw = new RawImage(decoded.data, decoded.width, decoded.height, 4);
+      }
       const inputs = await models.processor(raw);
       const output = await models.visionModel(inputs);
       embedding = normalized(output.image_embeds.data as Float32Array);

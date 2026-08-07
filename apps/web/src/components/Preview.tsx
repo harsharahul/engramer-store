@@ -4,8 +4,9 @@ import { IntegrityError, downloadAndDecrypt } from "../transfer";
 import { bridgeMediaUrl, mediaBridgeAvailable, mediaUrl, onMediaProgress, registerMediaKey } from "../mediastream";
 import { nativeShell } from "../native";
 import { fileKind, formatBytes } from "../format";
+import { displayableImage } from "../intel/heic";
 import { triggerDownload } from "../download";
-import { DownloadGlyph, PencilGlyph, ShareGlyph, TagGlyph, XGlyph } from "./Icon";
+import { DownloadGlyph, InfoGlyph, PencilGlyph, ShareGlyph, TagGlyph, XGlyph } from "./Icon";
 import { diag } from "../diag";
 import type { WorkbookPreview } from "../sheet";
 
@@ -252,7 +253,7 @@ export function Preview(props: {
   onClose: () => void;
   onShare: () => void;
   onRename: () => void;
-  onEditTags: () => void;
+  onDetails: () => void;
   onEdit?: () => void;
 }) {
   const { file } = props;
@@ -354,8 +355,16 @@ export function Preview(props: {
           setLoaded({ ...empty, pdf: bytes });
           return;
         }
-        url = URL.createObjectURL(new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime }));
-        setLoaded({ ...empty, url });
+        const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime });
+        // HEIC shows as-is where the platform decodes it; elsewhere it is
+        // re-encoded first, or an <img> would render nothing.
+        void displayableImage(blob, file.name).then((shown) => {
+          if (cancelled) {
+            return;
+          }
+          url = URL.createObjectURL(shown);
+          setLoaded({ ...empty, url });
+        });
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -408,7 +417,10 @@ export function Preview(props: {
         <button className="icon-btn" title="Share" onClick={props.onShare}>
           <ShareGlyph />
         </button>
-        <button className="icon-btn" title="Edit tags" onClick={props.onEditTags}>
+        <button className="icon-btn" title="Details" onClick={props.onDetails}>
+          <InfoGlyph />
+        </button>
+        <button className="icon-btn" title="Edit tags" onClick={props.onDetails}>
           <TagGlyph />
         </button>
         <button className="icon-btn" title="Rename" onClick={props.onRename}>

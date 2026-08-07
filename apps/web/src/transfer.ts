@@ -36,6 +36,7 @@ import { factsEnabled, scanForFacts } from "./intel/scan";
 import type { Fact, FactEvidence } from "./intel/facts";
 import { encodeIndexPayload } from "./indexblob";
 import { computeBlur } from "./intel/blur";
+import { decodeImageBitmap, normalizeImageMime } from "./intel/heic";
 import { diag } from "./diag";
 
 const THUMB_SIZE = 512;
@@ -63,7 +64,7 @@ function drawScaled(source: CanvasImageSource, width: number, height: number): P
 
 async function imageThumbnail(file: File): Promise<Thumbnail | null> {
   try {
-    const bitmap = await createImageBitmap(file);
+    const bitmap = await decodeImageBitmap(file, file.name);
     const { width, height } = bitmap;
     const blob = await drawScaled(bitmap, width, height);
     const blur = computeBlur(bitmap, width, height);
@@ -289,11 +290,11 @@ async function videoThumbnail(file: File): Promise<Thumbnail | null> {
   });
 }
 
-async function makeThumbnail(file: File): Promise<Thumbnail | null> {
-  if (file.type.startsWith("image/")) {
+async function makeThumbnail(file: File, mime: string): Promise<Thumbnail | null> {
+  if (mime.startsWith("image/")) {
     return imageThumbnail(file);
   }
-  if (file.type.startsWith("video/")) {
+  if (mime.startsWith("video/")) {
     return videoThumbnail(file);
   }
   return null;
@@ -328,15 +329,20 @@ export async function analyzeFile(
     }
   };
   onPhase?.("analyzing");
+  // Some platforms hand over a picked HEIC with an empty type; the name still
+  // knows, and every branch below keys off the mime.
+  const mime = normalizeImageMime(file.type, file.name);
   let [text, exif, thumbnail] = await Promise.all([
     withDeadline(extractText(file), ANALYSIS_DEADLINE_MS, signal),
     withDeadline(extractExif(file), ANALYSIS_DEADLINE_MS, signal),
-    withDeadline(makeThumbnail(file), THUMB_DEADLINE_MS + 2_000, signal).then((t) => t ?? null),
+    withDeadline(makeThumbnail(file, mime), THUMB_DEADLINE_MS + 2_000, signal).then(
+      (t) => t ?? null,
+    ),
   ]);
   cancelled();
   // Opt-in OCR: screenshots and scans become searchable, and the recognized
   // text sharpens categorization (a photographed invoice files as a receipt).
-  if (text === undefined && file.type.startsWith("image/") && ocrEnabled()) {
+  if (text === undefined && mime.startsWith("image/") && ocrEnabled()) {
     onPhase?.("reading text");
     text = await withDeadline(recognizeImage(file), ANALYSIS_DEADLINE_MS * 3, signal);
   }
@@ -351,13 +357,13 @@ export async function analyzeFile(
   // extracted; decoding the video a second time would be wasted work.
   let clip: Float32Array | undefined;
   let clips: Float32Array[] | undefined;
-  if (semanticEnabled() && (file.type.startsWith("image/") || file.type.startsWith("video/"))) {
+  if (semanticEnabled() && (mime.startsWith("image/") || mime.startsWith("video/"))) {
     onPhase?.("indexing by meaning");
   }
   if (semanticEnabled()) {
-    if (file.type.startsWith("image/")) {
+    if (mime.startsWith("image/")) {
       clip = await withDeadline(embedImage(file), 45_000, signal);
-    } else if (file.type.startsWith("video/") && thumbnail) {
+    } else if (mime.startsWith("video/") && thumbnail) {
       clip = await withDeadline(
         embedImage(
           new Blob([thumbnail.bytes.slice().buffer as ArrayBuffer], { type: "image/jpeg" }),
@@ -397,7 +403,7 @@ export async function analyzeFile(
     // Bytes worth scanning for a barcode: an image as it is; for a PDF, its
     // first page rendered at recognition width, because a printed pass's
     // code needs more resolution than the thumbnail carries.
-    const barcodeSource = file.type.startsWith("image/")
+    const barcodeSource = mime.startsWith("image/")
       ? file
       : isPdf(file.name, file.type)
         ? await withDeadline(renderPdfPage(file), ANALYSIS_DEADLINE_MS, signal).catch(() => null)
@@ -414,7 +420,7 @@ export async function analyzeFile(
     const found = await withDeadline(
       scanForFacts({
         name: file.name,
-        mime: file.type || "application/octet-stream",
+        mime: mime || "application/octet-stream",
         text,
         ...(raw !== undefined ? { raw } : {}),
         ...(barcodeSource ? { file: barcodeSource } : {}),
@@ -436,14 +442,14 @@ export async function analyzeFile(
   cancelled();
   const analysis = categorize({
     name: file.name,
-    mime: file.type || "application/octet-stream",
+    mime: mime || "application/octet-stream",
     mtime: file.lastModified,
     text,
     exif,
   });
   const meta: FileMetadata = {
     name: file.name,
-    mime: file.type || "application/octet-stream",
+    mime: mime || "application/octet-stream",
     size: file.size,
     mtime: file.lastModified,
     category: analysis.category,
@@ -748,34 +754,37 @@ export async function encryptAndUpload(
   }
 
   // Written after the content, not with the metadata that preceded it, so
-  // the digest describes the bytes that actually landed.
+  // the digest describes the bytes that actually landed. The thumbnail and
+  // the search index depend on nothing here and here on nothing, so all
+  // three travel together rather than paying three round trips in series.
   const withDigest = { ...prepared.meta, digest };
-  const stamped = await api.patchFile(dto.id, {
-    encryptedMeta: encryptFileMetadata(withDigest, fileKey),
-  });
-
-  if (prepared.thumbnail) {
-    await uploadBlob(dto.id, "thumbnail", encryptBytes(prepared.thumbnail.bytes, fileKey), undefined, signal);
-  }
-  if (prepared.text !== undefined || prepared.clip) {
-    // Search signals travel as their own encrypted blob, keeping sync rows
-    // small: text and the semantic embedding share one envelope.
-    await uploadBlob(
-      dto.id,
-      "index",
-      encryptBytes(
-        encodeIndexPayload({
-          text: prepared.text,
-          clip: prepared.clip,
-          clips: prepared.clips,
-          evidence: prepared.evidence,
-        }),
-        fileKey,
-      ),
-      undefined,
-      signal,
-    );
-  }
+  const [stamped] = await Promise.all([
+    api.patchFile(dto.id, {
+      encryptedMeta: encryptFileMetadata(withDigest, fileKey),
+    }),
+    prepared.thumbnail
+      ? uploadBlob(dto.id, "thumbnail", encryptBytes(prepared.thumbnail.bytes, fileKey), undefined, signal)
+      : null,
+    prepared.text !== undefined || prepared.clip
+      ? // Search signals travel as their own encrypted blob, keeping sync
+        // rows small: text and the semantic embedding share one envelope.
+        uploadBlob(
+          dto.id,
+          "index",
+          encryptBytes(
+            encodeIndexPayload({
+              text: prepared.text,
+              clip: prepared.clip,
+              clips: prepared.clips,
+              evidence: prepared.evidence,
+            }),
+            fileKey,
+          ),
+          undefined,
+          signal,
+        )
+      : null,
+  ]);
 
   const uploadedDto: FileDto = {
     ...stamped,
