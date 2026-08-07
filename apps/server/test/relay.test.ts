@@ -383,3 +383,42 @@ describe("snapshots truncate the log safely", () => {
     live.close();
   });
 });
+
+/**
+ * A browser sends its greeting the instant the socket opens, while the
+ * server is still several database round trips into admitting it. That
+ * greeting must not be lost: losing it means no welcome, no channel, and
+ * live editing that silently never starts. Caught by the first live
+ * two-account run, which found exactly that.
+ */
+describe("a greeting that beats the join", () => {
+  it("answers a hello sent in the same breath as the connection", async () => {
+    const { ticket } = await ticketFor(owner);
+    const socket = new WebSocket(`${base}/api/collab/${fileId}/channel?ticket=${ticket}`);
+    const frames: Frame[] = [];
+    socket.on("message", (data) => frames.push(JSON.parse(String(data)) as Frame));
+    // No await between open and hello: exactly what the browser does.
+    socket.on("open", () => socket.send(JSON.stringify({ t: "hello", lastSeq: 0 })));
+
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline && !frames.some((f) => f.t === "welcome")) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const welcome = frames.find((f) => f.t === "welcome");
+    expect(welcome).toBeDefined();
+    expect(typeof welcome!.yourIndex).toBe("number");
+    socket.close();
+  });
+
+  it("keeps two rapid posts in the order they were sent", async () => {
+    const a = await connect(owner);
+    await a.next((f) => f.t === "caught-up");
+    // Back to back, no await: their positions must follow send order.
+    a.send({ t: "post", ref: "o1", payload: "first" });
+    a.send({ t: "post", ref: "o2", payload: "second" });
+    const first = await a.next((f) => f.t === "ack" && f.ref === "o1");
+    const second = await a.next((f) => f.t === "ack" && f.ref === "o2");
+    expect(Number(second.seq)).toBeGreaterThan(Number(first.seq));
+    a.close();
+  });
+});
