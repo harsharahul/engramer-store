@@ -3,6 +3,19 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.39.6] - 2026-08-07
+
+### Fixed
+- **The iPhone app can reach its own device features again.** Because the app
+  loads the vault over the network, iOS was refusing every request it made of
+  the device itself. Unlocking with Face ID or Touch ID, watched folders, and
+  media playback were all turned away silently and simply appeared to be
+  unavailable. They work again.
+- **Photos picked on iPhone keep their original quality.** Completes the
+  system picker added in 0.39.5: a photo now travels from the library into
+  your vault exactly as it was recorded, rather than as a copy iOS re-encodes
+  on the way out. Requires the updated iPhone app.
+
 ## [0.39.5] - 2026-08-07
 
 ### Fixed

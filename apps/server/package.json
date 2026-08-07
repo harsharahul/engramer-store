@@ -1,6 +1,6 @@
 {
   "name": "@engramer/server",
-  "version": "0.39.5",
+  "version": "0.39.6",
   "description": "Zero-knowledge storage server for Engram Store",
   "license": "AGPL-3.0-only",
   "type": "module",
