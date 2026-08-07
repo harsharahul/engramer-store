@@ -379,7 +379,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://127.0.0.1:3080",
+      // The object form matters: the string shorthand does not upgrade
+      // WebSockets, and the collaboration channel dies silently in dev.
+      "/api": { target: "http://127.0.0.1:3080", ws: true },
     },
   },
 });

@@ -353,6 +353,9 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       isAdmin: app.config.adminEmails.includes(user.email),
       totpEnabled: user.totp_enabled === 1,
       recoveryCodesLeft: user.totp_enabled === 1 ? digests.length : 0,
+      // Clients read this before ever dialing the relay, so a deployment
+      // with the relay off degrades cleanly to turn-based editing.
+      collab: { relay: app.config.collabRelay },
     };
   });
 }

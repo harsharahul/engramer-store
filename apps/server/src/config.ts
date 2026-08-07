@@ -27,6 +27,8 @@ export interface ServerConfig {
   maxBlobBytes: number;
   /** Versions kept per file after a content replacement; 0 disables history. */
   maxVersions: number;
+  /** Whether the live-collaboration relay accepts connections. */
+  collabRelay: boolean;
   /** Directory of a built web client to serve, if any. */
   webDistDir: string | null;
   /** PostgreSQL connection string; unset means embedded SQLite. */
@@ -73,6 +75,7 @@ export interface ConfigOverrides {
   quotaBytes?: number;
   maxBlobBytes?: number;
   maxVersions?: number;
+  collabRelay?: boolean;
   port?: number;
   webDistDir?: string | null;
 }
@@ -98,6 +101,8 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
       0,
       overrides.maxVersions ?? Number(process.env.ENGRAMER_MAX_VERSIONS ?? 10),
     ),
+    collabRelay:
+      overrides.collabRelay ?? (process.env.ENGRAMER_COLLAB_RELAY ?? "on") !== "off",
     webDistDir:
       overrides.webDistDir !== undefined
         ? overrides.webDistDir

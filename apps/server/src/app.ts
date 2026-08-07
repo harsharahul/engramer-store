@@ -159,24 +159,29 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   const inlineScriptHashes = config.webDistDir
     ? hashInlineScripts(join(config.webDistDir, "index.html"))
     : [];
-  const CSP = [
-    "default-src 'self'",
-    `script-src 'self' 'wasm-unsafe-eval'${inlineScriptHashes.map((h) => ` '${h}'`).join("")}`,
-    "worker-src 'self' blob:",
-    "connect-src 'self'",
-    "img-src 'self' blob: data:",
-    // stream: is the desktop shell's native media protocol; browsers
-    // without it simply never reference such URLs.
-    "media-src 'self' blob: stream:",
-    "font-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
-    "frame-src 'self' blob:",
-    "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "frame-ancestors 'none'",
-    "upgrade-insecure-requests",
-  ].join("; ");
+  // connect-src names the WebSocket schemes explicitly rather than leaning
+  // on 'self' covering same-origin ws under CSP3 — cheap, and it removes a
+  // class of works-in-one-browser-silently-dead-in-another failures for
+  // the collaboration relay. Host-dependent, so the header is per request.
+  const cspFor = (host: string) =>
+    [
+      "default-src 'self'",
+      `script-src 'self' 'wasm-unsafe-eval'${inlineScriptHashes.map((h) => ` '${h}'`).join("")}`,
+      "worker-src 'self' blob:",
+      `connect-src 'self' ws://${host} wss://${host}`,
+      "img-src 'self' blob: data:",
+      // stream: is the desktop shell's native media protocol; browsers
+      // without it simply never reference such URLs.
+      "media-src 'self' blob: stream:",
+      "font-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "frame-src 'self' blob:",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+      "upgrade-insecure-requests",
+    ].join("; ");
 
   /**
    * The office editors are vendored third-party code that runs in a
@@ -245,7 +250,7 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
       reply.removeHeader("x-frame-options");
       return;
     }
-    reply.header("content-security-policy", CSP);
+    reply.header("content-security-policy", cspFor(request.host));
     reply.header("x-content-type-options", "nosniff");
     reply.header("x-frame-options", "DENY");
     // Share links carry the file key in the URL fragment; fragments are
@@ -285,7 +290,9 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   registerShareRoutes(app);
   registerRequestRoutes(app);
   registerCollabRoutes(app);
-  registerChannelRoutes(app);
+  if (config.collabRelay) {
+    registerChannelRoutes(app);
+  }
 
   app.get("/api/health", async () => ({ status: "ok" }));
 
