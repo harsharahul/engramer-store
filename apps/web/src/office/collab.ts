@@ -90,6 +90,11 @@ export class CollabBridge {
     this.members = options.members;
   }
 
+  /** The engine's identity is keyed to this index at init time. */
+  get index(): number {
+    return this.selfIndex;
+  }
+
   /** Everything the engine sends "to the server" enters here. */
   onEngineMessage(message: EngineMessage): BridgeEffects {
     const effects = none();
