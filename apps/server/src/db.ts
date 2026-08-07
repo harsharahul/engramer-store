@@ -18,6 +18,8 @@ export interface UserRow {
   disabled: number;
   /** Per-user quota override in bytes; null means the server default. */
   quota_bytes: number | null;
+  /** Optional name shown to collaborators in place of the email. */
+  display_name: string | null;
 }
 
 export interface InviteRow {
@@ -183,6 +185,9 @@ export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; type: str
   { table: "users", column: "recovery_code_digests", type: "TEXT" },
   { table: "users", column: "disabled", type: "BIGINT NOT NULL DEFAULT 0" },
   { table: "users", column: "quota_bytes", type: "BIGINT" },
+  // What collaborators see instead of an email address. Server-visible by
+  // necessity: the point of it is that other people can read it.
+  { table: "users", column: "display_name", type: "TEXT" },
   { table: "shares", column: "expires_at", type: "BIGINT" },
   { table: "shares", column: "max_downloads", type: "BIGINT" },
   { table: "shares", column: "download_count", type: "BIGINT NOT NULL DEFAULT 0" },

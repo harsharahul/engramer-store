@@ -110,14 +110,26 @@ export function registerChannelRoutes(app: FastifyInstance): void {
       const membersFrame = async () => ({
         t: "members",
         members: (
-          await app.db.all<{ conn_id: string; user_index: number; email: string }>(
-            `SELECT p.conn_id, p.user_index, u.email
+          await app.db.all<{
+            conn_id: string;
+            user_index: number;
+            email: string;
+            display_name: string | null;
+          }>(
+            `SELECT p.conn_id, p.user_index, u.email, u.display_name
                FROM channel_presence p JOIN users u ON u.id = p.user_id
               WHERE p.file_id = ? AND p.last_seen > ?`,
             fileId,
             Date.now() - PRESENCE_TTL_MS,
           )
-        ).map((row) => ({ connId: row.conn_id, index: row.user_index, name: row.email })),
+        ).map((row) => ({
+          connId: row.conn_id,
+          index: row.user_index,
+          // The name they chose, or their address if they chose none: an
+          // account has no name until someone sets one, and a blank label
+          // beside a cursor is worse than an address.
+          name: row.display_name ?? row.email,
+        })),
       });
 
       void (async () => {

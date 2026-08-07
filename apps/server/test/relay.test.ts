@@ -760,3 +760,30 @@ describe("losing access closes the socket", () => {
     expect(closed).toBe(true);
   });
 });
+
+describe("who is in the room", () => {
+  it("names people by the name they chose, and by their address until they do", async () => {
+    const named = await register("named@example.com", "harbour kite lantern moss");
+    // Nobody has a name until they set one; an address is the honest default.
+    const before = await app.inject({ method: "GET", url: "/api/user", headers: auth(named) });
+    expect(before.json().displayName).toBeNull();
+
+    const set = await app.inject({
+      method: "PATCH",
+      url: "/api/user",
+      headers: auth(named),
+      payload: { displayName: "  Ada  " },
+    });
+    expect(set.statusCode).toBe(200);
+    expect(set.json().displayName).toBe("Ada");
+
+    // Blanking it returns to the address rather than storing nothing.
+    const cleared = await app.inject({
+      method: "PATCH",
+      url: "/api/user",
+      headers: auth(named),
+      payload: { displayName: "   " },
+    });
+    expect(cleared.json().displayName).toBeNull();
+  });
+});

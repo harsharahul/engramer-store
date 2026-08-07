@@ -342,6 +342,17 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     return { disabled: true };
   });
 
+  app.patch("/api/user", auth, async (request, reply) => {
+    const body = z
+      .object({ displayName: z.string().trim().max(64).nullable() })
+      .parse(request.body);
+    // Empty means "no name": fall back to the address rather than storing
+    // a blank that would show as nothing at all beside someone's cursor.
+    const name = body.displayName && body.displayName.length > 0 ? body.displayName : null;
+    await app.db.run("UPDATE users SET display_name = ? WHERE id = ?", name, request.user.uid);
+    return reply.code(200).send({ displayName: name });
+  });
+
   app.get("/api/user", auth, async (request) => {
     const user = await getUser(request.user.uid);
     const digests = JSON.parse(user.recovery_code_digests ?? "[]") as string[];
@@ -351,6 +362,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       usedBytes: await storageUsed(app.db, request.user.uid),
       quotaBytes: await userQuota(app.db, request.user.uid, app.config.quotaBytes),
       isAdmin: app.config.adminEmails.includes(user.email),
+      displayName: user.display_name,
       totpEnabled: user.totp_enabled === 1,
       recoveryCodesLeft: user.totp_enabled === 1 ? digests.length : 0,
       // Clients read this before ever dialing the relay, so a deployment

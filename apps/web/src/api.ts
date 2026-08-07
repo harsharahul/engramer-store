@@ -204,10 +204,18 @@ export const api = {
       usedBytes: number;
       quotaBytes: number;
       createdAt: number;
+      displayName: string | null;
       totpEnabled: boolean;
       recoveryCodesLeft: number;
       isAdmin: boolean;
     }>("/api/user"),
+
+  /** The name collaborators see instead of this account's address. */
+  setDisplayName: (displayName: string | null) =>
+    request<{ displayName: string | null }>("/api/user", {
+      method: "PATCH",
+      body: JSON.stringify({ displayName }),
+    }),
 
   adminListUsers: () =>
     request<{ users: AdminUserInfo[]; registration: "open" | "invite" | "closed" }>(
