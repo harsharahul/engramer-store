@@ -3,6 +3,17 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.39.2] - 2026-08-07
+
+### Fixed
+- **Uploading photos from the iPhone no longer closes the app.** A photo
+  was being decoded three separate times — once for its thumbnail, again
+  to recognise text, and again to scan for barcodes — each at full
+  resolution. Keeping HEIC originals made that far heavier, since a
+  two-megabyte HEIC can hold tens of megapixels, and the phone ran out
+  of memory. Each photo is now decoded once, and everything that reads
+  it works from a single bounded copy.
+
 ## [0.39.1] - 2026-08-07
 
 ### Fixed
