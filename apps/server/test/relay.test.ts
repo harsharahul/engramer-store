@@ -615,3 +615,33 @@ describe("the log cannot grow without bound", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe("the ephemeral path is not a way around the write gate", () => {
+  it("relays nothing a viewer sends as an ephemeral either", async () => {
+    const editor = await connect(member);
+    await editor.next((f) => f.t === "caught-up");
+    const watcher = await connect(viewer);
+    await watcher.next((f) => f.t === "caught-up");
+
+    // The same edit a viewer cannot post, relabelled as a cursor.
+    watcher.send({ t: "eph", payload: "viewer-edit-as-eph" });
+    expect(
+      await editor.silence((f) => f.t === "eph" && f.payload === "viewer-edit-as-eph"),
+    ).toBe(true);
+
+    watcher.close();
+    editor.close();
+  });
+
+  it("still carries an editor's ephemerals", async () => {
+    const a = await connect(owner);
+    await a.next((f) => f.t === "caught-up");
+    const b = await connect(member);
+    await b.next((f) => f.t === "caught-up");
+    b.send({ t: "eph", payload: "editor-cursor" });
+    const seen = await a.next((f) => f.t === "eph");
+    expect(seen.payload).toBe("editor-cursor");
+    a.close();
+    b.close();
+  });
+});

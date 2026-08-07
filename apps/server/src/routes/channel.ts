@@ -248,7 +248,11 @@ export function registerChannelRoutes(app: FastifyInstance): void {
               return;
             }
             case "eph": {
-              if (typeof frame.payload !== "string") {
+              // The ephemeral path skips the ordered log, so it must not
+              // become the way around the write gate: a viewer could
+              // otherwise relabel a document change as a cursor and have
+              // every editor apply it.
+              if (!mayWrite || typeof frame.payload !== "string") {
                 return;
               }
               // Broadcast and forget: presence and cursors leave no row to
