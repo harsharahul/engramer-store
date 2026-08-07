@@ -1179,15 +1179,27 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   app.get("/api/sync", auth, async (request) => {
     const uid = request.user.uid;
     const since = Number((request.query as { since?: string }).since ?? 0);
+    // The cursor is read FIRST and every query bounded by it. Read last,
+    // anything committed mid-request would advance the client past a row it
+    // never received — skipped for good, until a full resync. A share
+    // granted while the recipient happened to be syncing vanished exactly
+    // this way, which is how it was found.
+    const user = (await app.db.get<{ last_seq: number }>(
+      "SELECT last_seq FROM users WHERE id = ?",
+      uid,
+    ))!;
+    const upTo = user.last_seq;
     const folders = await app.db.all<FolderRow>(
-      "SELECT * FROM folders WHERE user_id = ? AND update_seq > ? ORDER BY update_seq",
+      "SELECT * FROM folders WHERE user_id = ? AND update_seq > ? AND update_seq <= ? ORDER BY update_seq",
       uid,
       since,
+      upTo,
     );
     const files = await app.db.all<FileRow>(
-      "SELECT * FROM files WHERE user_id = ? AND update_seq > ? ORDER BY update_seq",
+      "SELECT * FROM files WHERE user_id = ? AND update_seq > ? AND update_seq <= ? ORDER BY update_seq",
       uid,
       since,
+      upTo,
     );
     const shared = await app.db.all<SharedJoinRow>(
       `SELECT f.*, c.role AS collab_role, c.sealed_key, c.key_epoch AS member_epoch,
@@ -1195,17 +1207,14 @@ export function registerStorageRoutes(app: FastifyInstance): void {
          FROM file_collaborators c
          JOIN files f ON f.id = c.file_id
          JOIN users u ON u.id = c.owner_id
-        WHERE c.user_id = ? AND c.update_seq > ?
+        WHERE c.user_id = ? AND c.update_seq > ? AND c.update_seq <= ?
         ORDER BY c.update_seq`,
       uid,
       since,
+      upTo,
     );
-    const user = (await app.db.get<{ last_seq: number }>(
-      "SELECT last_seq FROM users WHERE id = ?",
-      uid,
-    ))!;
     return {
-      seq: user.last_seq,
+      seq: upTo,
       folders: folders.map(folderToDto),
       files: files.map(fileToDto),
       shared: shared.map(sharedToDto),

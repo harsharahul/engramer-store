@@ -663,3 +663,56 @@ describe("history stays the owner's", () => {
     expect((ownerList.json().versions as unknown[]).length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * Sync must never hand back a cursor that runs ahead of what it delivered.
+ * When the cursor was read after the rows, anything committed in between
+ * advanced the client past a row it never saw, and that row was skipped
+ * for good. A share granted while its recipient happened to be syncing
+ * disappeared exactly that way: the invitation succeeded, and "Shared
+ * with me" stayed empty until a full resync.
+ */
+describe("sync never advances past what it delivered", () => {
+  it("keeps every delivered row at or below the cursor it returns", async () => {
+    const file = await uploadFile(owner, "cursorbound.docx", utf8Encode("x"));
+    await shareWith(recipient, file.id, file.fileKey, "editor");
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/sync?since=0",
+      headers: auth(recipient),
+    });
+    const body = response.json() as {
+      seq: number;
+      folders: Array<{ updateSeq: number }>;
+      files: Array<{ updateSeq: number }>;
+      shared: Array<{ updateSeq: number }>;
+    };
+    for (const row of [...body.folders, ...body.files, ...body.shared]) {
+      expect(row.updateSeq).toBeLessThanOrEqual(body.seq);
+    }
+    expect(body.shared.some((r) => (r as unknown as { id: string }).id === file.id)).toBe(true);
+  });
+
+  it("delivers a share granted after the recipient's last sync", async () => {
+    // The recipient syncs first, then the share arrives: the next sync from
+    // that cursor must carry it.
+    const first = await app.inject({
+      method: "GET",
+      url: "/api/sync?since=0",
+      headers: auth(stranger),
+    });
+    const cursor = first.json().seq as number;
+
+    const file = await uploadFile(owner, "afterthefact.docx", utf8Encode("y"));
+    await shareWith(stranger, file.id, file.fileKey, "viewer");
+
+    const second = await app.inject({
+      method: "GET",
+      url: `/api/sync?since=${cursor}`,
+      headers: auth(stranger),
+    });
+    const shared = second.json().shared as Array<{ id: string }>;
+    expect(shared.some((r) => r.id === file.id)).toBe(true);
+  });
+});
