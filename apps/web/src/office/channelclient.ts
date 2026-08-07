@@ -15,7 +15,7 @@ export interface ChannelWelcome {
   snapshotSeq: number;
   you: string;
   yourIndex: number;
-  members: Array<{ connId: string; index: number }>;
+  members: Array<{ connId: string; index: number; name?: string }>;
 }
 
 export interface ChannelEvents {
@@ -23,7 +23,7 @@ export interface ChannelEvents {
   onLog(seq: number, sender: string, payload: string): void;
   onCaughtUp(seq: number): void;
   onEph(sender: string, payload: string): void;
-  onMembers(members: Array<{ connId: string; index: number }>): void;
+  onMembers(members: Array<{ connId: string; index: number; name?: string }>): void;
   onAck(ref: number, seq: number): void;
   onTruncated(snapshotGeneration: number, snapshotSeq: number): void;
   /** The channel is gone and redialing has been abandoned. */
@@ -84,7 +84,7 @@ export class ChannelClient {
             this.events.onEph(String(frame.sender), String(frame.payload));
             return;
           case "members":
-            this.events.onMembers(frame.members as Array<{ connId: string; index: number }>);
+            this.events.onMembers(frame.members as Array<{ connId: string; index: number; name?: string }>);
             return;
           case "ack":
             this.lastSeq = Math.max(this.lastSeq, Number(frame.seq));

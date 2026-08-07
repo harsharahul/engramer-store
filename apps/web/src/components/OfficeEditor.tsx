@@ -96,7 +96,9 @@ export function OfficeEditor(props: {
   const pendingFramesRef = useRef(0);
   const lastFrameAtRef = useRef(0);
   // The effect's membership tracker; callbacks reach it through this seam.
-  const membersHook = useRef<(members: Array<{ connId: string; index: number }>) => void>(() => {});
+  const membersHook = useRef<(members: Array<{ connId: string; index: number; name?: string }>) => void>(
+    () => {},
+  );
 
   // The frame's address depends only on the kind of document, so the editor
   // begins loading its several megabytes immediately, while this file is
@@ -385,8 +387,8 @@ export function OfficeEditor(props: {
     // nobody saves in still converges and the log stays bounded. Election
     // is the lowest index present, computed identically everywhere; a
     // second snapshotter would be redundant, never harmful.
-    let latestMembers: Array<{ connId: string; index: number }> = [];
-    const rememberMembers = (members: Array<{ connId: string; index: number }>) => {
+    let latestMembers: Array<{ connId: string; index: number; name?: string }> = [];
+    const rememberMembers = (members: Array<{ connId: string; index: number; name?: string }>) => {
       latestMembers = members;
       indexByConn.clear();
       for (const m of members) {

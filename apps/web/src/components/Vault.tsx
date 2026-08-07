@@ -216,6 +216,14 @@ export function Vault() {
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
   const [detailsOpen, setDetailsOpen] = useState(() => loadPref("engramer-details", true));
   const [detailsSheet, setDetailsSheet] = useState(false);
+  /**
+   * The file the phone's Details sheet is showing. It owns this rather
+   * than borrowing the selection: opening Details from an open file closes
+   * that file, and the tap then lands on the grid underneath, which clears
+   * the selection — the sheet flickered open and vanished, back to the
+   * folder. What the sheet shows must not depend on what is selected.
+   */
+  const [detailsFileId, setDetailsFileId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{
     x: number;
@@ -425,6 +433,10 @@ export function Vault() {
   const renameFolder = renameFolderId ? store.folders.get(renameFolderId) : undefined;
   const selectedFile =
     selection.size === 1 ? (store.files.get([...selection][0]!) ?? null) : null;
+  // The pane follows the selection; the sheet follows what it was opened on.
+  const detailsFile = isMobile
+    ? (detailsFileId ? (store.files.get(detailsFileId) ?? null) : null)
+    : selectedFile;
   const freshIds = useMemo(
     () => new Set(store.reveal?.items.map((item) => item.fileId) ?? []),
     [store.reveal],
@@ -469,6 +481,7 @@ export function Vault() {
   useEffect(() => {
     clearSelection();
     setDetailsSheet(false);
+    setDetailsFileId(null);
   }, [view, query, clearSelection]);
   useEffect(() => setSearchCursor(0), [query]);
 
@@ -497,6 +510,7 @@ export function Vault() {
     setDetailsOpen(true);
     persist("engramer-details", true);
     // On phones the inspector is an on-demand bottom sheet, not a pane.
+    setDetailsFileId(id);
     setDetailsSheet(true);
   };
 
@@ -511,6 +525,14 @@ export function Vault() {
 
   const fileMenuItems = (file: FileEntry): MenuItem[] => [
     { id: "open", label: "Open", run: () => openFile(file.id) },
+    // Second from the top and named for what it is: reaching details used
+    // to mean opening the file first, then finding a button inside it.
+    {
+      id: "tags",
+      label: "Details and tags",
+      icon: <InfoGlyph size={13} />,
+      run: () => inspect(file.id),
+    },
     ...(["text", "doc", "sheet"].includes(fileKind(file.mime, file.name))
       ? [{ id: "edit", label: "Edit", icon: <PencilGlyph size={13} />, run: () => setEditorId(file.id) }]
       : []),
@@ -559,7 +581,7 @@ export function Vault() {
           },
         ]
       : []),
-    { id: "tags", label: "Tags and details", icon: <TagGlyph size={13} />, run: () => inspect(file.id) },
+
     ...(!file.shared || file.role === "editor"
       ? [{ id: "rename", label: "Rename", icon: <PencilGlyph size={13} />, run: () => setRenameFileId(file.id) }]
       : []),
@@ -1822,11 +1844,11 @@ export function Vault() {
         </div>
       </main>
 
-      {(isMobile ? detailsSheet && selectedFile !== null : detailsOpen) &&
+      {(isMobile ? detailsSheet && detailsFile !== null : detailsOpen) &&
         view.kind !== "trash" &&
         view.kind !== "shared" && (
           <DetailsPanel
-            file={selectedFile}
+            file={detailsFile}
             allFiles={liveFiles}
             selectionCount={selection.size}
             onOpen={openFile}
@@ -1843,6 +1865,7 @@ export function Vault() {
             onClose={() => {
               if (isMobile) {
                 setDetailsSheet(false);
+                setDetailsFileId(null);
                 return;
               }
               setDetailsOpen(false);

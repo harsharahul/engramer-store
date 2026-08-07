@@ -3,6 +3,24 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.39.3] - 2026-08-07
+
+### Fixed
+- **Details no longer flickers shut on a phone.** Opening Details from an
+  open file closed that file, and the same tap then landed on the grid
+  underneath, which cleared the selection the panel was reading from — so
+  it appeared and vanished, back to the folder. The panel now keeps hold
+  of the file it was opened on.
+
+### Changed
+- **Details is second in a file's actions menu**, named for what it is, so
+  reading a file's dates, tags and history no longer means opening the
+  file first.
+- **People editing together are named.** The editor showed "member 1" and
+  "member 2"; it now shows who is actually there. Identity travels no
+  further than the document's own membership — everyone listed was
+  invited to that document by its owner.
+
 ## [0.39.2] - 2026-08-07
 
 ### Fixed

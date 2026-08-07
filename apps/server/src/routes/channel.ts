@@ -103,15 +103,21 @@ export function registerChannelRoutes(app: FastifyInstance): void {
         socket.close(code);
       };
 
+      // Who is here, by name. Everyone on this list was invited to this
+      // document by its owner, and an editor showing "member 2" tells a
+      // person nothing about who is typing beside them. Identity travels
+      // no further than the document's own membership.
       const membersFrame = async () => ({
         t: "members",
         members: (
-          await app.db.all<{ conn_id: string; user_index: number }>(
-            "SELECT conn_id, user_index FROM channel_presence WHERE file_id = ? AND last_seen > ?",
+          await app.db.all<{ conn_id: string; user_index: number; email: string }>(
+            `SELECT p.conn_id, p.user_index, u.email
+               FROM channel_presence p JOIN users u ON u.id = p.user_id
+              WHERE p.file_id = ? AND p.last_seen > ?`,
             fileId,
             Date.now() - PRESENCE_TTL_MS,
           )
-        ).map((row) => ({ connId: row.conn_id, index: row.user_index })),
+        ).map((row) => ({ connId: row.conn_id, index: row.user_index, name: row.email })),
       });
 
       void (async () => {
