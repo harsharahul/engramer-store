@@ -3,7 +3,12 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## [Unreleased]
+## [0.38.0] - 2026-08-06
+
+### Security
+- **PDF renderer updated against GHSA-hq66-cqwq-w95j.** pdf.js moves to
+  6.2.108, closing an arbitrary script execution issue a crafted PDF
+  could trigger in affected versions.
 
 ### Added
 - **Sharing with people, not just links.** A file can be shared to another
