@@ -595,3 +595,32 @@ describe("key rotation", () => {
     expect(attempt.statusCode).toBe(403);
   });
 });
+
+describe("collaborator metadata patch", () => {
+  it("answers without the owner's wrapped key or folder", async () => {
+    const file = await uploadFile(owner, "patchable.docx", utf8Encode("v1"));
+    const { sealedKey } = await shareWith(recipient, file.id, file.fileKey, "editor");
+    const key = openSealed(
+      sealedKey,
+      recipient.keys.keyAttributes.publicKey,
+      recipient.keys.privateKey,
+    );
+    const patched = await app.inject({
+      method: "PATCH",
+      url: `/api/files/${file.id}`,
+      headers: auth(recipient),
+      payload: {
+        encryptedMeta: encryptFileMetadata(
+          { name: "renamed by editor.docx", mime: "application/octet-stream", size: 2, mtime: 1 },
+          key,
+        ),
+      },
+    });
+    expect(patched.statusCode).toBe(200);
+    const body = patched.json() as Record<string, unknown>;
+    expect(body.encryptedKey).toBeUndefined();
+    expect(body.folderId).toBeNull();
+    // The metadata that came back is readable with the shared key.
+    expect(body.encryptedMeta).toBeDefined();
+  });
+});

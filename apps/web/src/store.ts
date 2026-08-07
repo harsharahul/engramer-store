@@ -292,6 +292,48 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
 }
 
 /**
+ * The entry a server reply describes, given what this account already
+ * holds. A shared file's reply carries the OWNER's wrapped key, which this
+ * account's master key cannot open and has no need to: the key arrived
+ * with the share and is already in hand. Getting this wrong made every
+ * collaborator's save land its bytes and then report failure.
+ */
+export function entryFromUpdate(
+  prior: FileEntry | undefined,
+  dto: FileDto,
+  masterKey: Uint8Array,
+): FileEntry {
+  if (!prior?.shared) {
+    return decryptFile(dto, masterKey);
+  }
+  const meta = decryptFileMetadata(dto.encryptedMeta, prior.key);
+  return {
+    ...prior,
+    name: meta.name,
+    mime: meta.mime,
+    size: meta.size,
+    mtime: meta.mtime,
+    width: meta.width,
+    height: meta.height,
+    blur: meta.blur,
+    text: meta.text,
+    hasText: meta.hasText === true || meta.text !== undefined,
+    hasClip: meta.hasClip === true,
+    inlineText: meta.text !== undefined,
+    category: meta.category,
+    tags: meta.tags ?? [],
+    facts: asFacts(meta.facts),
+    digest: meta.digest,
+    favorite: meta.favorite ?? false,
+    hasThumb: dto.thumbSize > 0,
+    // The owner's tree and wrapping stay the owner's business.
+    folderId: null,
+    updatedAt: dto.updatedAt,
+    generation: dto.generation ?? prior.generation,
+  };
+}
+
+/**
  * A file shared in by another account. The key arrives sealed to this
  * account's public key rather than wrapped under the master key; once open,
  * everything downstream is identical because metadata is encrypted under
@@ -455,7 +497,7 @@ export const useStore = create<StoreState>((set, get) => {
     if (dto.deleted) {
       files.delete(dto.id);
     } else {
-      const entry = decryptFile(dto, masterKey());
+      const entry = entryFromUpdate(files.get(dto.id), dto, masterKey());
       // Keep already-warmed search text across metadata updates.
       const prior = files.get(dto.id);
       if (entry.text === undefined && entry.hasText && prior?.text !== undefined) {

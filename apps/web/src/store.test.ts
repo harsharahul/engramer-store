@@ -207,3 +207,89 @@ describe("decryptSharedFile", () => {
     expect(meta).not.toHaveProperty("ownerEmail");
   });
 });
+
+/**
+ * A collaborator's save uploads bytes, then applies the server's reply.
+ * That reply carries the OWNER's wrapped key, which the collaborator's
+ * master key cannot open — so applying it must keep using the key the
+ * share delivered. Caught live: the bytes landed and the editor still
+ * reported "wrong secret key for the given ciphertext".
+ */
+describe("entryFromUpdate", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  it("keeps a shared entry's own key and share facts across an update", async () => {
+    const { entryFromUpdate } = await import("./store");
+    const { encryptFileMetadata: encMeta, secretBoxSeal: seal } = await import("@engramer/crypto");
+    const ownerMaster = generateKey();
+    const otherMaster = generateKey();
+    const fileKey = generateKey();
+    const prior = entry({
+      id: "shared-1",
+      key: fileKey,
+      shared: true,
+      role: "editor",
+      ownerEmail: "owner@example.com",
+      folderId: null,
+    });
+    const dto = {
+      id: "shared-1",
+      folderId: "owners-folder",
+      // The owner's wrapping: opaque to this account.
+      encryptedKey: seal(fileKey, ownerMaster),
+      encryptedMeta: encMeta(
+        { name: "coedit.docx", mime: "application/octet-stream", size: 42, mtime: 9 },
+        fileKey,
+      ),
+      size: 42,
+      thumbSize: 0,
+      indexSize: 0,
+      uploaded: true,
+      trashed: false,
+      deleted: false,
+      updateSeq: 5,
+      createdAt: 1,
+      updatedAt: 9,
+    };
+    const updated = entryFromUpdate(prior, dto, otherMaster);
+    expect(updated.name).toBe("coedit.docx");
+    expect(updated.size).toBe(42);
+    expect(updated.key).toEqual(fileKey);
+    expect(updated.shared).toBe(true);
+    expect(updated.role).toBe("editor");
+    expect(updated.ownerEmail).toBe("owner@example.com");
+    // The owner's tree is not this account's business.
+    expect(updated.folderId).toBeNull();
+  });
+
+  it("still unwraps an owned file with the master key", async () => {
+    const { entryFromUpdate } = await import("./store");
+    const { encryptFileMetadata: encMeta, secretBoxSeal: seal } = await import("@engramer/crypto");
+    const master = generateKey();
+    const fileKey = generateKey();
+    const dto = {
+      id: "own-1",
+      folderId: "f1",
+      encryptedKey: seal(fileKey, master),
+      encryptedMeta: encMeta(
+        { name: "mine.docx", mime: "application/octet-stream", size: 7, mtime: 3 },
+        fileKey,
+      ),
+      size: 7,
+      thumbSize: 0,
+      indexSize: 0,
+      uploaded: true,
+      trashed: false,
+      deleted: false,
+      updateSeq: 2,
+      createdAt: 1,
+      updatedAt: 3,
+    };
+    const updated = entryFromUpdate(undefined, dto, master);
+    expect(updated.name).toBe("mine.docx");
+    expect(updated.folderId).toBe("f1");
+    expect(updated.shared).toBeUndefined();
+  });
+});
