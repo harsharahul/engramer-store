@@ -295,6 +295,20 @@ export function Vault() {
     }
   }, [store.syncError, store.synced, showToast]);
 
+  // Someone accepted an invitation and is waiting on a key. Nothing is
+  // released automatically, so this has to be visible or the recipient
+  // waits forever wondering whether sharing works.
+  const claimCount = store.pendingClaims.length;
+  useEffect(() => {
+    if (claimCount > 0) {
+      showToast(
+        claimCount === 1
+          ? "Someone accepted your invitation. Open Share on that file to check who, and release the key."
+          : `${claimCount} people accepted your invitations. Open Share on those files to release their keys.`,
+      );
+    }
+  }, [claimCount, showToast]);
+
   const liveFiles = useMemo(
     () => [...store.files.values()].filter((f) => !f.trashed),
     [store.files],

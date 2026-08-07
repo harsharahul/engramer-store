@@ -95,6 +95,15 @@ export interface FileEntry {
   generation?: number;
 }
 
+/** A claimed invitation whose key the owner has not released yet. */
+export interface PendingClaim {
+  token: string;
+  fileId: string;
+  fileName: string;
+  claimantEmail: string;
+  role: "viewer" | "editor";
+}
+
 export interface UploadItem {
   id: string;
   name: string;
@@ -234,8 +243,11 @@ interface StoreState {
   dismissReveal: () => void;
   createFileRequest: (label: string, folderId: string | null, expiresAt: number | null) => Promise<string>;
   ingestRequestUploads: () => Promise<number>;
-  /** Finishes claimed share invites by sealing the file key to each claimant. */
-  grantClaimedInvites: () => Promise<number>;
+  /** Invitations someone has claimed, waiting for this owner to approve. */
+  pendingClaims: PendingClaim[];
+  refreshPendingClaims: () => Promise<void>;
+  /** Releases the file key to the account that claimed this invitation. */
+  approveClaim: (token: string) => Promise<void>;
   recognizeFile: (id: string) => Promise<boolean>;
   recognizeAllImages: () => Promise<number>;
   /** Reads dates out of documents stored before this feature existed. */
@@ -628,6 +640,7 @@ export const useStore = create<StoreState>((set, get) => {
 
   return {
     session: null,
+    pendingClaims: [],
     synced: false,
     syncError: null,
     folders: new Map(),
@@ -796,11 +809,12 @@ export const useStore = create<StoreState>((set, get) => {
       }
       syncCursor = response.seq;
       void storeSyncRows(account, response);
-      // Anything that arrived through a file request gets filed automatically,
-      // and any claimed share invite gets its key released, so one open tab
-      // finishes every handshake.
+      // Anything that arrived through a file request gets filed
+      // automatically. Share invitations do NOT self-complete: releasing a
+      // file key is a decision, and it waits for the owner to look at who
+      // actually claimed it.
       await get().ingestRequestUploads().catch(() => 0);
-      await get().grantClaimedInvites().catch(() => 0);
+      await get().refreshPendingClaims().catch(() => {});
     },
 
     /** Escape hatch: full sync from the server and an exact cache rebuild,
@@ -1491,34 +1505,40 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     /**
-     * The owner's half of the share handshake. A claimed invite carries the
-     * claimant's public key; sealing the file key to it is the only step the
-     * server cannot do, and it happens here on the next sync, so leaving one
-     * tab open finishes every pending share. A failure leaves the invite
-     * claimed-but-ungranted for the next pass.
+     * Who is waiting on a key. An invitation names nobody until it is
+     * claimed; once it is, the owner learns which account took it and
+     * decides. Nothing is released by simply being asked.
      */
-    grantClaimedInvites: async () => {
+    refreshPendingClaims: async () => {
       if (!get().session) {
-        return 0;
+        return;
       }
       const { invites } = await api.listCollabInvites();
-      let released = 0;
+      const claims: PendingClaim[] = [];
       for (const invite of invites) {
-        if (!invite.claimed || invite.granted || invite.revoked || !invite.claimantPublicKey) {
+        if (!invite.claimed || invite.granted || invite.revoked || !invite.claimantEmail) {
           continue;
         }
-        const file = get().files.get(invite.fileId);
-        if (!file) {
-          continue;
-        }
-        try {
-          await api.grantCollabInvite(invite.token, sealFileKeyFor(file.key, invite.claimantPublicKey));
-          released++;
-        } catch {
-          // Stays pending; the next sync retries.
-        }
+        claims.push({
+          token: invite.token,
+          fileId: invite.fileId,
+          fileName: get().files.get(invite.fileId)?.name ?? "a document",
+          claimantEmail: invite.claimantEmail,
+          role: invite.role,
+        });
       }
-      return released;
+      set({ pendingClaims: claims });
+    },
+
+    approveClaim: async (token) => {
+      const { invites } = await api.listCollabInvites();
+      const invite = invites.find((i) => i.token === token);
+      const file = invite ? get().files.get(invite.fileId) : undefined;
+      if (!invite?.claimantPublicKey || !file) {
+        throw new Error("this invitation is no longer available");
+      }
+      await api.grantCollabInvite(token, sealFileKeyFor(file.key, invite.claimantPublicKey));
+      await get().refreshPendingClaims();
     },
 
     /** Runs OCR over one already-stored image or scanned PDF and files the

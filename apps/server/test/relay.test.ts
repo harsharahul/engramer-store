@@ -678,3 +678,85 @@ describe("only a real save trims the log", () => {
     probe.close();
   });
 });
+
+describe("losing access closes the socket", () => {
+  it("disconnects a collaborator the moment their access is revoked", async () => {
+    // A file of its own, so the shared fixture's channel stays untouched.
+    const fileKey = generateKey();
+    const made = await app.inject({
+      method: "POST",
+      url: "/api/files",
+      headers: auth(owner),
+      payload: {
+        folderId: null,
+        encryptedKey: secretBoxSeal(fileKey, owner.keys.masterKey),
+        encryptedMeta: encryptFileMetadata(
+          { name: "evictable.docx", mime: "application/octet-stream", size: 1, mtime: 1 },
+          fileKey,
+        ),
+      },
+    });
+    const file = { id: made.json().id as string, fileKey };
+    await app.inject({
+      method: "PUT",
+      url: `/api/files/${file.id}/data`,
+      headers: { ...auth(owner), "content-type": "application/octet-stream" },
+      payload: Buffer.from(encryptBytes(utf8Encode("z"), fileKey)),
+    });
+    const kicked = await register("kicked@example.com", "harbour thicket lantern");
+    const minted = await app.inject({
+      method: "POST",
+      url: "/api/collab/invites",
+      headers: auth(owner),
+      payload: { fileId: file.id, role: "editor" },
+    });
+    const token = minted.json().token as string;
+    await app.inject({
+      method: "POST",
+      url: `/api/collab/invites/${token}/claim`,
+      headers: auth(kicked),
+    });
+    const list = await app.inject({ method: "GET", url: "/api/collab/invites", headers: auth(owner) });
+    const entry = (list.json().invites as Array<Record<string, unknown>>).find(
+      (i) => i.token === token,
+    )!;
+    await app.inject({
+      method: "POST",
+      url: `/api/collab/invites/${token}/grant`,
+      headers: auth(owner),
+      payload: { sealedKey: sealToPublicKey(file.fileKey, entry.claimantPublicKey as string) },
+    });
+
+    // Connect to THAT file's channel, then lose access while holding it.
+    const ticketRes = await app.inject({
+      method: "POST",
+      url: `/api/collab/${file.id}/ticket`,
+      headers: auth(kicked),
+      payload: {},
+    });
+    const socket = new WebSocket(
+      `${base}/api/collab/${file.id}/channel?ticket=${ticketRes.json().ticket}`,
+    );
+    let closed = false;
+    socket.on("close", () => (closed = true));
+    await new Promise<void>((res) => socket.once("open", () => res()));
+    socket.send(JSON.stringify({ t: "hello", lastSeq: 0 }));
+    await new Promise((r) => setTimeout(r, 400));
+    expect(closed).toBe(false);
+
+    const members = await app.inject({
+      method: "GET",
+      url: `/api/collab/files/${file.id}/collaborators`,
+      headers: auth(owner),
+    });
+    const uid = (members.json().collaborators as Array<{ userId: number }>)[0]!.userId;
+    await app.inject({
+      method: "DELETE",
+      url: `/api/collab/files/${file.id}/collaborators/${uid}`,
+      headers: auth(owner),
+    });
+
+    await new Promise((r) => setTimeout(r, 400));
+    expect(closed).toBe(true);
+  });
+});
