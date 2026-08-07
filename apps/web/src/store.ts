@@ -16,7 +16,8 @@ import {
   utf8Encode,
   type FileMetadata,
 } from "@engramer/crypto";
-import { api, uploadBlob, withRetry, type FileDto, type FolderDto } from "./api";
+import { api, uploadBlob, withRetry, type FileDto, type FolderDto, type SharedFileDto } from "./api";
+import { openSharedFileKey, sealFileKeyFor } from "./collab";
 import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { clearSession, suspendSession, type Session } from "./session";
@@ -80,6 +81,14 @@ export interface FileEntry {
   trashed: boolean;
   createdAt: number;
   updatedAt: number;
+  /** Shared into this vault by another account. */
+  shared?: boolean;
+  /** This account's rights on a shared file. */
+  role?: "viewer" | "editor";
+  /** Who shared it; shown wherever the file appears. */
+  ownerEmail?: string;
+  /** The key generation this entry's key belongs to (rotation counter). */
+  keyEpoch?: number;
 }
 
 export interface UploadItem {
@@ -211,6 +220,8 @@ interface StoreState {
   dismissReveal: () => void;
   createFileRequest: (label: string, folderId: string | null, expiresAt: number | null) => Promise<string>;
   ingestRequestUploads: () => Promise<number>;
+  /** Finishes claimed share invites by sealing the file key to each claimant. */
+  grantClaimedInvites: () => Promise<number>;
   recognizeFile: (id: string) => Promise<boolean>;
   recognizeAllImages: () => Promise<number>;
   /** Reads dates out of documents stored before this feature existed. */
@@ -265,6 +276,46 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
 }
 
 /**
+ * A file shared in by another account. The key arrives sealed to this
+ * account's public key rather than wrapped under the master key; once open,
+ * everything downstream is identical because metadata is encrypted under
+ * the FILE key. Exported for its tests.
+ */
+export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEntry {
+  const key = openSharedFileKey(dto.sealedKey, session);
+  const meta = decryptFileMetadata(dto.encryptedMeta, key);
+  return {
+    id: dto.id,
+    folderId: null,
+    name: meta.name,
+    mime: meta.mime,
+    size: meta.size,
+    mtime: meta.mtime,
+    width: meta.width,
+    height: meta.height,
+    blur: meta.blur,
+    text: meta.text,
+    hasText: meta.hasText === true || meta.text !== undefined,
+    hasClip: meta.hasClip === true,
+    inlineText: meta.text !== undefined,
+    category: meta.category,
+    tags: meta.tags ?? [],
+    facts: asFacts(meta.facts),
+    digest: meta.digest,
+    favorite: meta.favorite ?? false,
+    key,
+    hasThumb: dto.thumbSize > 0,
+    trashed: false,
+    createdAt: dto.createdAt,
+    updatedAt: dto.updatedAt,
+    shared: true,
+    role: dto.role,
+    ownerEmail: dto.ownerEmail,
+    keyEpoch: dto.keyEpoch,
+  };
+}
+
+/**
  * The entry, back in the shape it is stored in.
  *
  * Every patch rebuilds metadata from here and sends the result, so a field
@@ -313,7 +364,11 @@ export const useStore = create<StoreState>((set, get) => {
   /** Decrypts a complete row set into fresh maps, skipping tombstones and
    * pending uploads, and carrying warmed search text over from the current
    * entries. One corrupt row must never take the whole library down. */
-  const buildLibrary = (folderDtos: FolderDto[], fileDtos: FileDto[]) => {
+  const buildLibrary = (
+    folderDtos: FolderDto[],
+    fileDtos: FileDto[],
+    sharedDtos: SharedFileDto[] = [],
+  ) => {
     const key = masterKey();
     const prior = get().files;
     const folders = new Map<string, FolderEntry>();
@@ -344,6 +399,22 @@ export const useStore = create<StoreState>((set, get) => {
         } catch {
           undecryptable++;
         }
+      }
+    }
+    const session = get().session;
+    for (const dto of sharedDtos) {
+      if (dto.revoked || !dto.uploaded || !session) {
+        continue;
+      }
+      try {
+        const entry = decryptSharedFile(dto, session);
+        const before = prior.get(dto.id);
+        if (entry.text === undefined && entry.hasText && before?.text !== undefined) {
+          entry.text = before.text;
+        }
+        files.set(dto.id, entry);
+      } catch {
+        undecryptable++;
       }
     }
     if (undecryptable > 0) {
@@ -583,7 +654,7 @@ export const useStore = create<StoreState>((set, get) => {
       if (!get().synced && syncCursor === 0) {
         const cached = await loadCache(account);
         if (cached) {
-          const { folders, files } = buildLibrary(cached.folders, cached.files);
+          const { folders, files } = buildLibrary(cached.folders, cached.files, cached.shared);
           syncCursor = cached.seq;
           set({ folders, files, synced: true, syncError: null });
         }
@@ -596,9 +667,13 @@ export const useStore = create<StoreState>((set, get) => {
         throw err;
       }
       if (syncCursor === 0) {
-        const { folders, files } = buildLibrary(response.folders, response.files);
+        const { folders, files } = buildLibrary(response.folders, response.files, response.shared);
         set({ folders, files, synced: true, syncError: null });
-      } else if (response.folders.length > 0 || response.files.length > 0) {
+      } else if (
+        response.folders.length > 0 ||
+        response.files.length > 0 ||
+        (response.shared?.length ?? 0) > 0
+      ) {
         // Delta on top of what is already showing: tombstones prune, live
         // rows replace. A row that fails to decrypt keeps its prior entry.
         const key = masterKey();
@@ -634,14 +709,39 @@ export const useStore = create<StoreState>((set, get) => {
             // keep the prior entry
           }
         }
+        const session = get().session;
+        for (const dto of response.shared ?? []) {
+          // A revoked membership, or a share whose file left the living
+          // set, is the tombstone.
+          if (dto.revoked || !dto.uploaded) {
+            files.delete(dto.id);
+            continue;
+          }
+          if (!session) {
+            continue;
+          }
+          try {
+            const entry = decryptSharedFile(dto, session);
+            const before = files.get(dto.id);
+            if (entry.text === undefined && entry.hasText && before?.text !== undefined) {
+              entry.text = before.text;
+            }
+            files.set(dto.id, entry);
+          } catch {
+            // keep the prior entry
+          }
+        }
         set({ folders, files, synced: true, syncError: null });
       } else {
         set({ synced: true, syncError: null });
       }
       syncCursor = response.seq;
       void storeSyncRows(account, response);
-      // Anything that arrived through a file request gets filed automatically.
+      // Anything that arrived through a file request gets filed automatically,
+      // and any claimed share invite gets its key released, so one open tab
+      // finishes every handshake.
       await get().ingestRequestUploads().catch(() => 0);
+      await get().grantClaimedInvites().catch(() => 0);
     },
 
     /** Escape hatch: full sync from the server and an exact cache rebuild,
@@ -652,7 +752,7 @@ export const useStore = create<StoreState>((set, get) => {
         throw new Error("not signed in");
       }
       const response = await api.sync(0);
-      const { folders, files } = buildLibrary(response.folders, response.files);
+      const { folders, files } = buildLibrary(response.folders, response.files, response.shared);
       syncCursor = response.seq;
       set({ folders, files, synced: true, syncError: null });
       await storeSyncRows(account, response, true);
@@ -1222,6 +1322,37 @@ export const useStore = create<StoreState>((set, get) => {
         await get().refreshUsage();
       }
       return revealItems.length;
+    },
+
+    /**
+     * The owner's half of the share handshake. A claimed invite carries the
+     * claimant's public key; sealing the file key to it is the only step the
+     * server cannot do, and it happens here on the next sync, so leaving one
+     * tab open finishes every pending share. A failure leaves the invite
+     * claimed-but-ungranted for the next pass.
+     */
+    grantClaimedInvites: async () => {
+      if (!get().session) {
+        return 0;
+      }
+      const { invites } = await api.listCollabInvites();
+      let released = 0;
+      for (const invite of invites) {
+        if (!invite.claimed || invite.granted || invite.revoked || !invite.claimantPublicKey) {
+          continue;
+        }
+        const file = get().files.get(invite.fileId);
+        if (!file) {
+          continue;
+        }
+        try {
+          await api.grantCollabInvite(invite.token, sealFileKeyFor(file.key, invite.claimantPublicKey));
+          released++;
+        } catch {
+          // Stays pending; the next sync retries.
+        }
+      }
+      return released;
     },
 
     /** Runs OCR over one already-stored image or scanned PDF and files the

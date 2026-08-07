@@ -147,3 +147,63 @@ describe("uploadFiles", () => {
     expect(useStore.getState().files.size).toBe(6);
   });
 });
+
+describe("decryptSharedFile", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  it("opens the sealed key with the account key pair and marks the entry shared", async () => {
+    const { generateKeyPair, sealToPublicKey, encryptFileMetadata: encMeta } = await import(
+      "@engramer/crypto"
+    );
+    const { decryptSharedFile } = await import("./store");
+    const pair = generateKeyPair();
+    const session = {
+      email: "r@example.com",
+      token: "t",
+      masterKey: generateKey(),
+      privateKey: pair.privateKey,
+      publicKey: pair.publicKey,
+    };
+    const fileKey = generateKey();
+    const dto = {
+      id: "sf1",
+      folderId: null as null,
+      encryptedMeta: encMeta(
+        { name: "team.docx", mime: "application/pdf", size: 9, mtime: 5 },
+        fileKey,
+      ),
+      size: 9,
+      thumbSize: 0,
+      indexSize: 0,
+      uploaded: true,
+      updateSeq: 3,
+      createdAt: 1,
+      updatedAt: 2,
+      ownerEmail: "owner@example.com",
+      role: "editor" as const,
+      sealedKey: sealToPublicKey(fileKey, pair.publicKey),
+      keyEpoch: 0,
+      revoked: false,
+    };
+    const entry = decryptSharedFile(dto, session);
+    expect(entry.name).toBe("team.docx");
+    expect(entry.shared).toBe(true);
+    expect(entry.role).toBe("editor");
+    expect(entry.ownerEmail).toBe("owner@example.com");
+    expect(entry.folderId).toBeNull();
+    expect(entry.key).toEqual(fileKey);
+  });
+
+  it("keeps metadataOf byte-preserving for a shared entry", async () => {
+    const meta = metadataOf(
+      entry({ shared: true, role: "viewer", ownerEmail: "o@example.com" } as Partial<FileEntry>),
+    );
+    expect(meta.name).toBe("passport.pdf");
+    // Share bookkeeping lives in the membership row, never inside the
+    // encrypted metadata, which stays exactly the owner's document.
+    expect(meta).not.toHaveProperty("role");
+    expect(meta).not.toHaveProperty("ownerEmail");
+  });
+});
