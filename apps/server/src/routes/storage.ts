@@ -1013,6 +1013,39 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     return fileToDto(row);
   });
 
+  /**
+   * A file shared into this vault, shaped for its recipient: the owner's
+   * wrapped key never travels, the location names the owner's tree and so
+   * becomes null, and the row's cursor is the MEMBERSHIP's seq, which is
+   * drawn from the recipient's own counter. A row whose membership is
+   * revoked or whose file left the living set is the tombstone.
+   */
+  type SharedJoinRow = FileRow & {
+    collab_role: string;
+    sealed_key: string;
+    member_epoch: number;
+    member_revoked: number;
+    member_seq: number;
+    owner_email: string;
+  };
+  const sharedToDto = (row: SharedJoinRow) => ({
+    id: row.id,
+    folderId: null,
+    encryptedMeta: JSON.parse(row.encrypted_meta) as unknown,
+    size: row.size,
+    thumbSize: row.thumb_size,
+    indexSize: row.index_size,
+    uploaded: row.uploaded === 1,
+    updateSeq: row.member_seq,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ownerEmail: row.owner_email,
+    role: row.collab_role,
+    sealedKey: row.sealed_key,
+    keyEpoch: row.member_epoch,
+    revoked: row.member_revoked === 1 || row.trashed === 1 || row.deleted === 1,
+  });
+
   // Delta sync: everything that changed after the client's cursor, tombstones included.
   app.get("/api/sync", auth, async (request) => {
     const uid = request.user.uid;
@@ -1027,6 +1060,17 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       uid,
       since,
     );
+    const shared = await app.db.all<SharedJoinRow>(
+      `SELECT f.*, c.role AS collab_role, c.sealed_key, c.key_epoch AS member_epoch,
+              c.revoked AS member_revoked, c.update_seq AS member_seq, u.email AS owner_email
+         FROM file_collaborators c
+         JOIN files f ON f.id = c.file_id
+         JOIN users u ON u.id = c.owner_id
+        WHERE c.user_id = ? AND c.update_seq > ?
+        ORDER BY c.update_seq`,
+      uid,
+      since,
+    );
     const user = (await app.db.get<{ last_seq: number }>(
       "SELECT last_seq FROM users WHERE id = ?",
       uid,
@@ -1035,6 +1079,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       seq: user.last_seq,
       folders: folders.map(folderToDto),
       files: files.map(fileToDto),
+      shared: shared.map(sharedToDto),
     };
   });
 }
