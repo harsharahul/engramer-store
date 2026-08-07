@@ -362,3 +362,129 @@ describe("collaborator access", () => {
     expect(read.statusCode).toBe(404);
   });
 });
+
+/**
+ * The riskiest surface of the feature: a bug here does not error, it
+ * silently hides a file from a vault or duplicates one into it. Shared
+ * rows ride the recipient's own cursor so one /api/sync call serves.
+ */
+describe("shared rows in sync", () => {
+  it("delivers a granted share through the recipient's own cursor, without the owner's wrapped key", async () => {
+    const content = utf8Encode("synced body");
+    const file = await uploadFile(owner, "synced.docx", content);
+    const { sealedKey } = await shareWith(recipient, file.id, file.fileKey, "editor");
+
+    const sync = await app.inject({ method: "GET", url: "/api/sync?since=0", headers: auth(recipient) });
+    expect(sync.statusCode).toBe(200);
+    const shared = (sync.json().shared as Array<Record<string, unknown>>).find(
+      (row) => row.id === file.id,
+    )!;
+    expect(shared).toBeDefined();
+    expect(shared.encryptedKey).toBeUndefined();
+    expect(shared.folderId).toBeNull();
+    expect(shared.ownerEmail).toBe(owner.email);
+    expect(shared.role).toBe("editor");
+    expect(shared.revoked).toBe(false);
+    expect(shared.sealedKey).toBe(sealedKey);
+    const key = openSealed(
+      shared.sealedKey as string,
+      recipient.keys.keyAttributes.publicKey,
+      recipient.keys.privateKey,
+    );
+    expect(key).toEqual(file.fileKey);
+  });
+
+  it("advances the member's cursor when the owner writes, so the change syncs", async () => {
+    const file = await uploadFile(owner, "advancing.docx", utf8Encode("v1"));
+    await shareWith(recipient, file.id, file.fileKey, "viewer");
+    const first = await app.inject({ method: "GET", url: "/api/sync?since=0", headers: auth(recipient) });
+    const cursor = first.json().seq as number;
+
+    const write = await app.inject({
+      method: "PUT",
+      url: `/api/files/${file.id}/data`,
+      headers: { ...auth(owner), "content-type": "application/octet-stream" },
+      payload: Buffer.from(encryptBytes(utf8Encode("v2"), file.fileKey)),
+    });
+    expect(write.statusCode).toBe(200);
+
+    const second = await app.inject({
+      method: "GET",
+      url: `/api/sync?since=${cursor}`,
+      headers: auth(recipient),
+    });
+    const rows = second.json().shared as Array<Record<string, unknown>>;
+    expect(rows.some((row) => row.id === file.id)).toBe(true);
+  });
+
+  it("tombstones on trash, returns on restore", async () => {
+    const file = await uploadFile(owner, "trashable.docx", utf8Encode("x"));
+    await shareWith(recipient, file.id, file.fileKey, "viewer");
+    const cursor = (
+      await app.inject({ method: "GET", url: "/api/sync?since=0", headers: auth(recipient) })
+    ).json().seq as number;
+
+    await app.inject({ method: "DELETE", url: `/api/files/${file.id}`, headers: auth(owner) });
+    const afterTrash = await app.inject({
+      method: "GET",
+      url: `/api/sync?since=${cursor}`,
+      headers: auth(recipient),
+    });
+    const trashedRow = (afterTrash.json().shared as Array<Record<string, unknown>>).find(
+      (row) => row.id === file.id,
+    )!;
+    expect(trashedRow).toBeDefined();
+    expect(trashedRow.revoked).toBe(true);
+
+    const cursor2 = afterTrash.json().seq as number;
+    await app.inject({ method: "POST", url: `/api/trash/${file.id}/restore`, headers: auth(owner) });
+    const afterRestore = await app.inject({
+      method: "GET",
+      url: `/api/sync?since=${cursor2}`,
+      headers: auth(recipient),
+    });
+    const restoredRow = (afterRestore.json().shared as Array<Record<string, unknown>>).find(
+      (row) => row.id === file.id,
+    )!;
+    expect(restoredRow).toBeDefined();
+    expect(restoredRow.revoked).toBe(false);
+  });
+
+  it("tombstones on revocation and on delete forever", async () => {
+    const file = await uploadFile(owner, "gone.docx", utf8Encode("x"));
+    await shareWith(recipient, file.id, file.fileKey, "viewer");
+    const cursor = (
+      await app.inject({ method: "GET", url: "/api/sync?since=0", headers: auth(recipient) })
+    ).json().seq as number;
+
+    const members = await app.inject({
+      method: "GET",
+      url: `/api/collab/files/${file.id}/collaborators`,
+      headers: auth(owner),
+    });
+    const uid = (members.json().collaborators as Array<{ userId: number }>)[0]!.userId;
+    await app.inject({
+      method: "DELETE",
+      url: `/api/collab/files/${file.id}/collaborators/${uid}`,
+      headers: auth(owner),
+    });
+    const afterRevoke = await app.inject({
+      method: "GET",
+      url: `/api/sync?since=${cursor}`,
+      headers: auth(recipient),
+    });
+    const revokedRow = (afterRevoke.json().shared as Array<Record<string, unknown>>).find(
+      (row) => row.id === file.id,
+    )!;
+    expect(revokedRow).toBeDefined();
+    expect(revokedRow.revoked).toBe(true);
+  });
+
+  it("never leaks shared rows into a stranger's sync", async () => {
+    const file = await uploadFile(owner, "leakproof.docx", utf8Encode("x"));
+    await shareWith(recipient, file.id, file.fileKey, "viewer");
+    const sync = await app.inject({ method: "GET", url: "/api/sync?since=0", headers: auth(stranger) });
+    const rows = (sync.json().shared ?? []) as Array<Record<string, unknown>>;
+    expect(rows.every((row) => row.id !== file.id)).toBe(true);
+  });
+});

@@ -284,4 +284,90 @@ describe.skipIf(!adminUrl)("postgres metadata backend", () => {
     expect(confirm.statusCode).toBe(200);
     expect(confirm.json().recoveryCodes).toHaveLength(10);
   });
+
+  it("shares a file account-to-account on postgres", async () => {
+    // The dialect-sensitive spots: the membership upsert (ON CONFLICT DO
+    // UPDATE), the three-way sync join, and per-member seq draws.
+    const partnerKeys = generateAccountKeys("a second postgres password");
+    const partnerRes = await app.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      payload: {
+        email: "pg-partner@example.com",
+        loginKey: partnerKeys.loginKey,
+        keyAttributes: partnerKeys.keyAttributes,
+      },
+    });
+    expect(partnerRes.statusCode).toBe(201);
+    const partnerToken = partnerRes.json().token as string;
+    const partnerAuth = () => ({ authorization: `Bearer ${partnerToken}` });
+
+    const fileKey = generateKey();
+    const content = utf8Encode("shared across accounts on postgres");
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/files",
+      headers: auth(),
+      payload: {
+        folderId: null,
+        encryptedKey: secretBoxSeal(fileKey, keys.masterKey),
+        encryptedMeta: encryptFileMetadata(
+          { name: "pg-shared.docx", mime: "application/octet-stream", size: content.length, mtime: Date.now() },
+          fileKey,
+        ),
+      },
+    });
+    const fileId = created.json().id as string;
+    await app.inject({
+      method: "PUT",
+      url: `/api/files/${fileId}/data`,
+      headers: { ...auth(), "content-type": "application/octet-stream" },
+      payload: Buffer.from(encryptBytes(content, fileKey)),
+    });
+
+    const minted = await app.inject({
+      method: "POST",
+      url: "/api/collab/invites",
+      headers: auth(),
+      payload: { fileId, role: "editor" },
+    });
+    expect(minted.statusCode).toBe(201);
+    const inviteToken = minted.json().token as string;
+    const claimed = await app.inject({
+      method: "POST",
+      url: `/api/collab/invites/${inviteToken}/claim`,
+      headers: partnerAuth(),
+    });
+    expect(claimed.statusCode).toBe(200);
+    const invites = await app.inject({ method: "GET", url: "/api/collab/invites", headers: auth() });
+    const entry = (invites.json().invites as Array<Record<string, unknown>>).find(
+      (i) => i.token === inviteToken,
+    )!;
+    const { sealToPublicKey, openSealed } = await import("@engramer/crypto");
+    const sealedKey = sealToPublicKey(fileKey, entry.claimantPublicKey as string);
+    const granted = await app.inject({
+      method: "POST",
+      url: `/api/collab/invites/${inviteToken}/grant`,
+      headers: auth(),
+      payload: { sealedKey },
+    });
+    expect(granted.statusCode).toBe(201);
+
+    const download = await app.inject({
+      method: "GET",
+      url: `/api/files/${fileId}/data`,
+      headers: partnerAuth(),
+    });
+    expect(download.statusCode).toBe(200);
+    const key = openSealed(sealedKey, partnerKeys.keyAttributes.publicKey, partnerKeys.privateKey);
+    expect(decryptBytes(new Uint8Array(download.rawPayload), key)).toEqual(content);
+
+    const sync = await app.inject({ method: "GET", url: "/api/sync?since=0", headers: partnerAuth() });
+    const sharedRow = (sync.json().shared as Array<Record<string, unknown>>).find(
+      (row) => row.id === fileId,
+    )!;
+    expect(sharedRow).toBeDefined();
+    expect(sharedRow.role).toBe("editor");
+    expect(sharedRow.revoked).toBe(false);
+  });
 });
