@@ -296,6 +296,9 @@ export function registerCollabRoutes(app: FastifyInstance): void {
     }
     // The tombstone still has to reach them, so the seq bump comes after.
     await touchMember(fileId, memberUid, Date.now());
+    // A socket opened before this moment would otherwise keep receiving
+    // every change until it happened to disconnect.
+    app.hub.evict(fileId, memberUid);
     return reply.code(204).send();
   });
 

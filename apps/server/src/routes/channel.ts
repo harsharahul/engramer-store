@@ -85,13 +85,18 @@ export function registerChannelRoutes(app: FastifyInstance): void {
       // editor's engine and then persisted by whoever saved next.
       let mayWrite = false;
 
+      let connUserId = 0;
       const conn: Connection = {
         id: connId,
+        get userId() {
+          return connUserId;
+        },
         send: (frame) => {
           if (socket.readyState === socket.OPEN) {
             socket.send(JSON.stringify(frame));
           }
         },
+        close: (code) => socket.close(code),
       };
 
       const refuse = (code: number) => {
@@ -128,6 +133,7 @@ export function registerChannelRoutes(app: FastifyInstance): void {
           return refuse(4403);
         }
         mayWrite = role === "owner" || role === "editor";
+        connUserId = claimed.user_id;
         const now = Date.now();
         // A sticky per-channel index, never reused: the engine namespaces
         // object ids by participant index, and a recycled index would let

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { toB64, protectShareKey } from "@engramer/crypto";
 import { api, type CollabInviteInfo, type CollaboratorInfo, type ShareInfo, type ShareOptions } from "../api";
 import { useStore, type FileEntry } from "../store";
-import { inviteLink, sealFileKeyFor } from "../collab";
+import { inviteLink } from "../collab";
 import { formatDate } from "../format";
 import { CopyGlyph, KeyGlyph, PeopleGlyph, TrashGlyph, XGlyph } from "./Icon";
 
@@ -52,6 +52,7 @@ export function ShareDialog(props: {
   const [links, setLinks] = useState<ShareInfo[] | null>(null);
   const [people, setPeople] = useState<CollaboratorInfo[]>([]);
   const [invites, setInvites] = useState<CollabInviteInfo[]>([]);
+  const [claims, setClaims] = useState<CollabInviteInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [expiry, setExpiry] = useState(0);
   const [limit, setLimit] = useState(0);
@@ -68,19 +69,9 @@ export function ShareDialog(props: {
     ]);
     setPeople(collaborators);
     const mine = allInvites.filter((i) => i.fileId === file.id && !i.revoked && !i.granted);
-    // A claimed invite can complete right here: the key is in hand, so the
-    // waiting recipient gets it now rather than on the next sync.
-    for (const invite of mine) {
-      if (invite.claimed && invite.claimantPublicKey) {
-        try {
-          await api.grantCollabInvite(invite.token, sealFileKeyFor(file.key, invite.claimantPublicKey));
-          const refreshed = await api.listCollaborators(file.id);
-          setPeople(refreshed.collaborators);
-        } catch {
-          // The background sync retries.
-        }
-      }
-    }
+    // Claimed invitations wait here for a decision; nothing is released by
+    // being asked, because the claimant is whoever opened the link.
+    setClaims(mine.filter((i) => i.claimed && i.claimantEmail));
     setInvites(mine.filter((i) => !i.claimed));
   };
 
@@ -162,6 +153,16 @@ export function ShareDialog(props: {
     }
   };
 
+  const approve = async (token: string) => {
+    try {
+      await useStore.getState().approveClaim(token);
+      await load();
+      props.onToast("Key released. They can open the document now.");
+    } catch {
+      props.onToast("Could not release the key. The invitation may have been revoked.");
+    }
+  };
+
   const revokeInvite = async (token: string) => {
     await api.revokeCollabInvite(token);
     await load();
@@ -225,6 +226,37 @@ export function ShareDialog(props: {
               </div>
             ))}
           </div>
+        )}
+        {claims.length > 0 && (
+          <div className="share-list">
+            {claims.map((claim) => (
+              <div key={claim.token} className="share-row">
+                <div className="share-row-main">
+                  <span className="share-row-token">{claim.claimantEmail}</span>
+                  <span className="badge">
+                    claimed · {claim.role === "editor" ? "edit" : "view"}
+                  </span>
+                  <span className="share-row-meta">waiting for you to release the key</span>
+                </div>
+                <button className="btn" onClick={() => void approve(claim.token)}>
+                  Release the key
+                </button>
+                <button
+                  className="icon-btn danger"
+                  title="Refuse and revoke this invitation"
+                  onClick={() => void revokeInvite(claim.token)}
+                >
+                  <TrashGlyph size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {claims.length > 0 && (
+          <p className="modal-sub">
+            Check the address before releasing: whoever opened the invitation link claimed it,
+            and releasing the key gives that account the document.
+          </p>
         )}
         {invites.length > 0 && (
           <div className="share-list">

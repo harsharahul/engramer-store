@@ -12,7 +12,10 @@
 export interface Connection {
   /** Per-connection random id; doubles as the sender id clients see. */
   id: string;
+  /** Whose socket this is, so losing access can close it immediately. */
+  userId: number;
   send(frame: Record<string, unknown>): void;
+  close(code: number): void;
 }
 
 export interface ChannelHub {
@@ -22,6 +25,8 @@ export interface ChannelHub {
   broadcast(fileId: string, frame: Record<string, unknown>, exceptConnId?: string): void;
   /** Connection ids currently held by THIS process for the channel. */
   local(fileId: string): string[];
+  /** Closes this account's sockets on a document; used when access ends. */
+  evict(fileId: string, userId: number): void;
 }
 
 export class InProcessHub implements ChannelHub {
@@ -57,5 +62,13 @@ export class InProcessHub implements ChannelHub {
 
   local(fileId: string): string[] {
     return [...(this.channels.get(fileId)?.keys() ?? [])];
+  }
+
+  evict(fileId: string, userId: number): void {
+    for (const conn of [...(this.channels.get(fileId)?.values() ?? [])]) {
+      if (conn.userId === userId) {
+        conn.close(4403);
+      }
+    }
   }
 }
