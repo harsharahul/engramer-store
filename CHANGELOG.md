@@ -3,6 +3,46 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.39.0] - 2026-08-07
+
+### Added
+- **Editing together, live.** Two people can now edit the same Word
+  document or spreadsheet at the same time and watch each other's
+  changes appear, with a marker showing who else is here. Every change
+  travels sealed under the file's key: the server orders and relays the
+  bytes without being able to read one of them. If the channel is
+  unavailable the document stays fully editable one person at a time.
+  See [docs/collaboration.md](docs/collaboration.md).
+- **Invitations wait for you.** A claimed invitation now names the
+  account that claimed it and holds the key until you release it, so a
+  link that reached the wrong person hands over nothing on its own.
+
+### Fixed
+- **A collaborator's save reported failure after succeeding.** The
+  document was stored correctly and the editor said the save had failed.
+- **A share could stay invisible to the person it was shared with.** A
+  grant that arrived while the recipient was syncing was skipped, and
+  Shared with me stayed empty until a manual resync.
+- **Version history is the owner's again.** A collaborator could read
+  every retained earlier version of a file shared with them, including
+  content removed before they were invited.
+
+### Security
+- A view-only collaborator could write to a shared document through the
+  live channel, and could destroy other people's unsaved work by
+  claiming a save that never happened. Both are closed: the channel now
+  distinguishes viewers from editors for its whole life, and only a save
+  the server itself committed can discard history.
+- Members could act as one another on the channel: a change could claim
+  someone else's identity, taking their locks or forcing others to
+  reload. Identity now comes from the connection the server saw.
+- Revoking access disconnects that person immediately instead of when
+  they next happen to disconnect.
+- On a deployment served over plain HTTP, the app's own security headers
+  blocked the collaboration channel outright.
+- The invitation throttle counted attempts in a way that could never
+  trigger its own backoff.
+
 ## [0.38.0] - 2026-08-06
 
 ### Security
