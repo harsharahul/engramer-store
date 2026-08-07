@@ -422,3 +422,28 @@ describe("a greeting that beats the join", () => {
     a.close();
   });
 });
+
+describe("joining tells the room", () => {
+  it("delivers a members frame to those already here when someone joins", async () => {
+    const first = await connect(owner);
+    await first.next((f) => f.t === "caught-up");
+
+    const second = await connect(member);
+    await second.next((f) => f.t === "welcome");
+
+    // The one already in the room learns a second person is present. This
+    // is what the editor turns into "someone joined" for the engine, and
+    // without it the first editor stays in single-user mode forever. The
+    // predicate names the frame meant here: every client also sees a
+    // members frame for its own arrival.
+    const members = await first.next(
+      (f) => f.t === "members" && (f.members as unknown[]).length === 2,
+    );
+    const list = members.members as Array<{ connId: string; index: number }>;
+    expect(list.length).toBe(2);
+    expect(new Set(list.map((m) => m.index)).size).toBe(2);
+
+    first.close();
+    second.close();
+  });
+});

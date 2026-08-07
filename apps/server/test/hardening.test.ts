@@ -197,3 +197,54 @@ describe("trusted proxy attribution", () => {
     expect(trustFor(proxies)).toBe(proxies);
   });
 });
+
+/**
+ * A page served over plain HTTP must not be told to upgrade its own
+ * requests: there is nothing to upgrade to, and the browser applies the
+ * rule to WebSockets too, turning ws:// into wss:// against a server with
+ * no TLS. That silently killed live collaboration for every deployment
+ * without HTTPS. Behind a TLS-terminating proxy the directive stays.
+ */
+describe("insecure-request upgrading follows the actual scheme", () => {
+  let app: FastifyInstance;
+  let dataDir: string;
+
+  const priorProxies = process.env.ENGRAMER_TRUSTED_PROXIES;
+
+  beforeAll(async () => {
+    dataDir = mkdtempSync(join(tmpdir(), "engramer-scheme-test-"));
+    // A TLS-terminating proxy is the shape this has to work behind.
+    process.env.ENGRAMER_TRUSTED_PROXIES = "127.0.0.1";
+    app = await buildApp({ dataDir, webDistDir: null });
+  });
+
+  afterAll(async () => {
+    await app.close();
+    rmSync(dataDir, { recursive: true, force: true });
+    if (priorProxies === undefined) {
+      delete process.env.ENGRAMER_TRUSTED_PROXIES;
+    } else {
+      process.env.ENGRAMER_TRUSTED_PROXIES = priorProxies;
+    }
+  });
+
+  it("omits the upgrade directive on a plain HTTP request", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/health" });
+    const csp = response.headers["content-security-policy"] as string;
+    expect(csp).not.toContain("upgrade-insecure-requests");
+    // The channel still has to be reachable on the scheme actually in use.
+    expect(csp).toContain("ws://");
+  });
+
+  it("keeps the upgrade directive when a trusted proxy reports https", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/health",
+      headers: { "x-forwarded-proto": "https" },
+      remoteAddress: "127.0.0.1",
+    });
+    const csp = response.headers["content-security-policy"] as string;
+    expect(csp).toContain("upgrade-insecure-requests");
+    expect(csp).toContain("wss://");
+  });
+});
