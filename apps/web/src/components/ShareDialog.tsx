@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { toB64, protectShareKey } from "@engramer/crypto";
-import { api, type ShareInfo, type ShareOptions } from "../api";
+import { api, type CollabInviteInfo, type CollaboratorInfo, type ShareInfo, type ShareOptions } from "../api";
 import type { FileEntry } from "../store";
+import { inviteLink, sealFileKeyFor } from "../collab";
 import { formatDate } from "../format";
-import { CopyGlyph, KeyGlyph, TrashGlyph, XGlyph } from "./Icon";
+import { CopyGlyph, KeyGlyph, PeopleGlyph, TrashGlyph, XGlyph } from "./Icon";
 
 const EXPIRY_CHOICES = [
   { label: "Never expires", ms: null },
@@ -49,15 +50,38 @@ export function ShareDialog(props: {
 }) {
   const { file } = props;
   const [links, setLinks] = useState<ShareInfo[] | null>(null);
+  const [people, setPeople] = useState<CollaboratorInfo[]>([]);
+  const [invites, setInvites] = useState<CollabInviteInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [expiry, setExpiry] = useState(0);
   const [limit, setLimit] = useState(0);
   const [password, setPassword] = useState("");
   const [creating, setCreating] = useState(false);
+  const [inviting, setInviting] = useState(false);
 
   const load = async () => {
     const { shares } = await api.listShares();
     setLinks(shares.filter((s) => s.fileId === file.id));
+    const [{ collaborators }, { invites: allInvites }] = await Promise.all([
+      api.listCollaborators(file.id),
+      api.listCollabInvites(),
+    ]);
+    setPeople(collaborators);
+    const mine = allInvites.filter((i) => i.fileId === file.id && !i.revoked && !i.granted);
+    // A claimed invite can complete right here: the key is in hand, so the
+    // waiting recipient gets it now rather than on the next sync.
+    for (const invite of mine) {
+      if (invite.claimed && invite.claimantPublicKey) {
+        try {
+          await api.grantCollabInvite(invite.token, sealFileKeyFor(file.key, invite.claimantPublicKey));
+          const refreshed = await api.listCollaborators(file.id);
+          setPeople(refreshed.collaborators);
+        } catch {
+          // The background sync retries.
+        }
+      }
+    }
+    setInvites(mine.filter((i) => !i.claimed));
   };
 
   useEffect(() => {
@@ -121,6 +145,35 @@ export function ShareDialog(props: {
     props.onToast("Link revoked.");
   };
 
+  const invitePerson = async (role: "viewer" | "editor") => {
+    setInviting(true);
+    setError(null);
+    try {
+      const { token } = await api.createCollabInvite(file.id, role);
+      await navigator.clipboard.writeText(inviteLink(token));
+      await load();
+      props.onToast(
+        "Invitation copied. Anyone with it can claim it once; send it the way you would send a password.",
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "could not create the invitation");
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const revokeInvite = async (token: string) => {
+    await api.revokeCollabInvite(token);
+    await load();
+    props.onToast("Invitation revoked.");
+  };
+
+  const removePerson = async (userId: number) => {
+    await api.removeCollaborator(file.id, userId);
+    await load();
+    props.onToast("Access removed. They keep what they already read; the file stops updating for them.");
+  };
+
   return (
     <div className="overlay" onClick={props.onClose}>
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
@@ -134,6 +187,79 @@ export function ShareDialog(props: {
           Links serve ciphertext only. Open links keep the key in the fragment after “#”, which
           browsers never send; password links wrap the key under the password on your device.
         </p>
+
+        <div className="sidebar-label">
+          <PeopleGlyph size={12} /> People
+        </div>
+        {people.length > 0 && (
+          <div className="share-list">
+            {people.map((person) => (
+              <div key={person.userId} className="share-row">
+                <div className="share-row-main">
+                  <span className="share-row-token">{person.email}</span>
+                  <span className="badge">{person.role === "editor" ? "can edit" : "can view"}</span>
+                </div>
+                <button
+                  className="icon-btn danger"
+                  title="Remove access"
+                  onClick={() => void removePerson(person.userId)}
+                >
+                  <TrashGlyph size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {invites.length > 0 && (
+          <div className="share-list">
+            {invites.map((invite) => (
+              <div key={invite.token} className="share-row">
+                <div className="share-row-main">
+                  <span className="share-row-token mono">/c/{invite.token.slice(0, 8)}…</span>
+                  <span className="badge">
+                    invitation · {invite.role === "editor" ? "edit" : "view"}
+                  </span>
+                  <span className="share-row-meta">waiting to be claimed</span>
+                </div>
+                <button
+                  className="icon-btn"
+                  title="Copy invitation"
+                  onClick={() =>
+                    void navigator.clipboard
+                      .writeText(inviteLink(invite.token))
+                      .then(() => props.onToast("Invitation copied."))
+                  }
+                >
+                  <CopyGlyph size={14} />
+                </button>
+                <button
+                  className="icon-btn danger"
+                  title="Revoke invitation"
+                  onClick={() => void revokeInvite(invite.token)}
+                >
+                  <TrashGlyph size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="share-option-row">
+          <button className="btn" disabled={inviting} onClick={() => void invitePerson("editor")}>
+            Invite to edit
+          </button>
+          <button className="btn" disabled={inviting} onClick={() => void invitePerson("viewer")}>
+            Invite to view
+          </button>
+        </div>
+        <p className="modal-sub">
+          An invitation carries no key. The person claims it signed in, you release the key to
+          exactly that account, and removing them later stops future access without recalling
+          what they already read.
+        </p>
+
+        <div className="sidebar-label">
+          <KeyGlyph size={12} /> Links
+        </div>
 
         {links && links.length > 0 && (
           <div className="share-list">

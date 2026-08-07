@@ -141,13 +141,15 @@ export function DetailsPanel(props: {
 
       <div className="details-name" title={file.name}>
         {file.name}
-        <button
-          className={`icon-btn star-inline${file.favorite ? " on" : ""}`}
-          title={file.favorite ? "Unfavorite" : "Favorite"}
-          onClick={() => void toggleFavorite(file.id)}
-        >
-          <StarGlyph filled={file.favorite} size={15} />
-        </button>
+        {(!file.shared || file.role === "editor") && (
+          <button
+            className={`icon-btn star-inline${file.favorite ? " on" : ""}`}
+            title={file.favorite ? "Unfavorite" : "Favorite"}
+            onClick={() => void toggleFavorite(file.id)}
+          >
+            <StarGlyph filled={file.favorite} size={15} />
+          </button>
+        )}
       </div>
 
       <div className="details-actions">
@@ -162,17 +164,30 @@ export function DetailsPanel(props: {
         <button className="icon-btn" title="Download" onClick={() => props.onDownload(file)}>
           <DownloadGlyph />
         </button>
-        <button className="icon-btn" title="Share" onClick={() => props.onShare(file.id)}>
-          <ShareGlyph />
-        </button>
-        <button className="icon-btn" title="Move to trash" onClick={() => props.onTrash(file.id)}>
-          <TrashGlyph />
-        </button>
+        {!file.shared && (
+          <button className="icon-btn" title="Share" onClick={() => props.onShare(file.id)}>
+            <ShareGlyph />
+          </button>
+        )}
+        {!file.shared && (
+          <button className="icon-btn" title="Move to trash" onClick={() => props.onTrash(file.id)}>
+            <TrashGlyph />
+          </button>
+        )}
       </div>
 
       <dl className="details-meta">
+        {file.shared && (
+          <>
+            <dt>Shared by</dt>
+            <dd>
+              {file.ownerEmail ?? "another account"}
+              {` · you can ${file.role === "editor" ? "edit" : "view"}`}
+            </dd>
+          </>
+        )}
         <dt>Where</dt>
-        <dd>{folderName}</dd>
+        <dd>{file.shared ? "Shared with me" : folderName}</dd>
         <dt>Category</dt>
         <dd>{file.category ?? "Other"}</dd>
         <dt>Type</dt>
@@ -257,35 +272,39 @@ export function DetailsPanel(props: {
               >
                 <DownloadGlyph size={13} />
               </button>
-              <button
-                className="icon-btn"
-                title="Restore this version"
-                disabled={restoring}
-                onClick={() => {
-                  if (
-                    !window.confirm(
-                      "Restore this version? The current content stays in history, so this can be undone.",
-                    )
-                  ) {
-                    return;
-                  }
-                  setRestoring(true);
-                  void restoreVersion(file.id, version.generation)
-                    .then(() => props.onToast("Version restored. The replaced content is in history."))
-                    .catch(() => props.onToast("Could not restore this version."))
-                    .finally(() => setRestoring(false));
-                }}
-              >
-                <RestoreGlyph size={13} />
-              </button>
+              {!file.shared && (
+                <button
+                  className="icon-btn"
+                  title="Restore this version"
+                  disabled={restoring}
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        "Restore this version? The current content stays in history, so this can be undone.",
+                      )
+                    ) {
+                      return;
+                    }
+                    setRestoring(true);
+                    void restoreVersion(file.id, version.generation)
+                      .then(() => props.onToast("Version restored. The replaced content is in history."))
+                      .catch(() => props.onToast("Could not restore this version."))
+                      .finally(() => setRestoring(false));
+                  }}
+                >
+                  <RestoreGlyph size={13} />
+                </button>
+              )}
             </div>
           ))}
         </div>
       )}
 
-      <button className="btn btn-ghost details-rename" onClick={() => props.onRename(file.id)}>
-        <PencilGlyph size={13} /> Rename
-      </button>
+      {(!file.shared || file.role === "editor") && (
+        <button className="btn btn-ghost details-rename" onClick={() => props.onRename(file.id)}>
+          <PencilGlyph size={13} /> Rename
+        </button>
+      )}
     </aside>
   );
 }

@@ -299,6 +299,15 @@ export const LinkGlyph = ({ size = 16 }: IconProps) => (
   </Svg>
 );
 
+export const PeopleGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <circle cx="9" cy="8.5" r="3.2" />
+    <path d="M3.5 19.5v-1a5.5 5.5 0 0 1 11 0v1" />
+    <path d="M15.5 5.6a3.2 3.2 0 0 1 0 5.8" />
+    <path d="M17.5 13.4a5.5 5.5 0 0 1 3 4.9v1.2" />
+  </Svg>
+);
+
 export const InboxGlyph = ({ size = 16 }: IconProps) => (
   <Svg size={size}>
     <path d="M3.5 13.5 6 6a1.5 1.5 0 0 1 1.4-1h9.2A1.5 1.5 0 0 1 18 6l2.5 7.5" />
