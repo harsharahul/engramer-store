@@ -64,11 +64,22 @@ export function newChannelOrder(fileId: string): ChannelOrder {
  * went missing, the document state is unknowable from the stream and only
  * a reload from the snapshot recovers it.
  */
-export function acceptFrame(order: ChannelOrder, frame: ChannelFrame): "apply" | "drop" | "resync" {
+export function acceptFrame(
+  order: ChannelOrder,
+  frame: ChannelFrame,
+  attestedSender?: string,
+): "apply" | "drop" | "resync" {
   if (order.broken) {
     return "resync";
   }
   if (frame.ch !== order.fileId) {
+    return "drop";
+  }
+  // Every member holds the same file key, so the sender a frame claims
+  // proves nothing; only the relay knows which connection it came from.
+  // Without this binding one member can wear another's identity: steal
+  // their locks, or mint objects under their participant index.
+  if (attestedSender !== undefined && frame.s !== attestedSender) {
     return "drop";
   }
   const last = order.lastFrom.get(frame.s) ?? 0;
@@ -81,4 +92,19 @@ export function acceptFrame(order: ChannelOrder, frame: ChannelFrame): "apply" |
   }
   order.lastFrom.set(frame.s, frame.n);
   return "apply";
+}
+
+/**
+ * Ephemerals skip the ordered log by design — a lost cursor costs
+ * nothing — so they get the strictest check instead of the weakest: this
+ * document, this sender, and cursors only. Anything else arriving by that
+ * route would be an unordered, unreplayable, unauthenticated write to the
+ * document, which is precisely what the ordered path exists to prevent.
+ */
+export function acceptEphemeral(
+  fileId: string,
+  frame: ChannelFrame,
+  attestedSender: string,
+): boolean {
+  return frame.ch === fileId && frame.s === attestedSender && frame.k === "cursor";
 }

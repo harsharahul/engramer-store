@@ -8,6 +8,7 @@ import { EditorSession, editorFrameUrl } from "../office/session";
 import { CollabBridge } from "../office/collab";
 import { ChannelClient, type ChannelWelcome } from "../office/channelclient";
 import {
+  acceptEphemeral,
   acceptFrame,
   decryptFrame,
   encryptFrame,
@@ -130,6 +131,9 @@ export function OfficeEditor(props: {
     let order: ChannelOrder = newChannelOrder(opened.id);
     let connId = "";
     let outCounter = 0;
+    // What the relay says each connection's participant index is; the only
+    // trustworthy source, since frame contents are member-forgeable.
+    const indexByConn = new Map<string, number>();
     // Log frames arriving before the engine is open wait here; the spike
     // proved catch-up must replay AFTER the document is ready.
     let tail: Array<ReturnType<typeof decryptFrame>> = [];
@@ -248,10 +252,22 @@ export function OfficeEditor(props: {
               },
               onLog: (seq, sender, payload) => {
                 void seq;
-                void sender;
                 try {
                   const decoded = decryptFrame(payload, opened.key);
-                  const verdict = acceptFrame(order, decoded);
+                  const verdict = acceptFrame(order, decoded, sender);
+                  // The participant index rides inside the frame too, and
+                  // the engine namespaces objects and locks by it, so it
+                  // must belong to the connection that actually sent this.
+                  const claimedIndex = (decoded.d as { idx?: number } | undefined)?.idx;
+                  const realIndex = indexByConn.get(sender);
+                  if (
+                    verdict === "apply" &&
+                    claimedIndex !== undefined &&
+                    realIndex !== undefined &&
+                    claimedIndex !== realIndex
+                  ) {
+                    return;
+                  }
                   if (verdict === "resync") {
                     resync();
                     return;
@@ -275,9 +291,16 @@ export function OfficeEditor(props: {
               },
               onCaughtUp: () => {},
               onEph: (sender, payload) => {
-                void sender;
                 try {
                   const decoded = decryptFrame(payload, opened.key);
+                  if (!acceptEphemeral(opened.id, decoded, sender)) {
+                    return;
+                  }
+                  const claimedIndex = (decoded.d as { idx?: number } | undefined)?.idx;
+                  const realIndex = indexByConn.get(sender);
+                  if (claimedIndex !== undefined && realIndex !== undefined && claimedIndex !== realIndex) {
+                    return;
+                  }
                   const b = bridge;
                   const s = sessionRef.current;
                   if (b && s && engineReady) {
@@ -365,6 +388,10 @@ export function OfficeEditor(props: {
     let latestMembers: Array<{ connId: string; index: number }> = [];
     const rememberMembers = (members: Array<{ connId: string; index: number }>) => {
       latestMembers = members;
+      indexByConn.clear();
+      for (const m of members) {
+        indexByConn.set(m.connId, m.index);
+      }
     };
     membersHook.current = rememberMembers;
     const autoSnapshot = window.setInterval(() => {
