@@ -643,7 +643,7 @@ export function uploadBlob(
   payload: Uint8Array,
   onProgress?: (fraction: number) => void,
   signal?: AbortSignal,
-  opts?: { collabSnapshot?: boolean },
+  opts?: { collabSnapshot?: boolean; collabUpTo?: number },
 ): Promise<number | null> {
   return putBytes(`/api/files/${fileId}/${kind}`, payload, {
     auth: true,
@@ -652,6 +652,13 @@ export function uploadBlob(
     errorFor: (status) => (status === 413 ? "storage quota exceeded" : undefined),
     // Marks this whole-document write as a claimed snapshot of the live
     // channel, which is what lets it through the tail-base guard.
-    ...(opts?.collabSnapshot ? { headers: { "x-collab-snapshot": "1" } } : {}),
+    ...(opts?.collabSnapshot
+      ? {
+          headers: {
+            "x-collab-snapshot": "1",
+            "x-collab-upto": String(opts.collabUpTo ?? 0),
+          },
+        }
+      : {}),
   });
 }

@@ -322,6 +322,16 @@ export function registerCollabRoutes(app: FastifyInstance): void {
     }
     const now = Date.now();
     await app.db.tx(async (t) => {
+      // Every frame still in the channel is sealed under the key being
+      // retired. Left there, the next client to open the document meets a
+      // frame it cannot decrypt, reloads, meets it again, and never gets
+      // in — the document would be permanently unopenable for everyone.
+      await t.run("DELETE FROM channel_messages WHERE file_id = ?", fileId);
+      await t.run(
+        "UPDATE channel_state SET last_seq = 0, snapshot_seq = 0, bytes = 0, updated_at = ? WHERE file_id = ?",
+        now,
+        fileId,
+      );
       for (const entry of body.keys) {
         await t.run(
           `UPDATE file_collaborators SET sealed_key = ?, key_epoch = ?, update_seq = ?, updated_at = ?

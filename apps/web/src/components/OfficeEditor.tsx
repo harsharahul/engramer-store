@@ -47,7 +47,7 @@ const STAGE_LABEL: Record<Stage, string> = {
 export function OfficeEditor(props: {
   file: FileEntry;
   fileType: "docx" | "xlsx";
-  onSave: (bytes: Uint8Array, opts?: { snapshot?: boolean }) => Promise<void>;
+  onSave: (bytes: Uint8Array, opts?: { snapshot?: boolean; upTo?: number }) => Promise<void>;
   /** A conflicting save kept as a new file of the editor's own. */
   onSaveCopy: (bytes: Uint8Array) => Promise<void>;
   onClose: () => void;
@@ -460,14 +460,14 @@ export function OfficeEditor(props: {
         throw new Error("the editor returned nothing to save");
       }
       out = await converter.exportDocument(`document.${fileType}`, bin);
-      await props.onSave(out, { snapshot: live });
+      await props.onSave(out, { snapshot: live, upTo });
       setDirty(false);
       dirtyRef.current = false;
       setSavedAt(Date.now());
       openedAtRef.current = useStore.getState().files.get(fileId)?.updatedAt ?? Date.now();
       if (live && upTo > 0) {
-        const generation = useStore.getState().files.get(fileId)?.generation ?? 0;
-        channelRef.current?.snap(generation, upTo);
+        // The server trims the channel itself, as part of committing this
+        // save; nothing here may ask for it.
         pendingFramesRef.current = 0;
       }
       diag("office", `saved ${file.name} (${out.length} bytes)`);

@@ -385,7 +385,71 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       return { size: written };
     }
 
-    return commitData(reply, ownerUid, id, file, nextGen, targetKey, written, hasher.digest("hex"));
+    const committed = await commitData(
+      reply,
+      ownerUid,
+      id,
+      file,
+      nextGen,
+      targetKey,
+      written,
+      hasher.digest("hex"),
+    );
+    // A snapshot is the only thing that may trim the channel, and only
+    // after its bytes are durably the current generation. The client says
+    // how far its export reached; the server decides whether that is a
+    // real position and whether a save actually happened, because a client
+    // that could name the position alone could discard other people's
+    // unsynced work without saving anything at all.
+    if (
+      typeof committed === "object" &&
+      committed !== null &&
+      "size" in committed &&
+      request.headers["x-collab-snapshot"] !== undefined
+    ) {
+      await truncateChannel(id, Number(request.headers["x-collab-upto"] ?? 0), nextGen);
+    }
+    return committed;
+  };
+
+  /** Trims a document channel up to a position a committed save covered. */
+  const truncateChannel = async (fileId: string, upTo: number, generation: number) => {
+    if (!Number.isInteger(upTo) || upTo <= 0) {
+      return;
+    }
+    const trimmed = await app.db.tx(async (t) => {
+      const state = await t.get<{ last_seq: number }>(
+        "SELECT last_seq FROM channel_state WHERE file_id = ?",
+        fileId,
+      );
+      // Never past what the channel has actually issued.
+      const bound = Math.min(upTo, Number(state?.last_seq ?? 0));
+      if (bound <= 0) {
+        return 0;
+      }
+      await t.run("DELETE FROM channel_messages WHERE file_id = ? AND seq <= ?", fileId, bound);
+      const remaining = await t.get<{ total: number | null }>(
+        "SELECT SUM(bytes) AS total FROM channel_messages WHERE file_id = ?",
+        fileId,
+      );
+      await t.run(
+        `UPDATE channel_state SET snapshot_generation = ?, snapshot_seq = ?, bytes = ?, updated_at = ?
+         WHERE file_id = ?`,
+        generation,
+        bound,
+        Number(remaining?.total ?? 0),
+        Date.now(),
+        fileId,
+      );
+      return bound;
+    });
+    if (trimmed > 0) {
+      app.hub.broadcast(fileId, {
+        t: "truncated",
+        snapshotGeneration: generation,
+        snapshotSeq: trimmed,
+      });
+    }
   };
 
   /**

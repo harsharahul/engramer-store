@@ -1988,6 +1988,7 @@ export function Vault() {
               ).catch(() => undefined);
               await store.saveFileBinary(editorFile.id, bytes, text, {
                 collabSnapshot: opts?.snapshot,
+                collabUpTo: opts?.upTo,
               });
             }}
             onSaveCopy={async (bytes) => {
