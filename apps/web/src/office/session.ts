@@ -336,7 +336,14 @@ export class EditorSession {
       lang: "en",
       mode: "edit",
       canCoAuthoring: true,
-      user: { id: "0", firstname: "you", name: "you" },
+      // In a collaborative session the id is the channel's member index:
+      // the engine namespaces the object ids this participant creates by
+      // it, so it must be unique in the room and fixed before init.
+      user: {
+        id: String(this.collab?.index ?? 0),
+        firstname: "you",
+        name: "you",
+      },
       customization: {
         about: true,
         feedback: false,

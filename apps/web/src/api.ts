@@ -263,6 +263,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ epoch, keys }),
     }),
+  collabTicket: (fileId: string) =>
+    request<{ ticket: string; expiresIn: number }>(`/api/collab/${fileId}/ticket`, {
+      method: "POST",
+      body: "{}",
+    }),
 
   createFolder: (parentId: string | null, encryptedKey: SecretBox, encryptedMeta: SecretBox) =>
     request<FolderDto>("/api/folders", {

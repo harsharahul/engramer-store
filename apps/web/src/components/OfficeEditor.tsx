@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore, type FileEntry } from "../store";
+import { api } from "../api";
 import { downloadAndDecrypt } from "../transfer";
 import { SaveConflictError, describeConflict } from "../conflict";
 import { Converter } from "../office/x2t";
 import { EditorSession, editorFrameUrl } from "../office/session";
+import { CollabBridge } from "../office/collab";
+import { ChannelClient, type ChannelWelcome } from "../office/channelclient";
+import {
+  acceptFrame,
+  decryptFrame,
+  encryptFrame,
+  newChannelOrder,
+  type ChannelOrder,
+} from "../office/channel";
 import { diag } from "../diag";
-import { XGlyph } from "./Icon";
+import { PeopleGlyph, XGlyph } from "./Icon";
 
 /**
  * Word and Excel editing.
@@ -71,6 +81,10 @@ export function OfficeEditor(props: {
   const openedAtRef = useRef(file.updatedAt);
   // Forces the open effect to run again for "Reload theirs".
   const [reloadNonce, setReloadNonce] = useState(0);
+  // Live collaboration: off (not a shared doc), connecting, live, or alone
+  // (shared but the relay is unreachable; turn-based editing still works).
+  const [collab, setCollab] = useState<"off" | "connecting" | "live" | "alone">("off");
+  const [peers, setPeers] = useState(1);
 
   // The frame's address depends only on the kind of document, so the editor
   // begins loading its several megabytes immediately, while this file is
@@ -100,36 +114,201 @@ export function OfficeEditor(props: {
       }
     }, 150_000);
 
-    const session = new EditorSession(frame, fileType, opened.name, {
-      onLoading: () => diag("office", "the editor is up and waiting for its document"),
-      onReady: () => {
-        window.clearTimeout(startupDeadline);
-        setStage("ready");
-      },
-      onChanged: (modified) => {
-        // Only ever set. The editor clears its own modified flag as soon as
-        // the stand-in collaboration server acknowledges a change, about a
-        // second after typing; treating that as "saved" would grey out Save
-        // and let the document close with the edit only in the editor.
-        if (modified) {
-          dirtyRef.current = true;
-          setDirty(true);
-        }
-      },
-      onShortcut: (name) => {
-        if (name === "save") {
-          saveRef.current();
-        }
-      },
-      onFailed: (message) => {
-        setStage("failed");
-        setError(message);
-      },
-    });
-    sessionRef.current = session;
+    let channel: ChannelClient | null = null;
+    let bridge: CollabBridge | undefined;
+    let order: ChannelOrder = newChannelOrder(opened.id);
+    let connId = "";
+    let outCounter = 0;
+    // Log frames arriving before the engine is open wait here; the spike
+    // proved catch-up must replay AFTER the document is ready.
+    let tail: Array<ReturnType<typeof decryptFrame>> = [];
+    let engineReady = false;
+
+    const feedFrame = (frame: ReturnType<typeof decryptFrame>) => {
+      const b = bridge;
+      const s = sessionRef.current;
+      if (!b || !s) {
+        return;
+      }
+      s.applyEffects(b.onRemoteFrame(frame));
+    };
+
+    const resync = () => {
+      // Frames went missing; the stream cannot be trusted. Reload the
+      // document from its current generation, the same road as a conflict.
+      if (!cancelled) {
+        setStage("decrypting");
+        setCollab("connecting");
+        setReloadNonce((n) => n + 1);
+      }
+    };
+
+    const makeSession = () =>
+      new EditorSession(
+        frame,
+        fileType,
+        opened.name,
+        {
+          onLoading: () => diag("office", "the editor is up and waiting for its document"),
+          onReady: () => {
+            window.clearTimeout(startupDeadline);
+            engineReady = true;
+            for (const queued of tail.splice(0)) {
+              feedFrame(queued);
+            }
+            setStage("ready");
+          },
+          onChanged: (modified) => {
+            // Only ever set. The editor clears its own modified flag as soon
+            // as the collaboration layer acknowledges a change; treating that
+            // as "saved" would grey out Save and let the document close with
+            // the edit only in the editor.
+            if (modified) {
+              dirtyRef.current = true;
+              setDirty(true);
+            }
+          },
+          onShortcut: (name) => {
+            if (name === "save") {
+              saveRef.current();
+            }
+          },
+          onFailed: (message) => {
+            setStage("failed");
+            setError(message);
+          },
+          onPost: (out) => {
+            if (channel) {
+              outCounter += 1;
+              channel.post(
+                out.ref,
+                encryptFrame(
+                  { ch: opened.id, s: connId, n: outCounter, k: out.k, d: out.d },
+                  opened.key,
+                ),
+              );
+            }
+          },
+          onEph: (out) => {
+            channel?.eph(
+              encryptFrame({ ch: opened.id, s: connId, n: 0, k: out.k, d: out.d }, opened.key),
+            );
+          },
+        },
+        bridge,
+      );
 
     void (async () => {
       try {
+        // A recipient knows the document is shared; an owner asks whether
+        // anyone else holds a key. Only then is the channel worth dialing.
+        let collaborative = opened.shared === true;
+        if (!collaborative && !opened.shared) {
+          collaborative = await api
+            .listCollaborators(opened.id)
+            .then((r) => r.collaborators.length > 0)
+            .catch(() => false);
+        }
+        if (collaborative && !cancelled) {
+          setCollab("connecting");
+          try {
+            channel = new ChannelClient(opened.id, {
+              onWelcome: (welcome: ChannelWelcome) => {
+                if (bridge) {
+                  // A redial lands on a new connection and a new index; the
+                  // engine's identity is fixed at init, so reopen cleanly.
+                  resync();
+                  return;
+                }
+                connId = welcome.you;
+                order = newChannelOrder(opened.id);
+                bridge = new CollabBridge({
+                  fileId: opened.id,
+                  selfConnId: welcome.you,
+                  selfIndex: welcome.yourIndex,
+                  members: welcome.members,
+                });
+                setPeers(welcome.members.length);
+              },
+              onLog: (seq, sender, payload) => {
+                void seq;
+                void sender;
+                try {
+                  const decoded = decryptFrame(payload, opened.key);
+                  const verdict = acceptFrame(order, decoded);
+                  if (verdict === "resync") {
+                    resync();
+                    return;
+                  }
+                  if (verdict === "apply") {
+                    if (engineReady) {
+                      feedFrame(decoded);
+                    } else {
+                      tail.push(decoded);
+                    }
+                  }
+                } catch {
+                  // A frame that does not open under our key is noise from a
+                  // rotation boundary; the reload path recovers.
+                  resync();
+                }
+              },
+              onCaughtUp: () => {},
+              onEph: (sender, payload) => {
+                void sender;
+                try {
+                  const decoded = decryptFrame(payload, opened.key);
+                  const b = bridge;
+                  const s = sessionRef.current;
+                  if (b && s && engineReady) {
+                    s.applyEffects(b.onRemoteFrame(decoded));
+                  }
+                } catch {
+                  // Lossy by design; a bad cursor frame costs nothing.
+                }
+              },
+              onMembers: (members) => {
+                setPeers(members.length);
+                const b = bridge;
+                const s = sessionRef.current;
+                if (b && s && engineReady) {
+                  s.applyEffects(b.onMembers(members));
+                }
+              },
+              onAck: (ref, seq) => {
+                const b = bridge;
+                const s = sessionRef.current;
+                if (b && s) {
+                  s.applyEffects(b.onOwnFrameAcked(ref, seq));
+                }
+              },
+              onTruncated: () => {
+                // A snapshot moved the base under us mid-flight; reload on it.
+                resync();
+              },
+              onDead: () => {
+                if (!cancelled) {
+                  setCollab("alone");
+                }
+              },
+            });
+            await channel.connect();
+            if (!cancelled) {
+              setCollab("live");
+            }
+          } catch {
+            channel = null;
+            bridge = undefined;
+            if (!cancelled) {
+              setCollab("alone");
+            }
+          }
+        }
+        if (cancelled) {
+          return;
+        }
+        const session = makeSession();
+        sessionRef.current = session;
         setStage("decrypting");
         const plaintext = await downloadAndDecrypt(opened.id, opened.key, opened.digest);
         if (cancelled) {
@@ -153,7 +332,8 @@ export function OfficeEditor(props: {
     return () => {
       cancelled = true;
       window.clearTimeout(startupDeadline);
-      session.close();
+      channel?.close();
+      sessionRef.current?.close();
       sessionRef.current = null;
       converter.close();
       converterRef.current = null;
@@ -292,6 +472,16 @@ export function OfficeEditor(props: {
         <span className="meta">
           {stage === "ready" ? (savedAt && !dirty ? "saved, encrypted" : "") : STAGE_LABEL[stage]}
         </span>
+        {collab === "live" && peers > 1 && (
+          <span className="badge" title="Editing together, live">
+            <PeopleGlyph size={11} /> {peers} here
+          </span>
+        )}
+        {collab === "alone" && (
+          <span className="badge" title="The live channel is unreachable; saving still works and conflicts are caught">
+            working alone
+          </span>
+        )}
         <div className="grow" />
         {error && <span className="error-text">{error}</span>}
         {conflict ? (
