@@ -872,7 +872,16 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       await touchCollaborators(t, id, now);
     });
     const row = (await app.db.get<FileRow>("SELECT * FROM files WHERE id = ?", id))!;
-    return fileToDto(row);
+    const dto = fileToDto(row);
+    if (access.role !== "owner") {
+      // The owner's wrapped key is theirs alone: a collaborator holds the
+      // file key sealed to their own account and needs nothing from this
+      // field, so it never travels. Same reason folderId does not.
+      const { encryptedKey, ...forCollaborator } = dto;
+      void encryptedKey;
+      return { ...forCollaborator, folderId: null };
+    }
+    return dto;
   });
 
   app.delete("/api/files/:id", auth, async (request, reply) => {
