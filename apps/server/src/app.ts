@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
@@ -17,16 +17,22 @@ import { openDatabase, type Db } from "./db.js";
 import { PostgresDb } from "./pgdb.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import websocket from "@fastify/websocket";
 import { registerStorageRoutes } from "./routes/storage.js";
 import { registerShareRoutes } from "./routes/shares.js";
 import { registerRequestRoutes } from "./routes/requests.js";
 import { registerCollabRoutes } from "./routes/collab.js";
+import { registerChannelRoutes } from "./routes/channel.js";
+import { InProcessHub, type ChannelHub } from "./collabhub.js";
 
 declare module "fastify" {
   interface FastifyInstance {
     config: ServerConfig;
     db: Db;
     blobs: BlobStore;
+    hub: ChannelHub;
+    /** Identifies this process in shared presence rows. */
+    podId: string;
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 }
@@ -103,6 +109,8 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   app.decorate("config", config);
   app.decorate("blobs", blobs);
   app.decorate("db", db);
+  app.decorate("hub", new InProcessHub());
+  app.decorate("podId", randomUUID());
   app.addHook("onClose", async () => {
     await db.close();
   });
@@ -267,12 +275,17 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   });
   await app.register(jwt, { secret: config.jwtSecret, sign: { expiresIn: "30d" } });
 
+  // Frames beyond this size are a protocol violation, not a big document:
+  // real content travels through the blob store, never the relay.
+  await app.register(websocket, { options: { maxPayload: 256 * 1024 } });
+
   registerAuthRoutes(app);
   registerAdminRoutes(app);
   registerStorageRoutes(app);
   registerShareRoutes(app);
   registerRequestRoutes(app);
   registerCollabRoutes(app);
+  registerChannelRoutes(app);
 
   app.get("/api/health", async () => ({ status: "ok" }));
 
