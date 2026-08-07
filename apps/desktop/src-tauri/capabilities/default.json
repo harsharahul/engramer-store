@@ -5,5 +5,5 @@
   "remote": {
     "urls": ["http://localhost:3080", "http://localhost:5173"]
   },
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": ["core:default", "dialog:allow-open", "shell-commands"]
 }

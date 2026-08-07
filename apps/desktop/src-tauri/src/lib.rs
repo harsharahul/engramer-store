@@ -104,6 +104,7 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("stream", media::handle)
         .invoke_handler(tauri::generate_handler![
             photos::pick_photos,
+            photos::picked_file_read,
             unlock::native_unlock_available,
             unlock::unlock_secret_store,
             unlock::unlock_secret_get,
