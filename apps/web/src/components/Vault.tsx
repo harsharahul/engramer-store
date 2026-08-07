@@ -1978,7 +1978,7 @@ export function Vault() {
           <OfficeEditor
             file={editorFile}
             fileType={officeKind(editorFile)!}
-            onSave={async (bytes) => {
+            onSave={async (bytes, opts) => {
               // The saved bytes are a fresh document; its words join the
               // search index the same way an upload's do.
               const text = await extractText(
@@ -1986,7 +1986,9 @@ export function Vault() {
                   type: editorFile.mime,
                 }),
               ).catch(() => undefined);
-              await store.saveFileBinary(editorFile.id, bytes, text);
+              await store.saveFileBinary(editorFile.id, bytes, text, {
+                collabSnapshot: opts?.snapshot,
+              });
             }}
             onSaveCopy={async (bytes) => {
               const text = await extractText(

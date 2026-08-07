@@ -14,6 +14,7 @@ import {
   newChannelOrder,
   type ChannelOrder,
 } from "../office/channel";
+import { electedSnapshotter, shouldAutoSnapshot } from "../office/snapshot";
 import { diag } from "../diag";
 import { PeopleGlyph, XGlyph } from "./Icon";
 
@@ -45,7 +46,7 @@ const STAGE_LABEL: Record<Stage, string> = {
 export function OfficeEditor(props: {
   file: FileEntry;
   fileType: "docx" | "xlsx";
-  onSave: (bytes: Uint8Array) => Promise<void>;
+  onSave: (bytes: Uint8Array, opts?: { snapshot?: boolean }) => Promise<void>;
   /** A conflicting save kept as a new file of the editor's own. */
   onSaveCopy: (bytes: Uint8Array) => Promise<void>;
   onClose: () => void;
@@ -85,6 +86,16 @@ export function OfficeEditor(props: {
   // (shared but the relay is unreachable; turn-based editing still works).
   const [collab, setCollab] = useState<"off" | "connecting" | "live" | "alone">("off");
   const [peers, setPeers] = useState(1);
+  // Callbacks read these; state is for rendering.
+  const collabRef = useRef<"off" | "connecting" | "live" | "alone">("off");
+  collabRef.current = collab;
+  const channelRef = useRef<ChannelClient | null>(null);
+  // Durable chg frames since the last snapshot, and when the last arrived:
+  // the elected member turns quiet spells into snapshots.
+  const pendingFramesRef = useRef(0);
+  const lastFrameAtRef = useRef(0);
+  // The effect's membership tracker; callbacks reach it through this seam.
+  const membersHook = useRef<(members: Array<{ connId: string; index: number }>) => void>(() => {});
 
   // The frame's address depends only on the kind of document, so the editor
   // begins loading its several megabytes immediately, while this file is
@@ -180,6 +191,10 @@ export function OfficeEditor(props: {
           onPost: (out) => {
             if (channel) {
               outCounter += 1;
+              if (out.k === "chg") {
+                pendingFramesRef.current += 1;
+                lastFrameAtRef.current = Date.now();
+              }
               channel.post(
                 out.ref,
                 encryptFrame(
@@ -228,6 +243,7 @@ export function OfficeEditor(props: {
                   selfIndex: welcome.yourIndex,
                   members: welcome.members,
                 });
+                membersHook.current(welcome.members);
                 setPeers(welcome.members.length);
               },
               onLog: (seq, sender, payload) => {
@@ -241,6 +257,10 @@ export function OfficeEditor(props: {
                     return;
                   }
                   if (verdict === "apply") {
+                    if (decoded.k === "chg") {
+                      pendingFramesRef.current += 1;
+                      lastFrameAtRef.current = Date.now();
+                    }
                     if (engineReady) {
                       feedFrame(decoded);
                     } else {
@@ -268,6 +288,7 @@ export function OfficeEditor(props: {
                 }
               },
               onMembers: (members) => {
+                membersHook.current(members);
                 setPeers(members.length);
                 const b = bridge;
                 const s = sessionRef.current;
@@ -282,9 +303,16 @@ export function OfficeEditor(props: {
                   s.applyEffects(b.onOwnFrameAcked(ref, seq));
                 }
               },
-              onTruncated: () => {
-                // A snapshot moved the base under us mid-flight; reload on it.
-                resync();
+              onTruncated: (generation, snapshotSeq) => {
+                void generation;
+                // Truncation deletes replay rows, not deliveries: a live
+                // member already holds every frame the snapshot contains.
+                // Only a position BEHIND the truncation point means frames
+                // this client never saw are gone, and the current
+                // generation is the only honest source left.
+                if ((channelRef.current?.lastSeenSeq ?? 0) < snapshotSeq) {
+                  resync();
+                }
               },
               onDead: () => {
                 if (!cancelled) {
@@ -293,6 +321,7 @@ export function OfficeEditor(props: {
               },
             });
             await channel.connect();
+            channelRef.current = channel;
             if (!cancelled) {
               setCollab("live");
             }
@@ -329,10 +358,34 @@ export function OfficeEditor(props: {
       }
     })();
 
+    // The elected member turns quiet spells into snapshots, so a room
+    // nobody saves in still converges and the log stays bounded. Election
+    // is the lowest index present, computed identically everywhere; a
+    // second snapshotter would be redundant, never harmful.
+    let latestMembers: Array<{ connId: string; index: number }> = [];
+    const rememberMembers = (members: Array<{ connId: string; index: number }>) => {
+      latestMembers = members;
+    };
+    membersHook.current = rememberMembers;
+    const autoSnapshot = window.setInterval(() => {
+      if (
+        collabRef.current === "live" &&
+        electedSnapshotter(latestMembers) === connId &&
+        shouldAutoSnapshot({
+          pendingFrames: pendingFramesRef.current,
+          msSinceLastFrame: Date.now() - lastFrameAtRef.current,
+        })
+      ) {
+        saveRef.current();
+      }
+    }, 10_000);
+
     return () => {
       cancelled = true;
       window.clearTimeout(startupDeadline);
+      window.clearInterval(autoSnapshot);
       channel?.close();
+      channelRef.current = null;
       sessionRef.current?.close();
       sessionRef.current = null;
       converter.close();
@@ -371,16 +424,25 @@ export function OfficeEditor(props: {
     setError(null);
     let out: Uint8Array | null = null;
     try {
+      // Everything the channel delivered up to here is applied and will be
+      // in the export; that position is what the snapshot may truncate.
+      const live = collabRef.current === "live";
+      const upTo = live ? (channelRef.current?.lastSeenSeq ?? 0) : 0;
       const bin = await session.save();
       if (!bin) {
         throw new Error("the editor returned nothing to save");
       }
       out = await converter.exportDocument(`document.${fileType}`, bin);
-      await props.onSave(out);
+      await props.onSave(out, { snapshot: live });
       setDirty(false);
       dirtyRef.current = false;
       setSavedAt(Date.now());
       openedAtRef.current = useStore.getState().files.get(fileId)?.updatedAt ?? Date.now();
+      if (live && upTo > 0) {
+        const generation = useStore.getState().files.get(fileId)?.generation ?? 0;
+        channelRef.current?.snap(generation, upTo);
+        pendingFramesRef.current = 0;
+      }
       diag("office", `saved ${file.name} (${out.length} bytes)`);
     } catch (err) {
       if (err instanceof SaveConflictError) {

@@ -320,3 +320,66 @@ describe("member indexes", () => {
     c.close();
   });
 });
+
+describe("snapshots truncate the log safely", () => {
+  it("drops frames up to the snapshot point, keeps later ones, and tells the room", async () => {
+    const a = await connect(owner);
+    await a.next((f) => f.t === "caught-up");
+    a.send({ t: "post", ref: "s1", payload: "before-1" });
+    const first = await a.next((f) => f.t === "ack");
+    a.send({ t: "post", ref: "s2", payload: "before-2" });
+    const second = await a.next((f) => f.t === "ack");
+
+    a.send({ t: "snap", generation: 3, upTo: second.seq });
+    const truncated = await a.next((f) => f.t === "truncated");
+    expect(truncated.snapshotGeneration).toBe(3);
+    expect(truncated.snapshotSeq).toBe(second.seq);
+
+    a.send({ t: "post", ref: "s3", payload: "after-1" });
+    await a.next((f) => f.t === "ack");
+    a.close();
+
+    // A fresh joiner from zero sees ONLY the frame after the snapshot.
+    const probe = await connect(member);
+    const welcome = await probe.next((f) => f.t === "welcome");
+    expect(welcome.snapshotGeneration).toBe(3);
+    const replayed: string[] = [];
+    for (;;) {
+      const frame = await probe.next((f) => f.t === "log" || f.t === "caught-up");
+      if (frame.t === "caught-up") {
+        break;
+      }
+      replayed.push(String(frame.payload));
+    }
+    expect(replayed).toEqual(["after-1"]);
+    expect(replayed).not.toContain("before-1");
+    probe.close();
+    void first;
+  });
+
+  it("refuses a plain whole-document write while members are live, and admits a snapshot", async () => {
+    const live = await connect(owner);
+    await live.next((f) => f.t === "caught-up");
+
+    const plain = await app.inject({
+      method: "PUT",
+      url: `/api/files/${fileId}/data`,
+      headers: { ...auth(owner), "content-type": "application/octet-stream" },
+      payload: Buffer.from(encryptBytes(utf8Encode("plain overwrite"), generateKey())),
+    });
+    expect(plain.statusCode).toBe(409);
+
+    const snapshot = await app.inject({
+      method: "PUT",
+      url: `/api/files/${fileId}/data`,
+      headers: {
+        ...auth(owner),
+        "content-type": "application/octet-stream",
+        "x-collab-snapshot": "1",
+      },
+      payload: Buffer.from(encryptBytes(utf8Encode("snapshot write"), generateKey())),
+    });
+    expect(snapshot.statusCode).toBe(200);
+    live.close();
+  });
+});

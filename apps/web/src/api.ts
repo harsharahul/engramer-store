@@ -19,6 +19,8 @@ export interface FileDto {
   encryptedMeta: SecretBox;
   /** Rotation counter; absent on rows cached before it existed. */
   keyEpoch?: number;
+  /** Content generation; absent on rows cached before it traveled. */
+  generation?: number;
   size: number;
   thumbSize: number;
   indexSize: number;
@@ -40,6 +42,7 @@ export interface SharedFileDto {
   id: string;
   folderId: null;
   encryptedMeta: SecretBox;
+  generation?: number;
   size: number;
   thumbSize: number;
   indexSize: number;
@@ -498,6 +501,7 @@ function putBytes(
     onProgress?: (fraction: number) => void;
     signal?: AbortSignal;
     errorFor?: (status: number) => string | undefined;
+    headers?: Record<string, string>;
   },
 ): Promise<number | null> {
   return new Promise((resolve, reject) => {
@@ -510,6 +514,9 @@ function putBytes(
     xhr.setRequestHeader("content-type", "application/octet-stream");
     if (opts.auth && authToken) {
       xhr.setRequestHeader("authorization", `Bearer ${authToken}`);
+    }
+    for (const [name, value] of Object.entries(opts.headers ?? {})) {
+      xhr.setRequestHeader(name, value);
     }
     let lastMovement = Date.now();
     let bodySent = false;
@@ -636,11 +643,15 @@ export function uploadBlob(
   payload: Uint8Array,
   onProgress?: (fraction: number) => void,
   signal?: AbortSignal,
+  opts?: { collabSnapshot?: boolean },
 ): Promise<number | null> {
   return putBytes(`/api/files/${fileId}/${kind}`, payload, {
     auth: true,
     onProgress,
     signal,
     errorFor: (status) => (status === 413 ? "storage quota exceeded" : undefined),
+    // Marks this whole-document write as a claimed snapshot of the live
+    // channel, which is what lets it through the tail-base guard.
+    ...(opts?.collabSnapshot ? { headers: { "x-collab-snapshot": "1" } } : {}),
   });
 }
