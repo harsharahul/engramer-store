@@ -11,6 +11,7 @@ import {
 } from "react";
 import { diag } from "../diag";
 import { detailsSubjectId } from "../details";
+import { stepThrough } from "../neighbors";
 import { useStore, type FileEntry, type FolderEntry } from "../store";
 import { api } from "../api";
 import {
@@ -2013,6 +2014,18 @@ export function Vault() {
             setShareId(previewFile.id);
             setPreviewId(null);
           }}
+          onStep={(direction) => {
+            const to = stepThrough(
+              visibleFiles.map((f) => f.id),
+              previewFile.id,
+              direction,
+            );
+            if (to) {
+              setPreviewId(to);
+            }
+          }}
+          canStepBack={stepThrough(visibleFiles.map((f) => f.id), previewFile.id, -1) !== null}
+          canStepOn={stepThrough(visibleFiles.map((f) => f.id), previewFile.id, 1) !== null}
           onRename={() => setRenameFileId(previewFile.id)}
           onDetails={() => {
             setPreviewId(null);

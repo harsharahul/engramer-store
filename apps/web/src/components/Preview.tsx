@@ -3,10 +3,20 @@ import { useStore, type FileEntry } from "../store";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
 import { bridgeMediaUrl, mediaBridgeAvailable, mediaUrl, onMediaProgress, registerMediaKey } from "../mediastream";
 import { nativeShell } from "../native";
+import { swipeStep } from "../neighbors";
 import { fileKind, formatBytes } from "../format";
 import { displayableImage } from "../intel/heic";
 import { triggerDownload } from "../download";
-import { DownloadGlyph, InfoGlyph, PencilGlyph, ShareGlyph, TagGlyph, XGlyph } from "./Icon";
+import {
+  ChevronLeftGlyph,
+  ChevronRightGlyph,
+  DownloadGlyph,
+  InfoGlyph,
+  PencilGlyph,
+  ShareGlyph,
+  TagGlyph,
+  XGlyph,
+} from "./Icon";
 import { diag } from "../diag";
 import type { WorkbookPreview } from "../sheet";
 
@@ -255,6 +265,10 @@ export function Preview(props: {
   onRename: () => void;
   onDetails: () => void;
   onEdit?: () => void;
+  /** Move to the next or previous file in the view; null when at an end. */
+  onStep?: (direction: 1 | -1) => void;
+  canStepBack?: boolean;
+  canStepOn?: boolean;
 }) {
   const { file } = props;
   const kind = fileKind(file.mime, file.name);
@@ -266,6 +280,31 @@ export function Preview(props: {
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
   const blobUrl = useRef<string | null>(null);
   const blobTried = useRef(false);
+  const swipeFrom = useRef<{ x: number; y: number } | null>(null);
+  const { onStep } = props;
+
+  useEffect(() => {
+    if (!onStep) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      const typing =
+        event.target instanceof HTMLElement &&
+        (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA");
+      if (typing) {
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        onStep(1);
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        onStep(-1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onStep]);
 
   /**
    * The last rung of playback: decrypt the whole file and play it from
@@ -409,6 +448,26 @@ export function Preview(props: {
         <span className="name">{file.name}</span>
         <span className="meta">{formatBytes(file.size)}</span>
         <div className="grow" />
+        {onStep && (
+          <>
+            <button
+              className="icon-btn"
+              title="Previous (left arrow)"
+              disabled={props.canStepBack === false}
+              onClick={() => onStep(-1)}
+            >
+              <ChevronLeftGlyph />
+            </button>
+            <button
+              className="icon-btn"
+              title="Next (right arrow)"
+              disabled={props.canStepOn === false}
+              onClick={() => onStep(1)}
+            >
+              <ChevronRightGlyph />
+            </button>
+          </>
+        )}
         {props.onEdit && (
           <button className="btn" onClick={props.onEdit}>
             <PencilGlyph size={14} /> Edit
@@ -433,7 +492,26 @@ export function Preview(props: {
           <XGlyph />
         </button>
       </div>
-      <div className="preview-body">
+      <div
+        className="preview-body"
+        onTouchStart={(event) => {
+          const touch = event.touches[0];
+          swipeFrom.current =
+            event.touches.length === 1 && touch ? { x: touch.clientX, y: touch.clientY } : null;
+        }}
+        onTouchEnd={(event) => {
+          const from = swipeFrom.current;
+          const touch = event.changedTouches[0];
+          swipeFrom.current = null;
+          if (!from || !touch || !onStep) {
+            return;
+          }
+          const direction = swipeStep(touch.clientX - from.x, touch.clientY - from.y);
+          if (direction) {
+            onStep(direction);
+          }
+        }}
+      >
         {error ? (
           <div className="preview-fallback">{error}</div>
         ) : !loaded ? (
