@@ -328,6 +328,7 @@ export const COMMON_SCHEMA = `
       snapshot_generation BIGINT NOT NULL DEFAULT 0,
       snapshot_seq BIGINT NOT NULL DEFAULT 0,
       bytes BIGINT NOT NULL DEFAULT 0,
+      member_counter BIGINT NOT NULL DEFAULT 0,
       updated_at BIGINT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS collab_tickets (
@@ -341,6 +342,7 @@ export const COMMON_SCHEMA = `
       conn_id TEXT NOT NULL,
       pod_id TEXT NOT NULL,
       user_id BIGINT NOT NULL,
+      user_index BIGINT NOT NULL,
       joined_at BIGINT NOT NULL,
       last_seen BIGINT NOT NULL,
       PRIMARY KEY (file_id, conn_id)
