@@ -42,6 +42,9 @@ html {
   /* Named so it can be measured and reported; env() is otherwise invisible
      to script, and this is the number most likely to be misread on a phone. */
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* The phone tab bar's own height, so the bottom overlay stack can clear it
+     without hardcoding the number twice. */
+  --tabbar-h: 74px;
   /* iOS paints its own grey flash on every tap and inflates type in
      landscape; both fight the design system. */
   -webkit-tap-highlight-color: transparent;
@@ -655,12 +658,6 @@ a {
   font-size: 13px;
   color: var(--paper);
   max-width: min(92vw, 560px);
-}
-
-@media (max-width: 760px) {
-  .update-bar {
-    bottom: calc(74px + env(safe-area-inset-bottom));
-  }
 }
 
 /* Per-folder choice of where watched arrivals land. */
@@ -3360,6 +3357,12 @@ span.item-menu {
   display: none;
 }
 
+/* Outside the phone layout the stack is not a real box: each child keeps
+   its own position: fixed rule exactly as before this wrapper existed. */
+.bottom-stack {
+  display: contents;
+}
+
 /* ---------- touch ergonomics (any coarse pointer) ---------- */
 
 @media (pointer: coarse) {
@@ -3511,7 +3514,10 @@ span.item-menu {
     overflow-y: visible;
   }
 
-  /* Bottom tab bar: the primary navigation surface. */
+  /* Bottom tab bar: the primary navigation surface. Its own box (padding
+     6px + 6px around a 50px tab row, 62px total) stays under --tabbar-h so
+     .bottom-stack, which clears --tabbar-h, always sits above it with room
+     to spare. */
   .tabbar {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -3559,29 +3565,48 @@ span.item-menu {
     box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 30%, transparent);
   }
 
-  /* Fixed-bottom chrome clears the tab bar. */
-  .toast {
-    bottom: calc(86px + env(safe-area-inset-bottom));
+  /* Fixed-bottom chrome clears the tab bar, stacked in one column instead
+     of six independently positioned overlays. */
+  .bottom-stack {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(var(--tabbar-h, 74px) + env(safe-area-inset-bottom));
+    z-index: 250;
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 8px;
+    pointer-events: none;
   }
 
-  .ocr-pill {
-    bottom: calc(136px + env(safe-area-inset-bottom));
+  .bottom-stack > * {
+    pointer-events: auto;
+    position: static;
+    bottom: auto;
+    left: auto;
+    right: auto;
+    transform: none;
   }
 
+  /* Pill-shaped widgets keep their intrinsic width and stay centered
+     instead of stretching to fill the stack; upload-tray is meant to span
+     the full width, so it is left out of this list. */
+  .update-bar,
+  .ocr-pill,
+  .toast,
+  .reveal,
   .bulk-bar {
-    bottom: calc(86px + env(safe-area-inset-bottom));
+    align-self: center;
   }
 
   .reveal {
-    bottom: calc(86px + env(safe-area-inset-bottom));
     max-width: calc(100vw - 24px);
   }
 
+  /* Its base rule fixes a 320px width for the desktop corner card; drop
+     that so it stretches to the stack's full width instead. */
   .upload-tray {
-    left: 12px;
-    right: 12px;
     width: auto;
-    bottom: calc(86px + env(safe-area-inset-bottom));
   }
 
   /* Details inspector rides up as a floating card that leaves the tab bar

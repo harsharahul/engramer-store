@@ -1908,39 +1908,6 @@ export function Vault() {
           />
         )}
 
-      {selection.size > 1 && (
-        <div className="bulk-bar">
-          <span>{selection.size} selected</span>
-          <button
-            className="btn btn-ghost"
-            onClick={() => {
-              for (const id of selection) {
-                void store.toggleFavorite(id);
-              }
-            }}
-          >
-            <StarGlyph size={13} /> Favorite
-          </button>
-          <button className="btn btn-ghost" onClick={() => setMoveIds([...selection])}>
-            <MoveGlyph size={13} /> Move
-          </button>
-          <button
-            className="btn btn-ghost danger"
-            onClick={() => {
-              for (const id of selection) {
-                void store.trashFile(id);
-              }
-              clearSelection();
-            }}
-          >
-            <TrashGlyph size={13} /> Trash
-          </button>
-          <button className="icon-btn" title="Clear selection" onClick={clearSelection}>
-            <XGlyph size={13} />
-          </button>
-        </div>
-      )}
-
       <nav className="tabbar">
         <button
           className={`tab${view.kind === "folder" && !drawerOpen ? " active" : ""}`}
@@ -1994,16 +1961,88 @@ export function Vault() {
         </button>
       </nav>
 
-      <UploadTray />
-      {store.reveal && (
-        <RevealToast
-          onOpen={(folderId) => {
-            store.dismissReveal();
-            setQuery("");
-            setView({ kind: "folder", id: folderId });
-          }}
-        />
-      )}
+      {/* One stacked column holds every phone-bottom overlay so they never
+          overlap; see .bottom-stack in styles.css. */}
+      <div className="bottom-stack">
+        {updateReady && (
+          <div className="update-bar" role="status">
+            <span>
+              Version {updateReady} is ready. This window is running {APP_VERSION}.
+            </span>
+            <button className="btn btn-primary" onClick={() => void reloadForUpdate()}>
+              Reload
+            </button>
+            <button className="icon-btn" title="Later" onClick={() => setUpdateReady(null)}>
+              <XGlyph />
+            </button>
+          </div>
+        )}
+        {store.batch && (
+          <div className="ocr-pill">
+            <span className="spinner" />
+            Uploading {store.batch.current || "…"} · {store.batch.done + store.batch.failed} of{" "}
+            {store.batch.total}
+            {store.batch.failed > 0 ? ` · ${store.batch.failed} failed` : ""}
+          </div>
+        )}
+        {store.ocrProgress && (
+          <div className="ocr-pill">
+            <span className="spinner" />
+            Reading {store.ocrProgress.current} · {store.ocrProgress.done + 1} of{" "}
+            {store.ocrProgress.total}
+          </div>
+        )}
+        {store.semanticProgress && (
+          <div className="ocr-pill">
+            <span className="spinner" />
+            Indexing {store.semanticProgress.current} · {store.semanticProgress.done + 1} of{" "}
+            {store.semanticProgress.total}
+          </div>
+        )}
+        {toast && <div className="toast">{toast}</div>}
+        {store.reveal && (
+          <RevealToast
+            onOpen={(folderId) => {
+              store.dismissReveal();
+              setQuery("");
+              setView({ kind: "folder", id: folderId });
+            }}
+          />
+        )}
+        <UploadTray />
+        {selection.size > 1 && (
+          <div className="bulk-bar">
+            <span>{selection.size} selected</span>
+            <button
+              className="btn btn-ghost"
+              onClick={() => {
+                for (const id of selection) {
+                  void store.toggleFavorite(id);
+                }
+              }}
+            >
+              <StarGlyph size={13} /> Favorite
+            </button>
+            <button className="btn btn-ghost" onClick={() => setMoveIds([...selection])}>
+              <MoveGlyph size={13} /> Move
+            </button>
+            <button
+              className="btn btn-ghost danger"
+              onClick={() => {
+                for (const id of selection) {
+                  void store.trashFile(id);
+                }
+                clearSelection();
+              }}
+            >
+              <TrashGlyph size={13} /> Trash
+            </button>
+            <button className="icon-btn" title="Clear selection" onClick={clearSelection}>
+              <XGlyph size={13} />
+            </button>
+          </div>
+        )}
+      </div>
       {ctxMenu && <ContextMenu {...ctxMenu} onClose={() => setCtxMenu(null)} />}
       {moveIds && (
         <MoveDialog
@@ -2182,28 +2221,6 @@ export function Vault() {
           onClose={() => setDeleteForeverId(null)}
         />
       )}
-      {store.batch && (
-        <div className="ocr-pill">
-          <span className="spinner" />
-          Uploading {store.batch.current || "…"} · {store.batch.done + store.batch.failed} of{" "}
-          {store.batch.total}
-          {store.batch.failed > 0 ? ` · ${store.batch.failed} failed` : ""}
-        </div>
-      )}
-      {store.ocrProgress && (
-        <div className="ocr-pill">
-          <span className="spinner" />
-          Reading {store.ocrProgress.current} · {store.ocrProgress.done + 1} of{" "}
-          {store.ocrProgress.total}
-        </div>
-      )}
-      {store.semanticProgress && (
-        <div className="ocr-pill">
-          <span className="spinner" />
-          Indexing {store.semanticProgress.current} · {store.semanticProgress.done + 1} of{" "}
-          {store.semanticProgress.total}
-        </div>
-      )}
       {unlockPromptOpen && (
         <Confirm
           title="Unlock with Touch ID next time?"
@@ -2218,20 +2235,6 @@ export function Vault() {
           }}
         />
       )}
-      {updateReady && (
-        <div className="update-bar" role="status">
-          <span>
-            Version {updateReady} is ready. This window is running {APP_VERSION}.
-          </span>
-          <button className="btn btn-primary" onClick={() => void reloadForUpdate()}>
-            Reload
-          </button>
-          <button className="icon-btn" title="Later" onClick={() => setUpdateReady(null)}>
-            <XGlyph />
-          </button>
-        </div>
-      )}
-      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
