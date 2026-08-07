@@ -60,28 +60,24 @@ describe("decodeHeic", () => {
 });
 
 /**
- * iOS decides at pick time whether to hand over the original HEIC or a
- * JPEG it transcodes on the spot. A wildcard in the accept list is read as
- * "any image will do", and it duly converts — which is what happened on
- * the owner's phone even though the list also named HEIC explicitly. So
- * the property that matters is the ABSENCE of the wildcard, not just the
- * presence of the HEIC types.
+ * Measured on real iOS WebKit (iPhone 16 Pro simulator, a HEIC in the photo
+ * library, six accept strings side by side): EVERY one of them came back as
+ * JPEG, including `image/heic,image/heif` alone and `.heic,.heif` alone.
+ * The accept attribute does not decide the format. iOS transcodes on the
+ * photo-library path through a file input, and the page never sees the
+ * original bytes. So this list exists only to say what the picker should
+ * OFFER, and narrowing it buys nothing while costing formats.
  */
 describe("what the photo picker declares it accepts", () => {
-  it("names heic and heif, in both mime and extension form", () => {
-    for (const token of ["image/heic", "image/heif", ".heic", ".heif"]) {
-      expect(PHOTO_ACCEPT).toContain(token);
-    }
+  it("offers images and videos without narrowing the formats a library holds", () => {
+    expect(PHOTO_ACCEPT).toContain("image/*");
+    expect(PHOTO_ACCEPT).toContain("video/*");
   });
 
-  it("carries no wildcard, which is what makes iOS transcode to JPEG", () => {
-    expect(PHOTO_ACCEPT).not.toContain("image/*");
-    expect(PHOTO_ACCEPT).not.toContain("video/*");
-  });
-
-  it("still admits the ordinary photo and video formats a library holds", () => {
-    for (const token of ["image/jpeg", "image/png", "video/quicktime", "video/mp4"]) {
-      expect(PHOTO_ACCEPT).toContain(token);
-    }
+  it("still names heic, so a device that DOES hand over the original is not refused", () => {
+    // Files-app picks and non-Apple browsers can deliver real HEIC; the
+    // decode fallback handles those, and the picker must not filter them out.
+    expect(PHOTO_ACCEPT).toContain("image/heic");
+    expect(PHOTO_ACCEPT).toContain(".heic");
   });
 });

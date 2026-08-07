@@ -3,6 +3,24 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+- **Details opens on a phone.** It never has. The rule that hides the
+  side pane on narrow screens outranked the rule that turns the same
+  element into a bottom sheet, so the sheet mounted at `display: none`:
+  present, correct, and invisible. Tapping Details appeared to do nothing.
+
+### Changed
+- **A file's facts are visible without scrolling.** The preview in the
+  details sheet took a 4:3 slice of the screen, pushing Where, Type, Size
+  and the dates below the fold. It is shorter on phones now.
+- **The photo picker accepts images and videos broadly again.** iOS decides
+  the format itself: measured against a HEIC on real iOS WebKit, every
+  candidate accept string returned a transcoded JPEG, so narrowing the list
+  only cost formats. Keeping HEIC originals needs a native picker, not an
+  attribute.
+
 ## [0.39.4] - 2026-08-07
 
 ### Fixed
