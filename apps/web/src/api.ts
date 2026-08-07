@@ -28,10 +28,57 @@ export interface FileDto {
   updatedAt: number;
 }
 
+/**
+ * A file shared into this account, shaped for its recipient: the key
+ * arrives sealed to the account's public key, the location is the owner's
+ * business and so is always null, and the cursor is the membership's own
+ * sequence. `revoked` doubles as the tombstone.
+ */
+export interface SharedFileDto {
+  id: string;
+  folderId: null;
+  encryptedMeta: SecretBox;
+  size: number;
+  thumbSize: number;
+  indexSize: number;
+  uploaded: boolean;
+  updateSeq: number;
+  createdAt: number;
+  updatedAt: number;
+  ownerEmail: string;
+  role: "viewer" | "editor";
+  sealedKey: string;
+  keyEpoch: number;
+  revoked: boolean;
+}
+
+export interface CollabInviteInfo {
+  token: string;
+  fileId: string;
+  role: "viewer" | "editor";
+  createdAt: number;
+  expiresAt: number | null;
+  revoked: boolean;
+  granted: boolean;
+  claimed: boolean;
+  claimantEmail?: string;
+  claimantPublicKey?: string;
+}
+
+export interface CollaboratorInfo {
+  userId: number;
+  email: string;
+  role: "viewer" | "editor";
+  keyEpoch: number;
+  createdAt: number;
+}
+
 export interface SyncResponse {
   seq: number;
   folders: FolderDto[];
   files: FileDto[];
+  /** Absent from rows cached before sharing existed; treat as empty. */
+  shared?: SharedFileDto[];
 }
 
 export class ApiError extends Error {
@@ -177,6 +224,41 @@ export const api = {
   adminDeleteUser: (id: number) => request<void>(`/api/admin/users/${id}`, { method: "DELETE" }),
 
   sync: (since: number) => request<SyncResponse>(`/api/sync?since=${since}`),
+
+  createCollabInvite: (fileId: string, role: "viewer" | "editor", expiresAt?: number | null) =>
+    request<{ token: string }>("/api/collab/invites", {
+      method: "POST",
+      body: JSON.stringify({ fileId, role, ...(expiresAt ? { expiresAt } : {}) }),
+    }),
+  listCollabInvites: () => request<{ invites: CollabInviteInfo[] }>("/api/collab/invites"),
+  revokeCollabInvite: (token: string) =>
+    request<void>(`/api/collab/invites/${token}`, { method: "DELETE" }),
+  claimCollabInvite: (token: string) =>
+    request<{ ownerEmail: string; role: "viewer" | "editor" }>(
+      `/api/collab/invites/${token}/claim`,
+      { method: "POST", body: "{}" },
+    ),
+  grantCollabInvite: (token: string, sealedKey: string) =>
+    request<{ ok: boolean }>(`/api/collab/invites/${token}/grant`, {
+      method: "POST",
+      body: JSON.stringify({ sealedKey }),
+    }),
+  listCollaborators: (fileId: string) =>
+    request<{ collaborators: CollaboratorInfo[] }>(`/api/collab/files/${fileId}/collaborators`),
+  patchCollaborator: (fileId: string, userId: number, role: "viewer" | "editor") =>
+    request<void>(`/api/collab/files/${fileId}/collaborators/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+  removeCollaborator: (fileId: string, userId: number) =>
+    request<void>(`/api/collab/files/${fileId}/collaborators/${userId}`, { method: "DELETE" }),
+  leaveShared: (fileId: string) =>
+    request<void>(`/api/collab/files/${fileId}/me`, { method: "DELETE" }),
+  rekeyShared: (fileId: string, epoch: number, keys: Array<{ userId: number; sealedKey: string }>) =>
+    request<void>(`/api/collab/files/${fileId}/rekey`, {
+      method: "POST",
+      body: JSON.stringify({ epoch, keys }),
+    }),
 
   createFolder: (parentId: string | null, encryptedKey: SecretBox, encryptedMeta: SecretBox) =>
     request<FolderDto>("/api/folders", {
