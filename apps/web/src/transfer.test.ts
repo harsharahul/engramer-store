@@ -113,3 +113,24 @@ describe("encryptAndUpload", () => {
     expect(result.meta.digest).toBeDefined();
   });
 });
+
+/**
+ * A photo used to be decoded three times over — thumbnail, text
+ * recognition, barcode scan — each time at full resolution. With HEIC
+ * packing tens of megapixels into a couple of megabytes, that exhausted
+ * an iPhone and iOS closed the app mid-upload, twice reported from a real
+ * device. The reading stages must work from one bounded copy.
+ */
+describe("analysis reads a bounded copy, not the original", () => {
+  it("bounds a large image and leaves a small one alone", async () => {
+    const { boundedForReading } = await import("./transfer");
+    const big = await boundedForReading(6000, 4000);
+    expect(big).not.toBeNull();
+    expect(Math.max(big!.width, big!.height)).toBeLessThanOrEqual(3600);
+    // Aspect ratio survives, or barcodes and text distort.
+    expect(big!.width / big!.height).toBeCloseTo(1.5, 1);
+
+    // Already small enough: no copy, no second decode, nothing wasted.
+    expect(await boundedForReading(800, 600)).toBeNull();
+  });
+});

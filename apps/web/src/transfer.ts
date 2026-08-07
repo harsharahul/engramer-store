@@ -37,6 +37,7 @@ import type { Fact, FactEvidence } from "./intel/facts";
 import { encodeIndexPayload } from "./indexblob";
 import { computeBlur } from "./intel/blur";
 import { decodeImageBitmap, normalizeImageMime } from "./intel/heic";
+import { isHandheld } from "./analysisslot";
 import { diag } from "./diag";
 
 const THUMB_SIZE = 512;
@@ -47,6 +48,15 @@ interface Thumbnail {
   height: number;
   /** ThumbHash placeholder, painted before any thumbnail request. */
   blur?: string;
+  /**
+   * A bounded copy of the image for the stages that read it. Text
+   * recognition and barcode scanning each used to decode the ORIGINAL
+   * again, so one photo was decoded three times over; on a phone, with
+   * HEIC packing tens of megapixels into a couple of megabytes, that
+   * exhausted memory and iOS closed the app mid-upload. Made once, from
+   * the decode the thumbnail already paid for.
+   */
+  readable?: Blob;
 }
 
 function drawScaled(source: CanvasImageSource, width: number, height: number): Promise<Blob | null> {
@@ -62,17 +72,70 @@ function drawScaled(source: CanvasImageSource, width: number, height: number): P
   return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
 }
 
+/**
+ * How large an image the reading stages get. Big enough that a dense
+ * barcode keeps the modules that carry its data — a boarding pass
+ * photographed whole still leaves its symbol several pixels per module —
+ * and small enough that decoding it cannot exhaust a phone.
+ */
+const READABLE_MAX_EDGE = 2400;
+const READABLE_MAX_EDGE_DESKTOP = 3600;
+
+/**
+ * The size a bounded copy would be, or null when the original is already
+ * small enough to read as it is. Exported for its test: the sizing is the
+ * part that has to stay right.
+ */
+export function boundedForReading(
+  width: number,
+  height: number,
+): { width: number; height: number } | null {
+  const limit = isHandheld() ? READABLE_MAX_EDGE : READABLE_MAX_EDGE_DESKTOP;
+  const longest = Math.max(width, height);
+  if (longest <= limit) {
+    return null;
+  }
+  const scale = limit / longest;
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+/** A bounded JPEG copy, or null when the original is already small. */
+async function readableCopy(
+  bitmap: ImageBitmap,
+  width: number,
+  height: number,
+): Promise<Blob | null> {
+  const size = boundedForReading(width, height);
+  if (!size) {
+    return null;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = size.width;
+  canvas.height = size.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return null;
+  }
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+}
+
 async function imageThumbnail(file: File): Promise<Thumbnail | null> {
   try {
     const bitmap = await decodeImageBitmap(file, file.name);
     const { width, height } = bitmap;
     const blob = await drawScaled(bitmap, width, height);
     const blur = computeBlur(bitmap, width, height);
+    // Made while the one decode is still in hand, then released with it.
+    const readable = (await readableCopy(bitmap, width, height)) ?? undefined;
     bitmap.close();
     if (!blob) {
       return null;
     }
-    return { bytes: new Uint8Array(await blob.arrayBuffer()), width, height, blur };
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), width, height, blur, readable };
   } catch {
     return null;
   }
@@ -342,9 +405,12 @@ export async function analyzeFile(
   cancelled();
   // Opt-in OCR: screenshots and scans become searchable, and the recognized
   // text sharpens categorization (a photographed invoice files as a receipt).
+  // Everything that READS the image works from the bounded copy: the
+  // original is decoded once, for the thumbnail, and never again.
+  const readable = thumbnail?.readable ?? file;
   if (text === undefined && mime.startsWith("image/") && ocrEnabled()) {
     onPhase?.("reading text");
-    text = await withDeadline(recognizeImage(file), ANALYSIS_DEADLINE_MS * 3, signal);
+    text = await withDeadline(recognizeImage(readable), ANALYSIS_DEADLINE_MS * 3, signal);
   }
   // A PDF with no text layer is a scan; its pages read like photos.
   if (text === undefined && isPdf(file.name, file.type) && ocrEnabled()) {
@@ -362,7 +428,7 @@ export async function analyzeFile(
   }
   if (semanticEnabled()) {
     if (mime.startsWith("image/")) {
-      clip = await withDeadline(embedImage(file), 45_000, signal);
+      clip = await withDeadline(embedImage(readable), 45_000, signal);
     } else if (mime.startsWith("video/") && thumbnail) {
       clip = await withDeadline(
         embedImage(
@@ -404,7 +470,7 @@ export async function analyzeFile(
     // first page rendered at recognition width, because a printed pass's
     // code needs more resolution than the thumbnail carries.
     const barcodeSource = mime.startsWith("image/")
-      ? file
+      ? readable
       : isPdf(file.name, file.type)
         ? await withDeadline(renderPdfPage(file), ANALYSIS_DEADLINE_MS, signal).catch(() => null)
         : null;
