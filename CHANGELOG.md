@@ -3,7 +3,7 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## [Unreleased]
+## [0.39.5] - 2026-08-07
 
 ### Fixed
 - **Details opens on a phone.** It never has. The rule that hides the

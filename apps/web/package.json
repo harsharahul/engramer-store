@@ -1,6 +1,6 @@
 {
   "name": "@engramer/web",
-  "version": "0.39.4",
+  "version": "0.39.5",
   "description": "Web client for Engram Store",
   "license": "AGPL-3.0-only",
   "type": "module",
