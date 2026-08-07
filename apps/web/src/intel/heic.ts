@@ -110,24 +110,16 @@ export async function displayableImage(blob: Blob, name: string): Promise<Blob> 
 /**
  * What the photo-library picker declares it accepts.
  *
- * Deliberately free of `image/*`: iOS reads a wildcard as permission to
- * hand over whatever format it likes and transcodes HEIC to JPEG at pick
- * time, before the page sees a single byte. Naming the types outright is
- * what gets the originals, so the list is enumerated rather than widened.
- * The general Upload input stays accept-less and takes any file at all.
+ * This does NOT control the format. Measured on real iOS WebKit against a
+ * HEIC in the photo library, all six candidate accept strings (wildcard,
+ * no attribute, heic-only, extensions-only, and two mixed lists) returned a
+ * transcoded JPEG. iOS converts on the photo-library path before the page
+ * sees a byte, so preserving originals needs a native route (a Files-app
+ * pick, a share-sheet target, or a shell-side picker reading the asset's
+ * original resource), not an attribute.
+ *
+ * It is therefore written to be permissive: its only job is deciding what
+ * the picker offers. HEIC stays named because other paths and other
+ * browsers do hand over real HEIC, which the decode fallback then reads.
  */
-export const PHOTO_ACCEPT = [
-  "image/heic",
-  "image/heif",
-  ".heic",
-  ".heif",
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-  "image/tiff",
-  "video/quicktime",
-  "video/mp4",
-  ".mov",
-  ".mp4",
-].join(",");
+export const PHOTO_ACCEPT = "image/*,video/*,image/heic,image/heif,.heic,.heif";
