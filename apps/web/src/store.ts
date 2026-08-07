@@ -175,7 +175,7 @@ interface StoreState {
     id: string,
     bytes: Uint8Array,
     searchText?: string,
-    opts?: { collabSnapshot?: boolean },
+    opts?: { collabSnapshot?: boolean; collabUpTo?: number },
   ) => Promise<void>;
   createNote: (name: string, folderId: string | null) => Promise<string>;
   createOfficeDocument: (
@@ -1084,6 +1084,7 @@ export const useStore = create<StoreState>((set, get) => {
       try {
         await uploadBlob(id, "data", sealed, undefined, undefined, {
           collabSnapshot: opts?.collabSnapshot,
+          collabUpTo: opts?.collabUpTo,
         });
       } catch (err) {
         // Someone else's save landed first. Typed, so the editor can offer
