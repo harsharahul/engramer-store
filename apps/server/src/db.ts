@@ -313,6 +313,39 @@ export const COMMON_SCHEMA = `
     );
     CREATE INDEX IF NOT EXISTS collab_invites_owner ON collab_invites(owner_id, granted, revoked);
     CREATE INDEX IF NOT EXISTS collab_invites_file ON collab_invites(file_id);
+    CREATE TABLE IF NOT EXISTS channel_messages (
+      file_id TEXT NOT NULL,
+      seq BIGINT NOT NULL,
+      sender TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      bytes BIGINT NOT NULL,
+      created_at BIGINT NOT NULL,
+      PRIMARY KEY (file_id, seq)
+    );
+    CREATE TABLE IF NOT EXISTS channel_state (
+      file_id TEXT PRIMARY KEY,
+      last_seq BIGINT NOT NULL DEFAULT 0,
+      snapshot_generation BIGINT NOT NULL DEFAULT 0,
+      snapshot_seq BIGINT NOT NULL DEFAULT 0,
+      bytes BIGINT NOT NULL DEFAULT 0,
+      updated_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS collab_tickets (
+      ticket TEXT PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id),
+      file_id TEXT NOT NULL,
+      expires_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS channel_presence (
+      file_id TEXT NOT NULL,
+      conn_id TEXT NOT NULL,
+      pod_id TEXT NOT NULL,
+      user_id BIGINT NOT NULL,
+      joined_at BIGINT NOT NULL,
+      last_seen BIGINT NOT NULL,
+      PRIMARY KEY (file_id, conn_id)
+    );
+    CREATE INDEX IF NOT EXISTS channel_presence_file ON channel_presence(file_id, last_seen);
     CREATE TABLE IF NOT EXISTS file_collaborators (
       file_id TEXT NOT NULL REFERENCES files(id),
       user_id BIGINT NOT NULL REFERENCES users(id),
@@ -406,6 +439,23 @@ export function openDatabase(path: string): SqliteDb {
 
 /** Monotonic per-user sequence number; every mutation gets the next value.
  * The single-row UPDATE serializes writers per user on both backends. */
+/**
+ * Allocates the next position in a document channel's total order. The same
+ * single-row atomic as nextSeq, so two posts through two pods can never
+ * take one seq; the row is created on first use.
+ */
+export async function nextChannelSeq(db: Db, fileId: string): Promise<number> {
+  const row = await db.get<{ last_seq: number }>(
+    `INSERT INTO channel_state (file_id, last_seq, updated_at) VALUES (?, 1, ?)
+     ON CONFLICT (file_id) DO UPDATE SET last_seq = channel_state.last_seq + 1, updated_at = ?
+     RETURNING last_seq`,
+    fileId,
+    Date.now(),
+    Date.now(),
+  );
+  return row!.last_seq;
+}
+
 export async function nextSeq(db: Db, userId: number): Promise<number> {
   const row = await db.get<{ last_seq: number }>(
     "UPDATE users SET last_seq = last_seq + 1 WHERE id = ? RETURNING last_seq",
