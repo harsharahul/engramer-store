@@ -1045,8 +1045,11 @@ export function registerStorageRoutes(app: FastifyInstance): void {
 
   app.get("/api/files/:id/versions", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
+    // History reaches back before the share existed and is never re-keyed,
+    // so it can hold content the owner removed before inviting anyone.
+    // It stays the owner's.
     const access = await getAccessibleFile(id, request.user.uid);
-    if (!access) {
+    if (!access || access.role !== "owner") {
       return reply.code(404).send({ error: "file not found" });
     }
     // Version rows are keyed by the OWNER's uid whoever is asking.
@@ -1061,7 +1064,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   app.get("/api/files/:id/versions/:gen/data", auth, async (request, reply) => {
     const { id, gen } = request.params as { id: string; gen: string };
     const access = await getAccessibleFile(id, request.user.uid);
-    if (!access) {
+    if (!access || access.role !== "owner") {
       return reply.code(404).send({ error: "file not found" });
     }
     const version = await app.db.get<FileVersionRow>(
