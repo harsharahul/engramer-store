@@ -72,6 +72,12 @@ export function registerChannelRoutes(app: FastifyInstance): void {
       const connId = randomUUID();
       let joined = false;
       let memberIndex = 0;
+      let drainEarly: () => void = () => {};
+      // A viewer may watch the document change in real time, which is the
+      // point of live viewing, but may never write to it. Without this the
+      // role is decorative: a viewer's frames would be applied by every
+      // editor's engine and then persisted by whoever saved next.
+      let mayWrite = false;
 
       const conn: Connection = {
         id: connId,
@@ -109,10 +115,13 @@ export function registerChannelRoutes(app: FastifyInstance): void {
         if (!claimed) {
           return refuse(4401);
         }
-        // The membership could have been revoked between mint and connect.
-        if (!(await accessRole(fileId, claimed.user_id))) {
+        // The membership could have been revoked between mint and connect,
+        // and the role decides what this socket may do for its whole life.
+        const role = await accessRole(fileId, claimed.user_id);
+        if (!role) {
           return refuse(4403);
         }
+        mayWrite = role === "owner" || role === "editor";
         const now = Date.now();
         // A sticky per-channel index, never reused: the engine namespaces
         // object ids by participant index, and a recycled index would let
@@ -139,14 +148,18 @@ export function registerChannelRoutes(app: FastifyInstance): void {
         );
         app.hub.join(fileId, conn);
         joined = true;
+        drainEarly();
         app.hub.broadcast(fileId, await membersFrame());
       })().catch(() => refuse(1011));
 
-      socket.on("message", (raw) => {
-        void (async () => {
-          if (!joined) {
-            return;
-          }
+      /**
+       * One frame at a time, in arrival order. Concurrent handlers would
+       * each read the channel's size before any of them wrote it back, so
+       * a burst could sail past the ceiling; they would also let two posts
+       * take positions in the opposite order to the one they were sent.
+       */
+      const handleFrame = async (raw: string) => {
+        {
           let frame: { t?: string; ref?: string; lastSeq?: number; payload?: string };
           try {
             frame = JSON.parse(String(raw)) as typeof frame;
@@ -188,7 +201,20 @@ export function registerChannelRoutes(app: FastifyInstance): void {
               return;
             }
             case "post": {
-              if (typeof frame.payload !== "string" || frame.payload.length === 0) {
+              if (!mayWrite || typeof frame.payload !== "string" || frame.payload.length === 0) {
+                return;
+              }
+              // The log is a tail between snapshots, not storage. Past the
+              // ceiling the room is asked to snapshot — which truncates and
+              // reopens the channel — and further frames are refused rather
+              // than allowed to grow the database without limit.
+              const state = await app.db.get<{ bytes: number }>(
+                "SELECT bytes FROM channel_state WHERE file_id = ?",
+                fileId,
+              );
+              if (Number(state?.bytes ?? 0) >= app.config.channelMaxBytes) {
+                app.hub.broadcast(fileId, { t: "please-snapshot" });
+                conn.send({ t: "please-snapshot" });
                 return;
               }
               const seq = await nextChannelSeq(app.db, fileId);
@@ -243,7 +269,9 @@ export function registerChannelRoutes(app: FastifyInstance): void {
               // reaches here until the save succeeded.
               const upTo = Number((frame as { upTo?: number }).upTo ?? 0);
               const generation = Number((frame as { generation?: number }).generation ?? 0);
-              if (!Number.isInteger(upTo) || upTo <= 0) {
+              // Truncation destroys replay history, so it belongs to whoever
+              // could have written the snapshot in the first place.
+              if (!mayWrite || !Number.isInteger(upTo) || upTo <= 0) {
                 return;
               }
               await app.db.tx(async (t) => {
@@ -276,7 +304,30 @@ export function registerChannelRoutes(app: FastifyInstance): void {
             default:
               return;
           }
-        })().catch(() => refuse(1011));
+        }
+      };
+
+      // Frames that arrive while the join is still in flight are held, not
+      // dropped: a browser greets the instant its socket opens, well before
+      // the database has finished admitting it.
+      const early: string[] = [];
+      let chain: Promise<void> = Promise.resolve();
+      const enqueue = (raw: string) => {
+        chain = chain.then(() => handleFrame(raw)).catch(() => refuse(1011));
+      };
+      drainEarly = () => {
+        for (const raw of early.splice(0)) {
+          enqueue(raw);
+        }
+      };
+
+      socket.on("message", (raw) => {
+        const text = String(raw);
+        if (!joined) {
+          early.push(text);
+          return;
+        }
+        enqueue(text);
       });
 
       socket.on("close", () => {

@@ -37,6 +37,7 @@ let base: string;
 let owner: TestAccount;
 let member: TestAccount;
 let stranger: TestAccount;
+let viewer: TestAccount;
 let fileId: string;
 
 const auth = (account: TestAccount) => ({ authorization: `Bearer ${account.token}` });
@@ -154,6 +155,7 @@ beforeAll(async () => {
   owner = await register("owner@example.com", "orchid lantern velvet");
   member = await register("member@example.com", "cedar mosaic thimble");
   stranger = await register("stranger@example.com", "quartz bellows meadow");
+  viewer = await register("viewer@example.com", "lantern pebble driftwood");
 
   // One shared file: owner uploads, member joins via invite claim + grant.
   const fileKey = generateKey();
@@ -199,6 +201,34 @@ beforeAll(async () => {
     url: `/api/collab/invites/${inviteToken}/grant`,
     headers: auth(owner),
     payload: { sealedKey: sealToPublicKey(fileKey, entry.claimantPublicKey as string) },
+  });
+
+  // A second collaborator, read-only, for the role tests.
+  const viewerInvite = await app.inject({
+    method: "POST",
+    url: "/api/collab/invites",
+    headers: auth(owner),
+    payload: { fileId, role: "viewer" },
+  });
+  const viewerToken = viewerInvite.json().token as string;
+  await app.inject({
+    method: "POST",
+    url: `/api/collab/invites/${viewerToken}/claim`,
+    headers: auth(viewer),
+  });
+  const viewerInvites = await app.inject({
+    method: "GET",
+    url: "/api/collab/invites",
+    headers: auth(owner),
+  });
+  const viewerEntry = (viewerInvites.json().invites as Array<Record<string, unknown>>).find(
+    (i) => i.token === viewerToken,
+  )!;
+  await app.inject({
+    method: "POST",
+    url: `/api/collab/invites/${viewerToken}/grant`,
+    headers: auth(owner),
+    payload: { sealedKey: sealToPublicKey(fileKey, viewerEntry.claimantPublicKey as string) },
   });
 });
 
@@ -445,5 +475,143 @@ describe("joining tells the room", () => {
 
     first.close();
     second.close();
+  });
+});
+
+/**
+ * View-only means view-only on the channel too. A viewer's frames would be
+ * applied by every editor's engine and then persisted by whoever saves
+ * next — a read-only collaborator writing to the document by laundering
+ * the edit through someone else's save.
+ */
+describe("a viewer cannot write through the channel", () => {
+  it("relays nothing a viewer posts, and stores nothing", async () => {
+    const editor = await connect(member);
+    await editor.next((f) => f.t === "caught-up");
+
+    const watcher = await connect(viewer);
+    await watcher.next((f) => f.t === "caught-up");
+    watcher.send({ t: "post", ref: "v1", payload: "viewer-edit" });
+
+    // No acknowledgement to the viewer, and nothing delivered to the editor.
+    expect(await watcher.silence((f) => f.t === "ack", 600)).toBe(true);
+    expect(await editor.silence((f) => f.t === "log" && f.payload === "viewer-edit")).toBe(true);
+
+    watcher.close();
+    editor.close();
+
+    // And nothing durable: a fresh joiner never replays it.
+    const probe = await connect(owner);
+    const seen: string[] = [];
+    for (;;) {
+      const frame = await probe.next((f) => f.t === "log" || f.t === "caught-up");
+      if (frame.t === "caught-up") break;
+      seen.push(String(frame.payload));
+    }
+    expect(seen).not.toContain("viewer-edit");
+    probe.close();
+  });
+
+  it("refuses a viewer's attempt to truncate the log with a snapshot claim", async () => {
+    const editor = await connect(member);
+    await editor.next((f) => f.t === "caught-up");
+    editor.send({ t: "post", ref: "keep1", payload: "editor-work" });
+    const ack = await editor.next((f) => f.t === "ack");
+
+    const watcher = await connect(viewer);
+    await watcher.next((f) => f.t === "caught-up");
+    watcher.send({ t: "snap", generation: 99, upTo: ack.seq });
+    expect(await editor.silence((f) => f.t === "truncated", 600)).toBe(true);
+
+    watcher.close();
+    editor.close();
+
+    // The editor's work survived the viewer's claim.
+    const probe = await connect(stranger === undefined ? owner : owner);
+    const seen: string[] = [];
+    for (;;) {
+      const frame = await probe.next((f) => f.t === "log" || f.t === "caught-up");
+      if (frame.t === "caught-up") break;
+      seen.push(String(frame.payload));
+    }
+    expect(seen).toContain("editor-work");
+    probe.close();
+  });
+});
+
+describe("the log cannot grow without bound", () => {
+  it("refuses posts past the cap and asks the room to snapshot", async () => {
+    // A dedicated instance with a tiny cap, so the test stays fast and the
+    // shared one keeps its normal limits.
+    const dir = mkdtempSync(join(tmpdir(), "engramer-cap-test-"));
+    const capped = await buildApp({
+      dataDir: dir,
+      quotaBytes: 512 * 1024,
+      webDistDir: null,
+      channelMaxBytes: 2_000,
+    });
+    await capped.listen({ port: 0, host: "127.0.0.1" });
+    const addr = capped.server.address();
+    const capBase = `ws://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+
+    const keys = generateAccountKeys("cap test passphrase");
+    const reg = await capped.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      payload: { email: "cap@example.com", loginKey: keys.loginKey, keyAttributes: keys.keyAttributes },
+    });
+    const capToken = reg.json().token as string;
+    const capAuth = { authorization: `Bearer ${capToken}` };
+    const capFileKey = generateKey();
+    const made = await capped.inject({
+      method: "POST",
+      url: "/api/files",
+      headers: capAuth,
+      payload: {
+        folderId: null,
+        encryptedKey: secretBoxSeal(capFileKey, keys.masterKey),
+        encryptedMeta: encryptFileMetadata(
+          { name: "big.docx", mime: "application/octet-stream", size: 1, mtime: 1 },
+          capFileKey,
+        ),
+      },
+    });
+    const capFileId = made.json().id as string;
+    await capped.inject({
+      method: "PUT",
+      url: `/api/files/${capFileId}/data`,
+      headers: { ...capAuth, "content-type": "application/octet-stream" },
+      payload: Buffer.from(encryptBytes(utf8Encode("x"), capFileKey)),
+    });
+
+    const ticketRes = await capped.inject({
+      method: "POST",
+      url: `/api/collab/${capFileId}/ticket`,
+      headers: capAuth,
+      payload: {},
+    });
+    const socket = new WebSocket(
+      `${capBase}/api/collab/${capFileId}/channel?ticket=${ticketRes.json().ticket}`,
+    );
+    const frames: Frame[] = [];
+    socket.on("message", (d) => frames.push(JSON.parse(String(d)) as Frame));
+    await new Promise<void>((res) => socket.once("open", () => res()));
+    socket.send(JSON.stringify({ t: "hello", lastSeq: 0 }));
+    await new Promise((r) => setTimeout(r, 300));
+
+    const chunk = "y".repeat(500);
+    for (let i = 0; i < 12; i++) {
+      socket.send(JSON.stringify({ t: "post", ref: `c${i}`, payload: chunk }));
+    }
+    await new Promise((r) => setTimeout(r, 800));
+
+    const acks = frames.filter((f) => f.t === "ack").length;
+    expect(acks).toBeGreaterThan(0); // early posts land
+    expect(acks).toBeLessThan(12); // later ones do not
+    expect(frames.some((f) => f.t === "please-snapshot")).toBe(true);
+
+    socket.close();
+    await capped.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 });

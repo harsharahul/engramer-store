@@ -29,6 +29,8 @@ export interface ServerConfig {
   maxVersions: number;
   /** Whether the live-collaboration relay accepts connections. */
   collabRelay: boolean;
+  /** Ceiling on a document channel's stored frames, in bytes. */
+  channelMaxBytes: number;
   /** Directory of a built web client to serve, if any. */
   webDistDir: string | null;
   /** PostgreSQL connection string; unset means embedded SQLite. */
@@ -76,6 +78,7 @@ export interface ConfigOverrides {
   maxBlobBytes?: number;
   maxVersions?: number;
   collabRelay?: boolean;
+  channelMaxBytes?: number;
   port?: number;
   webDistDir?: string | null;
 }
@@ -103,6 +106,13 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
     ),
     collabRelay:
       overrides.collabRelay ?? (process.env.ENGRAMER_COLLAB_RELAY ?? "on") !== "off",
+    // The floor only rules out a nonsense zero (which would refuse every
+    // frame); how much tail to carry above that is the operator's call.
+    channelMaxBytes: Math.max(
+      1024,
+      overrides.channelMaxBytes ??
+        Number(process.env.ENGRAMER_CHANNEL_MAX_BYTES ?? 8 * 1024 * 1024),
+    ),
     webDistDir:
       overrides.webDistDir !== undefined
         ? overrides.webDistDir
