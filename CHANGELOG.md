@@ -3,6 +3,17 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.39.1] - 2026-08-07
+
+### Fixed
+- **The iPhone app no longer closes while uploading several photos.**
+  Reading a photo is the heaviest thing the app does — recognising text,
+  scanning for barcodes at full resolution, thumbnailing — and uploading
+  a batch had started doing all of that for several photos at once,
+  which exhausted the memory of a phone and had iOS close the app
+  mid-upload. Transfers still overlap, because that is where the waiting
+  is; the reading now happens one photo at a time on a phone.
+
 ## [0.39.0] - 2026-08-07
 
 ### Added
