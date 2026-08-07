@@ -17,6 +17,8 @@
  * and the frame is never given anything but bytes.
  */
 
+import type { BridgeEffects, CollabBridge, EngineMessage, OutFrame } from "./collab";
+
 export type FileType = "docx" | "xlsx";
 
 const APP_BY_TYPE: Record<FileType, string> = {
@@ -67,12 +69,78 @@ export interface SessionHandlers {
   /** A shortcut pressed inside the frame, which this page cannot see. */
   onShortcut(name: string): void;
   onFailed(error: string): void;
+  /** A durable frame the bridge wants sealed and posted to the channel. */
+  onPost?(frame: OutFrame): void;
+  /** An ephemeral frame (cursor, presence) for the channel. */
+  onEph?(frame: OutFrame): void;
 }
 
 interface OOMessage {
   type?: string;
   isSave?: boolean;
   openCmd?: { url?: string };
+  /** The engine's messages carry more; the bridge reads them as data. */
+  [key: string]: unknown;
+}
+
+/**
+ * Every answer the page gives to the engine's collaboration chatter, as
+ * data. Without a bridge these are the single-user answers that have
+ * shipped since office editing existed, reproduced byte for byte and held
+ * there by their own regression tests; with a bridge attached the same
+ * questions route to the real membership, locks and change log. One branch,
+ * so the single-user path cannot drift by accident.
+ */
+export function answerServerMessage(message: OOMessage, collab?: CollabBridge): BridgeEffects {
+  if (collab) {
+    return collab.onEngineMessage(message as EngineMessage);
+  }
+  const effects: BridgeEffects = { toEditor: [], post: [], eph: [] };
+  switch (message.type) {
+    case "auth":
+      effects.toEditor.push({ type: "authChanges", changes: [] });
+      effects.toEditor.push({
+        type: "auth",
+        result: 1,
+        sessionId: "session-id",
+        participants: PARTICIPANTS.list,
+        locks: [],
+        changes: [],
+        changesIndex: 0,
+        indexUser: PARTICIPANTS.index,
+        buildVersion: "5.2.6",
+        buildNumber: 2,
+        licenseType: 3,
+      });
+      effects.toEditor.push({
+        type: "documentOpen",
+        data: {
+          type: "open",
+          status: "ok",
+          data: { "Editor.bin": message.openCmd?.url ?? DOCUMENT_URL },
+        },
+      });
+      return effects;
+    case "isSaveLock":
+      effects.toEditor.push({ type: "saveLock", saveLock: false });
+      return effects;
+    case "getLock":
+      effects.toEditor.push({ type: "getLock", locks: {} });
+      return effects;
+    case "saveChanges":
+      effects.toEditor.push({ type: "unSaveLock", index: 0, time: Date.now() });
+      return effects;
+    case "unLockDocument":
+      if (message.isSave) {
+        effects.toEditor.push({ type: "unSaveLock", time: -1, index: -1 });
+      }
+      return effects;
+    case "getMessages":
+      effects.toEditor.push({ type: "message" });
+      return effects;
+    default:
+      return effects;
+  }
 }
 
 export class EditorSession {
@@ -92,12 +160,29 @@ export class EditorSession {
     fileType: FileType,
     title: string,
     handlers: SessionHandlers,
+    collab?: CollabBridge,
   ) {
     this.frame = frame;
     this.fileType = fileType;
     this.title = title;
     this.handlers = handlers;
+    this.collab = collab;
     window.addEventListener("message", this.onMessage);
+  }
+
+  private readonly collab: CollabBridge | undefined;
+
+  /** Feeds bridge effects (remote frames, acks, membership) to the engine. */
+  applyEffects(effects: BridgeEffects): void {
+    for (const message of effects.toEditor) {
+      this.toEditor(message);
+    }
+    for (const frame of effects.post) {
+      this.handlers.onPost?.(frame);
+    }
+    for (const frame of effects.eph) {
+      this.handlers.onEph?.(frame);
+    }
   }
 
   close(): void {
@@ -238,56 +323,12 @@ export class EditorSession {
   }
 
   /**
-   * Standing in for the collaboration server the editor expects. A single
-   * local participant, no history, and the lock handshakes answered
-   * immediately so that opening and saving can complete.
+   * Standing in for the collaboration server the editor expects. The
+   * answers live in answerServerMessage so its two modes are pinned by
+   * tests; this only routes the effects.
    */
   private onServerMessage(message: OOMessage): void {
-    switch (message.type) {
-      case "auth":
-        this.toEditor({ type: "authChanges", changes: [] });
-        this.toEditor({
-          type: "auth",
-          result: 1,
-          sessionId: "session-id",
-          participants: PARTICIPANTS.list,
-          locks: [],
-          changes: [],
-          changesIndex: 0,
-          indexUser: PARTICIPANTS.index,
-          buildVersion: "5.2.6",
-          buildNumber: 2,
-          licenseType: 3,
-        });
-        this.toEditor({
-          type: "documentOpen",
-          data: {
-            type: "open",
-            status: "ok",
-            data: { "Editor.bin": message.openCmd?.url ?? DOCUMENT_URL },
-          },
-        });
-        return;
-      case "isSaveLock":
-        this.toEditor({ type: "saveLock", saveLock: false });
-        return;
-      case "getLock":
-        this.toEditor({ type: "getLock", locks: {} });
-        return;
-      case "saveChanges":
-        this.toEditor({ type: "unSaveLock", index: 0, time: Date.now() });
-        return;
-      case "unLockDocument":
-        if (message.isSave) {
-          this.toEditor({ type: "unSaveLock", time: -1, index: -1 });
-        }
-        return;
-      case "getMessages":
-        this.toEditor({ type: "message" });
-        return;
-      default:
-        return;
-    }
+    this.applyEffects(answerServerMessage(message, this.collab));
   }
 
   private editorConfig(): Record<string, unknown> {
