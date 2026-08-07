@@ -110,3 +110,45 @@ expiry like any link.
 
 The public endpoints never require an account, and none of them ever handle a
 plaintext byte or an unwrapped key.
+
+## Sharing with another account
+
+Beyond anonymous links, a file can be shared to a specific account, with a
+role: viewers read; editors also change content and metadata. The handshake
+never puts a key in a link and never lets the server (or anyone probing it)
+learn who has an account:
+
+1. The owner mints an **invitation**: an opaque claim-once token, served at
+   `/c/<token>`. The invitation carries identity, not key material; a leaked
+   invitation decrypts nothing.
+2. The recipient opens it signed in and claims it. Claiming reveals the
+   recipient's email and account public key to the owner — and only then,
+   which is what makes the disclosure consented. Every dead token
+   (fictional, revoked, expired, or already claimed) answers with one
+   identical response, so tokens cannot be told apart and accounts cannot
+   be enumerated; no endpoint anywhere resolves an email to an account.
+3. The owner's client seals the file key to the claimant's X25519 public
+   key (an anonymous sealed box) and releases it. This happens the moment
+   the owner opens the share dialog, or automatically on their next sync.
+
+A shared file then arrives through the recipient's ordinary delta sync,
+under its own cursor, and appears in **Shared with me**. It stays out of
+the recipient's folders and categories: its organization belongs to its
+owner. The owner's wrapped key never travels to recipients; each recipient
+holds the file key sealed to them alone. Bytes written by an editor count
+against the owner's quota, and every change a member makes reaches every
+other member's sync.
+
+Concurrent edits stay safe: the server accepts one save and refuses the
+other atomically, and the refused editor is asked a clean question — reload
+the winner's document, or keep their own work as a new file they own.
+
+Removing a collaborator stops the server serving them immediately. It
+cannot recall what they already read, and the dialog says so; the offered
+second step is **key rotation**, which re-encrypts the file's content,
+thumbnail, and search index under a fresh key and re-seals it to every
+remaining member. The removed account keeps its history and nothing more.
+
+What the server learns from all of this: which account shared which opaque
+file id with which other account, when, at what role, and the sealed boxes
+it cannot open. Nothing else.
