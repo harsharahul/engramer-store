@@ -66,6 +66,7 @@ export function fileToDto(row: FileRow) {
     encryptedKey: JSON.parse(row.encrypted_key) as unknown,
     encryptedMeta: JSON.parse(row.encrypted_meta) as unknown,
     keyEpoch: row.key_epoch,
+    generation: row.generation,
     size: row.size,
     thumbSize: row.thumb_size,
     indexSize: row.index_size,
@@ -123,6 +124,21 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     }
     const { collab_role, ...file } = row;
     return { file: file as FileRow, role: collab_role === "editor" ? "editor" : "viewer" };
+  };
+
+  /**
+   * Whether anyone holds a live editing channel on this file right now.
+   * Read from the shared presence table, never from process memory, so
+   * the answer holds when the writer's request lands on another pod.
+   */
+  const CHANNEL_PRESENCE_TTL_MS = 90_000;
+  const liveChannelMembers = async (fileId: string): Promise<number> => {
+    const row = await app.db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM channel_presence WHERE file_id = ? AND last_seen > ?",
+      fileId,
+      Date.now() - CHANNEL_PRESENCE_TTL_MS,
+    );
+    return Number(row?.n ?? 0);
   };
 
   /**
@@ -286,6 +302,21 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       return reply.code(403).send({ error: "view access only" });
     }
     const file = access.file;
+    // The tail-base invariant: while people are editing live, the channel
+    // tail is relative to the current generation, and a whole-document
+    // write that is not a claimed snapshot would silently strand every
+    // frame on a base it no longer matches — a plausible-looking wrong
+    // document, the worst failure this feature can produce. Refused here,
+    // structurally, with liveness read from the shared table.
+    if (
+      kind === "data" &&
+      request.headers["x-collab-snapshot"] === undefined &&
+      (await liveChannelMembers(id)) > 0
+    ) {
+      return reply
+        .code(409)
+        .send({ error: "someone is editing this document live; open it to join them" });
+    }
     // Every byte of a shared file belongs to its owner: quota, sizes and
     // sync attribution all key off the file's owner, never the writer.
     const ownerUid = file.user_id;
@@ -562,6 +593,15 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       return reply.code(403).send({ error: "view access only" });
     }
     const file = access.file;
+    // Same tail-base invariant as the single-request path.
+    if (
+      request.headers["x-collab-snapshot"] === undefined &&
+      (await liveChannelMembers(id)) > 0
+    ) {
+      return reply
+        .code(409)
+        .send({ error: "someone is editing this document live; open it to join them" });
+    }
     const body = partBeginSchema.parse(request.body);
 
     const keepsVersions = app.config.maxVersions > 0;
@@ -1044,6 +1084,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     id: row.id,
     folderId: null,
     encryptedMeta: JSON.parse(row.encrypted_meta) as unknown,
+    generation: row.generation,
     size: row.size,
     thumbSize: row.thumb_size,
     indexSize: row.index_size,

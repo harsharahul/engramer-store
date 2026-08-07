@@ -234,6 +234,45 @@ export function registerChannelRoutes(app: FastifyInstance): void {
               );
               return;
             }
+            case "snap": {
+              // A member persisted the document through a whole-document
+              // save; frames it contains stop being needed. Only frames AT
+              // OR BELOW the named position go — anything later replays on
+              // top of the new generation — and nothing is ever truncated
+              // on the strength of an unfinished snapshot, because nothing
+              // reaches here until the save succeeded.
+              const upTo = Number((frame as { upTo?: number }).upTo ?? 0);
+              const generation = Number((frame as { generation?: number }).generation ?? 0);
+              if (!Number.isInteger(upTo) || upTo <= 0) {
+                return;
+              }
+              await app.db.tx(async (t) => {
+                await t.run(
+                  "DELETE FROM channel_messages WHERE file_id = ? AND seq <= ?",
+                  fileId,
+                  upTo,
+                );
+                const remaining = await t.get<{ total: number | null }>(
+                  "SELECT SUM(bytes) AS total FROM channel_messages WHERE file_id = ?",
+                  fileId,
+                );
+                await t.run(
+                  `UPDATE channel_state SET snapshot_generation = ?, snapshot_seq = ?, bytes = ?, updated_at = ?
+                   WHERE file_id = ?`,
+                  generation,
+                  upTo,
+                  Number(remaining?.total ?? 0),
+                  Date.now(),
+                  fileId,
+                );
+              });
+              app.hub.broadcast(fileId, {
+                t: "truncated",
+                snapshotGeneration: generation,
+                snapshotSeq: upTo,
+              });
+              return;
+            }
             default:
               return;
           }

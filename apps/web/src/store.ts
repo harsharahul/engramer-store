@@ -91,6 +91,8 @@ export interface FileEntry {
   ownerEmail?: string;
   /** The key generation this entry's key belongs to (rotation counter). */
   keyEpoch?: number;
+  /** Which content generation is current; snapshot bookkeeping reads it. */
+  generation?: number;
 }
 
 export interface UploadItem {
@@ -169,7 +171,12 @@ interface StoreState {
   uploadFiles: (files: File[], folderId: string | null) => Promise<void>;
   uploadTree: (items: TreeFile[], baseFolderId: string | null) => Promise<void>;
   saveFileContent: (id: string, text: string) => Promise<void>;
-  saveFileBinary: (id: string, bytes: Uint8Array, searchText?: string) => Promise<void>;
+  saveFileBinary: (
+    id: string,
+    bytes: Uint8Array,
+    searchText?: string,
+    opts?: { collabSnapshot?: boolean },
+  ) => Promise<void>;
   createNote: (name: string, folderId: string | null) => Promise<string>;
   createOfficeDocument: (
     name: string,
@@ -280,6 +287,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
     createdAt: dto.createdAt,
     updatedAt: dto.updatedAt,
     keyEpoch: dto.keyEpoch ?? 0,
+    generation: dto.generation ?? 0,
   };
 }
 
@@ -320,6 +328,7 @@ export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEnt
     role: dto.role,
     ownerEmail: dto.ownerEmail,
     keyEpoch: dto.keyEpoch,
+    generation: dto.generation ?? 0,
   };
 }
 
@@ -1017,7 +1026,7 @@ export const useStore = create<StoreState>((set, get) => {
     // Binary flavor of the same flow, for document formats where the editor
     // exports bytes (e.g. .docx). searchText, when the editor can provide it,
     // keeps the file findable through client-side search.
-    saveFileBinary: async (id, bytes, searchText) => {
+    saveFileBinary: async (id, bytes, searchText, opts) => {
       const file = get().files.get(id);
       if (!file) {
         throw new Error("file not found");
@@ -1031,7 +1040,9 @@ export const useStore = create<StoreState>((set, get) => {
         throw new Error("this save could not be verified and was not stored");
       }
       try {
-        await uploadBlob(id, "data", sealed);
+        await uploadBlob(id, "data", sealed, undefined, undefined, {
+          collabSnapshot: opts?.collabSnapshot,
+        });
       } catch (err) {
         // Someone else's save landed first. Typed, so the editor can offer
         // the two honest ways out instead of a generic failure.

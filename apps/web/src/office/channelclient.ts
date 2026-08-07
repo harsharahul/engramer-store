@@ -147,6 +147,18 @@ export class ChannelClient {
     }
   }
 
+  /** The highest channel position this client has seen or been acked. */
+  get lastSeenSeq(): number {
+    return this.lastSeq;
+  }
+
+  /** Announces a completed snapshot: frames up to upTo stop being needed. */
+  snap(generation: number, upTo: number): void {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify({ t: "snap", generation, upTo }));
+    }
+  }
+
   close(): void {
     this.closed = true;
     this.socket?.close();
