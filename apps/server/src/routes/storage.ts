@@ -92,6 +92,56 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       uid,
     );
 
+  /**
+   * Ownership or membership. The owner sees the file in every state;
+   * a collaborator only while their membership is live and the file is
+   * neither trashed nor deleted. Everyone else gets the same nothing a
+   * stranger always got.
+   */
+  interface FileAccess {
+    file: FileRow;
+    role: "owner" | "editor" | "viewer";
+  }
+  const getAccessibleFile = async (id: string, uid: number): Promise<FileAccess | undefined> => {
+    const own = await getOwnFile(id, uid);
+    if (own) {
+      return { file: own, role: "owner" };
+    }
+    const row = await app.db.get<FileRow & { collab_role: string }>(
+      `SELECT f.*, c.role AS collab_role FROM file_collaborators c
+         JOIN files f ON f.id = c.file_id
+       WHERE c.file_id = ? AND c.user_id = ? AND c.revoked = 0
+         AND f.deleted = 0 AND f.trashed = 0`,
+      id,
+      uid,
+    );
+    if (!row) {
+      return undefined;
+    }
+    const { collab_role, ...file } = row;
+    return { file: file as FileRow, role: collab_role === "editor" ? "editor" : "viewer" };
+  };
+
+  /**
+   * A change to a shared file must reach every member's delta sync, and
+   * each member has their own cursor, so each membership row takes a seq
+   * from its member's counter. Runs inside the mutation's transaction.
+   */
+  const touchCollaborators = async (t: Db, fileId: string, now: number) => {
+    for (const member of await t.all<{ user_id: number }>(
+      "SELECT user_id FROM file_collaborators WHERE file_id = ? AND revoked = 0",
+      fileId,
+    )) {
+      await t.run(
+        "UPDATE file_collaborators SET update_seq = ?, updated_at = ? WHERE file_id = ? AND user_id = ?",
+        await nextSeq(t, member.user_id),
+        now,
+        fileId,
+        member.user_id,
+      );
+    }
+  };
+
   app.post("/api/folders", auth, async (request, reply) => {
     const body = createFolderSchema.parse(request.body);
     const uid = request.user.uid;
@@ -225,10 +275,17 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   ) => {
     const { id } = request.params as { id: string };
     const uid = request.user.uid;
-    const file = await getOwnFile(id, uid);
-    if (!file) {
+    const access = await getAccessibleFile(id, uid);
+    if (!access) {
       return reply.code(404).send({ error: "file not found" });
     }
+    if (access.role === "viewer") {
+      return reply.code(403).send({ error: "view access only" });
+    }
+    const file = access.file;
+    // Every byte of a shared file belongs to its owner: quota, sizes and
+    // sync attribution all key off the file's owner, never the writer.
+    const ownerUid = file.user_id;
     const keepsVersions = app.config.maxVersions > 0;
     const replacesContent = kind === "data" && file.uploaded === 1;
     // A replaced blob only frees quota when history is off; with versioning
@@ -242,12 +299,17 @@ export function registerStorageRoutes(app: FastifyInstance): void {
           : replacesContent && !keepsVersions
             ? file.size
             : 0;
-    const quota = await userQuota(app.db, uid, app.config.quotaBytes);
-    const quotaRoom = quota - ((await storageUsed(app.db, uid)) - reclaimable);
+    const quota = await userQuota(app.db, ownerUid, app.config.quotaBytes);
+    const quotaRoom = quota - ((await storageUsed(app.db, ownerUid)) - reclaimable);
     const maxBytes = Math.min(app.config.maxBlobBytes, quotaRoom);
     const declared = Number(request.headers["content-length"] ?? 0);
     if (maxBytes <= 0 || declared > maxBytes) {
-      return reply.code(413).send({ error: "storage quota exceeded" });
+      return reply.code(413).send({
+        error:
+          access.role === "owner"
+            ? "storage quota exceeded"
+            : "the owner of this document is out of storage space",
+      });
     }
     const nextGen = replacesContent ? file.generation + 1 : file.generation;
     const targetKey = kind === "data" ? blobKey(id, "data", nextGen) : blobKey(id, kind);
@@ -275,17 +337,21 @@ export function registerStorageRoutes(app: FastifyInstance): void {
 
     if (kind === "thumb" || kind === "index") {
       const column = kind === "thumb" ? "thumb_size" : "index_size";
-      await app.db.run(
-        `UPDATE files SET ${column} = ?, update_seq = ?, updated_at = ? WHERE id = ?`,
-        written,
-        await nextSeq(app.db, uid),
-        Date.now(),
-        id,
-      );
+      const now = Date.now();
+      await app.db.tx(async (t) => {
+        await t.run(
+          `UPDATE files SET ${column} = ?, update_seq = ?, updated_at = ? WHERE id = ?`,
+          written,
+          await nextSeq(t, ownerUid),
+          now,
+          id,
+        );
+        await touchCollaborators(t, id, now);
+      });
       return { size: written };
     }
 
-    return commitData(reply, uid, id, file, nextGen, targetKey, written, hasher.digest("hex"));
+    return commitData(reply, ownerUid, id, file, nextGen, targetKey, written, hasher.digest("hex"));
   };
 
   /**
@@ -391,15 +457,17 @@ export function registerStorageRoutes(app: FastifyInstance): void {
             staleBlobs.push(blobKey(id, "data", current.generation));
           }
         }
+        const now = Date.now();
         await t.run(
           "UPDATE files SET size = ?, generation = ?, uploaded = 1, content_hash = ?, update_seq = ?, updated_at = ? WHERE id = ?",
           written,
           nextGen,
           contentHash,
           await nextSeq(t, uid),
-          Date.now(),
+          now,
           id,
         );
+        await touchCollaborators(t, id, now);
         staleBlobs.push(...(await pruneVersions(t, id, uid)));
       });
     } catch (err) {
@@ -483,20 +551,29 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   app.post("/api/files/:id/data/parts", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
     const uid = request.user.uid;
-    const file = await getOwnFile(id, uid);
-    if (!file) {
+    const access = await getAccessibleFile(id, uid);
+    if (!access) {
       return reply.code(404).send({ error: "file not found" });
     }
+    if (access.role === "viewer") {
+      return reply.code(403).send({ error: "view access only" });
+    }
+    const file = access.file;
     const body = partBeginSchema.parse(request.body);
 
     const keepsVersions = app.config.maxVersions > 0;
     const replacesContent = file.uploaded === 1;
     const reclaimable = replacesContent && !keepsVersions ? file.size : 0;
-    const quota = await userQuota(app.db, uid, app.config.quotaBytes);
-    const quotaRoom = quota - ((await storageUsed(app.db, uid)) - reclaimable);
+    const quota = await userQuota(app.db, file.user_id, app.config.quotaBytes);
+    const quotaRoom = quota - ((await storageUsed(app.db, file.user_id)) - reclaimable);
     const maxBytes = Math.min(app.config.maxBlobBytes, quotaRoom);
     if (maxBytes <= 0 || body.size > maxBytes) {
-      return reply.code(413).send({ error: "storage quota exceeded" });
+      return reply.code(413).send({
+        error:
+          access.role === "owner"
+            ? "storage quota exceeded"
+            : "the owner of this document is out of storage space",
+      });
     }
 
     // One session per file: a fresh begin supersedes anything stale, and
@@ -599,11 +676,12 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     if (parts.length === 0 || !contiguous || total !== Number(row.declared_bytes)) {
       return reply.code(400).send({ error: "upload incomplete" });
     }
-    const file = await getOwnFile(id, uid);
-    if (!file) {
+    const access = await getAccessibleFile(id, uid);
+    if (!access || access.role === "viewer") {
       await dropSession(row);
       return reply.code(404).send({ error: "file not found" });
     }
+    const file = access.file;
     // Fail before assembly when another writer moved the file meanwhile;
     // commitData re-checks the same condition transactionally.
     if (
@@ -622,7 +700,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     // A blob assembled from parts was never in one stream to hash, so it has
     // no digest until something reads it. The check records one then, and
     // says so, rather than pretending the file was verified on arrival.
-    const result = await commitData(reply, uid, id, file, nextGen, row.blob_key, total, null);
+    const result = await commitData(reply, file.user_id, id, file, nextGen, row.blob_key, total, null);
     await app.db.run("DELETE FROM upload_parts WHERE session_id = ?", row.id);
     await app.db.run("DELETE FROM upload_sessions WHERE id = ?", row.id);
     return result;
@@ -667,7 +745,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
 
   const downloadBlob = async (request: FastifyRequest, reply: FastifyReply, kind: BlobKind) => {
     const { id } = request.params as { id: string };
-    const file = await getOwnFile(id, request.user.uid);
+    const file = (await getAccessibleFile(id, request.user.uid))?.file;
     const size =
       kind === "data" ? file?.size : kind === "thumb" ? file?.thumb_size : file?.index_size;
     if (!file || (kind === "data" && !file.uploaded) || (kind !== "data" && !size)) {
@@ -705,8 +783,17 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     const { id } = request.params as { id: string };
     const uid = request.user.uid;
     const body = patchFileSchema.parse(request.body);
-    if (!(await getOwnFile(id, uid))) {
+    const access = await getAccessibleFile(id, uid);
+    if (!access) {
       return reply.code(404).send({ error: "file not found" });
+    }
+    if (access.role === "viewer") {
+      return reply.code(403).send({ error: "view access only" });
+    }
+    // Where a file sits is the owner's tree; a collaborator's patch may
+    // carry new metadata, never a new location.
+    if (access.role !== "owner" && body.folderId !== undefined) {
+      return reply.code(403).send({ error: "only the owner can move this file" });
     }
     if (
       body.folderId !== undefined &&
@@ -715,19 +802,23 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     ) {
       return reply.code(404).send({ error: "destination folder not found" });
     }
-    await app.db.run(
-      `UPDATE files SET
-         folder_id = CASE WHEN ? = 1 THEN ? ELSE folder_id END,
-         encrypted_meta = COALESCE(?, encrypted_meta),
-         update_seq = ?, updated_at = ?
-       WHERE id = ?`,
-      body.folderId !== undefined ? 1 : 0,
-      body.folderId ?? null,
-      body.encryptedMeta ? JSON.stringify(body.encryptedMeta) : null,
-      await nextSeq(app.db, uid),
-      Date.now(),
-      id,
-    );
+    const now = Date.now();
+    await app.db.tx(async (t) => {
+      await t.run(
+        `UPDATE files SET
+           folder_id = CASE WHEN ? = 1 THEN ? ELSE folder_id END,
+           encrypted_meta = COALESCE(?, encrypted_meta),
+           update_seq = ?, updated_at = ?
+         WHERE id = ?`,
+        body.folderId !== undefined ? 1 : 0,
+        body.folderId ?? null,
+        body.encryptedMeta ? JSON.stringify(body.encryptedMeta) : null,
+        await nextSeq(t, access.file.user_id),
+        now,
+        id,
+      );
+      await touchCollaborators(t, id, now);
+    });
     const row = (await app.db.get<FileRow>("SELECT * FROM files WHERE id = ?", id))!;
     return fileToDto(row);
   });
@@ -737,14 +828,23 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     const uid = request.user.uid;
     const file = await getOwnFile(id, uid);
     if (!file) {
+      // A collaborator can see the file; only the owner can trash it.
+      if (await getAccessibleFile(id, uid)) {
+        return reply.code(403).send({ error: "only the owner can move this file to trash" });
+      }
       return reply.code(404).send({ error: "file not found" });
     }
-    await app.db.run(
-      "UPDATE files SET trashed = 1, update_seq = ?, updated_at = ? WHERE id = ?",
-      await nextSeq(app.db, uid),
-      Date.now(),
-      id,
-    );
+    const now = Date.now();
+    await app.db.tx(async (t) => {
+      // Members get the tombstone seq first, while their rows still match.
+      await touchCollaborators(t, id, now);
+      await t.run(
+        "UPDATE files SET trashed = 1, update_seq = ?, updated_at = ? WHERE id = ?",
+        await nextSeq(t, uid),
+        now,
+        id,
+      );
+    });
     return reply.code(204).send();
   });
 
@@ -757,13 +857,18 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     }
     // If the original folder was deleted, the file comes back at the root.
     const folderAlive = file.folder_id ? Boolean(await getOwnFolder(file.folder_id, uid)) : true;
-    await app.db.run(
-      "UPDATE files SET trashed = 0, folder_id = ?, update_seq = ?, updated_at = ? WHERE id = ?",
-      folderAlive ? file.folder_id : null,
-      await nextSeq(app.db, uid),
-      Date.now(),
-      id,
-    );
+    const now = Date.now();
+    await app.db.tx(async (t) => {
+      await t.run(
+        "UPDATE files SET trashed = 0, folder_id = ?, update_seq = ?, updated_at = ? WHERE id = ?",
+        folderAlive ? file.folder_id : null,
+        await nextSeq(t, uid),
+        now,
+        id,
+      );
+      // Restoring returns the file to its members' vaults too.
+      await touchCollaborators(t, id, now);
+    });
     return reply.code(204).send();
   });
 
@@ -779,12 +884,19 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       id,
     );
     await app.db.tx(async (t) => {
+      const now = Date.now();
+      // The membership rows are the tombstone carriers: bump their seqs
+      // while live, then revoke rather than delete, so each member's next
+      // sync still finds a row saying the file is gone.
+      await touchCollaborators(t, id, now);
+      await t.run("UPDATE file_collaborators SET revoked = 1 WHERE file_id = ?", id);
+      await t.run("UPDATE collab_invites SET revoked = 1 WHERE file_id = ?", id);
       await t.run("DELETE FROM shares WHERE file_id = ?", id);
       await t.run("DELETE FROM file_versions WHERE file_id = ?", id);
       await t.run(
         "UPDATE files SET deleted = 1, size = 0, thumb_size = 0, uploaded = 0, update_seq = ?, updated_at = ? WHERE id = ?",
         await nextSeq(t, uid),
-        Date.now(),
+        now,
         id,
       );
     });
@@ -808,27 +920,29 @@ export function registerStorageRoutes(app: FastifyInstance): void {
 
   app.get("/api/files/:id/versions", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
-    if (!(await getOwnFile(id, request.user.uid))) {
+    const access = await getAccessibleFile(id, request.user.uid);
+    if (!access) {
       return reply.code(404).send({ error: "file not found" });
     }
+    // Version rows are keyed by the OWNER's uid whoever is asking.
     const rows = await app.db.all<FileVersionRow>(
       "SELECT * FROM file_versions WHERE file_id = ? AND user_id = ? ORDER BY generation DESC",
       id,
-      request.user.uid,
+      access.file.user_id,
     );
     return { versions: rows.map(versionToDto) };
   });
 
   app.get("/api/files/:id/versions/:gen/data", auth, async (request, reply) => {
     const { id, gen } = request.params as { id: string; gen: string };
-    const uid = request.user.uid;
-    if (!(await getOwnFile(id, uid))) {
+    const access = await getAccessibleFile(id, request.user.uid);
+    if (!access) {
       return reply.code(404).send({ error: "file not found" });
     }
     const version = await app.db.get<FileVersionRow>(
       "SELECT * FROM file_versions WHERE file_id = ? AND user_id = ? AND generation = ?",
       id,
-      uid,
+      access.file.user_id,
       Number(gen),
     );
     if (!version) {
@@ -852,6 +966,10 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     const body = z.object({ encryptedMeta: secretBoxSchema }).parse(request.body);
     const file = await getOwnFile(id, uid);
     if (!file || !file.uploaded || file.trashed) {
+      // Restoring rewrites history; that stays the owner's call.
+      if (await getAccessibleFile(id, uid)) {
+        return reply.code(403).send({ error: "only the owner can restore a version" });
+      }
       return reply.code(404).send({ error: "file not found" });
     }
     const generation = Number(gen);
@@ -876,15 +994,17 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         file.updated_at,
       );
       await t.run("DELETE FROM file_versions WHERE file_id = ? AND generation = ?", id, generation);
+      const now = Date.now();
       await t.run(
         "UPDATE files SET generation = ?, size = ?, encrypted_meta = ?, update_seq = ?, updated_at = ? WHERE id = ?",
         generation,
         version.size,
         JSON.stringify(body.encryptedMeta),
         await nextSeq(t, uid),
-        Date.now(),
+        now,
         id,
       );
+      await touchCollaborators(t, id, now);
       return (await t.get<FileRow>("SELECT * FROM files WHERE id = ?", id))!;
     });
     if (!row) {

@@ -20,6 +20,7 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerStorageRoutes } from "./routes/storage.js";
 import { registerShareRoutes } from "./routes/shares.js";
 import { registerRequestRoutes } from "./routes/requests.js";
+import { registerCollabRoutes } from "./routes/collab.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -271,6 +272,7 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   registerStorageRoutes(app);
   registerShareRoutes(app);
   registerRequestRoutes(app);
+  registerCollabRoutes(app);
 
   app.get("/api/health", async () => ({ status: "ok" }));
 

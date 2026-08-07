@@ -55,6 +55,8 @@ export interface FileRow {
   content_hash: string | null;
   /** Which content blob is current: 0 = `<id>`, N = `<id>.g<N>`. */
   generation: number;
+  /** Advances when the file key is rotated after a collaborator is revoked. */
+  key_epoch: number;
   uploaded: number;
   trashed: number;
   deleted: number;
@@ -110,6 +112,37 @@ export interface RequestUploadRow {
   created_at: number;
 }
 
+export interface CollabInviteRow {
+  token: string;
+  file_id: string;
+  owner_id: number;
+  role: string;
+  expires_at: number | null;
+  revoked: number;
+  /** Account that claimed the invite; the owner seals the key to them. */
+  claimed_by: number | null;
+  claimed_at: number | null;
+  /** Set once the owner has released the sealed key. */
+  granted: number;
+  created_at: number;
+}
+
+export interface FileCollaboratorRow {
+  file_id: string;
+  user_id: number;
+  owner_id: number;
+  role: string;
+  /** The file key, sealed to the collaborator's account public key. */
+  sealed_key: string;
+  /** Advances when the owner rotates the file key. */
+  key_epoch: number;
+  /** Drawn from the COLLABORATOR's own sequence, so one sync cursor serves. */
+  update_seq: number;
+  revoked: number;
+  created_at: number;
+  updated_at: number;
+}
+
 export interface DbRunResult {
   changes: number;
 }
@@ -156,6 +189,8 @@ export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; type: str
   { table: "shares", column: "password_digest", type: "TEXT" },
   { table: "shares", column: "password_kdf", type: "TEXT" },
   { table: "shares", column: "wrapped_key", type: "TEXT" },
+  // Advances when the file key is rotated after a collaborator is revoked.
+  { table: "files", column: "key_epoch", type: "BIGINT NOT NULL DEFAULT 0" },
 ];
 
 /** Tables shared verbatim between the two dialects. */
@@ -264,6 +299,35 @@ export const COMMON_SCHEMA = `
       bytes BIGINT NOT NULL,
       PRIMARY KEY (session_id, part_no)
     );
+    CREATE TABLE IF NOT EXISTS collab_invites (
+      token TEXT PRIMARY KEY,
+      file_id TEXT NOT NULL REFERENCES files(id),
+      owner_id BIGINT NOT NULL REFERENCES users(id),
+      role TEXT NOT NULL,
+      expires_at BIGINT,
+      revoked BIGINT NOT NULL DEFAULT 0,
+      claimed_by BIGINT,
+      claimed_at BIGINT,
+      granted BIGINT NOT NULL DEFAULT 0,
+      created_at BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS collab_invites_owner ON collab_invites(owner_id, granted, revoked);
+    CREATE INDEX IF NOT EXISTS collab_invites_file ON collab_invites(file_id);
+    CREATE TABLE IF NOT EXISTS file_collaborators (
+      file_id TEXT NOT NULL REFERENCES files(id),
+      user_id BIGINT NOT NULL REFERENCES users(id),
+      owner_id BIGINT NOT NULL REFERENCES users(id),
+      role TEXT NOT NULL,
+      sealed_key TEXT NOT NULL,
+      key_epoch BIGINT NOT NULL DEFAULT 0,
+      update_seq BIGINT NOT NULL,
+      revoked BIGINT NOT NULL DEFAULT 0,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
+      PRIMARY KEY (file_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS file_collaborators_user ON file_collaborators(user_id, update_seq);
+    CREATE INDEX IF NOT EXISTS file_collaborators_file ON file_collaborators(file_id, revoked);
 `;
 
 /** Embedded SQLite behind the async facade; every call is synchronous
