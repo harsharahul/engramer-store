@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { decodeHeic, isHeicLike, normalizeImageMime } from "./heic";
+import { PHOTO_ACCEPT, decodeHeic, isHeicLike, normalizeImageMime } from "./heic";
 
 const fixture = () =>
   new Uint8Array(readFileSync(new URL("./fixtures/tiny.heic", import.meta.url)));
@@ -56,5 +56,32 @@ describe("decodeHeic", () => {
 
   it("rejects bytes that are not a heic image", async () => {
     await expect(decodeHeic(new Uint8Array([1, 2, 3, 4]))).rejects.toThrow();
+  });
+});
+
+/**
+ * iOS decides at pick time whether to hand over the original HEIC or a
+ * JPEG it transcodes on the spot. A wildcard in the accept list is read as
+ * "any image will do", and it duly converts — which is what happened on
+ * the owner's phone even though the list also named HEIC explicitly. So
+ * the property that matters is the ABSENCE of the wildcard, not just the
+ * presence of the HEIC types.
+ */
+describe("what the photo picker declares it accepts", () => {
+  it("names heic and heif, in both mime and extension form", () => {
+    for (const token of ["image/heic", "image/heif", ".heic", ".heif"]) {
+      expect(PHOTO_ACCEPT).toContain(token);
+    }
+  });
+
+  it("carries no wildcard, which is what makes iOS transcode to JPEG", () => {
+    expect(PHOTO_ACCEPT).not.toContain("image/*");
+    expect(PHOTO_ACCEPT).not.toContain("video/*");
+  });
+
+  it("still admits the ordinary photo and video formats a library holds", () => {
+    for (const token of ["image/jpeg", "image/png", "video/quicktime", "video/mp4"]) {
+      expect(PHOTO_ACCEPT).toContain(token);
+    }
   });
 });

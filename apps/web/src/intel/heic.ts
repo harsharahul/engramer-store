@@ -106,3 +106,28 @@ export async function displayableImage(blob: Blob, name: string): Promise<Blob> 
   const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
   return png ?? blob;
 }
+
+/**
+ * What the photo-library picker declares it accepts.
+ *
+ * Deliberately free of `image/*`: iOS reads a wildcard as permission to
+ * hand over whatever format it likes and transcodes HEIC to JPEG at pick
+ * time, before the page sees a single byte. Naming the types outright is
+ * what gets the originals, so the list is enumerated rather than widened.
+ * The general Upload input stays accept-less and takes any file at all.
+ */
+export const PHOTO_ACCEPT = [
+  "image/heic",
+  "image/heif",
+  ".heic",
+  ".heif",
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/tiff",
+  "video/quicktime",
+  "video/mp4",
+  ".mov",
+  ".mp4",
+].join(",");

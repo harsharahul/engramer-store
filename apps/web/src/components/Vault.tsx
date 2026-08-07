@@ -9,6 +9,8 @@ import {
   type CSSProperties,
   type DragEvent,
 } from "react";
+import { diag } from "../diag";
+import { detailsSubjectId } from "../details";
 import { useStore, type FileEntry, type FolderEntry } from "../store";
 import { api } from "../api";
 import {
@@ -37,6 +39,7 @@ import { nativeShell, nativeUnlockAvailable } from "../native";
 import { APP_VERSION } from "../version";
 import { reloadForUpdate, watchForUpdate } from "../update";
 import { startWatchSync } from "../watchfolders";
+import { PHOTO_ACCEPT } from "../intel/heic";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
 import { cosine, embedQuery, semanticEnabled, setSemanticEnabled } from "../intel/semantic";
 import { factsEnabled, setFactsEnabled } from "../intel/scan";
@@ -434,9 +437,12 @@ export function Vault() {
   const selectedFile =
     selection.size === 1 ? (store.files.get([...selection][0]!) ?? null) : null;
   // The pane follows the selection; the sheet follows what it was opened on.
-  const detailsFile = isMobile
-    ? (detailsFileId ? (store.files.get(detailsFileId) ?? null) : null)
-    : selectedFile;
+  const detailsSubject = detailsSubjectId({
+    pinnedId: detailsFileId,
+    selectedId: selectedFile?.id ?? null,
+    sheet: isMobile,
+  });
+  const detailsFile = detailsSubject ? (store.files.get(detailsSubject) ?? null) : null;
   const freshIds = useMemo(
     () => new Set(store.reveal?.items.map((item) => item.fileId) ?? []),
     [store.reveal],
@@ -479,9 +485,19 @@ export function Vault() {
   }, []);
 
   useEffect(() => {
+    diag("vault", `mounted (${isMobile ? "phone" : "wide"} layout)`);
+  }, [isMobile]);
+
+  useEffect(() => {
     clearSelection();
+    if (detailsSheet) {
+      diag("details", "closed: the view or the search changed");
+    }
     setDetailsSheet(false);
     setDetailsFileId(null);
+    // Deliberately not watching detailsSheet: this closes the sheet, and
+    // watching what it sets would make it re-run and close it again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, query, clearSelection]);
   useEffect(() => setSearchCursor(0), [query]);
 
@@ -512,6 +528,7 @@ export function Vault() {
     // On phones the inspector is an on-demand bottom sheet, not a pane.
     setDetailsFileId(id);
     setDetailsSheet(true);
+    diag("details", `opened as a ${isMobile ? "sheet" : "pane"}`);
   };
 
   const uploadTo = useCallback(
@@ -684,6 +701,9 @@ export function Vault() {
       lastSelected.current = id;
     }
     // Selecting for a menu must not resurface the phone details sheet.
+    if (detailsSheet) {
+      diag("details", "closed: a file menu opened");
+    }
     setDetailsSheet(false);
     setCtxMenu({ x, y, items: fileMenuItems(file) });
   };
@@ -1581,13 +1601,13 @@ export function Vault() {
               e.target.value = "";
             }}
           />
-          {/* Declaring heic is what stops iOS transcoding picked photos to
-              JPEG before the page ever sees them; the general Upload input
-              stays accept-less so it takes any file at all. */}
+          {/* Naming the formats outright, wildcard-free, is what stops iOS
+              transcoding picked photos to JPEG before the page ever sees
+              them; see PHOTO_ACCEPT. */}
           <input
             ref={photoInput}
             type="file"
-            accept="image/*,video/*,image/heic,image/heif,.heic,.heif"
+            accept={PHOTO_ACCEPT}
             multiple
             hidden
             onChange={(e) => {
@@ -1863,6 +1883,7 @@ export function Vault() {
             onTagClick={searchTag}
             onToast={showToast}
             onClose={() => {
+              diag("details", "closed: the close button");
               if (isMobile) {
                 setDetailsSheet(false);
                 setDetailsFileId(null);
@@ -1948,6 +1969,9 @@ export function Vault() {
           className={`tab${drawerOpen ? " active" : ""}`}
           onClick={() => {
             // The drawer and the details sheet never stack.
+            if (detailsSheet) {
+              diag("details", "closed: the More drawer opened");
+            }
             setDetailsSheet(false);
             setDrawerOpen(true);
           }}

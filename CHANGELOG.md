@@ -5,6 +5,18 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+- **Details stays open on a phone.** The panel read its file out of the
+  current selection, and a selection is cleared by ordinary things: a tap
+  on empty space, a menu opening, the grid rebuilding. Opening details now
+  pins the file it was opened on, and the panel reads the pin, in both the
+  phone sheet and the desktop pane.
+- **Photos picked from the library keep their original HEIC.** The picker
+  declared `image/*` alongside the HEIC types, and iOS reads a wildcard as
+  permission to hand over whatever format it likes: it transcoded to JPEG
+  at pick time, before the page saw a byte. The formats are now named
+  outright, with no wildcard.
+
 ### Added
 - **Choose the name collaborators see.** Profile has a name field. Set it
   and the people you edit a document with see that name beside your
