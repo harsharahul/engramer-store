@@ -16,8 +16,9 @@ import {
   utf8Encode,
   type FileMetadata,
 } from "@engramer/crypto";
-import { api, uploadBlob, withRetry, type FileDto, type FolderDto, type SharedFileDto } from "./api";
+import { ApiError, api, uploadBlob, withRetry, type FileDto, type FolderDto, type SharedFileDto } from "./api";
 import { openSharedFileKey, sealFileKeyFor } from "./collab";
+import { SaveConflictError, copyName } from "./conflict";
 import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { clearSession, suspendSession, type Session } from "./session";
@@ -174,6 +175,8 @@ interface StoreState {
     kind: "docx" | "xlsx",
     folderId: string | null,
   ) => Promise<string>;
+  /** A conflicting save kept as this account's own new file. */
+  saveFileCopy: (sourceId: string, bytes: Uint8Array, searchText?: string) => Promise<string>;
   renameFile: (id: string, name: string) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
   /**
@@ -970,7 +973,14 @@ export const useStore = create<StoreState>((set, get) => {
         throw new Error("file not found");
       }
       const bytes = utf8Encode(text);
-      await uploadBlob(id, "data", encryptBytes(bytes, file.key));
+      try {
+        await uploadBlob(id, "data", encryptBytes(bytes, file.key));
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          throw new SaveConflictError(id);
+        }
+        throw err;
+      }
       const digest = contentDigest(bytes);
       const searchText = text.slice(0, 100_000);
       const rescanned = await rescanFacts(file, searchText, digest);
@@ -1015,7 +1025,16 @@ export const useStore = create<StoreState>((set, get) => {
       if (!digestMatches(readBack, contentDigest(bytes))) {
         throw new Error("this save could not be verified and was not stored");
       }
-      await uploadBlob(id, "data", sealed);
+      try {
+        await uploadBlob(id, "data", sealed);
+      } catch (err) {
+        // Someone else's save landed first. Typed, so the editor can offer
+        // the two honest ways out instead of a generic failure.
+        if (err instanceof ApiError && err.status === 409) {
+          throw new SaveConflictError(id);
+        }
+        throw err;
+      }
       const digest = contentDigest(bytes);
       const rescanned = await rescanFacts(file, searchText, digest);
       if (searchText !== undefined || rescanned) {
@@ -1092,6 +1111,45 @@ export const useStore = create<StoreState>((set, get) => {
         encryptFileMetadata(meta, fileKey),
       );
       await uploadBlob(dto.id, "data", encryptBytes(bytes, fileKey));
+      applyFile({ ...dto, uploaded: true, size: bytes.length });
+      return dto.id;
+    },
+
+    /**
+     * The way out of a save conflict that keeps the loser's work: their
+     * exported bytes land in a NEW file of their own, owned by this account
+     * whoever owns the original, and the contested document stays exactly
+     * as its winner saved it.
+     */
+    saveFileCopy: async (sourceId, bytes, searchText) => {
+      const source = get().files.get(sourceId);
+      if (!source) {
+        throw new Error("file not found");
+      }
+      const fileKey = generateKey();
+      const meta: FileMetadata = {
+        name: copyName(source.name),
+        mime: source.mime,
+        size: bytes.length,
+        mtime: Date.now(),
+        category: source.category,
+        tags: source.tags,
+        digest: contentDigest(bytes),
+        ...(searchText !== undefined ? { hasText: true } : {}),
+      };
+      const dto = await api.createFile(
+        source.shared ? null : source.folderId,
+        secretBoxSeal(fileKey, masterKey()),
+        encryptFileMetadata(meta, fileKey),
+      );
+      await uploadBlob(dto.id, "data", encryptBytes(bytes, fileKey));
+      if (searchText !== undefined) {
+        await uploadBlob(
+          dto.id,
+          "index",
+          encryptBytes(encodeIndexPayload({ text: searchText.slice(0, 100_000) }), fileKey),
+        );
+      }
       applyFile({ ...dto, uploaded: true, size: bytes.length });
       return dto.id;
     },
