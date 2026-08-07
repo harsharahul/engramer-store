@@ -1,5 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { fileBytes } from "./native";
+import { fileBytes, mimeFromName } from "./native";
+
+/**
+ * Files from the shell's picker arrive as bytes and a name, with no type:
+ * it hands over paths, not browser `File`s. Downstream everything branches
+ * on the mime, so the name has to supply it. HEIC is recovered later by
+ * normalizeImageMime, but nothing recovers a video, and a typeless .mov
+ * would upload as an unplayable blob.
+ */
+describe("mimeFromName", () => {
+  it("names the formats an iPhone library actually holds", () => {
+    expect(mimeFromName("IMG_0001.HEIC")).toBe("image/heic");
+    expect(mimeFromName("IMG_0002.jpg")).toBe("image/jpeg");
+    expect(mimeFromName("IMG_0003.PNG")).toBe("image/png");
+    expect(mimeFromName("IMG_0004.mov")).toBe("video/quicktime");
+    expect(mimeFromName("IMG_0005.mp4")).toBe("video/mp4");
+  });
+
+  it("says nothing rather than guessing wrong", () => {
+    // An empty type is honest and recoverable; a wrong one is neither.
+    expect(mimeFromName("notes")).toBe("");
+    expect(mimeFromName("archive.zzz")).toBe("");
+  });
+});
 
 /**
  * The shell boundary carries no types: values arrive as JSON from another

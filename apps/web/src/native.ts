@@ -141,6 +141,67 @@ export async function watchedFileRead(path: string): Promise<Uint8Array> {
   return fileBytes(await invoke("watched_file_read", { path }));
 }
 
+/**
+ * The type a picked file's name implies, or "" when the name does not say.
+ *
+ * The shell hands over paths rather than browser `File`s, so nothing sets a
+ * type and everything downstream branches on one. Only the formats a photo
+ * library actually holds are listed: an empty answer is honest and can be
+ * recovered from the name later, a wrong one cannot.
+ */
+export function mimeFromName(name: string): string {
+  const ext = name.toLowerCase().split(".").pop() ?? "";
+  const known: Record<string, string> = {
+    heic: "image/heic",
+    heif: "image/heif",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    tiff: "image/tiff",
+    dng: "image/x-adobe-dng",
+    mov: "video/quicktime",
+    mp4: "video/mp4",
+    m4v: "video/x-m4v",
+  };
+  return known[ext] ?? "";
+}
+
+/**
+ * The system photo picker, as `File`s carrying the ORIGINAL bytes.
+ *
+ * A web file input cannot get these on iOS: the system transcodes HEIC to
+ * JPEG on the way out, whatever the accept attribute says, so the page never
+ * sees what the camera recorded. The shell's picker asks for each asset as
+ * stored instead. Returns null where there is no such picker (every browser,
+ * and any shell too old to carry the command), so callers fall back to the
+ * file input rather than losing the ability to add photos at all.
+ */
+export async function pickPhotos(): Promise<File[] | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  let paths: unknown;
+  try {
+    paths = await invoke("pick_photos", {});
+  } catch {
+    // An older shell, or a platform without the picker.
+    return null;
+  }
+  if (!Array.isArray(paths)) {
+    return null;
+  }
+  const files: File[] = [];
+  for (const path of paths as string[]) {
+    const name = path.split("/").pop() || "photo";
+    const bytes = fileBytes(await invoke("watched_file_read", { path }));
+    files.push(new File([bytes as BlobPart], name, { type: mimeFromName(name) }));
+  }
+  return files;
+}
+
 /** Native folder picker; null when dismissed. */
 export async function pickFolder(): Promise<string | null> {
   const invoke = tauriInvoke();

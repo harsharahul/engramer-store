@@ -8,6 +8,7 @@
 
 mod egc1;
 mod media;
+mod photos;
 mod unlock;
 mod watched;
 
@@ -102,6 +103,7 @@ pub fn run() {
         .manage(media::MediaState::default())
         .register_asynchronous_uri_scheme_protocol("stream", media::handle)
         .invoke_handler(tauri::generate_handler![
+            photos::pick_photos,
             unlock::native_unlock_available,
             unlock::unlock_secret_store,
             unlock::unlock_secret_get,
