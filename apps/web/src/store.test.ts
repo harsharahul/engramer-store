@@ -1,5 +1,53 @@
-import { describe, expect, it } from "vitest";
-import { metadataOf, type FileEntry } from "./store";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { encryptFileMetadata, generateKey, ready, secretBoxSeal } from "@engramer/crypto";
+import type { PreparedFile } from "./transfer";
+import type { FileDto } from "./api";
+
+const gauge = vi.hoisted(() => ({ running: 0, peak: 0 }));
+
+vi.mock("./transfer", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./transfer")>();
+  return {
+    ...original,
+    analyzeFile: async (file: File): Promise<PreparedFile> => {
+      gauge.running++;
+      gauge.peak = Math.max(gauge.peak, gauge.running);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      gauge.running--;
+      return {
+        meta: { name: file.name, mime: "image/jpeg", size: file.size, mtime: 1 },
+        analysis: { category: "Photos", tags: [] },
+        thumbnail: null,
+      };
+    },
+    encryptAndUpload: async (
+      file: File,
+      folderId: string | null,
+      masterKey: Uint8Array,
+      prepared: PreparedFile,
+    ) => {
+      const fileKey = generateKey();
+      const dto: FileDto = {
+        id: `up-${file.name}`,
+        folderId,
+        encryptedKey: secretBoxSeal(fileKey, masterKey),
+        encryptedMeta: encryptFileMetadata(prepared.meta, fileKey),
+        size: file.size,
+        thumbSize: 0,
+        indexSize: 0,
+        uploaded: true,
+        trashed: false,
+        deleted: false,
+        updateSeq: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      return { dto, fileKey, meta: prepared.meta };
+    },
+  };
+});
+
+import { metadataOf, useStore, type FileEntry } from "./store";
 
 /**
  * Metadata is rebuilt from the in-memory entry on every patch, so anything
@@ -64,5 +112,38 @@ describe("metadataOf", () => {
       tags: ["documents"],
       favorite: true,
     });
+  });
+});
+
+/**
+ * A multi-photo pick from a phone is the common upload, and its wall-clock
+ * time is the per-file pipeline times the batch when nothing overlaps. The
+ * folder path has had a bounded pool from the start; this holds the plain
+ * file path to the same standard.
+ */
+describe("uploadFiles", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  it("overlaps the per-file pipelines instead of uploading one at a time", async () => {
+    useStore.setState({
+      session: {
+        email: "t@example.com",
+        token: "t",
+        masterKey: generateKey(),
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      refreshUsage: async () => {},
+    });
+    const files = Array.from(
+      { length: 6 },
+      (_, i) => new File([new Uint8Array(64)], `p${i}.jpg`, { type: "image/jpeg" }),
+    );
+    await useStore.getState().uploadFiles(files, "folder-1");
+    expect(gauge.peak).toBeGreaterThan(1);
+    expect(gauge.peak).toBeLessThanOrEqual(4);
+    expect(useStore.getState().files.size).toBe(6);
   });
 });

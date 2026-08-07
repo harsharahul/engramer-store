@@ -18,6 +18,23 @@
 // lives in apps/web/src/office/session.ts.
 
 (function () {
+  // On touch devices, iOS zooms the whole page when a focused input's font
+  // is under 16px, and it judges the TOP-LEVEL page even when the input
+  // lives in this frame. The editor's typing surface is a hidden caret
+  // catcher (#area_id) that the engine styles at 8px inline and focuses on
+  // nearly every tap into a paragraph or cell, so editing looked like
+  // random zoom-in on the phone. The app's own 16px rule cannot reach this
+  // opaque-origin document; a rule here can, and author !important beats
+  // the inline style. touch-action on body also suppresses double-tap
+  // zoom, which the spreadsheet stylesheet sets and the document one lacks.
+  if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
+    var touchStyle = document.createElement('style');
+    touchStyle.textContent =
+      '#area_id { font-size: 16px !important; }\n' +
+      'body { touch-action: manipulation; }';
+    (document.head || document.documentElement).appendChild(touchStyle);
+  }
+
   var MIME_BY_EXT = {
     png: "image/png",
     jpg: "image/jpeg",

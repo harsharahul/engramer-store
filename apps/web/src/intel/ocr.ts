@@ -6,6 +6,7 @@
  * sessions never pay for it.
  */
 import type { Worker } from "tesseract.js";
+import { decodeHeic, isHeicLike } from "./heic";
 
 const PREF_KEY = "engram-ocr";
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -61,10 +62,24 @@ function scheduleShutdown(): void {
 /** Big photos are downscaled before recognition: faster and no less accurate. */
 async function normalized(image: Blob): Promise<Blob> {
   try {
-    const bitmap = await createImageBitmap(image);
+    // HEIC needs our own decoder where the platform lacks one, and the
+    // recognizer cannot read the original bytes there either, so a decoded
+    // HEIC is always re-encoded below even at full size.
+    let native = true;
+    let bitmap: ImageBitmap;
+    try {
+      bitmap = await createImageBitmap(image);
+    } catch (err) {
+      if (!isHeicLike(image.type, "")) {
+        throw err;
+      }
+      const decoded = await decodeHeic(new Uint8Array(await image.arrayBuffer()));
+      bitmap = await createImageBitmap(new ImageData(decoded.data, decoded.width, decoded.height));
+      native = false;
+    }
     const { width, height } = bitmap;
     const scale = Math.min(1, MAX_EDGE_PX / Math.max(width, height));
-    if (scale === 1) {
+    if (scale === 1 && native) {
       bitmap.close();
       return image;
     }
