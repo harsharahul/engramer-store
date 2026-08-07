@@ -12,6 +12,13 @@ All notable changes to Engram Store are documented here, following
   present, correct, and invisible. Tapping Details appeared to do nothing.
 
 ### Added
+- **Photos keep their original quality on iPhone.** Adding photos through
+  the app now uses the system picker, which hands over each photo and video
+  as it was recorded. Until now iOS re-encoded every HEIC photo to JPEG and
+  every HEVC video to H.264 on its way into the app, and no setting on the
+  web side could prevent it. The picker needs no access to your photo
+  library: it runs outside the app and passes over only what you choose.
+  Requires the updated iPhone app; everywhere else is unchanged.
 - **Move between files without leaving the viewer.** Swipe left or right on
   a phone, use the arrow buttons or the arrow keys elsewhere. It steps
   through whatever the current view is showing, in the order it is showing

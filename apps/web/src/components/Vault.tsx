@@ -36,7 +36,7 @@ import {
   markUnlockDeclined,
   unlockDeclined,
 } from "../unlock";
-import { nativeShell, nativeUnlockAvailable } from "../native";
+import { nativeShell, nativeUnlockAvailable, pickPhotos } from "../native";
 import { APP_VERSION } from "../version";
 import { reloadForUpdate, watchForUpdate } from "../update";
 import { startWatchSync } from "../watchfolders";
@@ -1027,7 +1027,19 @@ export function Vault() {
           id: "photos",
           label: "Photos and videos",
           icon: <PhotoGlyph size={15} />,
-          run: () => photoInput.current?.click(),
+          run: () => {
+            // The shell's picker keeps originals; the file input cannot, so
+            // it is the fallback rather than the other way round.
+            void pickPhotos()
+              .then((picked) => {
+                if (picked === null) {
+                  photoInput.current?.click();
+                } else if (picked.length > 0) {
+                  uploadTo(picked);
+                }
+              })
+              .catch(() => photoInput.current?.click());
+          },
         },
         { id: "camera", label: "Take photo", icon: <CameraGlyph size={15} />, run: () => cameraInput.current?.click() },
         {
