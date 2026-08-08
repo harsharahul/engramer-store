@@ -20,30 +20,40 @@ pub fn derive_kek(
     ops_limit: u64,
     mem_limit: usize,
 ) -> Result<[u8; KEY_BYTES], CryptoError> {
-    Ok(backend::pwhash_argon2id(KEY_BYTES, password.as_bytes(), salt, ops_limit, mem_limit)?
-        .try_into()
-        .unwrap())
+    Ok(
+        backend::pwhash_argon2id(KEY_BYTES, password.as_bytes(), salt, ops_limit, mem_limit)?
+            .try_into()
+            .unwrap(),
+    )
 }
 
 /// What is sent to the server in place of the password.
 pub fn derive_login_key(kek: &[u8; KEY_BYTES]) -> [u8; KEY_BYTES] {
-    backend::kdf_derive(KEY_BYTES, 1, CTX_LOGIN, kek).try_into().unwrap()
+    backend::kdf_derive(KEY_BYTES, 1, CTX_LOGIN, kek)
+        .try_into()
+        .unwrap()
 }
 
 /// What the server stores: BLAKE2b of the login key.
 pub fn login_key_digest(login_key: &[u8; KEY_BYTES]) -> [u8; KEY_BYTES] {
-    backend::generichash(KEY_BYTES, login_key).try_into().unwrap()
+    backend::generichash(KEY_BYTES, login_key)
+        .try_into()
+        .unwrap()
 }
 
 /// The key that wraps the master key for device unlock: derived from an
 /// opaque secret via BLAKE2b then the kdf, exactly as `deriveUnlockKey`.
 pub fn derive_unlock_key(secret: &[u8]) -> [u8; KEY_BYTES] {
     let hashed: [u8; KEY_BYTES] = backend::generichash(KEY_BYTES, secret).try_into().unwrap();
-    backend::kdf_derive(KEY_BYTES, 1, CTX_UNLOCK, &hashed).try_into().unwrap()
+    backend::kdf_derive(KEY_BYTES, 1, CTX_UNLOCK, &hashed)
+        .try_into()
+        .unwrap()
 }
 
 /// Share-link subkeys: id 1 proves password knowledge to the server, id 2
 /// wraps the file key locally and never leaves the client.
 pub fn share_subkey(link_kek: &[u8; KEY_BYTES], id: u64) -> [u8; KEY_BYTES] {
-    backend::kdf_derive(KEY_BYTES, id, CTX_SHARE, link_kek).try_into().unwrap()
+    backend::kdf_derive(KEY_BYTES, id, CTX_SHARE, link_kek)
+        .try_into()
+        .unwrap()
 }

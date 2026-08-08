@@ -37,7 +37,11 @@ pub fn random_bytes(n: usize) -> Vec<u8> {
     out
 }
 
-pub fn secretbox_seal(plaintext: &[u8], nonce: &[u8; NONCE_BYTES], key: &[u8; KEY_BYTES]) -> Vec<u8> {
+pub fn secretbox_seal(
+    plaintext: &[u8],
+    nonce: &[u8; NONCE_BYTES],
+    key: &[u8; KEY_BYTES],
+) -> Vec<u8> {
     init();
     let mut out = vec![0u8; plaintext.len() + MAC_BYTES];
     let rc = unsafe {
@@ -60,7 +64,9 @@ pub fn secretbox_open(
 ) -> Result<Vec<u8>, CryptoError> {
     init();
     if ciphertext.len() < MAC_BYTES {
-        return Err(CryptoError::Malformed("secretbox ciphertext shorter than its tag"));
+        return Err(CryptoError::Malformed(
+            "secretbox ciphertext shorter than its tag",
+        ));
     }
     let mut out = vec![0u8; ciphertext.len() - MAC_BYTES];
     let rc = unsafe {
@@ -126,7 +132,12 @@ impl Hasher {
 
 /// `crypto_kdf_derive_from_key`: BLAKE2b with the context as personal and
 /// the id as salt. The context must be exactly 8 bytes.
-pub fn kdf_derive(out_len: usize, subkey_id: u64, context: &[u8; 8], key: &[u8; KEY_BYTES]) -> Vec<u8> {
+pub fn kdf_derive(
+    out_len: usize,
+    subkey_id: u64,
+    context: &[u8; 8],
+    key: &[u8; KEY_BYTES],
+) -> Vec<u8> {
     init();
     let mut out = vec![0u8; out_len];
     let rc = unsafe {
@@ -218,7 +229,10 @@ impl StreamPush {
 pub struct StreamPull(ffi::crypto_secretstream_xchacha20poly1305_state);
 
 impl StreamPull {
-    pub fn new(header: &[u8; STREAM_HEADER_BYTES], key: &[u8; KEY_BYTES]) -> Result<Self, CryptoError> {
+    pub fn new(
+        header: &[u8; STREAM_HEADER_BYTES],
+        key: &[u8; KEY_BYTES],
+    ) -> Result<Self, CryptoError> {
         init();
         let mut state = std::mem::MaybeUninit::uninit();
         let rc = unsafe {
@@ -237,7 +251,9 @@ impl StreamPull {
     /// Returns the plaintext and whether this was the final chunk.
     pub fn pull(&mut self, ciphertext: &[u8]) -> Result<(Vec<u8>, bool), CryptoError> {
         if ciphertext.len() < STREAM_A_BYTES {
-            return Err(CryptoError::Malformed("secretstream chunk shorter than its tag"));
+            return Err(CryptoError::Malformed(
+                "secretstream chunk shorter than its tag",
+            ));
         }
         let mut out = vec![0u8; ciphertext.len() - STREAM_A_BYTES];
         let mut tag: u8 = 0;
@@ -261,11 +277,15 @@ impl StreamPull {
     }
 }
 
-pub fn box_seed_keypair(seed: &[u8; KEY_BYTES]) -> ([u8; BOX_PUBLIC_BYTES], [u8; BOX_SECRET_BYTES]) {
+pub fn box_seed_keypair(
+    seed: &[u8; KEY_BYTES],
+) -> ([u8; BOX_PUBLIC_BYTES], [u8; BOX_SECRET_BYTES]) {
     init();
     let mut public = [0u8; BOX_PUBLIC_BYTES];
     let mut secret = [0u8; BOX_SECRET_BYTES];
-    let rc = unsafe { ffi::crypto_box_seed_keypair(public.as_mut_ptr(), secret.as_mut_ptr(), seed.as_ptr()) };
+    let rc = unsafe {
+        ffi::crypto_box_seed_keypair(public.as_mut_ptr(), secret.as_mut_ptr(), seed.as_ptr())
+    };
     assert_eq!(rc, 0);
     (public, secret)
 }
@@ -301,7 +321,9 @@ pub fn box_seal_open(
 ) -> Result<Vec<u8>, CryptoError> {
     init();
     if ciphertext.len() < BOX_SEAL_BYTES {
-        return Err(CryptoError::Malformed("sealed box shorter than its overhead"));
+        return Err(CryptoError::Malformed(
+            "sealed box shorter than its overhead",
+        ));
     }
     let mut out = vec![0u8; ciphertext.len() - BOX_SEAL_BYTES];
     let rc = unsafe {

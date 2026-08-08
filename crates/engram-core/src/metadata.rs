@@ -45,15 +45,26 @@ pub struct FolderMetadata {
 }
 
 pub fn encrypt_file_metadata(meta: &FileMetadata, key: &[u8; 32]) -> SecretBox {
-    seal(serde_json::to_string(meta).expect("metadata serializes").as_bytes(), key)
+    seal(
+        serde_json::to_string(meta)
+            .expect("metadata serializes")
+            .as_bytes(),
+        key,
+    )
 }
 
-pub fn decrypt_file_metadata(sealed: &SecretBox, key: &[u8; 32]) -> Result<FileMetadata, CryptoError> {
+pub fn decrypt_file_metadata(
+    sealed: &SecretBox,
+    key: &[u8; 32],
+) -> Result<FileMetadata, CryptoError> {
     let plain = open(sealed, key)?;
     serde_json::from_slice(&plain).map_err(|_| CryptoError::Malformed("file metadata JSON"))
 }
 
-pub fn decrypt_folder_metadata(sealed: &SecretBox, key: &[u8; 32]) -> Result<FolderMetadata, CryptoError> {
+pub fn decrypt_folder_metadata(
+    sealed: &SecretBox,
+    key: &[u8; 32],
+) -> Result<FolderMetadata, CryptoError> {
     let plain = open(sealed, key)?;
     serde_json::from_slice(&plain).map_err(|_| CryptoError::Malformed("folder metadata JSON"))
 }

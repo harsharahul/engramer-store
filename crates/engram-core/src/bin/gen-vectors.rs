@@ -4,7 +4,7 @@
 //! `sealed.json` plus binary sidecars (written once, opened by the
 //! TypeScript side).
 
-use engram_core::{b64, chunked, digest, keys, metadata, secretbox, sealedbox, stream};
+use engram_core::{b64, chunked, digest, keys, metadata, sealedbox, secretbox, stream};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
@@ -18,19 +18,26 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn sizes() -> Vec<Value> {
-    [0u64, 1, 100, 4 * 1024 * 1024, 4 * 1024 * 1024 + 1, 9_000_000]
-        .iter()
-        .map(|n| {
-            json!({ "plain": n, "chunked": chunked::ciphertext_size(*n),
+    [
+        0u64,
+        1,
+        100,
+        4 * 1024 * 1024,
+        4 * 1024 * 1024 + 1,
+        9_000_000,
+    ]
+    .iter()
+    .map(|n| {
+        json!({ "plain": n, "chunked": chunked::ciphertext_size(*n),
                      "stream": stream::ciphertext_size(*n) })
-        })
-        .collect()
+    })
+    .collect()
 }
 
 fn main() {
     engram_core::init();
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../packages/crypto/test/vectors/rs");
+    let dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/crypto/test/vectors/rs");
     fs::create_dir_all(&dir).expect("vectors dir");
 
     let key: [u8; 32] = pattern(32, 13, 5).try_into().unwrap();
@@ -92,8 +99,11 @@ fn main() {
                    "plainLen": egc_plain.len(), "file": "egc1.bin" },
         "sizes": sizes(),
     });
-    fs::write(dir.join("vectors.json"), serde_json::to_string_pretty(&vectors).unwrap())
-        .expect("write vectors.json");
+    fs::write(
+        dir.join("vectors.json"),
+        serde_json::to_string_pretty(&vectors).unwrap(),
+    )
+    .expect("write vectors.json");
     fs::write(dir.join("egc1.bin"), &egc_blob).expect("write egc1.bin");
     println!("vectors.json + egc1.bin written");
 
@@ -137,7 +147,8 @@ fn main() {
         },
         "metadata": { "value": meta, "box": metadata::encrypt_file_metadata(&meta, &key) },
     });
-    fs::write(sealed_path, serde_json::to_string_pretty(&sealed).unwrap()).expect("write sealed.json");
+    fs::write(sealed_path, serde_json::to_string_pretty(&sealed).unwrap())
+        .expect("write sealed.json");
     fs::write(dir.join("stream.bin"), &stream_blob).expect("write stream.bin");
     println!("sealed.json + stream.bin written");
 }

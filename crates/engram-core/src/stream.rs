@@ -31,7 +31,11 @@ impl StreamEncryptor {
 }
 
 pub fn ciphertext_size(plain_size: u64) -> u64 {
-    let chunks = if plain_size == 0 { 1 } else { plain_size.div_ceil(CHUNK_SIZE as u64) };
+    let chunks = if plain_size == 0 {
+        1
+    } else {
+        plain_size.div_ceil(CHUNK_SIZE as u64)
+    };
     STREAM_HEADER_BYTES as u64 + plain_size + chunks * STREAM_A_BYTES as u64
 }
 
@@ -53,7 +57,9 @@ pub fn encrypt_bytes(plain: &[u8], key: &[u8; KEY_BYTES]) -> Vec<u8> {
 
 pub fn decrypt_bytes(blob: &[u8], key: &[u8; KEY_BYTES]) -> Result<Vec<u8>, CryptoError> {
     if blob.len() < STREAM_HEADER_BYTES {
-        return Err(CryptoError::Malformed("encrypted blob shorter than its header"));
+        return Err(CryptoError::Malformed(
+            "encrypted blob shorter than its header",
+        ));
     }
     let header: [u8; STREAM_HEADER_BYTES] = blob[..STREAM_HEADER_BYTES].try_into().unwrap();
     let mut pull = StreamPull::new(&header, key)?;
@@ -71,7 +77,9 @@ pub fn decrypt_bytes(blob: &[u8], key: &[u8; KEY_BYTES]) -> Result<Vec<u8>, Cryp
         offset = end;
         if done {
             if offset != blob.len() {
-                return Err(CryptoError::Malformed("trailing bytes after the final chunk"));
+                return Err(CryptoError::Malformed(
+                    "trailing bytes after the final chunk",
+                ));
             }
             return Ok(plain);
         }
