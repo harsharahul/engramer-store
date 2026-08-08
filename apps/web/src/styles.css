@@ -3561,6 +3561,31 @@ span.item-menu {
     min-height: 38px;
   }
 
+  /* A finger gets an answer the moment it lands, not on release. */
+  .card:active,
+  .photo-tile:active,
+  .album-option:active {
+    transform: scale(0.97);
+  }
+
+  .nav-item:active,
+  .ctx-item:active,
+  .tab:active,
+  .btn:active {
+    opacity: 0.6;
+  }
+
+  /* Chip removal is a real target, not a decoration to aim at. */
+  .tag.editable button {
+    min-width: 24px;
+    min-height: 24px;
+  }
+
+  .tag-add-album {
+    width: 28px;
+    height: 28px;
+  }
+
   /* iOS zooms the page on focus for inputs under 16px. */
   input,
   textarea,
@@ -3868,7 +3893,8 @@ span.item-menu {
   .modal {
     max-width: none;
     border-radius: 18px 18px 0 0;
-    padding: 20px 18px calc(24px + env(safe-area-inset-bottom));
+    /* --kb-inset lifts the sheet's inside above the on-screen keyboard. */
+    padding: 20px 18px calc(24px + env(safe-area-inset-bottom) + var(--kb-inset, 0px));
     max-height: 92vh;
     max-height: 92dvh;
     overflow-y: auto;
