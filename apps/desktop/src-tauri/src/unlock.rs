@@ -48,20 +48,31 @@ mod apple {
 
     pub fn store(email: &str, secret: &str) -> Result<(), String> {
         authenticate("set up device unlock for your vault")?;
-        passwords::set_generic_password(SERVICE, email, secret.as_bytes())
-            .map_err(|err| format!("keychain refused the secret: {err}"))
+        // Through keychain.rs so the item carries an explicit
+        // when-unlocked-this-device-only class; the old helper stored it
+        // with the default class, which restores onto other devices via
+        // encrypted backup.
+        crate::keychain::store(SERVICE, email, secret.as_bytes())
     }
 
     pub fn get(email: &str) -> Result<String, String> {
         authenticate("unlock your vault")?;
-        let bytes = passwords::get_generic_password(SERVICE, email)
+        if let Some(bytes) = crate::keychain::get(SERVICE, email)? {
+            return String::from_utf8(bytes).map_err(|_| "stored secret is corrupt".to_string());
+        }
+        // Migration: an item stored by the old helper (default
+        // accessibility) is read once, rewritten with the strict class,
+        // and the legacy copy dropped.
+        let legacy = passwords::get_generic_password(SERVICE, email)
             .map_err(|err| format!("keychain has no unlock secret: {err}"))?;
-        String::from_utf8(bytes).map_err(|_| "stored secret is corrupt".to_string())
+        crate::keychain::store(SERVICE, email, &legacy)?;
+        String::from_utf8(legacy).map_err(|_| "stored secret is corrupt".to_string())
     }
 
     pub fn delete(email: &str) -> Result<(), String> {
-        passwords::delete_generic_password(SERVICE, email)
-            .map_err(|err| format!("keychain delete failed: {err}"))
+        // Both generations of the item; either may exist.
+        let _ = passwords::delete_generic_password(SERVICE, email);
+        crate::keychain::delete(SERVICE, email)
     }
 }
 

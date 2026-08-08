@@ -8,6 +8,9 @@
 
 mod chrome;
 mod egc1;
+mod handoff;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+mod keychain;
 mod media;
 mod photos;
 mod unlock;
@@ -118,6 +121,10 @@ pub fn run() {
             watched::watched_file_read,
             media::media_register,
             media::media_clear,
+            handoff::handoff_available,
+            handoff::handoff_store,
+            handoff::handoff_get,
+            handoff::handoff_clear,
         ])
         .setup(|app| {
             watched::rebuild_watchers(app.handle());

@@ -47,12 +47,32 @@ if (kept.length < lines.length) {
 }
 writeFileSync(
   project,
-  kept.join("\n").replaceAll("IPHONEOS_DEPLOYMENT_TARGET = 14.0;", "IPHONEOS_DEPLOYMENT_TARGET = 15.0;"),
+  kept
+    .join("\n")
+    .replaceAll("IPHONEOS_DEPLOYMENT_TARGET = 14.0;", "IPHONEOS_DEPLOYMENT_TARGET = 16.0;")
+    .replaceAll("IPHONEOS_DEPLOYMENT_TARGET = 15.0;", "IPHONEOS_DEPLOYMENT_TARGET = 16.0;"),
 );
 
 const yml = join(apple, "project.yml");
-writeFileSync(yml, readFileSync(yml, "utf8").replace("iOS: 14.0", "iOS: 15.0"));
-console.log("ios project: deployment target floored at 15.0");
+const version = JSON.parse(readFileSync(join(tauriDir, "tauri.conf.json"), "utf8")).version;
+writeFileSync(
+  yml,
+  readFileSync(yml, "utf8")
+    .replace("iOS: 14.0", "iOS: 16.0")
+    .replace("iOS: 15.0", "iOS: 16.0")
+    // Generation bakes the version current at init time; every target must
+    // carry the released version or archive validation refuses the build
+    // the moment a second target (an extension) exists.
+    .replace(/CFBundleShortVersionString: .*/g, `CFBundleShortVersionString: ${version}`)
+    .replace(/CFBundleVersion: .*/g, `CFBundleVersion: "${version}"`),
+);
+console.log(`ios project: deployment target floored at 16.0, version stamped ${version}`);
+
+// The app-group and keychain-sharing entitlements, committed beside
+// tauri.conf.json; generation leaves the entitlements file empty.
+const entitlements = join(apple, "engram-store-desktop_iOS", "engram-store-desktop_iOS.entitlements");
+copyFileSync(join(tauriDir, "ios", "app.entitlements"), entitlements);
+console.log("ios project: app entitlements applied");
 
 const source = join(tauriDir, "icons", "ios");
 const catalog = join(apple, "Assets.xcassets", "AppIcon.appiconset");

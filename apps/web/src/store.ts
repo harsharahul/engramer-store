@@ -696,7 +696,7 @@ export const useStore = create<StoreState>((set, get) => {
         void clearCache(account);
       }
       syncCursor = 0;
-      clearSession();
+      clearSession(account);
       try {
         // Recent searches are plaintext fragments of the library; they
         // must not outlive the session on a shared device.

@@ -57,7 +57,9 @@ pub struct MediaState {
 }
 
 fn b64_decode(value: &str) -> Result<Vec<u8>, String> {
-    // Standard alphabet with or without padding, as toB64 produces.
+    // Standard alphabet with or without padding: the web side sends this
+    // key through btoa, NOT through toB64 (which is URL-safe unpadded).
+    // Switching the sender to toB64 would break decoding here.
     let cleaned: String = value.trim_end_matches('=').to_string();
     let table: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut lookup = [255u8; 256];
