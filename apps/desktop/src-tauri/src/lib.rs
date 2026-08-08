@@ -6,6 +6,7 @@
 //! ID; on iOS it is the decrypting media path, with the rest arriving as
 //! the mobile shell grows into them.
 
+mod chrome;
 mod egc1;
 mod media;
 mod photos;
@@ -18,7 +19,8 @@ use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 #[cfg(desktop)]
 use tauri::tray::TrayIconBuilder;
 #[cfg(desktop)]
-use tauri::{Manager, WindowEvent};
+use tauri::WindowEvent;
+use tauri::Manager;
 #[cfg(desktop)]
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
@@ -119,6 +121,10 @@ pub fn run() {
         ])
         .setup(|app| {
             watched::rebuild_watchers(app.handle());
+            #[cfg(target_os = "ios")]
+            if let Some(window) = app.get_webview_window("main") {
+                chrome::extend_under_safe_area(&window);
+            }
             #[cfg(desktop)]
             install_tray(app)?;
             Ok(())
@@ -130,6 +136,13 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+            }
+            // Rotation can hand the scroll view a fresh inset; re-assert.
+            #[cfg(target_os = "ios")]
+            if let tauri::WindowEvent::Resized(_) = event {
+                if let Some(webview) = window.app_handle().get_webview_window("main") {
+                    chrome::extend_under_safe_area(&webview);
+                }
             }
             #[cfg(mobile)]
             let _ = (window, event);

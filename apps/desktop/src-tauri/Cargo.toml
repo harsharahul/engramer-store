@@ -37,7 +37,9 @@ block2 = "0.6"
 objc2-photos-ui = { version = "0.3", features = ["PHPicker", "block2"] }
 objc2-ui-kit = { version = "0.3", features = [
     "UIApplication",
+    "UIGeometry",
     "UIResponder",
+    "UIScrollView",
     "UIView",
     "UIViewController",
     "UIWindow",
