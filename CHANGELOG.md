@@ -6,6 +6,22 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Added
+- **Save to Engram Store from any app.** A share extension puts the vault
+  in the iOS share sheet: pick it from Photos, Safari, Mail, anywhere, and
+  the item is encrypted on your device and uploaded in the background.
+  Photos keep their originals.
+- **Your vault in the Files app.** With extensions turned on, the vault
+  appears as a drive you can browse and open from, and copy files out of,
+  in the Files app and any app's file picker. (Saving into it from other
+  apps comes next.)
+- **Automatic photo backup.** Opt in, and your photos and videos are
+  copied to the vault, each encrypted on your device first. You choose
+  Wi-Fi only, whether to include videos and screenshots. Turning it on
+  asks for access to your photo library and says exactly why.
+- **Extensions on this device** (Profile): the switch that turns on
+  sharing and the Files-app drive. Your vault key is stored behind the
+  device passcode, on this device only, never in iCloud, and removed when
+  you sign out.
 - **A Photos view.** Every photo and video in the vault, wherever it is
   filed, as one timeline: month sections, edge-to-edge thumbnails, and a
   filter to show only favorites.
