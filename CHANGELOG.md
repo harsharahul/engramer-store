@@ -3,6 +3,21 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.40.2] - 2026-08-08
+
+### Fixed
+- **Opening the app now reconnects its extensions.** The Files app drive
+  and the share sheet read the vault key the moment the app has stored
+  it, instead of staying signed out until iOS restarted them.
+- The share sheet lays its message out correctly and keeps error
+  messages on screen long enough to read.
+- When extensions cannot read the vault key, they now say why, and the
+  profile's new connection check can store the key again and confirm it
+  reads back.
+
+### Added
+- The profile shows which server this app is connected to.
+
 ## [0.40.1] - 2026-08-08
 
 ### Added
