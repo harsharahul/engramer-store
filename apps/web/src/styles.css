@@ -1176,6 +1176,17 @@ a {
   accent-color: var(--accent);
 }
 
+.backup-knobs select {
+  margin-left: auto;
+  background: var(--ink-1);
+  color: var(--paper-dim);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13.5px;
+}
+
 .tag-add-album {
   width: 22px;
   height: 22px;

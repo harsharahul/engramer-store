@@ -38,6 +38,9 @@ pub struct PhotoAsset {
     pub kind: String,
     pub filename: String,
     pub mtime_ms: f64,
+    /// When the photo was taken; what a backup window filters on
+    /// (mtime moves on every edit, capture time does not).
+    pub created_ms: f64,
     pub screenshot: bool,
 }
 
@@ -135,6 +138,10 @@ mod apple {
                     .or_else(|| asset.creationDate())
                     .map(|d| d.timeIntervalSince1970() * 1000.0)
                     .unwrap_or(0.0);
+                let created_ms = asset
+                    .creationDate()
+                    .map(|d| d.timeIntervalSince1970() * 1000.0)
+                    .unwrap_or(mtime_ms);
                 let screenshot = asset
                     .mediaSubtypes()
                     .contains(PHAssetMediaSubtype::PhotoScreenshot);
@@ -143,6 +150,7 @@ mod apple {
                     kind: kind.to_string(),
                     filename,
                     mtime_ms,
+                    created_ms,
                     screenshot,
                 });
             }

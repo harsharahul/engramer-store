@@ -14,6 +14,7 @@ import {
   savePolicy,
   type BackupPolicy,
   type BackupProgress,
+  type BackupWindow,
 } from "../backup";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
 import {
@@ -818,6 +819,25 @@ export function ProfileView(props: {
               </div>
               {policy.enabled && (
                 <div className="backup-knobs">
+                  <label>
+                    Back up
+                    <select
+                      value={policy.window}
+                      onChange={(e) => {
+                        const window = e.target.value as BackupWindow;
+                        updatePolicy(
+                          window === "today"
+                            ? { window, windowAnchorMs: new Date().setHours(0, 0, 0, 0) }
+                            : { window },
+                        );
+                      }}
+                    >
+                      <option value="all">All photos</option>
+                      <option value="today">From today on</option>
+                      <option value="30d">Last 30 days</option>
+                      <option value="90d">Last 90 days</option>
+                    </select>
+                  </label>
                   <label>
                     <input
                       type="checkbox"

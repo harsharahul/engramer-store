@@ -198,6 +198,8 @@ export interface NativePhotoAsset {
   kind: "image" | "video";
   filename: string;
   mtime_ms: number;
+  /** Capture time; what a backup window filters on. */
+  created_ms: number;
   screenshot: boolean;
 }
 
