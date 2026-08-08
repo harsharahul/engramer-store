@@ -18,6 +18,7 @@ import {
   type FileMetadata,
 } from "@engramer/crypto";
 import { ApiError, api, uploadBlob, withRetry, type FileDto, type FolderDto, type SharedFileDto } from "./api";
+import { albumTag, isReservedTag } from "./albums";
 import { openSharedFileKey, sealFileKeyFor } from "./collab";
 import { SaveConflictError, copyName } from "./conflict";
 import { uploadLanes, withAnalysisSlot } from "./analysisslot";
@@ -200,6 +201,13 @@ interface StoreState {
   rotateFileKey: (id: string) => Promise<void>;
   renameFile: (id: string, name: string) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
+  /** Adds every file to the album, one metadata write at a time. */
+  addToAlbum: (ids: string[], tag: string) => Promise<void>;
+  removeFromAlbum: (ids: string[], tag: string) => Promise<void>;
+  /** Retags every member; returns the tag the album now lives under. */
+  renameAlbum: (oldTag: string, name: string) => Promise<string>;
+  /** Removes the tag from every member; the files themselves stay. */
+  deleteAlbum: (tag: string) => Promise<void>;
   /**
    * Pins a fact the owner accepted. Pass `value` when they corrected an
    * ambiguous reading; nothing acts on a fact until this has been called.
@@ -562,6 +570,10 @@ export const useStore = create<StoreState>((set, get) => {
       set({ files });
     }
   };
+
+  const normalizeTags = (tags: readonly string[]): string[] => [
+    ...new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean)),
+  ];
 
   const patchFileMeta = async (id: string, patch: Partial<FileMetadata>) => {
     const file = get().files.get(id);
@@ -1310,8 +1322,65 @@ export const useStore = create<StoreState>((set, get) => {
       set({ files });
     },
 
-    setTags: async (id, tags) =>
-      patchFileMeta(id, { tags: [...new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean))] }),
+    setTags: async (id, tags) => {
+      const file = get().files.get(id);
+      if (!file) {
+        return;
+      }
+      // The free-tag editor cannot mint or drop reserved tags: a hand-typed
+      // "album:x" is discarded, and membership the file already has survives
+      // an ordinary tag edit untouched. Albums and trips change only through
+      // their own flows below.
+      const existingReserved = file.tags.filter((t) => isReservedTag(t));
+      const edited = normalizeTags(tags).filter(
+        (t) => !isReservedTag(t) || existingReserved.includes(t),
+      );
+      const kept = existingReserved.filter((t) => !edited.includes(t));
+      await patchFileMeta(id, { tags: [...edited, ...kept] });
+    },
+
+    addToAlbum: async (ids, tag) => {
+      // Sequential on purpose: patchFileMeta rewrites the whole metadata
+      // object, so two in-flight writes to one vault race last-write-wins.
+      for (const id of ids) {
+        const file = get().files.get(id);
+        if (!file || file.tags.includes(tag)) {
+          continue;
+        }
+        await patchFileMeta(id, { tags: normalizeTags([...file.tags, tag]) });
+      }
+    },
+
+    removeFromAlbum: async (ids, tag) => {
+      for (const id of ids) {
+        const file = get().files.get(id);
+        if (!file || !file.tags.includes(tag)) {
+          continue;
+        }
+        await patchFileMeta(id, { tags: file.tags.filter((t) => t !== tag) });
+      }
+    },
+
+    renameAlbum: async (oldTag, name) => {
+      const newTag = albumTag(name);
+      if (!newTag || newTag === oldTag) {
+        return oldTag;
+      }
+      const members = [...get().files.values()].filter((f) => f.tags.includes(oldTag));
+      for (const file of members) {
+        await patchFileMeta(file.id, {
+          tags: normalizeTags(file.tags.map((t) => (t === oldTag ? newTag : t))),
+        });
+      }
+      return newTag;
+    },
+
+    deleteAlbum: async (tag) => {
+      const members = [...get().files.values()].filter((f) => f.tags.includes(tag));
+      for (const file of members) {
+        await patchFileMeta(file.id, { tags: file.tags.filter((t) => t !== tag) });
+      }
+    },
 
     confirmFact: async (id, factId, value) =>
       updateFact(id, factId, (fact) => {
@@ -1380,7 +1449,7 @@ export const useStore = create<StoreState>((set, get) => {
             ? { ...fact, confirmed: true }
             : fact,
         );
-        await patchFileMeta(fileId, { tags: [...file.tags, tag], facts });
+        await patchFileMeta(fileId, { tags: normalizeTags([...file.tags, tag]), facts });
       }
     },
 

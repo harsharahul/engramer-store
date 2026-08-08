@@ -149,6 +149,19 @@ describe("searchFiles", () => {
     expect(searchFiles(files, "type:pdf")[0]!.file.name).toBe("doc.pdf");
   });
 
+  it("matches reserved-namespace tags exactly, free tags by substring", () => {
+    const files = [
+      file({ name: "beach.jpg", tags: ["album:holidays-2026"] }),
+      file({ name: "list.pdf", tags: ["holiday-shopping"] }),
+    ];
+    expect(searchFiles(files, "tag:album:holidays-2026")).toHaveLength(1);
+    expect(searchFiles(files, "tag:album:holidays-2026")[0]!.file.name).toBe("beach.jpg");
+    expect(searchFiles(files, "tag:album:holidays")).toHaveLength(0);
+    const holiday = searchFiles(files, "tag:holiday");
+    expect(holiday).toHaveLength(1);
+    expect(holiday[0]!.file.name).toBe("list.pdf");
+  });
+
   it("marks name match ranges on the original name", () => {
     const files = [file({ name: "Quarterly-Report.pdf" })];
     const hit = searchFiles(files, "report")[0]!;

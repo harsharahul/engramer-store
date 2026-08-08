@@ -1,4 +1,5 @@
 import type { FileEntry, FolderEntry } from "./store";
+import { isReservedTag } from "./albums";
 import { fileKind } from "./format";
 
 export interface Highlight {
@@ -171,7 +172,14 @@ function passesFilters(file: FileEntry, { parsed, folders }: Context): boolean {
     return false;
   }
   for (const tag of parsed.tags) {
-    if (!file.tags.some((t) => t.includes(tag))) {
+    // A reserved-namespace query names one album or trip exactly. A free
+    // query keeps substring matching, "tag:hol" finding "holiday" is the
+    // point, but only over free tags: without that exclusion "tag:holiday"
+    // would also drag in "album:holidays-2026".
+    const matches = isReservedTag(tag)
+      ? file.tags.includes(tag)
+      : file.tags.some((t) => !isReservedTag(t) && t.includes(tag));
+    if (!matches) {
       return false;
     }
   }

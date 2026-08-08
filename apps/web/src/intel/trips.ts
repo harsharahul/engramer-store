@@ -352,7 +352,7 @@ export async function suggestTrips(
   return suggestions.sort((a, b) => a.start.localeCompare(b.start));
 }
 
-function slug(text: string): string {
+export function slug(text: string): string {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
