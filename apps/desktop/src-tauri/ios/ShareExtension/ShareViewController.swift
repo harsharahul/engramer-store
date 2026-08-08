@@ -18,6 +18,10 @@ final class ShareViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
+        // The system sizes this sheet from preferredContentSize; without
+        // one it can collapse to the label's compressed width and render
+        // the text one character per line.
+        preferredContentSize = CGSize(width: 360, height: 180)
         status.text = "Encrypting on this device…"
         status.font = .preferredFont(forTextStyle: .body)
         status.textAlignment = .center
@@ -31,7 +35,8 @@ final class ShareViewController: UIViewController {
         NSLayoutConstraint.activate([
             stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            stack.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 24),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
         ])
     }
 
@@ -41,8 +46,15 @@ final class ShareViewController: UIViewController {
     }
 
     private func process() {
-        guard let record = EngramHandoff.read() else {
-            finish(with: ShareError.notSignedIn)
+        let record: HandoffRecord
+        switch EngramHandoff.readDetailed() {
+        case .success(let found):
+            record = found
+        case .failure(let why):
+            // The failure detail is what makes a report from the device
+            // actionable: "no stored key" and "keychain error -34018"
+            // have entirely different fixes.
+            finish(with: ShareError.notSignedIn, detail: why.detail)
             return
         }
         guard !record.tokenLooksStale else {
@@ -160,11 +172,13 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    private func finish(with error: ShareError) {
+    private func finish(with error: ShareError, detail: String? = nil) {
         DispatchQueue.main.async {
             self.spinner.stopAnimating()
-            self.status.text = error.errorDescription
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+            let message = error.errorDescription ?? "Something went wrong."
+            self.status.text = detail.map { "\(message)\n(\($0))" } ?? message
+            // Long enough to read; a fast auto-dismiss looks like a crash.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
                 self.extensionContext?.cancelRequest(withError: error)
             }
         }

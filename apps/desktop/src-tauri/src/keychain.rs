@@ -115,6 +115,47 @@ pub fn get(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
     Ok(Some(data.bytes().to_vec()))
 }
 
+/// The extensions' own lookup shape: service and access group, no
+/// account. Run inside the app, this tells whether the shared item is
+/// visible the way the extensions ask for it; the answer separates "the
+/// record was never stored" from "the group itself is refused".
+pub fn probe(service: &str) -> Result<Option<usize>, String> {
+    let mut pairs: Vec<(CFString, CFType)> = vec![
+        (
+            cf_str(unsafe { kSecClass.cast() }),
+            cf_str(unsafe { kSecClassGenericPassword.cast() }).as_CFType(),
+        ),
+        (
+            cf_str(unsafe { kSecAttrService.cast() }),
+            CFString::new(service).as_CFType(),
+        ),
+        (
+            cf_str(unsafe { kSecReturnData.cast() }),
+            CFBoolean::true_value().as_CFType(),
+        ),
+    ];
+    #[cfg(target_os = "ios")]
+    pairs.push((
+        cf_str(unsafe { kSecAttrAccessGroup }),
+        CFString::new(ACCESS_GROUP).as_CFType(),
+    ));
+    let mut result: *const c_void = std::ptr::null();
+    let status = unsafe {
+        SecItemCopyMatching(
+            as_query(pairs).as_concrete_TypeRef(),
+            &mut result as *mut *const c_void as *mut _,
+        )
+    };
+    if status == errSecItemNotFound {
+        return Ok(None);
+    }
+    if status != 0 {
+        return Err(format!("keychain probe failed ({status})"));
+    }
+    let data = unsafe { CFData::wrap_under_create_rule(result.cast()) };
+    Ok(Some(data.len() as usize))
+}
+
 pub fn delete(service: &str, account: &str) -> Result<(), String> {
     let status =
         unsafe { SecItemDelete(as_query(base_pairs(service, account)).as_concrete_TypeRef()) };

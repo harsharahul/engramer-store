@@ -7,13 +7,25 @@ import UniformTypeIdentifiers
 /// with their conflict handling designed in; refusing them here is what
 /// keeps the first shipped provider trustworthy.
 final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
-    private let index: EngramFilesIndex?
-    private let record: HandoffRecord?
+    private var index: EngramFilesIndex?
+    private var record: HandoffRecord?
+    private let reconnectLock = NSLock()
 
     required init(domain: NSFileProviderDomain) {
-        self.record = EngramHandoff.read()
-        self.index = record.flatMap(EngramFilesIndex.init)
         super.init()
+        reconnectIfNeeded()
+    }
+
+    /// This instance can outlive an "open the app to connect" round trip:
+    /// the app writes the handoff after the system already spawned the
+    /// provider. A missing record is therefore re-read on every call
+    /// instead of being cached as a permanent "not signed in".
+    private func reconnectIfNeeded() {
+        reconnectLock.lock()
+        defer { reconnectLock.unlock() }
+        guard index == nil else { return }
+        record = EngramHandoff.read()
+        index = record.flatMap(EngramFilesIndex.init)
     }
 
     func invalidate() {}
@@ -23,6 +35,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         request: NSFileProviderRequest,
         completionHandler: @escaping (NSFileProviderItem?, Error?) -> Void
     ) -> Progress {
+        reconnectIfNeeded()
         if identifier == .rootContainer {
             completionHandler(RootItem(), nil)
             return Progress()
@@ -41,6 +54,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         request: NSFileProviderRequest,
         completionHandler: @escaping (URL?, NSFileProviderItem?, Error?) -> Void
     ) -> Progress {
+        reconnectIfNeeded()
         let progress = Progress(totalUnitCount: 2)
         guard let record, let entry = index?.entry(itemIdentifier.rawValue), !entry.isFolder else {
             completionHandler(nil, nil, NSFileProviderError(.noSuchItem))
@@ -96,6 +110,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         request: NSFileProviderRequest,
         completionHandler: @escaping (NSFileProviderItem?, NSFileProviderItemFields, Bool, Error?) -> Void
     ) -> Progress {
+        reconnectIfNeeded()
         let progress = Progress(totalUnitCount: 1)
         guard let record, let index, let master = record.masterKeyBytes else {
             completionHandler(nil, [], false, NSFileProviderError(.notAuthenticated))
@@ -206,6 +221,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         request: NSFileProviderRequest,
         completionHandler: @escaping (NSFileProviderItem?, NSFileProviderItemFields, Bool, Error?) -> Void
     ) -> Progress {
+        reconnectIfNeeded()
         let progress = Progress(totalUnitCount: 1)
         guard let record, let index, let master = record.masterKeyBytes else {
             completionHandler(nil, [], false, NSFileProviderError(.notAuthenticated))
@@ -403,6 +419,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         request: NSFileProviderRequest,
         completionHandler: @escaping (Error?) -> Void
     ) -> Progress {
+        reconnectIfNeeded()
         let progress = Progress(totalUnitCount: 1)
         guard let record, let index else {
             completionHandler(NSFileProviderError(.notAuthenticated))
@@ -433,6 +450,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         for containerItemIdentifier: NSFileProviderItemIdentifier,
         request: NSFileProviderRequest
     ) throws -> NSFileProviderEnumerator {
+        reconnectIfNeeded()
         guard let index else {
             throw NSFileProviderError(.notAuthenticated)
         }

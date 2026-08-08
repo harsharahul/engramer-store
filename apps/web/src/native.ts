@@ -103,6 +103,25 @@ export async function nativeHandoffGet(email: string): Promise<string | null> {
   }
 }
 
+/** What the extension-shaped keychain lookup finds, run from inside the app. */
+export type HandoffProbeResult =
+  | { state: "found"; bytes: number }
+  | { state: "missing" }
+  | { state: "error"; detail: string };
+
+export async function nativeHandoffProbe(): Promise<HandoffProbeResult> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return { state: "missing" };
+  }
+  try {
+    const found = await invoke("handoff_probe");
+    return typeof found === "number" ? { state: "found", bytes: found } : { state: "missing" };
+  } catch (error) {
+    return { state: "error", detail: String(error) };
+  }
+}
+
 export async function nativeHandoffClear(email: string): Promise<void> {
   const invoke = tauriInvoke();
   if (!invoke) {
@@ -119,6 +138,15 @@ export async function nativeFilesProviderEnable(email: string): Promise<void> {
     return;
   }
   await invoke("files_provider_enable", { email }).catch(() => {});
+}
+
+/** Asks the Files app to re-enumerate the drive after a reconnect. */
+export async function nativeFilesProviderSignal(email: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return;
+  }
+  await invoke("files_provider_signal", { email }).catch(() => {});
 }
 
 export async function nativeFilesProviderDisable(email: string): Promise<void> {

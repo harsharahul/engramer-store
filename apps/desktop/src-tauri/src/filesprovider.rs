@@ -39,6 +39,23 @@ pub async fn files_provider_enable(email: String) -> Result<(), String> {
     }
 }
 
+/// Nudges the Files app to re-enumerate the domain. Called after the
+/// handoff record is (re)written, so a provider instance that came up
+/// before the key existed stops showing "not signed in" the moment the
+/// app has reconnected it.
+#[tauri::command]
+pub async fn files_provider_signal(email: String) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    {
+        return apple::signal_domain(&domain_identifier(&email));
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = email;
+        Ok(())
+    }
+}
+
 #[tauri::command]
 pub async fn files_provider_disable(email: String) -> Result<(), String> {
     #[cfg(target_os = "ios")]
@@ -122,6 +139,62 @@ mod apple {
             let domain = make_domain(identifier, "Engram Store")
                 .ok_or_else(|| "could not build the File Provider domain".to_string())?;
             run(false, &domain)
+        }
+    }
+
+    // NSFileProviderItemIdentifier constants (NSString under the typedef).
+    extern "C" {
+        static NSFileProviderRootContainerItemIdentifier: &'static NSString;
+        static NSFileProviderWorkingSetContainerItemIdentifier: &'static NSString;
+    }
+
+    /// Asks the system to re-enumerate the domain's root and working set.
+    /// Both are signaled; an error from one container (typically "no one
+    /// is enumerating it right now") does not veto the other.
+    pub fn signal_domain(identifier: &str) -> Result<(), String> {
+        unsafe {
+            let domain = make_domain(identifier, "Engram Store")
+                .ok_or_else(|| "could not build the File Provider domain".to_string())?;
+            let class = AnyClass::get(c"NSFileProviderManager")
+                .ok_or_else(|| "NSFileProviderManager unavailable".to_string())?;
+            let manager: *mut AnyObject = msg_send![class, managerForDomain: &*domain];
+            if manager.is_null() {
+                return Err("no manager for the File Provider domain".into());
+            }
+            let mut errors: Vec<String> = Vec::new();
+            for container in [
+                NSFileProviderRootContainerItemIdentifier,
+                NSFileProviderWorkingSetContainerItemIdentifier,
+            ] {
+                let (tx, rx) = mpsc::channel::<Option<String>>();
+                let handler = RcBlock::new(move |error: *mut AnyObject| {
+                    let message = if error.is_null() {
+                        None
+                    } else {
+                        let desc: *const NSString = msg_send![error, localizedDescription];
+                        Some(
+                            desc.as_ref()
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| "unknown error".into()),
+                        )
+                    };
+                    let _ = tx.send(message);
+                });
+                let _: () = msg_send![
+                    manager,
+                    signalEnumeratorForContainerItemIdentifier: container,
+                    completionHandler: &*handler,
+                ];
+                match rx.recv() {
+                    Ok(None) => {}
+                    Ok(Some(message)) => errors.push(message),
+                    Err(_) => errors.push("signal did not complete".into()),
+                }
+            }
+            if errors.len() == 2 {
+                return Err(errors.join("; "));
+            }
+            Ok(())
         }
     }
 }
