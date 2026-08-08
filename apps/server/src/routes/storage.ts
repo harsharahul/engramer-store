@@ -1178,7 +1178,16 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   // Delta sync: everything that changed after the client's cursor, tombstones included.
   app.get("/api/sync", auth, async (request) => {
     const uid = request.user.uid;
-    const since = Number((request.query as { since?: string }).since ?? 0);
+    const query = request.query as { since?: string; limit?: string };
+    const since = Number(query.since ?? 0);
+    // Optional paging for clients with a memory budget (the Files
+    // provider): at most `limit` rows per collection. The returned seq is
+    // then the highest cursor value with nothing beyond it withheld, so a
+    // client that simply loops until seq stops advancing sees exactly the
+    // rows an unpaged sync would have sent.
+    const limitRaw = Number(query.limit ?? 0);
+    const limit =
+      Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 2000) : 0;
     // The cursor is read FIRST and every query bounded by it. Read last,
     // anything committed mid-request would advance the client past a row it
     // never received — skipped for good, until a full resync. A share
@@ -1189,32 +1198,54 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       uid,
     ))!;
     const upTo = user.last_seq;
-    const folders = await app.db.all<FolderRow>(
-      "SELECT * FROM folders WHERE user_id = ? AND update_seq > ? AND update_seq <= ? ORDER BY update_seq",
+    const probe = limit > 0 ? ` LIMIT ${limit + 1}` : "";
+    let folders = await app.db.all<FolderRow>(
+      "SELECT * FROM folders WHERE user_id = ? AND update_seq > ? AND update_seq <= ? ORDER BY update_seq" +
+        probe,
       uid,
       since,
       upTo,
     );
-    const files = await app.db.all<FileRow>(
-      "SELECT * FROM files WHERE user_id = ? AND update_seq > ? AND update_seq <= ? ORDER BY update_seq",
+    let files = await app.db.all<FileRow>(
+      "SELECT * FROM files WHERE user_id = ? AND update_seq > ? AND update_seq <= ? ORDER BY update_seq" +
+        probe,
       uid,
       since,
       upTo,
     );
-    const shared = await app.db.all<SharedJoinRow>(
+    let shared = await app.db.all<SharedJoinRow>(
       `SELECT f.*, c.role AS collab_role, c.sealed_key, c.key_epoch AS member_epoch,
               c.revoked AS member_revoked, c.update_seq AS member_seq, u.email AS owner_email
          FROM file_collaborators c
          JOIN files f ON f.id = c.file_id
          JOIN users u ON u.id = c.owner_id
         WHERE c.user_id = ? AND c.update_seq > ? AND c.update_seq <= ?
-        ORDER BY c.update_seq`,
+        ORDER BY c.update_seq` + probe,
       uid,
       since,
       upTo,
     );
+    let seq = upTo;
+    if (limit > 0) {
+      // A collection that overflowed caps the cursor at its last INCLUDED
+      // row; every collection is then re-cut at the lowest cap so the
+      // returned window is complete. Sequence values are unique per
+      // account, so "<= cap" is exact. The cursor only ever comes DOWN
+      // from upTo, preserving the read-cursor-first invariant above.
+      for (const rows of [folders, files] as { update_seq: number }[][]) {
+        if (rows.length > limit) {
+          seq = Math.min(seq, rows[limit - 1]!.update_seq);
+        }
+      }
+      if (shared.length > limit) {
+        seq = Math.min(seq, shared[limit - 1]!.member_seq);
+      }
+      folders = folders.filter((r) => r.update_seq <= seq);
+      files = files.filter((r) => r.update_seq <= seq);
+      shared = shared.filter((r) => r.member_seq <= seq);
+    }
     return {
-      seq: upTo,
+      seq,
       folders: folders.map(folderToDto),
       files: files.map(fileToDto),
       shared: shared.map(sharedToDto),
