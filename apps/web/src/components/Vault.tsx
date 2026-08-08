@@ -51,6 +51,8 @@ import { CalendarView } from "./CalendarView";
 import { HeadsUp, TripHeadsUp } from "./HeadsUp";
 import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
+import { albumTitle, albumsFrom } from "../albums";
+import { PhotoGrid } from "./PhotoGrid";
 import { saveDecryptedFile } from "../download";
 import { clearThumbnailCache } from "../thumbs";
 import { FileCard, FolderCard } from "./FileCard";
@@ -137,7 +139,9 @@ type View =
   | { kind: "profile" }
   | { kind: "expiring" }
   | { kind: "calendar" }
-  | { kind: "category"; name: string };
+  | { kind: "category"; name: string }
+  | { kind: "photos" }
+  | { kind: "album"; tag: string };
 
 const CATEGORY_ORDER = [
   "Photos", "Screenshots", "Documents", "Receipts", "Notes", "Code", "Videos",
@@ -340,6 +344,11 @@ export function Vault() {
     return counts;
   }, [liveFiles]);
 
+  const albums = useMemo(
+    () => albumsFrom(liveFiles.filter((f) => !f.shared)),
+    [liveFiles],
+  );
+
   const sharedWithMeCount = useMemo(
     () => liveFiles.reduce((n, f) => n + (f.shared ? 1 : 0), 0),
     [liveFiles],
@@ -410,6 +419,17 @@ export function Vault() {
         return [];
       case "category":
         files = liveFiles.filter((f) => !f.shared && (f.category ?? "Other") === view.name);
+        break;
+      case "photos": {
+        // The timeline shows everything the camera made, wherever it lives.
+        files = liveFiles.filter((f) => {
+          const kind = fileKind(f.mime, f.name);
+          return !f.shared && (kind === "image" || kind === "video");
+        });
+        break;
+      }
+      case "album":
+        files = liveFiles.filter((f) => !f.shared && f.tags.includes(view.tag));
         break;
       case "trash":
         return [...store.files.values()]
@@ -1247,7 +1267,11 @@ export function Vault() {
                 ? "Shared with me"
               : view.kind === "profile"
                 ? "Profile"
-                : "Trash";
+                : view.kind === "photos"
+                  ? "Photos"
+                  : view.kind === "album"
+                    ? albumTitle(view.tag)
+                    : "Trash";
 
   const similarActive = !searching && similarTo !== null;
   const showViewControls =
@@ -1304,6 +1328,7 @@ export function Vault() {
         </div>
         {navButton(view.kind === "folder", () => setView({ kind: "folder", id: null }), <FolderGlyph />, "Files")}
         {navButton(view.kind === "recent", () => setView({ kind: "recent" }), <ClockGlyph />, "Recent")}
+        {navButton(view.kind === "photos", () => setView({ kind: "photos" }), <PhotoGlyph />, "Photos")}
         {navButton(
           view.kind === "favorites",
           () => setView({ kind: "favorites" }),
@@ -1336,6 +1361,33 @@ export function Vault() {
             sharedWithMeCount,
           )}
         {navButton(view.kind === "trash", () => setView({ kind: "trash" }), <TrashGlyph />, "Trash")}
+
+        {albums.length > 0 && (
+          <>
+            <div className="sidebar-label">
+              <BookGlyph size={12} /> Albums
+            </div>
+            <div className="library-list">
+              {albums.map((album) => (
+                <button
+                  key={album.tag}
+                  className={`nav-item small${
+                    view.kind === "album" && view.tag === album.tag && !searching ? " active" : ""
+                  }`}
+                  onClick={() => {
+                    setQuery("");
+                    setDrawerOpen(false);
+                    setView({ kind: "album", tag: album.tag });
+                  }}
+                >
+                  <PhotoGlyph size={14} />
+                  {album.title}
+                  <span className="nav-count">{album.count}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         {libraryCategories.length > 0 && (
           <>
@@ -1817,6 +1869,19 @@ export function Vault() {
               onUpload={() => fileInput.current?.click()}
               onNote={() => setNewNoteOpen(true)}
             />
+          ) : !searching &&
+            (view.kind === "photos" ||
+              view.kind === "album" ||
+              (layout === "grid" &&
+                view.kind === "category" &&
+                (view.name === "Photos" || view.name === "Screenshots"))) ? (
+            <PhotoGrid
+              files={visibleFiles}
+              selection={selection}
+              onSelect={select}
+              onOpen={openFile}
+              onMenu={openFileMenu}
+            />
           ) : layout === "list" && view.kind !== "recent" ? (
             <>
               {view.kind === "folder" && childFolders.length > 0 && (
@@ -2289,6 +2354,20 @@ function EmptyState(props: {
         <span className="empty-mark">☆</span>
         <h3>No favorites yet</h3>
         <p>Right-click any file and choose "Add to favorites".</p>
+      </div>
+    );
+  }
+  if (props.view.kind === "photos" || props.view.kind === "album") {
+    return (
+      <div className="empty">
+        <span className="empty-mark">▦</span>
+        <h3>{props.view.kind === "album" ? "This album is empty" : "No photos yet"}</h3>
+        <p>Photos and videos you add appear here as a timeline.</p>
+        <div className="empty-actions">
+          <button className="btn btn-primary" onClick={props.onUpload}>
+            Add photos
+          </button>
+        </div>
       </div>
     );
   }

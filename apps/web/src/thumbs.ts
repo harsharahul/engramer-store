@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { diag } from "./diag";
 import { downloadThumbnail, retryDelay, whenOnline } from "./transfer";
 
@@ -70,6 +71,48 @@ export function thumbnailUrl(fileId: string, fileKey: Uint8Array): Promise<strin
     cache.set(fileId, entry);
   }
   return entry;
+}
+
+/**
+ * The lazy-thumbnail pattern every tile shares: nothing is fetched until
+ * the element approaches the viewport, and until then the caller shows its
+ * ThumbHash placeholder. Attach the returned ref to the tile's element.
+ */
+export function usePhotoThumb<E extends HTMLElement>(file: {
+  id: string;
+  key: Uint8Array;
+  hasThumb: boolean;
+}): { ref: React.RefObject<E | null>; thumb: string | null } {
+  const ref = useRef<E>(null);
+  const [thumb, setThumb] = useState<string | null>(null);
+
+  useEffect(() => {
+    setThumb(null);
+    if (!file.hasThumb || !ref.current) {
+      return;
+    }
+    let cancelled = false;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          observer.disconnect();
+          void thumbnailUrl(file.id, file.key).then((url) => {
+            if (!cancelled) {
+              setThumb(url);
+            }
+          });
+        }
+      },
+      { rootMargin: "400px" },
+    );
+    observer.observe(ref.current);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
+  }, [file.id, file.hasThumb, file.key]);
+
+  return { ref, thumb };
 }
 
 export function clearThumbnailCache(): void {
