@@ -66,6 +66,9 @@ targets:
           NSExtensionPointIdentifier: com.apple.fileprovider-nonui
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FileProviderExtension
           NSExtensionFileProviderSupportsEnumeration: true
+          # App Store validation requires the provider to name the app
+          # group its documents live in.
+          NSExtensionFileProviderDocumentGroup: group.com.harsharahul.engramstore
     entitlements:
       path: EngramFiles/EngramFiles.entitlements
       properties:
