@@ -27,6 +27,10 @@ struct IndexEntry: Codable {
     let key: Data
     let digest: String?
     let trashed: Bool
+    /// The sealed metadata exactly as the server holds it. A rename
+    /// decrypts THIS, edits one field, and reseals, so fields this index
+    /// does not model (tags, facts, thumbnails) survive untouched.
+    var encryptedMetaJson: String = ""
 }
 
 struct SyncFolderRow: Decodable {
@@ -173,7 +177,8 @@ final class EngramFilesIndex {
             updateSeq: folder.updateSeq,
             key: key,
             digest: nil,
-            trashed: false
+            trashed: false,
+            encryptedMetaJson: folder.encryptedMeta?.json ?? ""
         )
     }
 
@@ -198,7 +203,8 @@ final class EngramFilesIndex {
             updateSeq: file.updateSeq,
             key: key,
             digest: meta["digest"] as? String,
-            trashed: false
+            trashed: false,
+            encryptedMetaJson: file.encryptedMeta?.json ?? ""
         )
     }
 

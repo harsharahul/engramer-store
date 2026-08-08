@@ -163,6 +163,34 @@ mod tests {
         assert_eq!(meta.source_id.as_deref(), Some("asset-42"));
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    /// The write-side helpers Stage 3B adds: metadata reseal and the
+    /// folder envelope, both opened back through the read side.
+    #[test]
+    fn reseals_metadata_and_builds_folder_envelopes() {
+        let master = engram_core::secretbox::generate_key().to_vec();
+        let file_key = engram_core::secretbox::generate_key().to_vec();
+
+        let sealed = encrypt_metadata_json(
+            r#"{"name":"renamed née doc.txt","mime":"text/plain","size":3,"mtime":1}"#.into(),
+            file_key.clone(),
+        )
+        .unwrap();
+        let opened = decrypt_metadata_json(sealed, file_key).unwrap();
+        assert!(opened.contains("renamed née doc.txt"));
+
+        let envelope = folder_envelope("Backups".into(), master.clone()).unwrap();
+        let folder_key = open_file_key(envelope.encrypted_key_json, master).unwrap();
+        let meta = decrypt_metadata_json(envelope.encrypted_meta_json, folder_key).unwrap();
+        assert_eq!(meta, r#"{"name":"Backups"}"#);
+
+        let file_key2 = engram_core::secretbox::generate_key().to_vec();
+        let replaced = encrypt_content(b"replacement bytes".to_vec(), file_key2.clone()).unwrap();
+        assert_eq!(
+            decrypt_content(replaced, file_key2).unwrap(),
+            b"replacement bytes"
+        );
+    }
 }
 
 fn read_full(input: &mut File, buffer: &mut [u8]) -> Result<usize, FfiError> {
@@ -219,6 +247,61 @@ pub fn decrypt_metadata_json(
     })?;
     String::from_utf8(plain).map_err(|_| FfiError::Failed {
         reason: "metadata is not utf8".into(),
+    })
+}
+
+/// Encrypts replacement content under the file's EXISTING key, as the
+/// default stream format: the modify path, where the key must not change
+/// because other references (metadata, thumbnails) are sealed under it.
+#[uniffi::export]
+pub fn encrypt_content(plain: Vec<u8>, file_key: Vec<u8>) -> Result<Vec<u8>, FfiError> {
+    engram_core::init();
+    let key: [u8; 32] = file_key.try_into().map_err(|_| FfiError::Failed {
+        reason: "file key must be 32 bytes".into(),
+    })?;
+    Ok(stream::encrypt_bytes(&plain, &key))
+}
+
+/// Seals plaintext metadata JSON under the object's own key: the write
+/// half of `decrypt_metadata_json`, for a rename or a content update that
+/// edits fields Swift-side and re-seals the whole object.
+#[uniffi::export]
+pub fn encrypt_metadata_json(meta_json: String, object_key: Vec<u8>) -> Result<String, FfiError> {
+    engram_core::init();
+    let key: [u8; 32] = object_key.try_into().map_err(|_| FfiError::Failed {
+        reason: "object key must be 32 bytes".into(),
+    })?;
+    serde_json::to_string(&secretbox::seal(meta_json.as_bytes(), &key)).map_err(|_| {
+        FfiError::Failed {
+            reason: "could not serialize sealed metadata".into(),
+        }
+    })
+}
+
+/// Everything a new folder needs: a fresh folder key wrapped under the
+/// master key, and the `{name}` metadata sealed under the folder key.
+#[derive(uniffi::Record)]
+pub struct FolderEnvelope {
+    pub encrypted_key_json: String,
+    pub encrypted_meta_json: String,
+}
+
+#[uniffi::export]
+pub fn folder_envelope(name: String, master_key: Vec<u8>) -> Result<FolderEnvelope, FfiError> {
+    engram_core::init();
+    let master: [u8; 32] = master_key.try_into().map_err(|_| FfiError::Failed {
+        reason: "master key must be 32 bytes".into(),
+    })?;
+    let folder_key = secretbox::generate_key();
+    let meta = serde_json::json!({ "name": name });
+    Ok(FolderEnvelope {
+        encrypted_key_json: serde_json::to_string(&secretbox::seal(&folder_key, &master))
+            .map_err(fail("serialize folder key"))?,
+        encrypted_meta_json: serde_json::to_string(&secretbox::seal(
+            meta.to_string().as_bytes(),
+            &folder_key,
+        ))
+        .map_err(fail("serialize folder metadata"))?,
     })
 }
 

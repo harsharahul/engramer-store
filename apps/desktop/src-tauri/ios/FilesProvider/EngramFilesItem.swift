@@ -51,6 +51,11 @@ final class EngramFilesItem: NSObject, NSFileProviderItem {
     }
 
     var capabilities: NSFileProviderItemCapabilities {
-        entry.isFolder ? [.allowsReading, .allowsContentEnumerating] : [.allowsReading]
+        if entry.isFolder {
+            // Folder rename/move/delete wait for their own pass; adding
+            // items into a folder works now.
+            return [.allowsReading, .allowsContentEnumerating, .allowsAddingSubItems]
+        }
+        return [.allowsReading, .allowsWriting, .allowsRenaming, .allowsReparenting, .allowsDeleting]
     }
 }

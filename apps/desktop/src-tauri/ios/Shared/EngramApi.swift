@@ -68,6 +68,137 @@ enum EngramApi {
     }
 }
 
+// MARK: - Synchronous write surface for the File Provider.
+// Provider callbacks run on background queues and expect the work done
+// when the completion fires, so these block on a semaphore; the system
+// grants providers the time.
+
+/// What a content upload came back as; the provider maps refusals to
+/// conflict copies rather than data loss.
+enum EngramUploadOutcome {
+    case ok
+    /// The server refused: a generation race or a live co-editing session.
+    case conflict
+    case failed(String)
+}
+
+extension EngramApi {
+    /// The threshold above which content travels as numbered parts, so a
+    /// network blip costs one part rather than the whole file.
+    static let partsThreshold: UInt64 = 64 * 1024 * 1024
+    private static let partSize: UInt64 = 8 * 1024 * 1024
+
+    private static func request(
+        _ record: HandoffRecord,
+        _ method: String,
+        _ path: String,
+        body: Data? = nil,
+        contentType: String? = nil
+    ) -> URLRequest? {
+        guard let url = URL(string: "\(record.origin)\(path)") else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.httpBody = body
+        if let contentType {
+            request.setValue(contentType, forHTTPHeaderField: "content-type")
+        }
+        request.setValue("Bearer \(record.token)", forHTTPHeaderField: "authorization")
+        return request
+    }
+
+    private static func send(_ request: URLRequest) -> (Int, Data)? {
+        var result: (Int, Data)?
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            defer { done.signal() }
+            guard let http = response as? HTTPURLResponse else { return }
+            result = (http.statusCode, data ?? Data())
+        }.resume()
+        done.wait()
+        return result
+    }
+
+    private static func sendFile(_ request: URLRequest, from file: URL) -> (Int, Data)? {
+        var result: (Int, Data)?
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.uploadTask(with: request, fromFile: file) { data, response, _ in
+            defer { done.signal() }
+            guard let http = response as? HTTPURLResponse else { return }
+            result = (http.statusCode, data ?? Data())
+        }.resume()
+        done.wait()
+        return result
+    }
+
+    /// JSON POST/PATCH returning the decoded body on 2xx.
+    static func json(
+        record: HandoffRecord,
+        method: String,
+        path: String,
+        payload: [String: Any]
+    ) -> Data? {
+        guard let body = try? JSONSerialization.data(withJSONObject: payload),
+              let request = request(record, method, path, body: body, contentType: "application/json"),
+              let (status, data) = send(request), (200..<300).contains(status)
+        else { return nil }
+        return data
+    }
+
+    /// Uploads a staged ciphertext blob as the file's content: one PUT
+    /// below the threshold, the parts flow above it.
+    static func uploadContent(record: HandoffRecord, fileId: String, blob: URL) -> EngramUploadOutcome {
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: blob.path)[.size] as? NSNumber)?
+            .uint64Value
+        else { return .failed("staged blob unreadable") }
+        if size < partsThreshold {
+            guard let put = request(record, "PUT", "/api/files/\(fileId)/data", contentType: "application/octet-stream"),
+                  let (status, _) = sendFile(put, from: blob)
+            else { return .failed("upload did not complete") }
+            if (200..<300).contains(status) { return .ok }
+            return status == 409 ? .conflict : .failed("upload refused (\(status))")
+        }
+        return uploadParts(record: record, fileId: fileId, blob: blob, size: size)
+    }
+
+    private static func uploadParts(
+        record: HandoffRecord, fileId: String, blob: URL, size: UInt64
+    ) -> EngramUploadOutcome {
+        struct Begun: Decodable { let session: String }
+        guard let beginData = json(
+            record: record, method: "POST", path: "/api/files/\(fileId)/data/parts",
+            payload: ["size": size]
+        ), let begun = try? JSONDecoder().decode(Begun.self, from: beginData)
+        else { return .failed("could not begin a parts upload") }
+
+        guard let handle = try? FileHandle(forReadingFrom: blob) else {
+            return .failed("staged blob unreadable")
+        }
+        defer { try? handle.close() }
+        var part = 1
+        while true {
+            let chunk = handle.readData(ofLength: Int(Self.partSize))
+            if chunk.isEmpty { break }
+            guard var putReq = request(
+                record, "PUT", "/api/files/\(fileId)/data/parts/\(begun.session)/\(part)",
+                contentType: "application/octet-stream"
+            ) else { return .failed("bad part request") }
+            putReq.httpBody = chunk
+            guard let (status, _) = send(putReq), (200..<300).contains(status) else {
+                _ = json(record: record, method: "DELETE",
+                         path: "/api/files/\(fileId)/data/parts/\(begun.session)", payload: [:])
+                return .failed("part \(part) refused")
+            }
+            part += 1
+        }
+        guard let completeReq = request(
+            record, "POST", "/api/files/\(fileId)/data/parts/\(begun.session)/complete",
+            body: Data("{}".utf8), contentType: "application/json"
+        ), let (status, _) = send(completeReq) else { return .failed("completion did not answer") }
+        if (200..<300).contains(status) { return .ok }
+        return status == 409 ? .conflict : .failed("completion refused (\(status))")
+    }
+}
+
 enum ShareError: LocalizedError {
     case notSignedIn
     case staleToken
