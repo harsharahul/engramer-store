@@ -1053,6 +1053,46 @@ a {
   color: var(--ink-2);
 }
 
+.album-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 12px 0;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.album-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--hairline);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.album-option:hover {
+  background: var(--paper-dim);
+}
+
+.album-option-title {
+  flex: 1;
+}
+
+.tag-add-album {
+  width: 22px;
+  height: 22px;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
 @media (max-width: 760px) {
   /* Edge to edge: the pictures own the phone screen. */
   .photo-grid {

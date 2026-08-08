@@ -32,6 +32,8 @@ export function PhotoGrid(props: {
   onSelect: (id: string, event: React.MouseEvent) => void;
   onOpen: (id: string) => void;
   onMenu: (id: string, x: number, y: number) => void;
+  /** Long-press on a tile starts gathering, the photos-app idiom. */
+  onEnterSelect?: (id: string) => void;
 }) {
   const sections = useMemo(() => byMonth(props.files), [props.files]);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -114,6 +116,7 @@ export function PhotoGrid(props: {
                     onSelect={(e) => props.onSelect(file.id, e)}
                     onOpen={() => props.onOpen(file.id)}
                     onMenu={(x, y) => props.onMenu(file.id, x, y)}
+                    onEnterSelect={props.onEnterSelect ? () => props.onEnterSelect!(file.id) : undefined}
                   />
                 ))}
               </div>
@@ -133,10 +136,19 @@ function PhotoTile(props: {
   onSelect: (event: React.MouseEvent) => void;
   onOpen: () => void;
   onMenu: (x: number, y: number) => void;
+  onEnterSelect?: () => void;
 }) {
   const { file } = props;
   const { ref, thumb } = usePhotoThumb<HTMLButtonElement>(file);
-  const longPress = useLongPress(props.onMenu);
+  // At rest a long-press starts gathering; once gathering, it falls back to
+  // the menu so the tile's richer actions stay reachable on touch.
+  const longPress = useLongPress((x, y) => {
+    if (!props.selectMode && props.onEnterSelect) {
+      props.onEnterSelect();
+    } else {
+      props.onMenu(x, y);
+    }
+  });
   const placeholder = !thumb && file.blur ? blurUrl(file.blur) : null;
   const coarse = window.matchMedia("(pointer: coarse)").matches;
   const isVideo = fileKind(file.mime, file.name) === "video";

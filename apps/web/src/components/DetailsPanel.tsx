@@ -3,6 +3,7 @@ import { decryptContent, decryptFileMetadata } from "@engramer/crypto";
 import { api, type FileVersionInfo } from "../api";
 import { FileFacts, LibraryIntel } from "./FactsPanel";
 import { useStore, type FileEntry } from "../store";
+import { albumTitle, isAlbumTag, isReservedTag } from "../albums";
 import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { triggerDownload } from "../download";
@@ -34,12 +35,15 @@ export function DetailsPanel(props: {
   onRename: (id: string) => void;
   onTrash: (id: string) => void;
   onTagClick: (tag: string) => void;
+  onOpenAlbum: (tag: string) => void;
+  onAddToAlbum: (id: string) => void;
   onToast: (message: string) => void;
   onClose: () => void;
 }) {
   const { file } = props;
   const folders = useStore((s) => s.folders);
   const setTags = useStore((s) => s.setTags);
+  const removeFromAlbum = useStore((s) => s.removeFromAlbum);
   const toggleFavorite = useStore((s) => s.toggleFavorite);
   const restoreVersion = useStore((s) => s.restoreVersion);
   const [thumb, setThumb] = useState<string | null>(null);
@@ -212,17 +216,49 @@ export function DetailsPanel(props: {
 
       <FileFacts file={file} />
 
+      {file.tags.some((t) => isAlbumTag(t)) && (
+        <div className="details-tags">
+          <span className="details-label">Albums</span>
+          <div className="tag-input compact">
+            {file.tags.filter(isAlbumTag).map((tag) => (
+              <span key={tag} className="tag editable">
+                <button className="tag-link" title={albumTitle(tag)} onClick={() => props.onOpenAlbum(tag)}>
+                  {albumTitle(tag)}
+                </button>
+                <button
+                  title="Remove from album"
+                  onClick={() => void removeFromAlbum([file.id], tag)}
+                >
+                  <XGlyph size={10} />
+                </button>
+              </span>
+            ))}
+            <button className="tag-add-album" title="Add to album" onClick={() => props.onAddToAlbum(file.id)}>
+              +
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="details-tags">
         <span className="details-label">Tags</span>
         <div className="tag-input compact">
-          {file.tags.map((tag) => (
+          {file.tags
+            .filter((tag) => !isReservedTag(tag) || tag.startsWith("trip:"))
+            .map((tag) => (
             <span key={tag} className="tag editable">
               <button className="tag-link" title={`Search tag:${tag}`} onClick={() => props.onTagClick(tag)}>
                 {tag}
               </button>
               <button
                 title="Remove"
-                onClick={() => void setTags(file.id, file.tags.filter((t) => t !== tag))}
+                onClick={() =>
+                  // setTags protects reserved namespaces, so a trip chip's
+                  // remove goes through the direct membership path instead.
+                  void (isReservedTag(tag)
+                    ? removeFromAlbum([file.id], tag)
+                    : setTags(file.id, file.tags.filter((t) => t !== tag)))
+                }
               >
                 <XGlyph size={10} />
               </button>

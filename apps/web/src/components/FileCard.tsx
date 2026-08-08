@@ -37,6 +37,9 @@ export function FileCard(props: {
   index: number;
   selected: boolean;
   fresh?: boolean;
+  /** While gathering, every tap toggles membership instead of opening. */
+  selectMode?: boolean;
+  onToggleSelect?: () => void;
   onSelect: (event: React.MouseEvent) => void;
   onOpen: () => void;
   onMenu: (x: number, y: number) => void;
@@ -57,8 +60,14 @@ export function FileCard(props: {
       ref={cardRef}
       className={`card${props.selected ? " selected" : ""}${props.fresh ? " fresh" : ""}`}
       style={{ "--i": Math.min(props.index, 20) } as CSSProperties}
-      onClick={(e) => (coarse ? props.onOpen() : props.onSelect(e))}
-      onDoubleClick={props.onOpen}
+      onClick={(e) =>
+        props.selectMode && props.onToggleSelect
+          ? props.onToggleSelect()
+          : coarse
+            ? props.onOpen()
+            : props.onSelect(e)
+      }
+      onDoubleClick={props.selectMode ? undefined : props.onOpen}
       onContextMenu={(e) => {
         e.preventDefault();
         props.onMenu(e.clientX, e.clientY);
