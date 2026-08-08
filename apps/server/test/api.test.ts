@@ -214,6 +214,46 @@ describe("files and folders", () => {
     expect(meta.name).toBe("in-folder.txt");
   });
 
+  it("paged sync drains to the same rows an unpaged sync returns", async () => {
+    const before = await app.inject({ method: "GET", url: "/api/sync", headers: authHeader() });
+    const cursor = before.json().seq as number;
+
+    const made: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      made.push((await uploadFile(`paged-${i}.txt`, utf8Encode(`page ${i}`))).id);
+    }
+
+    const whole = await app.inject({
+      method: "GET",
+      url: `/api/sync?since=${cursor}`,
+      headers: authHeader(),
+    });
+    const wholeIds = (whole.json().files as Array<{ id: string }>).map((f) => f.id);
+
+    const drained: string[] = [];
+    let at = cursor;
+    for (let hops = 0; hops < 20; hops++) {
+      const page = await app.inject({
+        method: "GET",
+        url: `/api/sync?since=${at}&limit=2`,
+        headers: authHeader(),
+      });
+      const body = page.json() as { seq: number; files: Array<{ id: string }> };
+      expect(body.files.length).toBeLessThanOrEqual(2);
+      drained.push(...body.files.map((f) => f.id));
+      if (body.seq === at) {
+        break;
+      }
+      at = body.seq;
+    }
+
+    // Same rows, same order, none lost, none duplicated.
+    expect(drained).toEqual(wholeIds);
+    for (const id of made) {
+      expect(drained).toContain(id);
+    }
+  });
+
   it("delta sync returns only changes after the cursor", async () => {
     const before = await app.inject({ method: "GET", url: "/api/sync", headers: authHeader() });
     const cursor = before.json().seq as number;
