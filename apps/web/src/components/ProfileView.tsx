@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { disableHandoff, enableHandoff, handoffEnabled, handoffSupported } from "../handoff";
+import {
+  backupAvailable,
+  loadPolicy,
+  requestBackupAccess,
+  runBackup,
+  savePolicy,
+  type BackupPolicy,
+  type BackupProgress,
+} from "../backup";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
 import {
   checkStoredFiles,
@@ -82,14 +91,48 @@ export function ProfileView(props: {
   const [shell] = useState(() => nativeShell());
   // null hides the row entirely (no shared keychain on this platform).
   const [handoffOn, setHandoffOn] = useState<boolean | null>(null);
+  const [backupOk, setBackupOk] = useState(false);
+  const [policy, setPolicy] = useState<BackupPolicy>(() => loadPolicy());
+  const [backupRun, setBackupRun] = useState<BackupProgress | null>(null);
   useEffect(() => {
     void handoffSupported().then((supported) => {
       if (supported) {
         setHandoffOn(handoffEnabled(store.session?.email ?? ""));
       }
     });
+    void backupAvailable().then(setBackupOk);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const updatePolicy = (patch: Partial<BackupPolicy>) => {
+    const next = { ...policy, ...patch };
+    setPolicy(next);
+    savePolicy(next);
+    return next;
+  };
+
+  const startBackup = async (next: BackupPolicy) => {
+    const status = await requestBackupAccess();
+    if (status !== "authorized") {
+      props.onToast(
+        status === "limited"
+          ? "Full library access is needed for automatic backup. Grant it in Settings."
+          : "Photo access was declined. You can grant it in Settings.",
+      );
+      updatePolicy({ enabled: false });
+      return;
+    }
+    props.onToast("Backing up your photos…");
+    const result = await runBackup(next, setBackupRun);
+    setBackupRun(null);
+    props.onToast(
+      result.failed > 0
+        ? `Backed up ${result.done}; ${result.failed} could not be read.`
+        : result.done > 0
+          ? `Backed up ${result.done} ${result.done === 1 ? "item" : "items"}.`
+          : "Everything is already backed up.",
+    );
+  };
   // The same shell crate runs on Macs and iPhones; the words should say
   // which device is talking. WKWebView reports iPhone/iPad in the agent.
   const [phoneShell] = useState(() => nativeShell() && /iPhone|iPad/i.test(navigator.userAgent));
@@ -700,6 +743,76 @@ export function ProfileView(props: {
             >
               {handoffOn ? "Turn off" : "Turn on"}
             </button>
+          </div>
+        )}
+        {backupOk && (
+          <div className="profile-row profile-row-stack">
+            <div className="profile-row-main">
+              <b>Automatic photo backup</b>
+              <div className="profile-row-sub">
+                Backs up your photos and videos to the vault, each one encrypted on this device
+                before it leaves. Turning this on asks for access to your whole photo library.
+                Backup runs while the app is open; iOS decides when it may also run in the
+                background, so keep the app open now and then to catch up.
+              </div>
+              {policy.enabled && (
+                <div className="backup-knobs">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={policy.wifiOnly}
+                      onChange={(e) => updatePolicy({ wifiOnly: e.target.checked })}
+                    />
+                    Wi-Fi only
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={policy.includeVideos}
+                      onChange={(e) => updatePolicy({ includeVideos: e.target.checked })}
+                    />
+                    Include videos
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={policy.includeScreenshots}
+                      onChange={(e) => updatePolicy({ includeScreenshots: e.target.checked })}
+                    />
+                    Include screenshots
+                  </label>
+                </div>
+              )}
+              {backupRun && (
+                <div className="profile-row-sub">
+                  Backing up {backupRun.done} of {backupRun.total}
+                  {backupRun.failed > 0 ? ` (${backupRun.failed} failed)` : ""}…
+                </div>
+              )}
+            </div>
+            <div className="profile-head-actions">
+              {policy.enabled ? (
+                <>
+                  <button
+                    className="btn"
+                    disabled={backupRun !== null}
+                    onClick={() => void startBackup(policy)}
+                  >
+                    Back up now
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => updatePolicy({ enabled: false })}>
+                    Turn off
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="btn btn-primary"
+                  onClick={() => void startBackup(updatePolicy({ enabled: true }))}
+                >
+                  Turn on
+                </button>
+              )}
+            </div>
           </div>
         )}
       </section>

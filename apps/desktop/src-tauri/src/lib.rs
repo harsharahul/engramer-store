@@ -13,6 +13,7 @@ mod handoff;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod keychain;
 mod media;
+mod photolib;
 mod photos;
 mod unlock;
 mod watched;
@@ -129,6 +130,10 @@ pub fn run() {
             filesprovider::files_provider_available,
             filesprovider::files_provider_enable,
             filesprovider::files_provider_disable,
+            photolib::photos_available,
+            photolib::photos_authorize,
+            photolib::photos_list,
+            photolib::photos_export,
         ])
         .setup(|app| {
             watched::rebuild_watchers(app.handle());

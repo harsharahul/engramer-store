@@ -1108,6 +1108,25 @@ a {
   border: 1px solid var(--hairline);
 }
 
+.profile-row-stack {
+  align-items: flex-start;
+}
+
+.backup-knobs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.backup-knobs label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .tag-add-album {
   width: 22px;
   height: 22px;

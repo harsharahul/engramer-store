@@ -104,6 +104,14 @@ describe("metadataOf", () => {
     expect(metadataOf(entry())).not.toHaveProperty("facts");
   });
 
+  it("keeps the backup source id, which a patch would otherwise erase", () => {
+    expect(metadataOf(entry({ sourceId: "asset-99" })).sourceId).toBe("asset-99");
+  });
+
+  it("writes no sourceId for a file never backed up from the library", () => {
+    expect(metadataOf(entry())).not.toHaveProperty("sourceId");
+  });
+
   it("still carries the fields it always did", () => {
     const meta = metadataOf(entry({ category: "Documents", favorite: true }));
     expect(meta).toMatchObject({

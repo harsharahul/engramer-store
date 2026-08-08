@@ -129,6 +129,58 @@ export async function nativeFilesProviderDisable(email: string): Promise<void> {
   await invoke("files_provider_disable", { email }).catch(() => {});
 }
 
+// ----- photo library (iOS; automatic backup) -----
+
+export interface NativePhotoAsset {
+  id: string;
+  kind: "image" | "video";
+  filename: string;
+  mtime_ms: number;
+  screenshot: boolean;
+}
+
+export async function nativePhotosAvailable(): Promise<boolean> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return false;
+  }
+  try {
+    return (await invoke("photos_available")) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Requests full-library access; resolves to the resulting status. */
+export async function nativePhotosAuthorize(): Promise<string> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return "denied";
+  }
+  return (await invoke("photos_authorize")) as string;
+}
+
+export async function nativePhotosList(): Promise<NativePhotoAsset[]> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return [];
+  }
+  return (await invoke("photos_list")) as NativePhotoAsset[];
+}
+
+/** Exports one asset's original and reads it back as a File (originals
+ * intact), reusing the picker's own read-and-delete bridge. */
+export async function nativePhotoFile(id: string): Promise<File | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  const path = (await invoke("photos_export", { id })) as string;
+  const name = path.split("/").pop() || "photo";
+  const bytes = fileBytes(await invoke("picked_file_read", { path }));
+  return new File([bytes as BlobPart], name, { type: mimeFromName(name) });
+}
+
 // ----- watched folders (desktop shell only) -----
 
 export interface WatchedFile {

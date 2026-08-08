@@ -38,6 +38,16 @@ block2 = "0.6"
 # original bytes instead of a JPEG iOS transcoded on the way out.
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2-photos-ui = { version = "0.3", features = ["PHPicker", "block2"] }
+objc2-photos = { version = "0.3", features = [
+    "PHAsset",
+    "PHFetchResult",
+    "PHFetchOptions",
+    "PHAssetResource",
+    "PHAssetResourceManager",
+    "PHPhotoLibrary",
+    "PhotosTypes",
+    "block2",
+] }
 objc2-ui-kit = { version = "0.3", features = [
     "UIApplication",
     "UIGeometry",
