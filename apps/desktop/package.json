@@ -9,7 +9,7 @@
     "ios:init": "tauri ios init && node scripts/ios-project-fix.mjs",
     "ios:core": "node scripts/ios-core-build.mjs",
     "ios:dev": "node scripts/instance-config.mjs && node scripts/ios-core-build.mjs && tauri ios dev --config src-tauri/tauri.instance.json",
-    "ios:bundle": "node scripts/instance-config.mjs && node scripts/ios-core-build.mjs && tauri ios build --config src-tauri/tauri.instance.json --export-method app-store-connect",
+    "ios:bundle": "node scripts/instance-config.mjs && node scripts/ios-core-build.mjs && node scripts/ios-project-fix.mjs && tauri ios build --config src-tauri/tauri.instance.json --export-method app-store-connect",
     "tauri": "tauri"
   },
   "devDependencies": {
