@@ -2056,8 +2056,15 @@ export function Vault() {
             onShare={(id) => setShareId(id)}
             onRename={(id) => setRenameFileId(id)}
             onTrash={(id) => {
+              const name = store.files.get(id)?.name;
               void store.trashFile(id);
               clearSelection();
+              // The sheet was opened on this file; with the file gone it
+              // must close, and the action needs an acknowledgement.
+              setDetailsSheet(false);
+              setDetailsFileId(null);
+              setDetailsOpen(false);
+              showToast(name ? `Moved "${name}" to trash` : "Moved to trash");
             }}
             onTagClick={searchTag}
             onOpenAlbum={(tag) => {
