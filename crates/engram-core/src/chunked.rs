@@ -41,7 +41,10 @@ pub fn read_header(bytes: &[u8]) -> Result<Header, CryptoError> {
     let mut fixed = [0u8; HEADER_BYTES];
     fixed.copy_from_slice(&bytes[..HEADER_BYTES]);
     let plain_size = u64::from_le_bytes(fixed[20..28].try_into().unwrap());
-    Ok(Header { plain_size, bytes: fixed })
+    Ok(Header {
+        plain_size,
+        bytes: fixed,
+    })
 }
 
 pub fn chunk_count(plain_size: u64) -> u64 {
@@ -75,7 +78,9 @@ fn chunk_nonce(header: &Header, index: u64) -> [u8; NONCE_BYTES] {
     let mut message = Vec::with_capacity(HEADER_BYTES + 8);
     message.extend_from_slice(&header.bytes);
     message.extend_from_slice(&index.to_le_bytes());
-    backend::generichash(NONCE_BYTES, &message).try_into().unwrap()
+    backend::generichash(NONCE_BYTES, &message)
+        .try_into()
+        .unwrap()
 }
 
 pub fn encrypt_chunk(header: &Header, key: &[u8; KEY_BYTES], index: u64, plain: &[u8]) -> Vec<u8> {

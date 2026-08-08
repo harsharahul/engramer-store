@@ -19,7 +19,11 @@ pub fn generate_key() -> [u8; KEY_BYTES] {
 
 /// Seal with the nonce supplied, so vectors reproduce exactly; production
 /// callers use `seal`, which draws a random nonce.
-pub fn seal_with_nonce(plaintext: &[u8], key: &[u8; KEY_BYTES], nonce: &[u8; NONCE_BYTES]) -> SecretBox {
+pub fn seal_with_nonce(
+    plaintext: &[u8],
+    key: &[u8; KEY_BYTES],
+    nonce: &[u8; NONCE_BYTES],
+) -> SecretBox {
     SecretBox {
         ciphertext: to_b64url(&backend::secretbox_seal(plaintext, nonce, key)),
         nonce: to_b64url(nonce),

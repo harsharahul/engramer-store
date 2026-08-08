@@ -49,6 +49,52 @@ jobs:
       - name: Audit production dependencies for known vulnerabilities
         run: pnpm audit --prod --audit-level high
 
+  rust:
+    name: Rust core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Regenerate the TypeScript vectors
+        run: pnpm --filter @engramer/crypto gen:vectors
+      - name: Fail if the committed TypeScript vectors moved
+        run: git diff --exit-code packages/crypto/test/vectors/ts
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      # Scoped to the core crate: the shell predates rustfmt discipline.
+      - run: cargo fmt -p engram-core -- --check
+      - run: cargo clippy -p engram-core --all-targets -- -D warnings
+      - name: Cross-language vectors, TypeScript to Rust
+        run: cargo test -p engram-core
+      - name: Regenerate the Rust vectors
+        run: cargo run -p engram-core --bin gen-vectors
+      - name: Fail if the committed Rust vectors moved
+        run: git diff --exit-code packages/crypto/test/vectors/rs
+      - name: Cross-language vectors, Rust to TypeScript
+        run: pnpm --filter @engramer/crypto test
+
+  ios-core:
+    name: iOS core cross-build
+    runs-on: macos-15
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p engram-core --target aarch64-apple-ios --release
+      - run: cargo build -p engram-core --target aarch64-apple-ios-sim --release
+
   docker:
     name: Docker image
     needs: test
