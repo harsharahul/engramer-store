@@ -311,7 +311,9 @@ a {
   min-height: 100%;
   display: grid;
   place-items: center;
-  padding: 32px;
+  /* The bottom inset keeps the last row (the server picker) above the
+     phone's home indicator instead of underneath it. */
+  padding: 32px 32px calc(32px + env(safe-area-inset-bottom));
   background:
     radial-gradient(1200px 600px at 70% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%),
     radial-gradient(900px 500px at 10% 110%, color-mix(in srgb, var(--accent) 4%, transparent), transparent 60%),
@@ -965,16 +967,20 @@ a {
 
 .photo-month {
   position: sticky;
-  top: 0;
+  top: 8px;
   z-index: 5;
-  padding: 10px 2px 8px;
-  font-size: 13px;
+  width: fit-content;
+  margin: 8px 0 6px 2px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  font-size: 12.5px;
   font-weight: 600;
-  color: var(--ink-1);
-  /* A frosted strip that reads as the page, not a slab. The blur keeps
-     the label legible over photos while the tint stays close to the
-     surface it floats on in either theme. */
-  background: color-mix(in srgb, var(--paper) 78%, transparent);
+  color: var(--paper);
+  /* A frosted pill floating over the photos, tinted from the page
+     surface so it reads correctly in both themes; the blur keeps the
+     label legible over any picture. */
+  background: color-mix(in srgb, var(--ink-0) 80%, transparent);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
@@ -1095,18 +1101,28 @@ a {
 }
 
 .auth-server {
-  margin-top: 14px;
+  margin-top: 16px;
   text-align: center;
   font-size: 13px;
 }
 
+/* The self-hosting door: visible at a glance, not buried fine print. */
 .auth-server-link {
-  border: none;
-  background: none;
-  color: var(--ink-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 14px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink-2) 55%, transparent);
+  color: var(--paper-dim);
   cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  font-size: 13px;
+}
+
+.auth-server-link b {
+  color: var(--paper);
+  font-weight: 600;
 }
 
 .auth-server form {
@@ -1203,7 +1219,7 @@ a {
     margin: 0 -14px;
   }
   .photo-month {
-    padding-left: 14px;
+    margin-left: 14px;
   }
 }
 
