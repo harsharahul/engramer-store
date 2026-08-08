@@ -8,6 +8,7 @@
 
 mod chrome;
 mod egc1;
+mod filesprovider;
 mod handoff;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod keychain;
@@ -21,9 +22,9 @@ use std::sync::{Arc, Mutex};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 #[cfg(desktop)]
 use tauri::tray::TrayIconBuilder;
+use tauri::Manager;
 #[cfg(desktop)]
 use tauri::WindowEvent;
-use tauri::Manager;
 #[cfg(desktop)]
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
@@ -125,6 +126,9 @@ pub fn run() {
             handoff::handoff_store,
             handoff::handoff_get,
             handoff::handoff_clear,
+            filesprovider::files_provider_available,
+            filesprovider::files_provider_enable,
+            filesprovider::files_provider_disable,
         ])
         .setup(|app| {
             watched::rebuild_watchers(app.handle());

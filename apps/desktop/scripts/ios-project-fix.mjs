@@ -73,7 +73,7 @@ if (!spec.includes("- target: EngramShare")) {
   const head = spec.slice(0, appAt);
   const tail = spec.slice(appAt).replace(
     /^(\s*)dependencies:\s*$/m,
-    `$1dependencies:\n$1  - target: EngramShare\n$1    embed: true`,
+    `$1dependencies:\n$1  - target: EngramShare\n$1    embed: true\n$1  - target: EngramFiles\n$1    embed: true`,
   );
   spec = head + tail;
 }
@@ -158,7 +158,7 @@ console.log(`ios project: ${added ? `added ${added} privacy usage descriptions` 
 
 // 7. Loud verification: every expected target, present in the pbxproj.
 const finalProject = readFileSync(project, "utf8");
-for (const target of ["engram-store-desktop_iOS", "EngramShare"]) {
+for (const target of ["engram-store-desktop_iOS", "EngramShare", "EngramFiles"]) {
   if (!finalProject.includes(target)) {
     console.error(`ios project: target ${target} MISSING from the generated project`);
     process.exit(1);

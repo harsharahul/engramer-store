@@ -153,12 +153,14 @@ mod ios {
             let configuration = PHPickerConfiguration::new();
             configuration.setSelectionLimit(0);
             // The whole point of this file.
-            configuration
-                .setPreferredAssetRepresentationMode(PHPickerConfigurationAssetRepresentationMode::Current);
-            let filter = PHPickerFilter::anyFilterMatchingSubfilters(&NSArray::from_retained_slice(&[
-                PHPickerFilter::imagesFilter(),
-                PHPickerFilter::videosFilter(),
-            ]));
+            configuration.setPreferredAssetRepresentationMode(
+                PHPickerConfigurationAssetRepresentationMode::Current,
+            );
+            let filter =
+                PHPickerFilter::anyFilterMatchingSubfilters(&NSArray::from_retained_slice(&[
+                    PHPickerFilter::imagesFilter(),
+                    PHPickerFilter::videosFilter(),
+                ]));
             configuration.setFilter(Some(&filter));
 
             let controller: Retained<PickerController> = msg_send![

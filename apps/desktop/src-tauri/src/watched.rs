@@ -41,10 +41,7 @@ pub struct WatchedFile {
 }
 
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|err| err.to_string())?;
+    let dir = app.path().app_config_dir().map_err(|err| err.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
     Ok(dir.join("watched-folders.json"))
 }
@@ -237,7 +234,10 @@ pub async fn watched_scan(app: AppHandle) -> Vec<WatchedFile> {
 }
 
 #[tauri::command]
-pub async fn watched_file_read(app: AppHandle, path: String) -> Result<tauri::ipc::Response, String> {
+pub async fn watched_file_read(
+    app: AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
     let file = PathBuf::from(&path);
     let folders = load_folders(&app);
     // The webview may only read inside folders the user explicitly chose.

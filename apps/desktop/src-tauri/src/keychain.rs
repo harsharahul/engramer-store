@@ -116,7 +116,8 @@ pub fn get(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
 }
 
 pub fn delete(service: &str, account: &str) -> Result<(), String> {
-    let status = unsafe { SecItemDelete(as_query(base_pairs(service, account)).as_concrete_TypeRef()) };
+    let status =
+        unsafe { SecItemDelete(as_query(base_pairs(service, account)).as_concrete_TypeRef()) };
     if status != 0 && status != errSecItemNotFound {
         return Err(format!("keychain delete failed ({status})"));
     }

@@ -62,9 +62,9 @@ pub fn encrypt_for_upload(
     source_id: Option<String>,
 ) -> Result<UploadEnvelope, FfiError> {
     engram_core::init();
-    let master: [u8; 32] = master_key
-        .try_into()
-        .map_err(|_| FfiError::Failed { reason: "master key must be 32 bytes".into() })?;
+    let master: [u8; 32] = master_key.try_into().map_err(|_| FfiError::Failed {
+        reason: "master key must be 32 bytes".into(),
+    })?;
 
     let mut input = File::open(&input_path).map_err(fail("open input"))?;
     let plain_size = input.metadata().map_err(fail("stat input"))?.len();
@@ -72,7 +72,9 @@ pub fn encrypt_for_upload(
 
     let file_key = secretbox::generate_key();
     let mut encryptor = stream::StreamEncryptor::new(&file_key);
-    output.write_all(&encryptor.header()).map_err(fail("write header"))?;
+    output
+        .write_all(&encryptor.header())
+        .map_err(fail("write header"))?;
 
     let mut digester = Digester::new();
     let mut written: u64 = engram_core::backend::STREAM_HEADER_BYTES as u64;
@@ -80,7 +82,11 @@ pub fn encrypt_for_upload(
     let mut remaining = plain_size;
     loop {
         let want = buffer.len().min(remaining.max(0) as usize);
-        let read = if want == 0 { 0 } else { read_full(&mut input, &mut buffer[..want])? };
+        let read = if want == 0 {
+            0
+        } else {
+            read_full(&mut input, &mut buffer[..want])?
+        };
         let final_chunk = remaining <= read as u64;
         digester.update(&buffer[..read]);
         let sealed = encryptor.push(&buffer[..read], final_chunk);
@@ -107,8 +113,10 @@ pub fn encrypt_for_upload(
     Ok(UploadEnvelope {
         encrypted_key_json: serde_json::to_string(&secretbox::seal(&file_key, &master))
             .map_err(fail("serialize key"))?,
-        encrypted_meta_json: serde_json::to_string(&metadata::encrypt_file_metadata(&meta, &file_key))
-            .map_err(fail("serialize metadata"))?,
+        encrypted_meta_json: serde_json::to_string(&metadata::encrypt_file_metadata(
+            &meta, &file_key,
+        ))
+        .map_err(fail("serialize metadata"))?,
         digest,
         ciphertext_size: written,
     })
@@ -160,7 +168,9 @@ mod tests {
 fn read_full(input: &mut File, buffer: &mut [u8]) -> Result<usize, FfiError> {
     let mut filled = 0;
     while filled < buffer.len() {
-        let n = input.read(&mut buffer[filled..]).map_err(fail("read input"))?;
+        let n = input
+            .read(&mut buffer[filled..])
+            .map_err(fail("read input"))?;
         if n == 0 {
             break;
         }
@@ -174,14 +184,50 @@ fn read_full(input: &mut File, buffer: &mut [u8]) -> Result<usize, FfiError> {
 #[uniffi::export]
 pub fn decrypt_content(blob: Vec<u8>, file_key: Vec<u8>) -> Result<Vec<u8>, FfiError> {
     engram_core::init();
-    let key: [u8; 32] = file_key
-        .try_into()
-        .map_err(|_| FfiError::Failed { reason: "file key must be 32 bytes".into() })?;
+    let key: [u8; 32] = file_key.try_into().map_err(|_| FfiError::Failed {
+        reason: "file key must be 32 bytes".into(),
+    })?;
     if blob.len() >= 4 && &blob[..4] == b"EGC1" {
-        return engram_core::chunked::decrypt(&blob, &key)
-            .map_err(|e| FfiError::Failed { reason: e.to_string() });
+        return engram_core::chunked::decrypt(&blob, &key).map_err(|e| FfiError::Failed {
+            reason: e.to_string(),
+        });
     }
-    stream::decrypt_bytes(&blob, &key).map_err(|e| FfiError::Failed { reason: e.to_string() })
+    stream::decrypt_bytes(&blob, &key).map_err(|e| FfiError::Failed {
+        reason: e.to_string(),
+    })
+}
+
+/// Decrypts an encrypted metadata blob ({"ciphertext","nonce"} JSON)
+/// with the object's own key and returns the plaintext JSON for Swift to
+/// parse. Serves files and folders alike; the caller knows which fields
+/// it wants.
+#[uniffi::export]
+pub fn decrypt_metadata_json(
+    encrypted_meta_json: String,
+    object_key: Vec<u8>,
+) -> Result<String, FfiError> {
+    engram_core::init();
+    let key: [u8; 32] = object_key.try_into().map_err(|_| FfiError::Failed {
+        reason: "object key must be 32 bytes".into(),
+    })?;
+    let sealed: secretbox::SecretBox =
+        serde_json::from_str(&encrypted_meta_json).map_err(|_| FfiError::Failed {
+            reason: "not encrypted metadata".into(),
+        })?;
+    let plain = secretbox::open(&sealed, &key).map_err(|e| FfiError::Failed {
+        reason: e.to_string(),
+    })?;
+    String::from_utf8(plain).map_err(|_| FfiError::Failed {
+        reason: "metadata is not utf8".into(),
+    })
+}
+
+/// BLAKE2b-256 of the given bytes, base64url: the digest the metadata
+/// carries, so a provider can verify what it materialized.
+#[uniffi::export]
+pub fn content_digest(bytes: Vec<u8>) -> String {
+    engram_core::init();
+    engram_core::digest::digest(&bytes)
 }
 
 /// Opens a wrapped per-file key ({"ciphertext","nonce"} JSON) with the
@@ -189,10 +235,14 @@ pub fn decrypt_content(blob: Vec<u8>, file_key: Vec<u8>) -> Result<Vec<u8>, FfiE
 #[uniffi::export]
 pub fn open_file_key(encrypted_key_json: String, master_key: Vec<u8>) -> Result<Vec<u8>, FfiError> {
     engram_core::init();
-    let master: [u8; 32] = master_key
-        .try_into()
-        .map_err(|_| FfiError::Failed { reason: "master key must be 32 bytes".into() })?;
-    let sealed: secretbox::SecretBox = serde_json::from_str(&encrypted_key_json)
-        .map_err(|_| FfiError::Failed { reason: "not a wrapped key".into() })?;
-    secretbox::open(&sealed, &master).map_err(|e| FfiError::Failed { reason: e.to_string() })
+    let master: [u8; 32] = master_key.try_into().map_err(|_| FfiError::Failed {
+        reason: "master key must be 32 bytes".into(),
+    })?;
+    let sealed: secretbox::SecretBox =
+        serde_json::from_str(&encrypted_key_json).map_err(|_| FfiError::Failed {
+            reason: "not a wrapped key".into(),
+        })?;
+    secretbox::open(&sealed, &master).map_err(|e| FfiError::Failed {
+        reason: e.to_string(),
+    })
 }

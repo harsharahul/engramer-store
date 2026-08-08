@@ -94,7 +94,9 @@ pub fn media_register(
     mime: String,
 ) -> Result<(), String> {
     let raw = b64_decode(&key)?;
-    let key: [u8; 32] = raw.try_into().map_err(|_| "key must be 32 bytes".to_string())?;
+    let key: [u8; 32] = raw
+        .try_into()
+        .map_err(|_| "key must be 32 bytes".to_string())?;
     let source = Arc::new(MediaSource {
         key,
         token,
@@ -107,7 +109,11 @@ pub fn media_register(
         }),
         fetching: tokio::sync::Mutex::new(()),
     });
-    state.sources.lock().expect("media state").insert(file_id, source);
+    state
+        .sources
+        .lock()
+        .expect("media state")
+        .insert(file_id, source);
     Ok(())
 }
 
@@ -230,12 +236,7 @@ fn http_client(app: &AppHandle) -> reqwest::Client {
     app.state::<Pooled>().0.clone()
 }
 
-fn respond(
-    responder: UriSchemeResponder,
-    status: u16,
-    headers: &[(&str, String)],
-    body: Vec<u8>,
-) {
+fn respond(responder: UriSchemeResponder, status: u16, headers: &[(&str, String)], body: Vec<u8>) {
     let mut builder = http::Response::builder().status(status);
     for (name, value) in headers {
         builder = builder.header(*name, value);
@@ -245,7 +246,11 @@ fn respond(
     }
 }
 
-pub fn handle(ctx: UriSchemeContext<'_, tauri::Wry>, request: http::Request<Vec<u8>>, responder: UriSchemeResponder) {
+pub fn handle(
+    ctx: UriSchemeContext<'_, tauri::Wry>,
+    request: http::Request<Vec<u8>>,
+    responder: UriSchemeResponder,
+) {
     let app = ctx.app_handle().clone();
     tauri::async_runtime::spawn(async move {
         let uri = request.uri().clone();
