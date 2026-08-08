@@ -16,6 +16,7 @@ import {
   InfoGlyph,
   PencilGlyph,
   ShareGlyph,
+  StarGlyph,
   TagGlyph,
   XGlyph,
 } from "./Icon";
@@ -267,6 +268,8 @@ export function Preview(props: {
   onRename: () => void;
   onDetails: () => void;
   onEdit?: () => void;
+  /** Star toggle; double-tap now belongs to zoom, so the button is explicit. */
+  onFavorite?: () => void;
   /** Move to the next or previous file in the view; null when at an end. */
   onStep?: (direction: 1 | -1) => void;
   canStepBack?: boolean;
@@ -496,6 +499,15 @@ export function Preview(props: {
         {props.onEdit && (
           <button className="btn" onClick={props.onEdit}>
             <PencilGlyph size={14} /> Edit
+          </button>
+        )}
+        {props.onFavorite && (
+          <button
+            className={`icon-btn${file.favorite ? " fav-active" : ""}`}
+            title={file.favorite ? "Remove from favorites" : "Add to favorites"}
+            onClick={props.onFavorite}
+          >
+            <StarGlyph />
           </button>
         )}
         <button className="icon-btn" title="Share" onClick={props.onShare}>
