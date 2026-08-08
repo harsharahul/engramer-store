@@ -3,7 +3,7 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## [Unreleased]
+## [0.40.0] - 2026-08-08
 
 ### Added
 - **Save to Engram Store from any app.** A share extension puts the vault
