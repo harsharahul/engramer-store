@@ -26,6 +26,8 @@ notify = "8"
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 security-framework = "3"
+security-framework-sys = "2"
+core-foundation = "0.10"
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-local-authentication = "0.3"

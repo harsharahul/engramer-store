@@ -9,6 +9,7 @@ import {
   type KeyAttributes,
 } from "@engramer/crypto";
 import { api, setAuthToken } from "./api";
+import { clearHandoff, refreshHandoff } from "./handoff";
 import { clearNativeUnlock, deviceUnlock, updateUnlockToken } from "./unlock";
 import { nativeMediaClear } from "./native";
 
@@ -103,6 +104,8 @@ function activate(session: Session): void {
   setAuthToken(session.token);
   // A fresh login renews the device-unlock record's 30-day token window.
   updateUnlockToken(session.email, session.token);
+  // And the extension handoff record's, where this device opted in.
+  refreshHandoff(session);
   sessionStorage.setItem(
     SESSION_KEY,
     JSON.stringify({
@@ -144,11 +147,15 @@ export async function restoreSession(): Promise<Session | null> {
   }
 }
 
-export function clearSession(): void {
+export function clearSession(email?: string): void {
   sessionStorage.removeItem(SESSION_KEY);
   // Signing out is the revocation gesture: the wrapped session must not
-  // outlive it, in this browser or in the desktop shell's Keychain.
+  // outlive it, in this browser, the shell's Keychain, or the extension
+  // handoff item.
   clearNativeUnlock();
+  if (email) {
+    clearHandoff(email);
+  }
   void nativeMediaClear();
   setAuthToken(null);
 }
@@ -156,7 +163,10 @@ export function clearSession(): void {
 /**
  * Locks without revoking: in-memory keys and the session token go away,
  * but the device-unlock enrollment stays, so Touch ID or the passkey
- * reopens the vault. Signing out remains the full wipe.
+ * reopens the vault. The extension handoff record also stays, on
+ * purpose: extensions exist to work while the app is closed, and the
+ * record is already behind the device passcode. Signing out remains the
+ * full wipe.
  */
 export function suspendSession(): void {
   sessionStorage.removeItem(SESSION_KEY);

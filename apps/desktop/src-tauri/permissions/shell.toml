@@ -15,7 +15,8 @@
 identifier = "shell-commands"
 description = """
 Lets the hosted vault app call the shell's own commands: the device unlock
-secret, watched folders, the media stream bridge, and the photo picker.
+secret, watched folders, the media stream bridge, the photo picker, and the
+extension handoff record.
 """
 commands.allow = [
     "pick_photos",
@@ -31,4 +32,8 @@ commands.allow = [
     "watched_file_read",
     "media_register",
     "media_clear",
+    "handoff_available",
+    "handoff_store",
+    "handoff_get",
+    "handoff_clear",
 ]

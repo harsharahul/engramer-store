@@ -67,6 +67,50 @@ export async function nativeSecretDelete(email: string): Promise<void> {
   await invoke("unlock_secret_delete", { email }).catch(() => {});
 }
 
+// ----- extension handoff (shared keychain; iOS extensions read it) -----
+
+/** True when the shell can persist a handoff record for app extensions. */
+export async function nativeHandoffAvailable(): Promise<boolean> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return false;
+  }
+  try {
+    return (await invoke("handoff_available")) === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function nativeHandoffStore(email: string, payload: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    throw new Error("no native shell");
+  }
+  await invoke("handoff_store", { email, payload });
+}
+
+export async function nativeHandoffGet(email: string): Promise<string | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  try {
+    const record = await invoke("handoff_get", { email });
+    return typeof record === "string" ? record : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function nativeHandoffClear(email: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return;
+  }
+  await invoke("handoff_clear", { email }).catch(() => {});
+}
+
 // ----- watched folders (desktop shell only) -----
 
 export interface WatchedFile {

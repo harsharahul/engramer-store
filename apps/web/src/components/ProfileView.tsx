@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { disableHandoff, enableHandoff, handoffEnabled, handoffSupported } from "../handoff";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
 import {
   checkStoredFiles,
@@ -79,6 +80,16 @@ export function ProfileView(props: {
   const [savingName, setSavingName] = useState(false);
   const [enrolling, setEnrolling] = useState(false);
   const [shell] = useState(() => nativeShell());
+  // null hides the row entirely (no shared keychain on this platform).
+  const [handoffOn, setHandoffOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    void handoffSupported().then((supported) => {
+      if (supported) {
+        setHandoffOn(handoffEnabled(store.session?.email ?? ""));
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // The same shell crate runs on Macs and iPhones; the words should say
   // which device is talking. WKWebView reports iPhone/iPad in the agent.
   const [phoneShell] = useState(() => nativeShell() && /iPhone|iPad/i.test(navigator.userAgent));
@@ -655,6 +666,43 @@ export function ProfileView(props: {
             Resync
           </button>
         </div>
+        {handoffOn !== null && (
+          <div className="profile-row">
+            <div className="profile-row-main">
+              <b>Extensions on this device</b>
+              <div className="profile-row-sub">
+                Lets this device's app extensions (sharing into the vault, the Files app) work
+                while the app is closed. Your vault key is stored behind the device passcode, on
+                this device only, never in iCloud. It stays through a lock; signing out removes
+                it.
+              </div>
+            </div>
+            <button
+              className="btn"
+              onClick={() => {
+                const session = store.session;
+                if (!session) {
+                  return;
+                }
+                if (handoffOn) {
+                  void disableHandoff(session.email).then(() => {
+                    setHandoffOn(false);
+                    props.onToast("Extensions are off. The stored key was removed.");
+                  });
+                } else {
+                  void enableHandoff(session)
+                    .then(() => {
+                      setHandoffOn(true);
+                      props.onToast("Extensions can use this vault now.");
+                    })
+                    .catch(() => props.onToast("The Keychain refused to store the record."));
+                }
+              }}
+            >
+              {handoffOn ? "Turn off" : "Turn on"}
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="profile-card">
