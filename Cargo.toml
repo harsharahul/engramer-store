@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/engram-core", "apps/desktop/src-tauri"]
+members = ["crates/engram-core", "crates/engram-ffi", "apps/desktop/src-tauri"]
 
 [profile.release]
 lto = true

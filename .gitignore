@@ -35,3 +35,6 @@ apps/web/public/office/
 # Auto-generated code map from the local index
 docs/codemap/
 /target/
+apps/desktop/src-tauri/ios/EngramCore.xcframework/
+apps/desktop/src-tauri/ios/Generated/
+apps/desktop/src-tauri/ios/.core-build/
