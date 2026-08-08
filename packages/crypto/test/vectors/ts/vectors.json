@@ -1,0 +1,102 @@
+{
+ "b64url": [
+  {
+   "hexIn": "",
+   "out": ""
+  },
+  {
+   "hexIn": "00",
+   "out": "AA"
+  },
+  {
+   "hexIn": "0001",
+   "out": "AAE"
+  },
+  {
+   "hexIn": "fbff7e",
+   "out": "-_9-"
+  },
+  {
+   "hexIn": "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98",
+   "out": "BRIfLDlGU2BteoeUoa67yNXi7_wJFiMwPUpXZHF-i5g"
+  }
+ ],
+ "digest": [
+  {
+   "hexIn": "",
+   "out": "DldRwCblQ7Loqy6wYJnaodHl30d3j3eH-qtFzfEv46g"
+  },
+  {
+   "hexIn": "0104070a0d101316191c1f2225282b2e3134373a3d404346494c4f5255585b5e6164676a6d707376797c7f8285888b8e9194979a9da0a3a6a9acafb2b5b8bbbec1c4c7cacdd0d3d6d9dcdfe2e5e8ebeef1f4f7fafd000306090c0f1215181b1e2124272a",
+   "out": "TdExdMANJmiPcULrg8diBxx5-iwiZkmkvm6KdiWkgX8"
+  },
+  {
+   "incremental": [
+    "00010203040506070809",
+    "090e13181d22272c31363b40454a4f54595e6368"
+   ],
+   "out": "-On2ucnas_J0qmQ8yvK430UMRbxmO42TGl5v6UMvNk8"
+  }
+ ],
+ "argon2id": [
+  {
+   "password": "correct horse battery staple",
+   "salt": "Ag0YIy45RE9aZXB7hpGcpw",
+   "opsLimit": 2,
+   "memLimit": 19922944,
+   "kek": "gYIcY5uqzoQkwq3EMxV5khxSEvkp-daabGfvHe_C_cg"
+  },
+  {
+   "password": "pässwörd — unicode",
+   "salt": "Ag0YIy45RE9aZXB7hpGcpw",
+   "opsLimit": 3,
+   "memLimit": 67108864,
+   "kek": "WA-T9r9TUlk3HExJJMvi5EzNZF00via73dQ5nxb8vQI"
+  }
+ ],
+ "kdf": {
+  "kek": "gYIcY5uqzoQkwq3EMxV5khxSEvkp-daabGfvHe_C_cg",
+  "loginKey": "A9E6Dg7j2U0HpnmxqQwmNRo-yD6vFK40Hald7i4K87s",
+  "loginKeyDigest": "PBRdFLDXZs8tq_zYBEYIEo_drR2KC13kgAhe5GQOUIQ",
+  "unlockSecretHex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c",
+  "unlockKey": "bT80qIE5RC0xlEg72FNDYhgcn9CMqUvxbTqPMAmxLuU"
+ },
+ "sizes": [
+  {
+   "plain": 0,
+   "chunked": 44,
+   "stream": 41,
+   "streamBack": 0
+  },
+  {
+   "plain": 1,
+   "chunked": 45,
+   "stream": 42,
+   "streamBack": 1
+  },
+  {
+   "plain": 100,
+   "chunked": 144,
+   "stream": 141,
+   "streamBack": 100
+  },
+  {
+   "plain": 4194304,
+   "chunked": 4194348,
+   "stream": 4194345,
+   "streamBack": 4194304
+  },
+  {
+   "plain": 4194305,
+   "chunked": 4194365,
+   "stream": 4194363,
+   "streamBack": 4194305
+  },
+  {
+   "plain": 9000000,
+   "chunked": 9000076,
+   "stream": 9000075,
+   "streamBack": 9000000
+  }
+ ]
+}

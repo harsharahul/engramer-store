@@ -65,6 +65,13 @@ export interface FileMetadata {
   tags?: string[];
   favorite?: boolean;
   /**
+   * The identifier of the device photo-library asset this file was backed
+   * up from. Lets a reinstalled device rebuild its backup ledger from the
+   * synced library alone, without re-uploading anything. Encrypted with
+   * the rest of the metadata; the server never sees it.
+   */
+  sourceId?: string;
+  /**
    * BLAKE2b-256 of the file's contents, taken on the device that uploaded
    * it, before any encryption.
    *
