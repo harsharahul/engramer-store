@@ -75,6 +75,8 @@ export interface FileEntry {
   favorite: boolean;
   /** Digest of the contents, recorded on the device that uploaded them. */
   digest?: string;
+  /** The photo-library asset this file was backed up from, if any. */
+  sourceId?: string;
   /** Set once a read has found the contents disagreeing with that digest. */
   corrupt?: boolean;
   /** Set once a read in this session has matched it. Not remembered across
@@ -201,6 +203,12 @@ interface StoreState {
   rotateFileKey: (id: string) => Promise<void>;
   renameFile: (id: string, name: string) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
+  /** The set of photo-library asset ids already in the vault, read from
+   * the synced metadata; a backup pass skips these. */
+  backedUpSourceIds: () => Set<string>;
+  /** Backs one exported original up into the Camera Roll folder, stamped
+   * with its library id so a reinstall recognizes it. Returns the file id. */
+  backupAsset: (file: File, sourceId: string) => Promise<string>;
   /** Adds every file to the album, one metadata write at a time. */
   addToAlbum: (ids: string[], tag: string) => Promise<void>;
   removeFromAlbum: (ids: string[], tag: string) => Promise<void>;
@@ -301,6 +309,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
     tags: meta.tags ?? [],
     facts: asFacts(meta.facts),
     digest: meta.digest,
+    sourceId: meta.sourceId,
     favorite: meta.favorite ?? false,
     key,
     hasThumb: dto.thumbSize > 0,
@@ -345,6 +354,7 @@ export function entryFromUpdate(
     tags: meta.tags ?? [],
     facts: asFacts(meta.facts),
     digest: meta.digest,
+    sourceId: meta.sourceId,
     favorite: meta.favorite ?? false,
     hasThumb: dto.thumbSize > 0,
     // The owner's tree and wrapping stay the owner's business.
@@ -381,6 +391,7 @@ export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEnt
     tags: meta.tags ?? [],
     facts: asFacts(meta.facts),
     digest: meta.digest,
+    sourceId: meta.sourceId,
     favorite: meta.favorite ?? false,
     key,
     hasThumb: dto.thumbSize > 0,
@@ -426,6 +437,9 @@ export function metadataOf(file: FileEntry): FileMetadata {
     // file simply became unverifiable, and "Verify my vault" would report it
     // as never checked forever after.
     digest: file.digest,
+    // Same hazard for the backup link: dropping it would make a later
+    // pass re-upload every already-backed-up photo.
+    ...(file.sourceId ? { sourceId: file.sourceId } : {}),
   };
 }
 
@@ -1337,6 +1351,28 @@ export const useStore = create<StoreState>((set, get) => {
       );
       const kept = existingReserved.filter((t) => !edited.includes(t));
       await patchFileMeta(id, { tags: [...edited, ...kept] });
+    },
+
+    backedUpSourceIds: () => {
+      const ids = new Set<string>();
+      for (const file of get().files.values()) {
+        if (file.sourceId) {
+          ids.add(file.sourceId);
+        }
+      }
+      return ids;
+    },
+
+    backupAsset: async (file, sourceId) => {
+      const key = masterKey();
+      const prepared = await withAnalysisSlot(() => analyzeFile(file));
+      // The library id rides inside the encrypted metadata, so a
+      // reinstall rebuilds its ledger from the synced library alone.
+      prepared.meta.sourceId = sourceId;
+      const destination = await ensureCategoryFolder("Camera Roll");
+      const result = await encryptAndUpload(file, destination, key, prepared, () => {});
+      applyFile(result.dto);
+      return result.dto.id;
     },
 
     addToAlbum: async (ids, tag) => {
