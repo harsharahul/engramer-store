@@ -14,16 +14,17 @@ enum EngramApi {
         record: HandoffRecord,
         encryptedKeyJSON: String,
         encryptedMetaJSON: String,
+        folderId: String? = nil,
         completion: @escaping (Result<String, Error>) -> Void
     ) {
         guard let url = URL(string: "\(record.origin)/api/files"),
               let key = try? JSONSerialization.jsonObject(with: Data(encryptedKeyJSON.utf8)),
               let meta = try? JSONSerialization.jsonObject(with: Data(encryptedMetaJSON.utf8)),
               let body = try? JSONSerialization.data(withJSONObject: [
-                  "folderId": NSNull(),
+                  "folderId": folderId ?? NSNull(),
                   "encryptedKey": key,
                   "encryptedMeta": meta,
-              ])
+              ] as [String: Any])
         else {
             completion(.failure(ShareError.badEnvelope))
             return
