@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import type { FileEntry } from "../store";
-import { thumbnailUrl } from "../thumbs";
+import { usePhotoThumb } from "../thumbs";
 import { blurUrl } from "../intel/blur";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { DotsGlyph, PeopleGlyph, StarGlyph } from "./Icon";
@@ -43,36 +43,10 @@ export function FileCard(props: {
   onDragStart?: (event: React.DragEvent) => void;
 }) {
   const { file } = props;
-  const [thumb, setThumb] = useState<string | null>(null);
-  const cardRef = useRef<HTMLDivElement>(null);
-  const longPress = useLongPress(props.onMenu);
-
   // Thumbnails load only when the card approaches the viewport; until then
   // the ThumbHash placeholder (or the kind art) holds the frame.
-  useEffect(() => {
-    if (!file.hasThumb || !cardRef.current) {
-      return;
-    }
-    let cancelled = false;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          observer.disconnect();
-          void thumbnailUrl(file.id, file.key).then((url) => {
-            if (!cancelled) {
-              setThumb(url);
-            }
-          });
-        }
-      },
-      { rootMargin: "400px" },
-    );
-    observer.observe(cardRef.current);
-    return () => {
-      cancelled = true;
-      observer.disconnect();
-    };
-  }, [file.id, file.hasThumb, file.key]);
+  const { ref: cardRef, thumb } = usePhotoThumb<HTMLDivElement>(file);
+  const longPress = useLongPress(props.onMenu);
 
   const placeholder = !thumb && file.blur ? blurUrl(file.blur) : null;
 
