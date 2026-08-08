@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { disableHandoff, enableHandoff, handoffEnabled, handoffSupported } from "../handoff";
+import {
+  disableHandoff,
+  enableHandoff,
+  handoffEnabled,
+  handoffSupported,
+  reconnectHandoff,
+} from "../handoff";
 import {
   backupAvailable,
   loadPolicy,
@@ -91,6 +97,8 @@ export function ProfileView(props: {
   const [shell] = useState(() => nativeShell());
   // null hides the row entirely (no shared keychain on this platform).
   const [handoffOn, setHandoffOn] = useState<boolean | null>(null);
+  const [reconnectNote, setReconnectNote] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
   const [backupOk, setBackupOk] = useState(false);
   const [policy, setPolicy] = useState<BackupPolicy>(() => loadPolicy());
   const [backupRun, setBackupRun] = useState<BackupProgress | null>(null);
@@ -742,6 +750,48 @@ export function ProfileView(props: {
               }}
             >
               {handoffOn ? "Turn off" : "Turn on"}
+            </button>
+          </div>
+        )}
+        {handoffOn === true && (
+          <div className="profile-row">
+            <div className="profile-row-main">
+              <b>Extension connection</b>
+              <div className="profile-row-sub">
+                {reconnectNote ??
+                  "Rewrites the stored key and checks it reads back the way the Share sheet " +
+                    "and the Files app ask for it."}
+              </div>
+            </div>
+            <button
+              className="btn"
+              disabled={reconnecting}
+              onClick={() => {
+                const session = store.session;
+                if (!session) {
+                  return;
+                }
+                setReconnecting(true);
+                setReconnectNote(null);
+                void reconnectHandoff(session)
+                  .then((probe) => {
+                    if (probe.state === "found") {
+                      setReconnectNote(
+                        "Connected. If the Files app still asks you to connect, pull down to refresh there.",
+                      );
+                    } else if (probe.state === "missing") {
+                      setReconnectNote(
+                        "The key was stored but did not read back. Turn Extensions off and on, then reconnect.",
+                      );
+                    } else {
+                      setReconnectNote(`The Keychain refused the lookup (${probe.detail}).`);
+                    }
+                  })
+                  .catch(() => setReconnectNote("The Keychain refused to store the record."))
+                  .finally(() => setReconnecting(false));
+              }}
+            >
+              {reconnecting ? "Checking…" : "Reconnect"}
             </button>
           </div>
         )}

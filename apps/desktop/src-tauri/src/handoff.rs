@@ -53,6 +53,24 @@ pub async fn handoff_get(email: String) -> Result<Option<String>, String> {
     }
 }
 
+/// Runs the same query shape the extensions use (service and access
+/// group, no account) and reports what it finds: the stored record's
+/// byte count, `None` when nothing is stored, or the keychain's refusal.
+/// This is the in-app connection check for the Extensions setting.
+#[tauri::command]
+pub async fn handoff_probe() -> Result<Option<usize>, String> {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        return spawn_blocking(|| crate::keychain::probe(SERVICE))
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    {
+        Ok(None)
+    }
+}
+
 #[tauri::command]
 pub async fn handoff_clear(email: String) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "ios"))]

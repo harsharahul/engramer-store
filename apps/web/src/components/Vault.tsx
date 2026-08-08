@@ -26,6 +26,7 @@ import { searchFiles, highlightParts, type SearchHit } from "../search";
 import { collectDropped, fromDirectoryInput } from "../uploader";
 import { MOBILE_QUERY, useMediaQuery } from "../media";
 import { installMediaKeyResponder } from "../mediastream";
+import { installHandoffForegroundRefresh } from "../handoff";
 import { useLongPress } from "../longpress";
 import {
   clearNativeUnlock,
@@ -1008,6 +1009,11 @@ export function Vault() {
   // The media bridge's worker may restart at any time; this responder
   // re-supplies file keys for as long as the vault is open.
   useEffect(() => installMediaKeyResponder(), []);
+
+  // iOS sends people from the Files app to "open the app to connect";
+  // returning to the foreground rewrites the extension handoff and
+  // signals the drive, so that trip actually reconnects it.
+  useEffect(() => installHandoffForegroundRefresh(() => useStore.getState().session), []);
 
   // Desktop shell only: pick up watched-folder arrivals, past and live.
   useEffect(() => {
