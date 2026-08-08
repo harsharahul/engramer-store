@@ -263,11 +263,6 @@ export function Auth() {
             </>
           )}
         </div>
-        <p className="auth-note">
-          Files, names, and folders are encrypted on your device before upload.
-          <br />
-          The server stores ciphertext it cannot read.
-        </p>
         {nativeShell() && (
           <div className="auth-server">
             {serverEditing ? (
@@ -297,11 +292,16 @@ export function Auth() {
               </form>
             ) : (
               <button className="auth-server-link" onClick={() => setServerEditing(true)}>
-                Server: {location.host} · Change
+                Server: <b>{location.host}</b> · Change
               </button>
             )}
           </div>
         )}
+        <p className="auth-note">
+          Files, names, and folders are encrypted on your device before upload.
+          <br />
+          The server stores ciphertext it cannot read.
+        </p>
       </div>
 
       {pendingRecovery && (
