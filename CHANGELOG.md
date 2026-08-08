@@ -3,6 +3,28 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.40.3] - 2026-08-08
+
+### Added
+- **Choose where shared files go.** The share sheet opens on a
+  destination picker: Smart classify (an Inbox folder whose arrivals the
+  app tags and categorizes), the vault root, or one of your folders,
+  remembering your last choice.
+- **Choose how far back photo backup reaches.** Back up the whole
+  library, only photos taken from today on, or the last 30 or 90 days.
+
+### Fixed
+- **Large files open reliably from the Files app.** Downloads stream to
+  disk and decrypt in small slices, so any size works within the tight
+  memory limits iOS gives extensions; downloads also retry once after a
+  cold start and show real progress. Saves from other apps stream the
+  same way.
+- The server picker on the sign-in screen is now a visible control
+  instead of fine print hidden behind the iPhone's home indicator, so
+  pointing the app at a self-hosted server is discoverable.
+- The photos timeline's month marker is now a frosted pill that renders
+  correctly in the light theme.
+
 ## [0.40.2] - 2026-08-08
 
 ### Fixed
