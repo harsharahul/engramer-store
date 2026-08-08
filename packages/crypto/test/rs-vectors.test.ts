@@ -119,6 +119,6 @@ describe("rust vectors", () => {
     const meta = decryptFileMetadata(sealed.metadata.box, fromHex(sealed.keyHex));
     expect(meta.name).toBe("rust née fixture.pdf");
     expect(meta.tags).toEqual(["album:fixtures", "rusty"]);
-    expect((meta as Record<string, unknown>).sourceId).toBe("asset-0001");
+    expect(meta.sourceId).toBe("asset-0001");
   });
 });
