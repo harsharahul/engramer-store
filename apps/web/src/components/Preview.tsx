@@ -7,6 +7,8 @@ import { swipeStep } from "../neighbors";
 import { fileKind, formatBytes } from "../format";
 import { displayableImage } from "../intel/heic";
 import { triggerDownload } from "../download";
+import { ZoomableImage } from "./ZoomableImage";
+import { IDENTITY, zoomAt, type Box, type ZoomState } from "../zoom";
 import {
   ChevronLeftGlyph,
   ChevronRightGlyph,
@@ -283,15 +285,38 @@ export function Preview(props: {
   const swipeFrom = useRef<{ x: number; y: number } | null>(null);
   const { onStep } = props;
 
+  // Transform-based zoom on the image itself, not the page: native page zoom
+  // would scale the fixed chrome (top bar, buttons) right along with it.
+  const [zoom, setZoom] = useState<ZoomState>(IDENTITY);
+  const zoomBox = useRef<Box>({ width: 0, height: 0 });
+
   useEffect(() => {
-    if (!onStep) {
-      return;
-    }
+    setZoom(IDENTITY);
+  }, [file.id]);
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const typing =
         event.target instanceof HTMLElement &&
         (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA");
       if (typing) {
+        return;
+      }
+      if (kind === "image" && (event.key === "+" || event.key === "=" || event.key === "-" || event.key === "0")) {
+        event.preventDefault();
+        if (event.key === "0") {
+          setZoom(IDENTITY);
+        } else if (zoomBox.current.width > 0) {
+          // Nothing to anchor against until the image has laid out and
+          // measured its box at least once.
+          const factor = event.key === "-" ? 1 / 1.2 : 1.2;
+          const box = zoomBox.current;
+          const center = { x: box.width / 2, y: box.height / 2 };
+          setZoom((prev) => zoomAt(prev, prev.scale * factor, center, box));
+        }
+        return;
+      }
+      if (!onStep) {
         return;
       }
       if (event.key === "ArrowRight") {
@@ -304,7 +329,7 @@ export function Preview(props: {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onStep]);
+  }, [onStep, kind]);
 
   /**
    * The last rung of playback: decrypt the whole file and play it from
@@ -503,6 +528,12 @@ export function Preview(props: {
           const from = swipeFrom.current;
           const touch = event.changedTouches[0];
           swipeFrom.current = null;
+          // A finger panning a zoomed-in image is not a request to step to
+          // the next file: only read it as a swipe once the image is back
+          // at rest.
+          if (zoom.scale !== 1) {
+            return;
+          }
           if (!from || !touch || !onStep) {
             return;
           }
@@ -517,7 +548,13 @@ export function Preview(props: {
         ) : !loaded ? (
           <div className="spinner" />
         ) : kind === "image" && loaded.url ? (
-          <img src={loaded.url} alt={file.name} />
+          <ZoomableImage
+            src={loaded.url}
+            alt={file.name}
+            zoom={zoom}
+            onZoomChange={setZoom}
+            boxRef={zoomBox}
+          />
         ) : kind === "video" && loaded.url ? (
           <>
             <video
