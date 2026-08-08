@@ -1356,7 +1356,9 @@ export const useStore = create<StoreState>((set, get) => {
     backedUpSourceIds: () => {
       const ids = new Set<string>();
       for (const file of get().files.values()) {
-        if (file.sourceId) {
+        // A trashed photo is no longer "backed up": leaving it here would
+        // refuse to re-upload one the owner deleted and wants again.
+        if (file.sourceId && !file.trashed) {
           ids.add(file.sourceId);
         }
       }

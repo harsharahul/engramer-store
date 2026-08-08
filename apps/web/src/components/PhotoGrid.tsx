@@ -19,7 +19,7 @@ import { fileKind } from "../format";
  * but the iOS-16 WebKit floor predates it.)
  */
 
-const TILE_MIN = 108;
+const TILE_MIN = 92;
 const TILE_GAP = 2;
 const HEADER_H = 44;
 /** Sections within this many viewports of the screen render for real. */
