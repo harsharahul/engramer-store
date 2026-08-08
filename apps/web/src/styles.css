@@ -1083,6 +1083,10 @@ a {
   flex: 1;
 }
 
+.icon-btn.fav-active {
+  color: var(--accent);
+}
+
 .tag-add-album {
   width: 22px;
   height: 22px;

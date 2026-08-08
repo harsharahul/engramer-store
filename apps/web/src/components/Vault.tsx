@@ -228,6 +228,7 @@ export function Vault() {
   // long-press enters it, every tap toggles, Done leaves.
   const [selectMode, setSelectMode] = useState(false);
   const [albumPickerIds, setAlbumPickerIds] = useState<string[] | null>(null);
+  const [photosFavOnly, setPhotosFavOnly] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(() => loadPref("engramer-details", true));
   const [detailsSheet, setDetailsSheet] = useState(false);
   /**
@@ -430,12 +431,14 @@ export function Vault() {
         // The timeline shows everything the camera made, wherever it lives.
         files = liveFiles.filter((f) => {
           const kind = fileKind(f.mime, f.name);
-          return !f.shared && (kind === "image" || kind === "video");
+          return !f.shared && (kind === "image" || kind === "video") && (!photosFavOnly || f.favorite);
         });
         break;
       }
       case "album":
-        files = liveFiles.filter((f) => !f.shared && f.tags.includes(view.tag));
+        files = liveFiles.filter(
+          (f) => !f.shared && f.tags.includes(view.tag) && (!photosFavOnly || f.favorite),
+        );
         break;
       case "trash":
         return [...store.files.values()]
@@ -447,7 +450,7 @@ export function Vault() {
         files = liveFiles.filter((f) => !f.shared && f.folderId === currentFolderId);
     }
     return sortFiles(files, sort);
-  }, [view, liveFiles, store.files, currentFolderId, sort]);
+  }, [view, liveFiles, store.files, currentFolderId, sort, photosFavOnly]);
 
   const hits = useMemo(
     () => (searching ? searchFiles(store.files.values(), query, store.folders) : []),
@@ -1801,6 +1804,20 @@ export function Vault() {
           </div>
           {showViewControls && (
             <div className="view-controls">
+              {(view.kind === "photos" || view.kind === "album") && (
+                <div className="seg">
+                  <button className={photosFavOnly ? "" : "active"} onClick={() => setPhotosFavOnly(false)}>
+                    All
+                  </button>
+                  <button
+                    className={photosFavOnly ? "active" : ""}
+                    title="Only favorites"
+                    onClick={() => setPhotosFavOnly(true)}
+                  >
+                    <StarGlyph size={12} />
+                  </button>
+                </div>
+              )}
               {!selectMode && visibleFiles.length > 0 && (
                 <button
                   className="btn btn-ghost select-toggle"
@@ -1935,7 +1952,13 @@ export function Vault() {
               view.kind === "album" ||
               (layout === "grid" &&
                 view.kind === "category" &&
-                (view.name === "Photos" || view.name === "Screenshots"))) ? (
+                (view.name === "Photos" || view.name === "Screenshots")) ||
+              (view.kind === "favorites" &&
+                visibleFiles.length > 0 &&
+                visibleFiles.every((f) => {
+                  const kind = fileKind(f.mime, f.name);
+                  return kind === "image" || kind === "video";
+                }))) ? (
             <PhotoGrid
               files={visibleFiles}
               selection={selection}
@@ -2201,6 +2224,7 @@ export function Vault() {
         <Preview
           file={previewFile}
           onClose={() => setPreviewId(null)}
+          onFavorite={() => void store.toggleFavorite(previewFile.id)}
           onShare={() => {
             setShareId(previewFile.id);
             setPreviewId(null);
