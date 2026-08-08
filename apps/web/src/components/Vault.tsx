@@ -53,6 +53,8 @@ import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { albumTitle, albumsFrom } from "../albums";
 import { PhotoGrid } from "./PhotoGrid";
+import { AlbumPicker } from "./AlbumPicker";
+import { SelectionBar } from "./SelectionBar";
 import { saveDecryptedFile } from "../download";
 import { clearThumbnailCache } from "../thumbs";
 import { FileCard, FolderCard } from "./FileCard";
@@ -222,6 +224,10 @@ export function Vault() {
   const [layout, setLayout] = useState<"grid" | "list">(() => loadPref("engramer-layout", "grid"));
   const [sort, setSort] = useState<SortState>(() => loadPref("engramer-sort", { key: "name", dir: 1 }));
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
+  // Touch has no cmd-click, so gathering files is an explicit mode there:
+  // long-press enters it, every tap toggles, Done leaves.
+  const [selectMode, setSelectMode] = useState(false);
+  const [albumPickerIds, setAlbumPickerIds] = useState<string[] | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(() => loadPref("engramer-details", true));
   const [detailsSheet, setDetailsSheet] = useState(false);
   /**
@@ -502,8 +508,36 @@ export function Vault() {
 
   const clearSelection = useCallback(() => {
     setSelection(new Set());
+    setSelectMode(false);
     lastSelected.current = null;
   }, []);
+
+  const enterSelect = useCallback((id: string) => {
+    setSelectMode(true);
+    setSelection(new Set([id]));
+    lastSelected.current = id;
+  }, []);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      lastSelected.current = id;
+      return next;
+    });
+  }, []);
+
+  const addSelectionToAlbum = (ids: string[], tag: string) => {
+    setAlbumPickerIds(null);
+    void store
+      .addToAlbum(ids, tag)
+      .then(() => showToast(`Added ${ids.length === 1 ? "1 item" : `${ids.length} items`} to ${albumTitle(tag)}`))
+      .catch(() => showToast("Could not add to the album."));
+  };
 
   useEffect(() => {
     diag("vault", `mounted (${isMobile ? "phone" : "wide"} layout)`);
@@ -570,6 +604,18 @@ export function Vault() {
       label: "Details and tags",
       icon: <InfoGlyph size={13} />,
       run: () => inspect(file.id),
+    },
+    {
+      id: "album",
+      label: "Add to album",
+      icon: <PhotoGlyph size={13} />,
+      run: () => setAlbumPickerIds([file.id]),
+    },
+    {
+      id: "select",
+      label: "Select",
+      icon: <GridGlyph size={13} />,
+      run: () => enterSelect(file.id),
     },
     ...(["text", "doc", "sheet"].includes(fileKind(file.mime, file.name))
       ? [{ id: "edit", label: "Edit", icon: <PencilGlyph size={13} />, run: () => setEditorId(file.id) }]
@@ -795,13 +841,20 @@ export function Vault() {
         searchInput.current?.focus();
       } else if (event.key === "Escape" && drawerOpen) {
         setDrawerOpen(false);
-      } else if (event.key === "Escape" && !typing && selection.size > 0 && !previewId && !editorId && !ctxMenu) {
+      } else if (
+        event.key === "Escape" &&
+        !typing &&
+        (selection.size > 0 || selectMode) &&
+        !previewId &&
+        !editorId &&
+        !ctxMenu
+      ) {
         clearSelection();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [paletteOpen, selection, previewId, editorId, ctxMenu, drawerOpen, clearSelection]);
+  }, [paletteOpen, selection, selectMode, previewId, editorId, ctxMenu, drawerOpen, clearSelection]);
 
   // Meaning search runs beside the lexical index: the query embeds on this
   // device and warmed photo vectors rank by similarity. Operator queries
@@ -1748,6 +1801,14 @@ export function Vault() {
           </div>
           {showViewControls && (
             <div className="view-controls">
+              {!selectMode && visibleFiles.length > 0 && (
+                <button
+                  className="btn btn-ghost select-toggle"
+                  onClick={() => setSelectMode(true)}
+                >
+                  Select
+                </button>
+              )}
               <select
                 className="sort-select"
                 value={sort.key}
@@ -1878,9 +1939,11 @@ export function Vault() {
             <PhotoGrid
               files={visibleFiles}
               selection={selection}
-              onSelect={select}
+              selectMode={selectMode}
+              onSelect={(id, e) => (selectMode ? toggleSelect(id) : select(id, e))}
               onOpen={openFile}
               onMenu={openFileMenu}
+              onEnterSelect={enterSelect}
             />
           ) : layout === "list" && view.kind !== "recent" ? (
             <>
@@ -1931,6 +1994,8 @@ export function Vault() {
                   index={(view.kind === "folder" ? childFolders.length : 0) + i}
                   selected={selection.has(file.id)}
                   fresh={freshIds.has(file.id)}
+                  selectMode={selectMode}
+                  onToggleSelect={() => toggleSelect(file.id)}
                   onSelect={(e) => select(file.id, e)}
                   onOpen={() => openFile(file.id)}
                   onMenu={(x, y) => openFileMenu(file.id, x, y)}
@@ -1959,6 +2024,11 @@ export function Vault() {
               clearSelection();
             }}
             onTagClick={searchTag}
+            onOpenAlbum={(tag) => {
+              setQuery("");
+              setView({ kind: "album", tag });
+            }}
+            onAddToAlbum={(id) => setAlbumPickerIds([id])}
             onToast={showToast}
             onClose={() => {
               diag("details", "closed: the close button");
@@ -2075,37 +2145,34 @@ export function Vault() {
           />
         )}
         <UploadTray />
-        {selection.size > 1 && (
-          <div className="bulk-bar">
-            <span>{selection.size} selected</span>
-            <button
-              className="btn btn-ghost"
-              onClick={() => {
-                for (const id of selection) {
-                  void store.toggleFavorite(id);
+        {(selectMode || selection.size > 1) && (
+          <SelectionBar
+            count={selection.size}
+            total={visibleFiles.length}
+            onFavorite={() => {
+              for (const id of selection) {
+                void store.toggleFavorite(id);
+              }
+            }}
+            onAlbum={() => setAlbumPickerIds([...selection])}
+            onMove={() => setMoveIds([...selection])}
+            onDownload={() => {
+              for (const id of selection) {
+                const file = store.files.get(id);
+                if (file) {
+                  download(file);
                 }
-              }}
-            >
-              <StarGlyph size={13} /> Favorite
-            </button>
-            <button className="btn btn-ghost" onClick={() => setMoveIds([...selection])}>
-              <MoveGlyph size={13} /> Move
-            </button>
-            <button
-              className="btn btn-ghost danger"
-              onClick={() => {
-                for (const id of selection) {
-                  void store.trashFile(id);
-                }
-                clearSelection();
-              }}
-            >
-              <TrashGlyph size={13} /> Trash
-            </button>
-            <button className="icon-btn" title="Clear selection" onClick={clearSelection}>
-              <XGlyph size={13} />
-            </button>
-          </div>
+              }
+            }}
+            onTrash={() => {
+              for (const id of selection) {
+                void store.trashFile(id);
+              }
+              clearSelection();
+            }}
+            onSelectAll={() => setSelection(new Set(visibleFiles.map((f) => f.id)))}
+            onDone={clearSelection}
+          />
         )}
       </div>
       {ctxMenu && <ContextMenu {...ctxMenu} onClose={() => setCtxMenu(null)} />}
@@ -2117,6 +2184,14 @@ export function Vault() {
             clearSelection();
           }}
           onClose={() => setMoveIds(null)}
+        />
+      )}
+      {albumPickerIds && (
+        <AlbumPicker
+          albums={albums}
+          count={albumPickerIds.length}
+          onPick={(tag) => addSelectionToAlbum(albumPickerIds, tag)}
+          onClose={() => setAlbumPickerIds(null)}
         />
       )}
       {paletteOpen && (
