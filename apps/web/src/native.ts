@@ -129,6 +129,40 @@ export async function nativeFilesProviderDisable(email: string): Promise<void> {
   await invoke("files_provider_disable", { email }).catch(() => {});
 }
 
+// ----- server override (one binary, many servers) -----
+
+/** The stored server override, or null when the build's default is in use. */
+export async function nativeServerUrlGet(): Promise<string | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  try {
+    const url = await invoke("server_url_get");
+    return typeof url === "string" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Persists a new server and navigates the shell to it. */
+export async function nativeServerUrlSet(url: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    throw new Error("no native shell");
+  }
+  await invoke("server_url_set", { url });
+}
+
+/** Back to the build's own default server. */
+export async function nativeServerUrlClear(): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return;
+  }
+  await invoke("server_url_clear").catch(() => {});
+}
+
 // ----- photo library (iOS; automatic backup) -----
 
 export interface NativePhotoAsset {

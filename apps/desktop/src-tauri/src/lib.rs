@@ -15,6 +15,7 @@ mod keychain;
 mod media;
 mod photolib;
 mod photos;
+mod serverurl;
 mod unlock;
 mod watched;
 
@@ -134,9 +135,13 @@ pub fn run() {
             photolib::photos_authorize,
             photolib::photos_list,
             photolib::photos_export,
+            serverurl::server_url_get,
+            serverurl::server_url_set,
+            serverurl::server_url_clear,
         ])
         .setup(|app| {
             watched::rebuild_watchers(app.handle());
+            serverurl::apply_stored(app.handle());
             #[cfg(target_os = "ios")]
             if let Some(window) = app.get_webview_window("main") {
                 chrome::extend_under_safe_area(&window);

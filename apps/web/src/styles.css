@@ -1094,6 +1094,37 @@ a {
   color: var(--accent);
 }
 
+.auth-server {
+  margin-top: 14px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.auth-server-link {
+  border: none;
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.auth-server form {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.auth-server input {
+  min-width: 240px;
+}
+
+.auth-server-error {
+  flex-basis: 100%;
+  color: var(--danger);
+}
+
 /* The grip only reads as a handle where the panel is actually a sheet. */
 .details-grip {
   display: none;
