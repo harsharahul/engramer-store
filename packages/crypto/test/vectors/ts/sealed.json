@@ -1,0 +1,49 @@
+{
+ "keyHex": "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98",
+ "secretbox": {
+  "plainHex": "040d161f28313a434c555e677079828b949da6afb8c1cad3dce5eef70009121b242d363f48515a636c757e879099a2abb4bdc6cfd8e1eaf3fc050e172029323b",
+  "box": {
+   "ciphertext": "Ujsu4XhWihhgbUCCsqObfqqj4gFuoPN7OAsl9GbnvCJkFX159oScDR7Zsr2QISwmyamcWV0konlJOMGFx3FIdnIvOG6e6agcUaDMhNNUYEM",
+   "nonce": "D9THOS9OuzZZGl1cIx7SsNo7Me_AcXuT"
+  }
+ },
+ "stream": {
+  "plainMul": 17,
+  "plainAdd": 11,
+  "plainLen": 100000,
+  "file": "stream.bin"
+ },
+ "egc1": {
+  "plainMul": 31,
+  "plainAdd": 7,
+  "plainLen": 4194307,
+  "file": "egc1.bin"
+ },
+ "sealedbox": {
+  "publicKey": "P3WTs6KpUka5fCg9nnfiEIOJQeEXBJAUlaoh0P65LFA",
+  "privateKey": "mcQ82tOVYvEO-n1eXb8y1rrRfrBWrpAAMynpQy2SZys",
+  "message": "sealed across languages",
+  "sealed": "-GrnvDTgeqoah79NFl-ECgdifwUoN9GJNO7Stk1aYky92Jo277KNEzlkJh35XKYYkFNDwobPNMtu3KrOqQPnagHN_C60ltA"
+ },
+ "metadata": {
+  "value": {
+   "name": "fixture née photo.heic",
+   "mime": "image/heic",
+   "size": 12345,
+   "mtime": 1754500000000,
+   "tags": [
+    "album:fixtures",
+    "sunny"
+   ],
+   "favorite": true,
+   "digest": "mrf2e2oOo10nfkGFCt_eNctCi9fOsI1SyNjWOBt83A8",
+   "futureField": {
+    "keep": "me"
+   }
+  },
+  "box": {
+   "ciphertext": "ZcRyG7yRrzI-FBPsKMXkOYx5A4-rXA2SHQxM2wbSlZYPUK--dsU8iophVzTFUhKnf6urBjbmHa2AGPw_iAlHAzhxmdn7RV_uFsJU2OJULFrw6OyncrTaFZcxn9DuGfQt2SLg7i2J9SNnEswOp8sSA0kUbPdEh8f66yNZNSpRxgQsrEVvivwQZM4yPBbDM0uUendkwLcnQdINTkmCT7yITexUc6-SzRIqburt1MPjo2ngABgSw3upOTc9XiXCf4NGCBQT42cv6rLO1hF-7MkWJzJeCUilMtkWS3IiKqadfd6XM7V_jV-lQmv0fnErng",
+   "nonce": "B6C6U6pPvnErkBMQCidPWwG2_RmNFXcV"
+  }
+ }
+}

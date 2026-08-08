@@ -1,0 +1,33 @@
+{
+  "keyHex": "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98",
+  "metadata": {
+    "box": {
+      "ciphertext": "53onLGvq6MM3ycM8Mqb9S1OJGA65OzMV9UNs-2N42jCrkhBPkeVpa1TLmNI6i-m3vMEdUnKYZ6TopGH8q_tTHTswiKwQE3DPr9HePt8w9MT9duHTX2LAP5z7TLR2-kjmdrjXG5q_1Xr9QKikiaz80jnySCu7ieOVfrwytFMMOysBdSzzwzImphw6cT8bZNemDjTaDeYJFVTe6Fa8Rw_aZFsOdGRLYk2Gj1KdSrgQd5NV2RdlPPuEwz_SU9ba7_f5_6rnSQetP61igwuuF6nYC9LNKQ5l0IERo7stqzd2o-odF5T5qyAy-8sG8a50",
+      "nonce": "78jBwX9x9Hg5mWGnPzSBigLKVEtiVIWY"
+    },
+    "value": {
+      "digest": "J1d0JSlNeuK2hnyhVfOFTQPxkRijmIzxhKlIGKQg8FM",
+      "favorite": false,
+      "mime": "application/pdf",
+      "mtime": 1754600000000,
+      "name": "rust née fixture.pdf",
+      "size": 4242,
+      "sourceId": "asset-0001",
+      "tags": [
+        "album:fixtures",
+        "rusty"
+      ]
+    }
+  },
+  "sealedbox": {
+    "message": "sealed from rust",
+    "sealed": "hrGaNWXWmE117DFiyikhwm5aI4x2-KHX4_LSu88aBGUDScvwvV0SfrTdQarO0fTwbB1CRS4rhmLUI_MF1q-e8g",
+    "toPublicKey": "P3WTs6KpUka5fCg9nnfiEIOJQeEXBJAUlaoh0P65LFA"
+  },
+  "stream": {
+    "file": "stream.bin",
+    "plainAdd": 15,
+    "plainLen": 100000,
+    "plainMul": 23
+  }
+}

@@ -1,0 +1,14 @@
+[package]
+name = "engram-core"
+version = "0.39.6"
+edition = "2021"
+description = "The encryption core, byte-compatible with @engramer/crypto"
+license = "AGPL-3.0-only"
+
+[dependencies]
+libsodium-sys-stable = "1.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# none: fixture tests use only std and the crate itself

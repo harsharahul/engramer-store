@@ -1,0 +1,119 @@
+{
+  "argon2id": [
+    {
+      "kek": "gYIcY5uqzoQkwq3EMxV5khxSEvkp-daabGfvHe_C_cg",
+      "memLimit": 19922944,
+      "opsLimit": 2,
+      "password": "correct horse battery staple",
+      "salt": "Ag0YIy45RE9aZXB7hpGcpw"
+    },
+    {
+      "kek": "WA-T9r9TUlk3HExJJMvi5EzNZF00via73dQ5nxb8vQI",
+      "memLimit": 67108864,
+      "opsLimit": 3,
+      "password": "pässwörd — unicode",
+      "salt": "Ag0YIy45RE9aZXB7hpGcpw"
+    }
+  ],
+  "b64std": {
+    "hexIn": "fbff7e00",
+    "out": "+/9+AA=="
+  },
+  "b64url": [
+    {
+      "hexIn": "",
+      "out": ""
+    },
+    {
+      "hexIn": "00",
+      "out": "AA"
+    },
+    {
+      "hexIn": "0001",
+      "out": "AAE"
+    },
+    {
+      "hexIn": "fbff7e",
+      "out": "-_9-"
+    },
+    {
+      "hexIn": "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98",
+      "out": "BRIfLDlGU2BteoeUoa67yNXi7_wJFiMwPUpXZHF-i5g"
+    }
+  ],
+  "digest": [
+    {
+      "hexIn": "",
+      "out": "DldRwCblQ7Loqy6wYJnaodHl30d3j3eH-qtFzfEv46g"
+    },
+    {
+      "hexIn": "0104070a0d101316191c1f2225282b2e3134373a3d404346494c4f5255585b5e6164676a6d707376797c7f8285888b8e9194979a9da0a3a6a9acafb2b5b8bbbec1c4c7cacdd0d3d6d9dcdfe2e5e8ebeef1f4f7fafd000306090c0f1215181b1e2124272a",
+      "out": "TdExdMANJmiPcULrg8diBxx5-iwiZkmkvm6KdiWkgX8"
+    },
+    {
+      "incremental": [
+        "00010203040506070809",
+        "090e13181d22272c31363b40454a4f54595e6368"
+      ],
+      "out": "-On2ucnas_J0qmQ8yvK430UMRbxmO42TGl5v6UMvNk8"
+    }
+  ],
+  "egc1": {
+    "file": "egc1.bin",
+    "keyHex": "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98",
+    "plainAdd": 3,
+    "plainLen": 4194307,
+    "plainMul": 29,
+    "saltHex": "020d18232e39444f5a65707b86919ca7"
+  },
+  "kdf": {
+    "kek": "gYIcY5uqzoQkwq3EMxV5khxSEvkp-daabGfvHe_C_cg",
+    "loginKey": "A9E6Dg7j2U0HpnmxqQwmNRo-yD6vFK40Hald7i4K87s",
+    "loginKeyDigest": "PBRdFLDXZs8tq_zYBEYIEo_drR2KC13kgAhe5GQOUIQ",
+    "shareSubkey1": "wK2TsWFMuBPH8Y9QDNAM98WqoTuNfz0Vy1UiyFRrYAk",
+    "shareSubkey2": "LzDwBlm54K_vj4LsiToODS6Zd2gwkPtqfRTllCxwErA",
+    "unlockKey": "bT80qIE5RC0xlEg72FNDYhgcn9CMqUvxbTqPMAmxLuU",
+    "unlockSecretHex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c"
+  },
+  "secretbox": {
+    "box": {
+      "ciphertext": "FSyq6mWWAZi-CCo1rCLgb84zyWq3ulujf0ZwoWKWhPMZ_gKqO1V_L_BEZYuBpaenPxIQZtUzvr-2bxYWddhUcW34PoXhvU3mHMF-TwEytJw",
+      "nonce": "BhksP1JleIuescTX6v0QIzZJXG-Clai7"
+    },
+    "keyHex": "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98",
+    "nonceHex": "06192c3f5265788b9eb1c4d7eafd102336495c6f8295a8bb",
+    "plainHex": "040d161f28313a434c555e677079828b949da6afb8c1cad3dce5eef70009121b242d363f48515a636c757e879099a2abb4bdc6cfd8e1eaf3fc050e172029323b"
+  },
+  "sizes": [
+    {
+      "chunked": 44,
+      "plain": 0,
+      "stream": 41
+    },
+    {
+      "chunked": 45,
+      "plain": 1,
+      "stream": 42
+    },
+    {
+      "chunked": 144,
+      "plain": 100,
+      "stream": 141
+    },
+    {
+      "chunked": 4194348,
+      "plain": 4194304,
+      "stream": 4194345
+    },
+    {
+      "chunked": 4194365,
+      "plain": 4194305,
+      "stream": 4194363
+    },
+    {
+      "chunked": 9000076,
+      "plain": 9000000,
+      "stream": 9000075
+    }
+  ]
+}
