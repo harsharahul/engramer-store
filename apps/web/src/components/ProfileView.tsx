@@ -671,10 +671,9 @@ export function ProfileView(props: {
             <div className="profile-row-main">
               <b>Extensions on this device</b>
               <div className="profile-row-sub">
-                Lets this device's app extensions (sharing into the vault, the Files app) work
-                while the app is closed. Your vault key is stored behind the device passcode, on
-                this device only, never in iCloud. It stays through a lock; signing out removes
-                it.
+                Turns on sharing into the vault from any app, and shows your vault in the Files
+                app as a drive. Your vault key is stored behind the device passcode, on this
+                device only, never in iCloud. It stays through a lock; signing out removes it.
               </div>
             </div>
             <button

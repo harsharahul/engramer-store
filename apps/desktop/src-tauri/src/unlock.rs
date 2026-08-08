@@ -30,20 +30,23 @@ mod apple {
         unsafe {
             let context = LAContext::new();
             let reason = NSString::from_str(reason);
-            let reply = RcBlock::new(move |ok: objc2::runtime::Bool, _error: *mut objc2_foundation::NSError| {
-                let _ = tx.send(if ok.as_bool() {
-                    Ok(())
-                } else {
-                    Err("authentication cancelled".to_string())
-                });
-            });
+            let reply = RcBlock::new(
+                move |ok: objc2::runtime::Bool, _error: *mut objc2_foundation::NSError| {
+                    let _ = tx.send(if ok.as_bool() {
+                        Ok(())
+                    } else {
+                        Err("authentication cancelled".to_string())
+                    });
+                },
+            );
             context.evaluatePolicy_localizedReason_reply(
                 LAPolicy::DeviceOwnerAuthentication,
                 &reason,
                 &reply,
             );
         }
-        rx.recv().map_err(|_| "authentication interrupted".to_string())?
+        rx.recv()
+            .map_err(|_| "authentication interrupted".to_string())?
     }
 
     pub fn store(email: &str, secret: &str) -> Result<(), String> {

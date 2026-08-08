@@ -111,6 +111,24 @@ export async function nativeHandoffClear(email: string): Promise<void> {
   await invoke("handoff_clear", { email }).catch(() => {});
 }
 
+// ----- Files-app provider (iOS; registers the vault as a drive) -----
+
+export async function nativeFilesProviderEnable(email: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return;
+  }
+  await invoke("files_provider_enable", { email }).catch(() => {});
+}
+
+export async function nativeFilesProviderDisable(email: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return;
+  }
+  await invoke("files_provider_disable", { email }).catch(() => {});
+}
+
 // ----- watched folders (desktop shell only) -----
 
 export interface WatchedFile {

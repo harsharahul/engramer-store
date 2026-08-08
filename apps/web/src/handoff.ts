@@ -1,5 +1,7 @@
 import { secretBoxSeal, toB64 } from "@engramer/crypto";
 import {
+  nativeFilesProviderDisable,
+  nativeFilesProviderEnable,
   nativeHandoffAvailable,
   nativeHandoffClear,
   nativeHandoffGet,
@@ -62,11 +64,15 @@ function buildRecord(session: Session): HandoffRecord {
 export async function enableHandoff(session: Session): Promise<void> {
   await nativeHandoffStore(session.email, JSON.stringify(buildRecord(session)));
   localStorage.setItem(ENABLED_KEY, session.email);
+  // The Files-app drive can only read once the key is in place, so it
+  // is registered here and removed with the key below.
+  await nativeFilesProviderEnable(session.email);
 }
 
-/** Turns it off and removes the keychain item. */
+/** Turns it off, removes the keychain item, and unregisters the drive. */
 export async function disableHandoff(email: string): Promise<void> {
   localStorage.removeItem(ENABLED_KEY);
+  await nativeFilesProviderDisable(email);
   await nativeHandoffClear(email);
 }
 

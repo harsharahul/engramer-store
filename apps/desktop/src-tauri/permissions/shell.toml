@@ -36,4 +36,7 @@ commands.allow = [
     "handoff_store",
     "handoff_get",
     "handoff_clear",
+    "files_provider_available",
+    "files_provider_enable",
+    "files_provider_disable",
 ]
