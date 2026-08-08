@@ -696,6 +696,17 @@ export function ProfileView(props: {
 
       <section className="profile-card">
         <h3>This device</h3>
+        {shell && (
+          <div className="profile-row">
+            <div className="profile-row-main">
+              <b>Server</b>
+              <div className="profile-row-sub">
+                This app is connected to <b>{location.host}</b>. To use a different server, sign
+                out and choose Change under the sign-in form.
+              </div>
+            </div>
+          </div>
+        )}
         <div className="profile-row">
           <div className="profile-row-main">
             <b>Resync library</b>
