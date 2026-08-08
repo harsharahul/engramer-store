@@ -56,6 +56,7 @@ import { PhotoGrid } from "./PhotoGrid";
 import { AlbumPicker } from "./AlbumPicker";
 import { SelectionBar } from "./SelectionBar";
 import { usePullToRefresh } from "../pulltorefresh";
+import { useKeyboardInset } from "../keyboard";
 import { saveDecryptedFile } from "../download";
 import { clearThumbnailCache } from "../thumbs";
 import { FileCard, FolderCard } from "./FileCard";
@@ -280,6 +281,7 @@ export function Vault() {
   const [similarHits, setSimilarHits] = useState<SearchHit[]>([]);
   const isMobile = useMediaQuery(MOBILE_QUERY);
   const pullToRefresh = usePullToRefresh(() => store.refresh());
+  useKeyboardInset();
   // Between phone and full desktop the long placeholder clips mid-word;
   // a narrower window gets the short, confident form instead.
   const compactSearch = useMediaQuery("(max-width: 1180px)");
