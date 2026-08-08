@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { MOBILE_QUERY, useMediaQuery } from "../media";
+import { useSheetDrag } from "../sheetdrag";
 
 export interface MenuItem {
   id: string;
@@ -24,6 +25,7 @@ export function ContextMenu(props: {
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const sheet = useMediaQuery(MOBILE_QUERY);
+  const { handleProps, sheetStyle } = useSheetDrag(ref, props.onClose);
 
   useEffect(() => {
     const away = (event: MouseEvent) => {
@@ -63,8 +65,9 @@ export function ContextMenu(props: {
     <div
       ref={ref}
       className={`ctx-menu${sheet ? " sheet" : ""}`}
-      style={sheet ? undefined : { left: x, top: y, width }}
+      style={sheet ? { ...sheetStyle } : { left: x, top: y, width }}
       role="menu"
+      {...(sheet ? handleProps : {})}
     >
       {sheet && <div className="sheet-grip" aria-hidden="true" />}
       {sheet && props.title && <div className="sheet-title">{props.title}</div>}

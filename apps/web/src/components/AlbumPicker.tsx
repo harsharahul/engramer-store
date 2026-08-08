@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { albumTag, type Album } from "../albums";
+import { MOBILE_QUERY, useMediaQuery } from "../media";
+import { useSheetDrag } from "../sheetdrag";
 import { PhotoGlyph, PlusGlyph } from "./Icon";
 
 /**
@@ -14,6 +16,9 @@ export function AlbumPicker(props: {
 }) {
   const [draft, setDraft] = useState("");
   const draftTag = albumTag(draft);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const isSheet = useMediaQuery(MOBILE_QUERY);
+  const drag = useSheetDrag(sheetRef, props.onClose);
 
   const create = (event: React.FormEvent) => {
     event.preventDefault();
@@ -24,13 +29,20 @@ export function AlbumPicker(props: {
 
   return (
     <div className="overlay" onClick={props.onClose}>
-      <div className="modal album-picker" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={sheetRef}
+        className="modal album-picker"
+        onClick={(e) => e.stopPropagation()}
+        style={isSheet ? drag.sheetStyle : undefined}
+        {...(isSheet ? drag.handleProps : {})}
+      >
+        {isSheet && <div className="sheet-grip" aria-hidden="true" />}
         <h2>Add to album</h2>
         <p className="modal-sub">
           {props.count === 1 ? "One item" : `${props.count} items`} to file away.
         </p>
         {props.albums.length > 0 && (
-          <div className="album-options">
+          <div className="album-options" data-sheet-scroll>
             {props.albums.map((album) => (
               <button key={album.tag} className="album-option" onClick={() => props.onPick(album.tag)}>
                 <PhotoGlyph size={15} />
