@@ -84,8 +84,18 @@ spec = spec
   .replace(/CFBundleShortVersionString: .*/g, `CFBundleShortVersionString: ${version}`)
   .replace(/CFBundleVersion: .*/g, `CFBundleVersion: "${version}"`)
   .replace(/iOS: 1[45]\.0/g, "iOS: 16.0");
+// The team applies project-wide so every target signs; generation only
+// carries it when an instance config was present at init time, which a
+// fresh checkout's init is not. The id is public (it is in the committed
+// entitlements), so stamping it here is configuration, not a secret.
+if (!spec.includes("DEVELOPMENT_TEAM")) {
+  spec = spec.replace(
+    /^settingGroups:/m,
+    `settings:\n  base:\n    DEVELOPMENT_TEAM: "5MD7MFXN8S"\nsettingGroups:`,
+  );
+}
 writeFileSync(yml, spec);
-console.log(`ios project: targets merged, version stamped ${version}, floor 16.0`);
+console.log(`ios project: targets merged, version stamped ${version}, floor 16.0, team set`);
 
 // 4. Regenerate the pbxproj from the amended spec.
 run("xcodegen", ["generate", "--spec", "project.yml", "--project", "."], apple);
