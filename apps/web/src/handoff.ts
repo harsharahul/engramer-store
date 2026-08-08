@@ -11,6 +11,7 @@ import {
   type HandoffProbeResult,
 } from "./native";
 import type { Session } from "./session";
+import { useStore } from "./store";
 
 /**
  * The extension handoff: everything a Files-app provider, share
@@ -35,6 +36,38 @@ export interface HandoffRecord {
   publicKey: string;
   encryptedPrivateKey: { ciphertext: string; nonce: string };
   createdAt: number;
+  /** Where the share sheet's "Smart classify" saves: the Inbox folder. */
+  inboxFolderId?: string;
+}
+
+/**
+ * The share sheet's Smart classify destination: a root folder named
+ * Inbox, found or (once the library has synced) created. Never creates
+ * before the first sync lands, which is what keeps a fresh install from
+ * planting a duplicate.
+ */
+async function ensureInboxFolderId(): Promise<string | undefined> {
+  try {
+    const find = (): string | undefined => {
+      for (const folder of useStore.getState().folders.values()) {
+        if (!folder.parentId && folder.name.trim().toLowerCase() === "inbox") {
+          return folder.id;
+        }
+      }
+      return undefined;
+    };
+    const existing = find();
+    if (existing) {
+      return existing;
+    }
+    if (!useStore.getState().synced) {
+      return undefined;
+    }
+    await useStore.getState().createFolder("Inbox", null);
+    return find();
+  } catch {
+    return undefined;
+  }
 }
 
 const ENABLED_KEY = "engram-handoff-enabled";
@@ -47,7 +80,7 @@ export async function handoffSupported(): Promise<boolean> {
   return nativeHandoffAvailable();
 }
 
-function buildRecord(session: Session): HandoffRecord {
+function buildRecord(session: Session, inboxFolderId?: string): HandoffRecord {
   return {
     v: 1,
     email: session.email,
@@ -60,12 +93,14 @@ function buildRecord(session: Session): HandoffRecord {
     // record is self-contained (a fresh nonce changes nothing).
     encryptedPrivateKey: secretBoxSeal(session.privateKey, session.masterKey),
     createdAt: Date.now(),
+    inboxFolderId,
   };
 }
 
 /** Turns the handoff on for this device and writes the current session. */
 export async function enableHandoff(session: Session): Promise<void> {
-  await nativeHandoffStore(session.email, JSON.stringify(buildRecord(session)));
+  const inboxFolderId = await ensureInboxFolderId();
+  await nativeHandoffStore(session.email, JSON.stringify(buildRecord(session, inboxFolderId)));
   localStorage.setItem(ENABLED_KEY, session.email);
   // The Files-app drive can only read once the key is in place, so it
   // is registered here and removed with the key below. The signal wakes
@@ -94,18 +129,20 @@ export function refreshHandoff(session: Session): void {
   if (!handoffEnabled(session.email)) {
     return;
   }
-  void nativeHandoffStore(session.email, JSON.stringify(buildRecord(session)))
-    .then(async () => {
-      await nativeFilesProviderEnable(session.email);
-      await nativeFilesProviderSignal(session.email);
-    })
-    .catch(() => {});
+  void (async () => {
+    const inboxFolderId = await ensureInboxFolderId();
+    await nativeHandoffStore(session.email, JSON.stringify(buildRecord(session, inboxFolderId)));
+    await nativeFilesProviderEnable(session.email);
+    await nativeFilesProviderSignal(session.email);
+  })().catch(() => {});
 }
 
 /**
- * Rewrites the record every time the app returns to the foreground.
- * iOS sends people here from the Files app ("open the app to connect");
- * without this listener that trip fixed nothing. Idempotent to install.
+ * Rewrites the record on every foreground AND background transition.
+ * iOS sends people to the app from the Files app ("open the app to
+ * connect"), so coming forward must reconnect; and leaving for the
+ * share sheet is exactly when the record should be freshest.
+ * Idempotent to install.
  */
 let foregroundRefreshInstalled = false;
 export function installHandoffForegroundRefresh(current: () => Session | null): void {
@@ -114,9 +151,6 @@ export function installHandoffForegroundRefresh(current: () => Session | null): 
   }
   foregroundRefreshInstalled = true;
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible") {
-      return;
-    }
     const session = current();
     if (session) {
       refreshHandoff(session);

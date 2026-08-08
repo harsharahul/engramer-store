@@ -13,6 +13,10 @@ struct HandoffRecord: Decodable {
     let masterKey: String
     let publicKey: String
     let createdAt: UInt64
+    /// Where "Smart classify" saves shares: the app keeps an Inbox
+    /// folder and records it here. Absent in older records; the share
+    /// sheet then falls back to the vault root.
+    let inboxFolderId: String?
 
     /// Base64url without padding, the encoding the whole product uses.
     var masterKeyBytes: Data? {
