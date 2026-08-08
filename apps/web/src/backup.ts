@@ -24,11 +24,20 @@ import { useStore } from "./store";
  * requests access, and the loop runs only if it was granted.
  */
 
+/** Which slice of the library backup covers, by capture date. */
+export type BackupWindow = "all" | "today" | "30d" | "90d";
+
 export interface BackupPolicy {
   enabled: boolean;
   includeVideos: boolean;
   includeScreenshots: boolean;
   wifiOnly: boolean;
+  window: BackupWindow;
+  /**
+   * The fixed floor for the "today" window: start of the day the option
+   * was chosen, so the meaning never drifts as days pass.
+   */
+  windowAnchorMs?: number;
 }
 
 export const DEFAULT_POLICY: BackupPolicy = {
@@ -36,7 +45,22 @@ export const DEFAULT_POLICY: BackupPolicy = {
   includeVideos: true,
   includeScreenshots: true,
   wifiOnly: true,
+  window: "all",
 };
+
+/** The oldest capture time the policy's window admits. */
+export function windowStartMs(policy: BackupPolicy, now = Date.now()): number {
+  switch (policy.window) {
+    case "today":
+      return policy.windowAnchorMs ?? 0;
+    case "30d":
+      return now - 30 * 86_400_000;
+    case "90d":
+      return now - 90 * 86_400_000;
+    default:
+      return 0;
+  }
+}
 
 const POLICY_KEY = "engram-backup-policy";
 
@@ -68,11 +92,14 @@ export interface BackupProgress {
   failed: number;
 }
 
-function keep(asset: NativePhotoAsset, policy: BackupPolicy): boolean {
+function keep(asset: NativePhotoAsset, policy: BackupPolicy, since: number): boolean {
   if (asset.kind === "video" && !policy.includeVideos) {
     return false;
   }
   if (asset.screenshot && !policy.includeScreenshots) {
+    return false;
+  }
+  if (asset.created_ms < since) {
     return false;
   }
   return true;
@@ -90,7 +117,8 @@ export async function runBackup(
   signal?: { aborted: boolean },
 ): Promise<BackupProgress> {
   const store = useStore.getState();
-  const assets = (await nativePhotosList()).filter((a) => keep(a, policy));
+  const since = windowStartMs(policy);
+  const assets = (await nativePhotosList()).filter((a) => keep(a, policy, since));
   const already = store.backedUpSourceIds();
   const pending = assets.filter((a) => !already.has(a.id));
 
