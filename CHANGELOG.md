@@ -3,6 +3,37 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Added
+- **A Photos view.** Every photo and video in the vault, wherever it is
+  filed, as one timeline: month sections, edge-to-edge thumbnails, and a
+  filter to show only favorites.
+- **Albums.** Group photos into albums without moving them; a photo can
+  live in any number of albums. Albums appear in the sidebar, can be
+  created on the spot while filing, and are searchable by exact name.
+  Stored as encrypted tags, so the server learns nothing.
+- **Select multiple files on a phone.** Hold a photo (or choose Select)
+  to start gathering, tap to add more, then favorite, file into an album,
+  move, download, or trash them together.
+- **Pinch to zoom in the viewer.** Pinch, double-tap, trackpad pinch, or
+  the +, -, and 0 keys; panning while zoomed no longer flips to the next
+  file.
+- **A star in the viewer toolbar** marks a photo as a favorite without
+  leaving it.
+
+### Changed
+- **Phone sheets behave like sheets.** The action sheet, the details
+  sheet, and the album picker share one gesture: drag down to dismiss,
+  with a flick closing from anywhere. The photo viewer closes with a
+  downward swipe. File lists refresh when pulled.
+- **Notifications stopped colliding.** Toasts, upload progress, and the
+  selection bar stack in one column above the tab bar instead of landing
+  on the same spot.
+- **Dialogs rise above the keyboard** instead of hiding behind it, and
+  touch targets across the phone layout got bigger and answer the finger
+  immediately.
+
 ## [0.39.6] - 2026-08-07
 
 ### Fixed
