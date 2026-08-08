@@ -3,6 +3,17 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.40.1] - 2026-08-08
+
+### Added
+- **Choose your server from the login screen.** The iPhone and desktop
+  apps show which vault server they are connected to and let you change
+  it, so one app serves any deployment, self-hosted included.
+
+### Fixed
+- The App Store build now refuses to produce an app pointed at a
+  development address, and bakes the deployment it is told about.
+
 ## [0.40.0] - 2026-08-08
 
 ### Added

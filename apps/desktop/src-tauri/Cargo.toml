@@ -1,6 +1,6 @@
 [package]
 name = "engram-store-desktop"
-version = "0.40.0"
+version = "0.40.1"
 description = "Engram Store desktop app"
 authors = ["Harsha Rahul Boggaram"]
 license = "AGPL-3.0-only"
@@ -20,6 +20,7 @@ tokio = { version = "1", features = ["sync"] }
 http = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+url = "2"
 
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 tauri-plugin-autostart = "2"

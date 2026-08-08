@@ -43,4 +43,7 @@ commands.allow = [
     "photos_authorize",
     "photos_list",
     "photos_export",
+    "server_url_get",
+    "server_url_set",
+    "server_url_clear",
 ]

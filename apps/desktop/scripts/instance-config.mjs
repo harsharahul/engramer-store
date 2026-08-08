@@ -65,7 +65,12 @@ writeFileSync(
 const capability = JSON.parse(readFileSync(join(tauriDir, "capabilities", "default.json"), "utf8"));
 capability.identifier = "instance";
 capability.description = "The deployment this build belongs to, named at build time.";
-capability.remote = { urls: [origin] };
+// Any https origin keeps IPC beside the baked one: the login screen can
+// repoint the shell at a different vault, and a vault the owner chose to
+// sign into already holds their ciphertext, so granting it the shell's
+// commands adds no trust it does not have. Plain http stays pinned to the
+// baked (dev) origin.
+capability.remote = { urls: [origin, "https://**"] };
 writeFileSync(
   join(tauriDir, "capabilities", "instance.json"),
   `${JSON.stringify(capability, null, 2)}\n`,

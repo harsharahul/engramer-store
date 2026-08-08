@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../api";
+import { nativeServerUrlSet, nativeShell } from "../native";
 import { login, registerAccount, type LoginResult, type Session } from "../session";
 import { useStore } from "../store";
 import { BrandMark, Wordmark } from "./FileArt";
@@ -25,6 +26,10 @@ export function Auth() {
   // does not linger in history. A token from the query string is still
   // accepted for links already handed out, and scrubbed the same way.
   const [invite, setInvite] = useState(() => readInviteToken());
+  // Shell only: repoint this install at a different vault server.
+  const [serverEditing, setServerEditing] = useState(false);
+  const [serverDraft, setServerDraft] = useState("");
+  const [serverError, setServerError] = useState("");
 
   useEffect(() => {
     const arrived = invite.length > 0;
@@ -263,6 +268,40 @@ export function Auth() {
           <br />
           The server stores ciphertext it cannot read.
         </p>
+        {nativeShell() && (
+          <div className="auth-server">
+            {serverEditing ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void nativeServerUrlSet(serverDraft).catch(() =>
+                    setServerError("That address did not look like an http(s) server."),
+                  );
+                  // On success the shell navigates this window away; only a
+                  // failure leaves anything to show.
+                }}
+              >
+                <input
+                  autoFocus
+                  value={serverDraft}
+                  placeholder="https://vault.example.com"
+                  onChange={(e) => setServerDraft(e.target.value)}
+                />
+                <button type="submit" className="btn btn-primary">
+                  Connect
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => setServerEditing(false)}>
+                  Cancel
+                </button>
+                {serverError && <span className="auth-server-error">{serverError}</span>}
+              </form>
+            ) : (
+              <button className="auth-server-link" onClick={() => setServerEditing(true)}>
+                Server: {location.host} · Change
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {pendingRecovery && (
