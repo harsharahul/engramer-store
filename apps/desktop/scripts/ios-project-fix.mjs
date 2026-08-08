@@ -30,7 +30,14 @@ const apple = join(tauriDir, "gen", "apple");
 const project = join(apple, "engram-store-desktop.xcodeproj", "project.pbxproj");
 const yml = join(apple, "project.yml");
 
-const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: "pipe" }).toString();
+// XcodeGen expands ${VAR} references from its environment while
+// generating. The Rust build phase's script keeps a ${FORCE_COLOR}
+// placeholder to be resolved at BUILD time; an inherited npm-style
+// FORCE_COLOR here would be baked into the project as a bogus
+// architecture argument and fail every archive.
+const env = { ...process.env };
+delete env.FORCE_COLOR;
+const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: "pipe", env }).toString();
 const sips = (...args) => execFileSync("sips", args, { stdio: ["ignore", "pipe", "ignore"] });
 
 try {
