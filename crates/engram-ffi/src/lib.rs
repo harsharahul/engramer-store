@@ -4,9 +4,9 @@
 //! `engram-core`; all networking stays in Swift, because only a Swift
 //! background URLSession survives the extension's death.
 
-use engram_core::{digest::Digester, metadata, secretbox, stream};
+use engram_core::{chunked, digest::Digester, metadata, secretbox, stream};
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{BufWriter, Read, Write};
 
 uniffi::setup_scaffolding!();
 
@@ -71,35 +71,7 @@ pub fn encrypt_for_upload(
     let mut output = File::create(&output_path).map_err(fail("create output"))?;
 
     let file_key = secretbox::generate_key();
-    let mut encryptor = stream::StreamEncryptor::new(&file_key);
-    output
-        .write_all(&encryptor.header())
-        .map_err(fail("write header"))?;
-
-    let mut digester = Digester::new();
-    let mut written: u64 = engram_core::backend::STREAM_HEADER_BYTES as u64;
-    let mut buffer = vec![0u8; stream::CHUNK_SIZE];
-    let mut remaining = plain_size;
-    loop {
-        let want = buffer.len().min(remaining.max(0) as usize);
-        let read = if want == 0 {
-            0
-        } else {
-            read_full(&mut input, &mut buffer[..want])?
-        };
-        let final_chunk = remaining <= read as u64;
-        digester.update(&buffer[..read]);
-        let sealed = encryptor.push(&buffer[..read], final_chunk);
-        output.write_all(&sealed).map_err(fail("write chunk"))?;
-        written += sealed.len() as u64;
-        remaining -= read as u64;
-        if final_chunk {
-            break;
-        }
-    }
-    output.sync_all().map_err(fail("flush output"))?;
-
-    let digest = digester.finish();
+    let (digest, written) = stream_encrypt_file(&mut input, plain_size, &mut output, &file_key)?;
     let meta = metadata::FileMetadata {
         name,
         mime,
@@ -164,6 +136,99 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// The provider's streaming read path: ciphertext file in, verified
+    /// plaintext file out, for both content formats, with the digest gate
+    /// and truncation refusal that keep wrong bytes from ever leaving.
+    #[test]
+    fn streams_files_back_to_plaintext() {
+        let dir = std::env::temp_dir().join("engram-ffi-stream-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let plain: Vec<u8> = (0..9_000_000u32).map(|i| (i % 249) as u8).collect();
+        let key = engram_core::secretbox::generate_key();
+        let expected = engram_core::digest::digest(&plain);
+
+        // Secretstream format, digest verified.
+        let blob_path = dir.join("stream.bin");
+        std::fs::write(&blob_path, stream::encrypt_bytes(&plain, &key)).unwrap();
+        let out_path = dir.join("stream.plain");
+        let size = decrypt_file_contents(
+            blob_path.to_string_lossy().into(),
+            out_path.to_string_lossy().into(),
+            key.to_vec(),
+            Some(expected.clone()),
+        )
+        .unwrap();
+        assert_eq!(size, plain.len() as u64);
+        assert_eq!(std::fs::read(&out_path).unwrap(), plain);
+
+        // EGC1 format, digest verified.
+        let egc_path = dir.join("egc.bin");
+        std::fs::write(&egc_path, chunked::encrypt(&plain, &key, &[7u8; 16])).unwrap();
+        let egc_out = dir.join("egc.plain");
+        decrypt_file_contents(
+            egc_path.to_string_lossy().into(),
+            egc_out.to_string_lossy().into(),
+            key.to_vec(),
+            Some(expected),
+        )
+        .unwrap();
+        assert_eq!(std::fs::read(&egc_out).unwrap(), plain);
+
+        // A wrong expected digest removes the output instead of leaving it.
+        let bad_out = dir.join("bad.plain");
+        let refused = decrypt_file_contents(
+            blob_path.to_string_lossy().into(),
+            bad_out.to_string_lossy().into(),
+            key.to_vec(),
+            Some("not-the-digest".into()),
+        );
+        assert!(refused.is_err());
+        assert!(!bad_out.exists());
+
+        // A truncated blob is refused, output removed.
+        let blob = std::fs::read(&blob_path).unwrap();
+        let cut_path = dir.join("cut.bin");
+        std::fs::write(&cut_path, &blob[..blob.len() - 10]).unwrap();
+        let cut_out = dir.join("cut.plain");
+        assert!(decrypt_file_contents(
+            cut_path.to_string_lossy().into(),
+            cut_out.to_string_lossy().into(),
+            key.to_vec(),
+            None,
+        )
+        .is_err());
+        assert!(!cut_out.exists());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The modify path's streaming encrypt: same key in, same bytes back,
+    /// with the digest and sizes the metadata reseal needs.
+    #[test]
+    fn streams_replacements_under_the_existing_key() {
+        let dir = std::env::temp_dir().join("engram-ffi-replace-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let plain: Vec<u8> = (0..5_000_000u32).map(|i| (i % 241) as u8).collect();
+        let input = dir.join("in.bin");
+        std::fs::write(&input, &plain).unwrap();
+        let key = engram_core::secretbox::generate_key();
+
+        let sealed = dir.join("sealed.bin");
+        let envelope = encrypt_file_replacement(
+            input.to_string_lossy().into(),
+            sealed.to_string_lossy().into(),
+            key.to_vec(),
+        )
+        .unwrap();
+        assert_eq!(envelope.plain_size, plain.len() as u64);
+        assert_eq!(envelope.digest, engram_core::digest::digest(&plain));
+
+        let blob = std::fs::read(&sealed).unwrap();
+        assert_eq!(blob.len() as u64, envelope.ciphertext_size);
+        assert_eq!(decrypt_content(blob, key.to_vec()).unwrap(), plain);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// The write-side helpers Stage 3B adds: metadata reseal and the
     /// folder envelope, both opened back through the read side.
     #[test]
@@ -205,6 +270,201 @@ fn read_full(input: &mut File, buffer: &mut [u8]) -> Result<usize, FfiError> {
         filled += n;
     }
     Ok(filled)
+}
+
+/// Decrypts an encrypted content file into a plaintext file, streaming
+/// chunk by chunk so peak memory stays near one 4 MiB chunk no matter
+/// how large the file is. The plaintext digest is computed in the same
+/// pass; when `expected_digest` is given and does not match, the output
+/// is removed and an error returned, so unverified bytes are never left
+/// where another app could read them. Handles both content formats
+/// (secretstream and EGC1 chunked media). Returns the plaintext size.
+#[uniffi::export]
+pub fn decrypt_file_contents(
+    input_path: String,
+    output_path: String,
+    file_key: Vec<u8>,
+    expected_digest: Option<String>,
+) -> Result<u64, FfiError> {
+    engram_core::init();
+    let key: [u8; 32] = file_key.try_into().map_err(|_| FfiError::Failed {
+        reason: "file key must be 32 bytes".into(),
+    })?;
+    let result = decrypt_file_inner(&input_path, &output_path, &key, expected_digest.as_deref());
+    if result.is_err() {
+        let _ = std::fs::remove_file(&output_path);
+    }
+    result
+}
+
+fn decrypt_file_inner(
+    input_path: &str,
+    output_path: &str,
+    key: &[u8; 32],
+    expected_digest: Option<&str>,
+) -> Result<u64, FfiError> {
+    let mut input = File::open(input_path).map_err(fail("open input"))?;
+    let mut magic = [0u8; 4];
+    if read_full(&mut input, &mut magic)? != 4 {
+        return Err(FfiError::Failed {
+            reason: "encrypted blob shorter than its header".into(),
+        });
+    }
+    let out_file = File::create(output_path).map_err(fail("create output"))?;
+    let mut output = BufWriter::new(out_file);
+    let mut digester = Digester::new();
+    let mut plain_total: u64 = 0;
+
+    if &magic == b"EGC1" {
+        let mut header_bytes = [0u8; chunked::HEADER_BYTES];
+        header_bytes[..4].copy_from_slice(&magic);
+        if read_full(&mut input, &mut header_bytes[4..])? != chunked::HEADER_BYTES - 4 {
+            return Err(FfiError::Failed {
+                reason: "chunked blob is truncated".into(),
+            });
+        }
+        let header = chunked::read_header(&header_bytes).map_err(fail("read header"))?;
+        let count = chunked::chunk_count(header.plain_size);
+        let mut sealed = vec![0u8; chunked::CHUNK_SIZE + chunked::TAG_BYTES];
+        for index in 0..count {
+            let want = chunked::sealed_chunk_len(&header, index);
+            if read_full(&mut input, &mut sealed[..want])? != want {
+                return Err(FfiError::Failed {
+                    reason: "chunked blob is truncated".into(),
+                });
+            }
+            let plain =
+                chunked::decrypt_chunk(&header, key, index, &sealed[..want]).map_err(|e| {
+                    FfiError::Failed {
+                        reason: e.to_string(),
+                    }
+                })?;
+            digester.update(&plain);
+            output.write_all(&plain).map_err(fail("write plaintext"))?;
+            plain_total += plain.len() as u64;
+        }
+    } else {
+        use engram_core::backend::{StreamPull, STREAM_A_BYTES, STREAM_HEADER_BYTES};
+        let mut header = [0u8; STREAM_HEADER_BYTES];
+        header[..4].copy_from_slice(&magic);
+        if read_full(&mut input, &mut header[4..])? != STREAM_HEADER_BYTES - 4 {
+            return Err(FfiError::Failed {
+                reason: "encrypted blob shorter than its header".into(),
+            });
+        }
+        let mut pull = StreamPull::new(&header, key).map_err(|e| FfiError::Failed {
+            reason: e.to_string(),
+        })?;
+        let mut sealed = vec![0u8; stream::CHUNK_SIZE + STREAM_A_BYTES];
+        loop {
+            let filled = read_full(&mut input, &mut sealed)?;
+            if filled == 0 {
+                // The final tag never arrived: the blob was cut short and
+                // the bytes so far must not be trusted as the whole file.
+                return Err(FfiError::Failed {
+                    reason: "encrypted blob is truncated".into(),
+                });
+            }
+            let (plain, done) = pull.pull(&sealed[..filled]).map_err(|e| FfiError::Failed {
+                reason: e.to_string(),
+            })?;
+            digester.update(&plain);
+            output.write_all(&plain).map_err(fail("write plaintext"))?;
+            plain_total += plain.len() as u64;
+            if done {
+                let mut probe = [0u8; 1];
+                if read_full(&mut input, &mut probe)? != 0 {
+                    return Err(FfiError::Failed {
+                        reason: "trailing bytes after the final chunk".into(),
+                    });
+                }
+                break;
+            }
+        }
+    }
+
+    let out_file = output.into_inner().map_err(fail("flush plaintext"))?;
+    out_file.sync_all().map_err(fail("flush plaintext"))?;
+    let digest = digester.finish();
+    if let Some(expected) = expected_digest {
+        if digest != expected {
+            return Err(FfiError::Failed {
+                reason: "content digest mismatch".into(),
+            });
+        }
+    }
+    Ok(plain_total)
+}
+
+/// What a streamed re-encryption of replacement content produces: the
+/// numbers the resealed metadata needs.
+#[derive(uniffi::Record)]
+pub struct ReplacementEnvelope {
+    pub digest: String,
+    pub plain_size: u64,
+    pub ciphertext_size: u64,
+}
+
+/// Encrypts `input_path` to `output_path` under the file's EXISTING key
+/// (the modify path, where the key must not change), streaming like
+/// `encrypt_for_upload` and computing the plaintext digest in the same
+/// read.
+#[uniffi::export]
+pub fn encrypt_file_replacement(
+    input_path: String,
+    output_path: String,
+    file_key: Vec<u8>,
+) -> Result<ReplacementEnvelope, FfiError> {
+    engram_core::init();
+    let key: [u8; 32] = file_key.try_into().map_err(|_| FfiError::Failed {
+        reason: "file key must be 32 bytes".into(),
+    })?;
+    let mut input = File::open(&input_path).map_err(fail("open input"))?;
+    let plain_size = input.metadata().map_err(fail("stat input"))?.len();
+    let mut output = File::create(&output_path).map_err(fail("create output"))?;
+    let (digest, written) = stream_encrypt_file(&mut input, plain_size, &mut output, &key)?;
+    Ok(ReplacementEnvelope {
+        digest,
+        plain_size,
+        ciphertext_size: written,
+    })
+}
+
+/// The shared streaming loop: plaintext file in, secretstream file out,
+/// digest computed in the same pass. Returns (digest, ciphertext size).
+fn stream_encrypt_file(
+    input: &mut File,
+    plain_size: u64,
+    output: &mut File,
+    key: &[u8; 32],
+) -> Result<(String, u64), FfiError> {
+    let mut encryptor = stream::StreamEncryptor::new(key);
+    output
+        .write_all(&encryptor.header())
+        .map_err(fail("write header"))?;
+    let mut digester = Digester::new();
+    let mut written: u64 = engram_core::backend::STREAM_HEADER_BYTES as u64;
+    let mut buffer = vec![0u8; stream::CHUNK_SIZE];
+    let mut remaining = plain_size;
+    loop {
+        let want = buffer.len().min(remaining.max(0) as usize);
+        let read = if want == 0 {
+            0
+        } else {
+            read_full(input, &mut buffer[..want])?
+        };
+        let final_chunk = remaining <= read as u64;
+        digester.update(&buffer[..read]);
+        let sealed = encryptor.push(&buffer[..read], final_chunk);
+        output.write_all(&sealed).map_err(fail("write chunk"))?;
+        written += sealed.len() as u64;
+        remaining -= read as u64;
+        if final_chunk {
+            break;
+        }
+    }
+    output.sync_all().map_err(fail("flush output"))?;
+    Ok((digester.finish(), written))
 }
 
 /// Decrypts a whole content blob; Stage 3's read path, exposed now so the

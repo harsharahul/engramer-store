@@ -48,6 +48,16 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         return Progress()
     }
 
+    /// One session for content downloads: no shared cache (the blob lands
+    /// on disk once, in the download file itself), a modest per-request
+    /// timeout, and a generous ceiling for large files.
+    private static let contentSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 600
+        return URLSession(configuration: config)
+    }()
+
     func fetchContents(
         for itemIdentifier: NSFileProviderItemIdentifier,
         version requestedVersion: NSFileProviderItemVersion?,
@@ -55,7 +65,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         completionHandler: @escaping (URL?, NSFileProviderItem?, Error?) -> Void
     ) -> Progress {
         reconnectIfNeeded()
-        let progress = Progress(totalUnitCount: 2)
+        let progress = Progress(totalUnitCount: 100)
         guard let record, let entry = index?.entry(itemIdentifier.rawValue), !entry.isFolder else {
             completionHandler(nil, nil, NSFileProviderError(.noSuchItem))
             return progress
@@ -66,31 +76,79 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         }
         var download = URLRequest(url: url)
         download.setValue("Bearer \(record.token)", forHTTPHeaderField: "authorization")
-        URLSession.shared.dataTask(with: download) { data, response, _ in
-            progress.completedUnitCount = 1
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200, let data else {
+        downloadAndDecrypt(download, entry: entry, attempt: 1, progress: progress,
+                           completionHandler: completionHandler)
+        return progress
+    }
+
+    /// Download to disk, then stream-decrypt file to file: peak memory
+    /// stays near one 4 MiB chunk regardless of file size, which is what
+    /// keeps this process alive under the extension memory cap (the
+    /// in-memory path was how "couldn't communicate with a helper
+    /// application" happened on large files). One retry absorbs the cold
+    /// first request after the process or the network slept.
+    private func downloadAndDecrypt(
+        _ request: URLRequest, entry: IndexEntry, attempt: Int, progress: Progress,
+        completionHandler: @escaping (URL?, NSFileProviderItem?, Error?) -> Void
+    ) {
+        let task = Self.contentSession.downloadTask(with: request) { downloaded, response, error in
+            if error != nil {
+                if attempt == 1, !progress.isCancelled {
+                    self.downloadAndDecrypt(request, entry: entry, attempt: 2, progress: progress,
+                                            completionHandler: completionHandler)
+                } else {
+                    completionHandler(nil, nil, NSFileProviderError(.serverUnreachable))
+                }
+                return
+            }
+            guard let http = response as? HTTPURLResponse else {
                 completionHandler(nil, nil, NSFileProviderError(.serverUnreachable))
                 return
             }
+            if http.statusCode == 401 {
+                completionHandler(nil, nil, NSFileProviderError(.notAuthenticated))
+                return
+            }
+            guard http.statusCode == 200, let downloaded else {
+                completionHandler(nil, nil, NSFileProviderError(
+                    http.statusCode == 404 ? .noSuchItem : .serverUnreachable))
+                return
+            }
+            // The system deletes the downloaded file when this block
+            // returns; move it out synchronously before decrypting.
+            let blob = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+            let staged = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
             do {
-                let plain = try decryptContent(blob: data, fileKey: entry.key)
+                try FileManager.default.moveItem(at: downloaded, to: blob)
+            } catch {
+                completionHandler(nil, nil, NSFileProviderError(.serverUnreachable))
+                return
+            }
+            defer { try? FileManager.default.removeItem(at: blob) }
+            do {
                 // The digest sealed in the metadata is the end-to-end
-                // truth; a mismatch means wrong bytes, and wrong bytes
-                // are never handed to another app.
-                if let digest = entry.digest, contentDigest(bytes: plain) != digest {
-                    completionHandler(nil, nil, NSFileProviderError(.noSuchItem))
-                    return
-                }
-                let staged = FileManager.default.temporaryDirectory
-                    .appendingPathComponent(UUID().uuidString)
-                try plain.write(to: staged, options: .atomic)
-                progress.completedUnitCount = 2
-                completionHandler(staged, EngramFilesItem(entry), nil)
+                // truth, verified in the same streaming pass; a mismatch
+                // deletes the output, and wrong bytes are never handed to
+                // another app.
+                _ = try decryptFileContents(
+                    inputPath: blob.path, outputPath: staged.path,
+                    fileKey: entry.key, expectedDigest: entry.digest
+                )
             } catch {
                 completionHandler(nil, nil, NSFileProviderError(.noSuchItem))
+                return
             }
-        }.resume()
-        return progress
+            progress.completedUnitCount = progress.totalUnitCount
+            completionHandler(staged, EngramFilesItem(entry), nil)
+        }
+        if attempt == 1 {
+            // Files shows a real pie for the download, the long part.
+            progress.addChild(task.progress, withPendingUnitCount: 95)
+        }
+        progress.cancellationHandler = { task.cancel() }
+        task.resume()
     }
 
     // MARK: - Writes.
@@ -308,21 +366,20 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     ) -> EngramUploadOutcome {
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: scratch) }
-        guard let plain = try? Data(contentsOf: contents) else {
-            return .failed("replacement bytes unreadable")
-        }
         // Reuse the existing file key by sealing manually: metadata JSON is
-        // decrypted, updated, resealed; content goes through the stream
-        // format under the same key.
+        // decrypted, updated, resealed; content streams through the
+        // format file to file under the same key, so a multi-gigabyte
+        // save from another app costs one chunk of memory, not the file.
         guard let metaJson = try? decryptMetadataJson(
             encryptedMetaJson: entry.encryptedMetaJson, objectKey: entry.key
         ), var meta = (try? JSONSerialization.jsonObject(with: Data(metaJson.utf8))) as? [String: Any]
         else { return .failed("metadata unreadable") }
 
-        let sealedContent: Data
+        let envelope: ReplacementEnvelope
         do {
-            sealedContent = try encryptContent(plain: plain, fileKey: entry.key)
-            try sealedContent.write(to: scratch)
+            envelope = try encryptFileReplacement(
+                inputPath: contents.path, outputPath: scratch.path, fileKey: entry.key
+            )
         } catch {
             return .failed("encryption failed")
         }
@@ -330,8 +387,8 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         let outcome = EngramApi.uploadContent(record: record, fileId: entry.id, blob: scratch)
         guard case .ok = outcome else { return outcome }
 
-        meta["digest"] = contentDigest(bytes: plain)
-        meta["size"] = plain.count
+        meta["digest"] = envelope.digest
+        meta["size"] = envelope.plainSize
         meta["mtime"] = UInt64(Date().timeIntervalSince1970 * 1000)
         if let updated = try? JSONSerialization.data(withJSONObject: meta),
            let updatedJson = String(data: updated, encoding: .utf8),
