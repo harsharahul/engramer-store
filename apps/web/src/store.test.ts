@@ -47,6 +47,7 @@ vi.mock("./transfer", async (importOriginal) => {
   };
 });
 
+import { api } from "./api";
 import { metadataOf, useStore, type FileEntry } from "./store";
 
 /**
@@ -291,5 +292,117 @@ describe("entryFromUpdate", () => {
     expect(updated.name).toBe("mine.docx");
     expect(updated.folderId).toBe("f1");
     expect(updated.shared).toBeUndefined();
+  });
+});
+
+describe("albums in the store", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  /**
+   * Seeds the store with real-crypto files and stubs api.patchFile to echo
+   * the encrypted metadata straight back, so every assertion below reads
+   * what would actually have been stored, after the full seal/open cycle.
+   * The stub also measures overlap: album writes must stay sequential,
+   * because each one rewrites the whole metadata blob last-write-wins.
+   */
+  const setup = (tagsById: Record<string, string[]>) => {
+    const masterKey = generateKey();
+    const keys = new Map<string, Uint8Array>();
+    const files = new Map<string, FileEntry>();
+    for (const [id, tags] of Object.entries(tagsById)) {
+      const key = generateKey();
+      keys.set(id, key);
+      files.set(id, entry({ id, tags, key, mtime: 5 }));
+    }
+    useStore.setState({
+      session: {
+        email: "t@example.com",
+        token: "t",
+        masterKey,
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      files,
+    });
+    const gauge = { order: [] as string[], running: 0, peak: 0 };
+    let seq = 100;
+    const spy = vi.spyOn(api, "patchFile").mockImplementation(async (id, patch) => {
+      gauge.order.push(id);
+      gauge.running++;
+      gauge.peak = Math.max(gauge.peak, gauge.running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      gauge.running--;
+      return {
+        id,
+        folderId: null,
+        encryptedKey: secretBoxSeal(keys.get(id)!, masterKey),
+        encryptedMeta: patch.encryptedMeta!,
+        size: 1,
+        thumbSize: 0,
+        indexSize: 0,
+        uploaded: true,
+        trashed: false,
+        deleted: false,
+        updateSeq: seq++,
+        createdAt: 1,
+        updatedAt: 2,
+      } satisfies FileDto;
+    });
+    return { gauge, spy, tagsOf: (id: string) => useStore.getState().files.get(id)!.tags };
+  };
+
+  it("addToAlbum tags every member one write at a time and skips existing members", async () => {
+    const { gauge, spy, tagsOf } = setup({
+      a: ["sunny"],
+      b: ["album:beach"],
+      c: [],
+    });
+    await useStore.getState().addToAlbum(["a", "b", "c"], "album:beach");
+    expect(tagsOf("a")).toEqual(["sunny", "album:beach"]);
+    expect(tagsOf("c")).toEqual(["album:beach"]);
+    expect(gauge.order).toEqual(["a", "c"]);
+    expect(gauge.peak).toBe(1);
+    spy.mockRestore();
+  });
+
+  it("setTags refuses hand-typed reserved tags but keeps existing membership", async () => {
+    const { spy, tagsOf } = setup({ a: ["album:beach", "sunny"] });
+    await useStore.getState().setTags("a", ["sunny", "warm", "album:forged", "trip:fake-2026-01"]);
+    expect(tagsOf("a")).toEqual(["sunny", "warm", "album:beach"]);
+    spy.mockRestore();
+  });
+
+  it("renameAlbum retags every member and returns the new tag", async () => {
+    const { gauge, spy, tagsOf } = setup({
+      a: ["album:beach", "sunny"],
+      b: ["album:beach"],
+      c: ["album:city"],
+    });
+    const next = await useStore.getState().renameAlbum("album:beach", "Beach Trip");
+    expect(next).toBe("album:beach-trip");
+    expect(tagsOf("a")).toEqual(["album:beach-trip", "sunny"]);
+    expect(tagsOf("b")).toEqual(["album:beach-trip"]);
+    expect(tagsOf("c")).toEqual(["album:city"]);
+    expect(gauge.peak).toBe(1);
+    spy.mockRestore();
+  });
+
+  it("deleteAlbum strips the tag and keeps the files", async () => {
+    const { spy, tagsOf } = setup({ a: ["album:beach", "sunny"], b: ["album:beach"] });
+    await useStore.getState().deleteAlbum("album:beach");
+    expect(tagsOf("a")).toEqual(["sunny"]);
+    expect(tagsOf("b")).toEqual([]);
+    expect(useStore.getState().files.size).toBe(2);
+    spy.mockRestore();
+  });
+
+  it("confirmed trips dedupe their tag on a second confirmation", async () => {
+    const { spy, tagsOf } = setup({ a: ["trip:rome-2026-03"] });
+    await useStore.getState().addToAlbum(["a"], "album:rome");
+    await useStore.getState().addToAlbum(["a"], "album:rome");
+    expect(tagsOf("a")).toEqual(["trip:rome-2026-03", "album:rome"]);
+    spy.mockRestore();
   });
 });
