@@ -546,7 +546,23 @@ export function Preview(props: {
           if (zoom.scale !== 1) {
             return;
           }
-          if (!from || !touch || !onStep) {
+          if (!from || !touch) {
+            return;
+          }
+          // Down and decisively vertical closes the viewer, the way every
+          // iOS photo viewer hands the picture back. Only for media that
+          // does not scroll vertically itself: the same gesture inside a
+          // PDF or spreadsheet is just scrolling.
+          const dyDown = touch.clientY - from.y;
+          if (
+            (kind === "image" || kind === "video" || kind === "audio") &&
+            dyDown > 80 &&
+            dyDown > 2 * Math.abs(touch.clientX - from.x)
+          ) {
+            props.onClose();
+            return;
+          }
+          if (!onStep) {
             return;
           }
           const direction = swipeStep(touch.clientX - from.x, touch.clientY - from.y);

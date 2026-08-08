@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { decryptContent, decryptFileMetadata } from "@engramer/crypto";
 import { api, type FileVersionInfo } from "../api";
 import { FileFacts, LibraryIntel } from "./FactsPanel";
 import { useStore, type FileEntry } from "../store";
 import { albumTitle, isAlbumTag, isReservedTag } from "../albums";
+import { useSheetDrag } from "../sheetdrag";
+import { MOBILE_QUERY, useMediaQuery } from "../media";
 import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { triggerDownload } from "../download";
@@ -44,6 +46,13 @@ export function DetailsPanel(props: {
   const folders = useStore((s) => s.folders);
   const setTags = useStore((s) => s.setTags);
   const removeFromAlbum = useStore((s) => s.removeFromAlbum);
+  const panelRef = useRef<HTMLElement>(null);
+  const isSheet = useMediaQuery(MOBILE_QUERY);
+  const drag = useSheetDrag(panelRef, props.onClose);
+  // The wide layout's side pane is not a sheet; only the phone gets the
+  // grip and the drag physics.
+  const handleProps = isSheet ? drag.handleProps : {};
+  const sheetStyle = isSheet ? drag.sheetStyle : undefined;
   const toggleFavorite = useStore((s) => s.toggleFavorite);
   const restoreVersion = useStore((s) => s.restoreVersion);
   const [thumb, setThumb] = useState<string | null>(null);
@@ -131,8 +140,11 @@ export function DetailsPanel(props: {
   };
 
   return (
-    <aside className="details">
-      <header>
+    <aside className="details" ref={panelRef} style={sheetStyle}>
+      {/* Phone-only grip (hidden by CSS on wide layouts); the drag reads
+          from the header area so the scrollable body keeps scrolling. */}
+      <div className="sheet-grip details-grip" aria-hidden="true" {...handleProps} />
+      <header {...handleProps}>
         <span className="details-title">Details</span>
         <button className="icon-btn" title="Close" onClick={props.onClose}>
           <XGlyph size={14} />

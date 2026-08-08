@@ -55,6 +55,7 @@ import { albumTitle, albumsFrom } from "../albums";
 import { PhotoGrid } from "./PhotoGrid";
 import { AlbumPicker } from "./AlbumPicker";
 import { SelectionBar } from "./SelectionBar";
+import { usePullToRefresh } from "../pulltorefresh";
 import { saveDecryptedFile } from "../download";
 import { clearThumbnailCache } from "../thumbs";
 import { FileCard, FolderCard } from "./FileCard";
@@ -278,6 +279,7 @@ export function Vault() {
   const [similarTo, setSimilarTo] = useState<FileEntry | null>(null);
   const [similarHits, setSimilarHits] = useState<SearchHit[]>([]);
   const isMobile = useMediaQuery(MOBILE_QUERY);
+  const pullToRefresh = usePullToRefresh(() => store.refresh());
   // Between phone and full desktop the long placeholder clips mid-word;
   // a narrower window gets the short, confident form instead.
   const compactSearch = useMediaQuery("(max-width: 1180px)");
@@ -1863,7 +1865,16 @@ export function Vault() {
           )}
         </div>
 
-        <div className="content" onClick={(e) => e.target === e.currentTarget && clearSelection()}>
+        <div
+          className="content"
+          onClick={(e) => e.target === e.currentTarget && clearSelection()}
+          {...(isMobile ? pullToRefresh.containerProps : {})}
+        >
+          {(pullToRefresh.pulling || pullToRefresh.refreshing) && (
+            <div className="ptr-indicator" aria-live="polite">
+              {pullToRefresh.refreshing ? "Refreshing…" : "Release to refresh"}
+            </div>
+          )}
           {/* Above the files, and only when it has something to say. It is
               deliberately not shown while searching or in trash: both are
               places you arrived at with a question of your own. */}
