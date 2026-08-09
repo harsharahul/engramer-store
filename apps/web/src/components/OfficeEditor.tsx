@@ -13,6 +13,7 @@ import {
   decryptFrame,
   encryptFrame,
   newChannelOrder,
+  sealChannelBaseline,
   type ChannelOrder,
 } from "../office/channel";
 import { electedSnapshotter, shouldAutoSnapshot } from "../office/snapshot";
@@ -90,6 +91,8 @@ export function OfficeEditor(props: {
   // Callbacks read these; state is for rendering.
   const collabRef = useRef<"off" | "connecting" | "live" | "alone">("off");
   collabRef.current = collab;
+  /** Reloads taken to repair the channel; bounded so failure is visible. */
+  const resyncCountRef = useRef(0);
   const channelRef = useRef<ChannelClient | null>(null);
   // Durable chg frames since the last snapshot, and when the last arrived:
   // the elected member turns quiet spells into snapshots.
@@ -153,7 +156,18 @@ export function OfficeEditor(props: {
     const resync = () => {
       // Frames went missing; the stream cannot be trusted. Reload the
       // document from its current generation, the same road as a conflict.
+      // Bounded: a channel that cannot be repaired (frames sealed under a
+      // retired key, a stream this build cannot follow) must become an
+      // error, never an infinite spinner.
       if (!cancelled) {
+        resyncCountRef.current += 1;
+        if (resyncCountRef.current > 3) {
+          setStage("failed");
+          setError(
+            "the live session for this document could not be repaired; close it and try again",
+          );
+          return;
+        }
         setStage("decrypting");
         setCollab("connecting");
         setReloadNonce((n) => n + 1);
@@ -170,6 +184,8 @@ export function OfficeEditor(props: {
           onReady: () => {
             window.clearTimeout(startupDeadline);
             engineReady = true;
+            // A door that opened proves the channel is followable again.
+            resyncCountRef.current = 0;
             for (const queued of tail.splice(0)) {
               feedFrame(queued);
             }
@@ -291,7 +307,11 @@ export function OfficeEditor(props: {
                   resync();
                 }
               },
-              onCaughtUp: () => {},
+              onCaughtUp: () => {
+                // The initial replay is over; from here the per-sender
+                // counters must be contiguous.
+                sealChannelBaseline(order);
+              },
               onEph: (sender, payload) => {
                 try {
                   const decoded = decryptFrame(payload, opened.key);
@@ -443,9 +463,13 @@ export function OfficeEditor(props: {
     }
     // Most conflicts can be caught before the work of exporting: if the
     // library's entry moved since this editor opened, someone else already
-    // saved, and the question gets asked now rather than after a 409.
+    // saved, and the question gets asked now rather than after a 409. In a
+    // LIVE room this gate must not run: a co-editor's snapshot moves the
+    // entry on every sync, but its content already reached this engine as
+    // frames, so a snapshot save from here is cooperative, not a conflict.
+    const live = collabRef.current === "live";
     const current = useStore.getState().files.get(fileId);
-    if (current && describeConflict(openedAtRef.current, current.updatedAt) === "stale") {
+    if (!live && current && describeConflict(openedAtRef.current, current.updatedAt) === "stale") {
       setConflict({ bytes: null });
       return;
     }
@@ -455,7 +479,6 @@ export function OfficeEditor(props: {
     try {
       // Everything the channel delivered up to here is applied and will be
       // in the export; that position is what the snapshot may truncate.
-      const live = collabRef.current === "live";
       const upTo = live ? (channelRef.current?.lastSeenSeq ?? 0) : 0;
       const bin = await session.save();
       if (!bin) {

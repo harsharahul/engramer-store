@@ -6,6 +6,7 @@ import {
   decryptFrame,
   encryptFrame,
   newChannelOrder,
+  sealChannelBaseline,
   type ChannelFrame,
 } from "./channel";
 
@@ -80,6 +81,40 @@ describe("acceptance order", () => {
  * Binding the two is what stops one member forging another's identity —
  * stealing their locks, or minting objects under their index.
  */
+describe("truncation baseline", () => {
+  it("accepts a stream that resumes mid-count during the initial replay", () => {
+    // A snapshot save trimmed this sender's first six frames; the tail
+    // legitimately begins at 7. Demanding 1 here made the document
+    // permanently unopenable for every fresh client.
+    const order = newChannelOrder("file-1");
+    expect(acceptFrame(order, frame({ n: 7 }), "conn-a")).toBe("apply");
+    expect(acceptFrame(order, frame({ n: 8 }), "conn-a")).toBe("apply");
+  });
+
+  it("still resyncs on a gap within a replayed stream", () => {
+    const order = newChannelOrder("file-1");
+    expect(acceptFrame(order, frame({ n: 7 }), "conn-a")).toBe("apply");
+    expect(acceptFrame(order, frame({ n: 9 }), "conn-a")).toBe("resync");
+  });
+
+  it("turns strict once the baseline is sealed", () => {
+    const order = newChannelOrder("file-1");
+    expect(acceptFrame(order, frame({ n: 7 }), "conn-a")).toBe("apply");
+    sealChannelBaseline(order);
+    // A NEW sender appearing live must start at 1; mid-count now means
+    // frames went missing.
+    expect(acceptFrame(order, frame({ s: "conn-b", n: 3 }), "conn-b")).toBe("resync");
+  });
+
+  it("keeps enforcing continuity for baselined senders after sealing", () => {
+    const order = newChannelOrder("file-1");
+    expect(acceptFrame(order, frame({ n: 7 }), "conn-a")).toBe("apply");
+    sealChannelBaseline(order);
+    expect(acceptFrame(order, frame({ n: 8 }), "conn-a")).toBe("apply");
+    expect(acceptFrame(order, frame({ n: 10 }), "conn-a")).toBe("resync");
+  });
+});
+
 describe("sender binding", () => {
   it("drops a frame whose claimed sender is not the one who sent it", () => {
     const order = newChannelOrder("file-1");
