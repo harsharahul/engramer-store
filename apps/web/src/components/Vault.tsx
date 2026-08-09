@@ -324,9 +324,19 @@ export function Vault() {
     }
   }, [store.syncError, store.synced, showToast]);
 
-  // Someone accepted an invitation and is waiting on a key. Nothing is
-  // released automatically, so this has to be visible or the recipient
-  // waits forever wondering whether sharing works.
+  // A named invitation released its key without a click; say so, since
+  // an invisible grant looks identical to a broken one.
+  const autoReleasedNote = store.autoReleasedNote;
+  useEffect(() => {
+    if (autoReleasedNote) {
+      showToast(autoReleasedNote);
+      useStore.getState().consumeAutoReleaseNote();
+    }
+  }, [autoReleasedNote, showToast]);
+
+  // Someone accepted an invitation and is waiting on a key. Unnamed
+  // invitations release nothing automatically, so this has to be visible
+  // or the recipient waits forever wondering whether sharing works.
   const claimCount = store.pendingClaims.length;
   useEffect(() => {
     if (claimCount > 0) {

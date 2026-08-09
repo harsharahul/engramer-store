@@ -3,6 +3,7 @@ import { toB64, protectShareKey } from "@engramer/crypto";
 import { api, type CollabInviteInfo, type CollaboratorInfo, type ShareInfo, type ShareOptions } from "../api";
 import { useStore, type FileEntry } from "../store";
 import { inviteLink } from "../collab";
+import { rememberAutoRelease } from "../autorelease";
 import { formatDate } from "../format";
 import { CopyGlyph, KeyGlyph, PeopleGlyph, TrashGlyph, XGlyph } from "./Icon";
 
@@ -64,6 +65,7 @@ export function ShareDialog(props: {
   // access was removed from a phone.
   const [rotateAsk, setRotateAsk] = useState(false);
   const [rotating, setRotating] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
 
   const load = async () => {
     const { shares } = await api.listShares();
@@ -146,10 +148,16 @@ export function ShareDialog(props: {
     setError(null);
     try {
       const { token } = await api.createCollabInvite(file.id, role);
+      const named = inviteEmail.trim();
+      if (named) {
+        rememberAutoRelease(token, named);
+      }
       await navigator.clipboard.writeText(inviteLink(token));
       await load();
       props.onToast(
-        "Invitation copied. Anyone with it can claim it once; send it the way you would send a password.",
+        named
+          ? `Invitation copied. The key releases automatically when ${named} claims it; anyone else waits for your approval.`
+          : "Invitation copied. Anyone with it can claim it once; send it the way you would send a password.",
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "could not create the invitation");
@@ -302,6 +310,14 @@ export function ShareDialog(props: {
           </div>
         )}
         <div className="share-option-row">
+          <input
+            type="email"
+            value={inviteEmail}
+            placeholder="Their email — releases the key automatically (optional)"
+            onChange={(e) => setInviteEmail(e.target.value)}
+          />
+        </div>
+        <div className="share-option-row">
           <button className="btn" disabled={inviting} onClick={() => void invitePerson("editor")}>
             Invite to edit
           </button>
@@ -310,9 +326,10 @@ export function ShareDialog(props: {
           </button>
         </div>
         <p className="modal-sub">
-          An invitation carries no key. The person claims it signed in, you release the key to
-          exactly that account, and removing them later stops future access without recalling
-          what they already read.
+          An invitation carries no key. The person claims it signed in, and the key is released
+          to exactly that account: automatically when you named their address here, otherwise by
+          your approval. Removing them later stops future access without recalling what they
+          already read.
         </p>
 
         <div className="sidebar-label">
