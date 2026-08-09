@@ -53,10 +53,24 @@ export interface ChannelOrder {
   readonly lastFrom: Map<string, number>;
   /** Set once a gap is seen; every later frame answers resync too. */
   broken: boolean;
+  /**
+   * True while the initial server replay is still arriving. The log is
+   * append-only and trimmed only from the front (a snapshot save removes
+   * the prefix that generation already contains), so during the replay a
+   * sender's surviving stream may legitimately BEGIN mid-count; its first
+   * frame sets the baseline. Once the replay ends the rule turns strict:
+   * a live frame that skips a count means frames went missing.
+   */
+  seeding: boolean;
 }
 
 export function newChannelOrder(fileId: string): ChannelOrder {
-  return { fileId, lastFrom: new Map(), broken: false };
+  return { fileId, lastFrom: new Map(), broken: false, seeding: true };
+}
+
+/** The initial replay is over; from here every counter must be contiguous. */
+export function sealChannelBaseline(order: ChannelOrder): void {
+  order.seeding = false;
 }
 
 /**
@@ -82,11 +96,19 @@ export function acceptFrame(
   if (attestedSender !== undefined && frame.s !== attestedSender) {
     return "drop";
   }
-  const last = order.lastFrom.get(frame.s) ?? 0;
-  if (frame.n <= last) {
+  const last = order.lastFrom.get(frame.s);
+  if (last === undefined && order.seeding) {
+    // A stream cut by snapshot truncation resumes wherever it resumes;
+    // demanding 1 here made a document with such a tail permanently
+    // unopenable (reload, meet the same tail, reload again, forever).
+    order.lastFrom.set(frame.s, frame.n);
+    return "apply";
+  }
+  const floor = last ?? 0;
+  if (frame.n <= floor) {
     return "drop";
   }
-  if (frame.n !== last + 1) {
+  if (frame.n !== floor + 1) {
     order.broken = true;
     return "resync";
   }
