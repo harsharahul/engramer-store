@@ -3,6 +3,21 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.40.4] - 2026-08-08
+
+### Added
+- **The vault keeps itself current.** An open window refreshes when you
+  return to it and checks in while it stays visible, so shared
+  documents, approvals, and uploads from your phone appear on their own
+  instead of waiting for a manual refresh.
+- **Opening the iPhone app delivers pending share-sheet uploads
+  immediately**, instead of waiting for the system's background
+  scheduler, and cleans up staging the system already delivered.
+
+### Fixed
+- The invitation page now describes how a share is approved: the owner
+  releases it from the document's Share panel.
+
 ## [0.40.3] - 2026-08-08
 
 ### Added
