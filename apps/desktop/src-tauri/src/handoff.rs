@@ -10,7 +10,7 @@
 use tauri::async_runtime::spawn_blocking;
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-const SERVICE: &str = "com.harsharahul.engramstore.handoff";
+pub(crate) const SERVICE: &str = "com.harsharahul.engramstore.handoff";
 
 #[tauri::command]
 pub fn handoff_available() -> bool {

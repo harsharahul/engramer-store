@@ -15,7 +15,7 @@ tauri-plugin-dialog = "2"
 crypto_secretbox = "0.1"
 blake2 = "0.10"
 engram-core = { path = "../../../crates/engram-core" }
-reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "blocking"] }
 tokio = { version = "1", features = ["sync"] }
 http = "1"
 serde = { version = "1", features = ["derive"] }
