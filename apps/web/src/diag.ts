@@ -25,6 +25,16 @@ export function diag(tag: string, message: string): void {
   listeners.forEach((listener) => listener());
 }
 
+declare global {
+  interface Window {
+    /** The same in-tab buffer the diagnostics panel shows; nothing new. */
+    engramDiag?: () => readonly DiagEntry[];
+  }
+}
+if (typeof window !== "undefined") {
+  window.engramDiag = () => entries;
+}
+
 export function diagEntries(): readonly DiagEntry[] {
   return entries;
 }
