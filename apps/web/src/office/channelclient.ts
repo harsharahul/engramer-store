@@ -26,6 +26,8 @@ export interface ChannelEvents {
   onMembers(members: Array<{ connId: string; index: number; name?: string }>): void;
   onAck(ref: number, seq: number): void;
   onTruncated(snapshotGeneration: number, snapshotSeq: number): void;
+  /** The log passed its byte ceiling; only a snapshot save clears it. */
+  onPleaseSnapshot(): void;
   /** The channel is gone and redialing has been abandoned. */
   onDead(): void;
 }
@@ -45,6 +47,14 @@ export class ChannelClient {
     private readonly events: ChannelEvents,
   ) {}
 
+  /**
+   * Keeps bytes moving while the editor loads. A phone can spend a
+   * minute starting the editor with the socket completely idle, and
+   * idle-timeout proxies kill quiet connections; the relay ignores
+   * unknown frame kinds, so this costs one tiny frame every 20s.
+   */
+  private keepalive: number | null = null;
+
   /** Dials and resolves once the welcome arrives. */
   async connect(): Promise<ChannelWelcome> {
     const { ticket } = await api.collabTicket(this.fileId);
@@ -53,6 +63,13 @@ export class ChannelClient {
       `${scheme}://${location.host}/api/collab/${this.fileId}/channel?ticket=${ticket}`,
     );
     this.socket = socket;
+    if (this.keepalive === null) {
+      this.keepalive = window.setInterval(() => {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          this.socket.send(JSON.stringify({ t: "ping" }));
+        }
+      }, 20_000);
+    }
     return new Promise<ChannelWelcome>((resolve, reject) => {
       let welcomed = false;
       socket.onopen = () => {
@@ -92,6 +109,9 @@ export class ChannelClient {
             return;
           case "truncated":
             this.events.onTruncated(Number(frame.snapshotGeneration), Number(frame.snapshotSeq));
+            return;
+          case "please-snapshot":
+            this.events.onPleaseSnapshot();
             return;
           default:
             return;
@@ -154,6 +174,10 @@ export class ChannelClient {
 
   close(): void {
     this.closed = true;
+    if (this.keepalive !== null) {
+      window.clearInterval(this.keepalive);
+      this.keepalive = null;
+    }
     this.socket?.close();
   }
 }
