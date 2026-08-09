@@ -93,6 +93,8 @@ export function OfficeEditor(props: {
   collabRef.current = collab;
   /** Reloads taken to repair the channel; bounded so failure is visible. */
   const resyncCountRef = useRef(0);
+  /** Solo-to-live upgrades taken; bounded so a flapping dial cannot thrash. */
+  const upgradeRef = useRef(0);
   const channelRef = useRef<ChannelClient | null>(null);
   // Durable chg frames since the last snapshot, and when the last arrived:
   // the elected member turns quiet spells into snapshots.
@@ -241,14 +243,31 @@ export function OfficeEditor(props: {
 
     void (async () => {
       try {
+        // The document's own bytes come first and never wait for anything
+        // else: fetching and converting start immediately, while the
+        // channel dials in parallel. A websocket a proxy or VPN
+        // black-holes settles neither way for minutes, and an open that
+        // awaited it hung on "starting" forever, for every member.
+        const docPromise = (async () => {
+          setStage("decrypting");
+          const plaintext = await downloadAndDecrypt(opened.id, opened.key, opened.digest);
+          if (cancelled) {
+            return null;
+          }
+          setStage("converting");
+          return converter.importDocument(`document.${fileType}`, plaintext);
+        })();
         // A recipient knows the document is shared; an owner asks whether
         // anyone else holds a key. Only then is the channel worth dialing.
         let collaborative = opened.shared === true;
         if (!collaborative && !opened.shared) {
-          collaborative = await api
-            .listCollaborators(opened.id)
-            .then((r) => r.collaborators.length > 0)
-            .catch(() => false);
+          collaborative = await Promise.race([
+            api
+              .listCollaborators(opened.id)
+              .then((r) => r.collaborators.length > 0)
+              .catch(() => false),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5_000)),
+          ]);
         }
         if (collaborative && !cancelled) {
           setCollab("connecting");
@@ -260,6 +279,19 @@ export function OfficeEditor(props: {
                   // engine's identity is fixed at init, so reopen cleanly.
                   // Uncounted: a flapping connection is not a broken stream.
                   resync(false);
+                  return;
+                }
+                if (sessionRef.current) {
+                  // The welcome outran its deadline and this session
+                  // already opened solo. One reload upgrades it to live;
+                  // a dial that keeps missing the deadline stays solo
+                  // rather than thrash the document.
+                  if (upgradeRef.current < 2) {
+                    upgradeRef.current += 1;
+                    resync(false);
+                  } else {
+                    channelRef.current?.close();
+                  }
                   return;
                 }
                 connId = welcome.you;
@@ -378,10 +410,17 @@ export function OfficeEditor(props: {
                 }
               },
             });
-            await channel.connect();
+            // Ten seconds is generous for a healthy upgrade. Past it the
+            // session opens solo rather than hang; the dial keeps going
+            // in the background, and a welcome that lands later upgrades
+            // this open through the reload path instead of blocking it.
+            const settled = await Promise.race([
+              channel.connect().then(() => true),
+              new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 10_000)),
+            ]);
             channelRef.current = channel;
             if (!cancelled) {
-              setCollab("live");
+              setCollab(settled ? "live" : "alone");
             }
           } catch {
             channel = null;
@@ -396,14 +435,8 @@ export function OfficeEditor(props: {
         }
         const session = makeSession();
         sessionRef.current = session;
-        setStage("decrypting");
-        const plaintext = await downloadAndDecrypt(opened.id, opened.key, opened.digest);
-        if (cancelled) {
-          return;
-        }
-        setStage("converting");
-        const imported = await converter.importDocument(`document.${fileType}`, plaintext);
-        if (cancelled) {
+        const imported = await docPromise;
+        if (cancelled || !imported) {
           return;
         }
         session.deliver(imported.bin, imported.media);
