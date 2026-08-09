@@ -3,6 +3,21 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.40.7] - 2026-08-10
+
+### Fixed
+- **Live co-editing works.** Three startup-order flaws kept real-time
+  collaboration from engaging outside local testing: a fast-loading
+  editor could announce itself before anyone listened and wait forever;
+  a promptly connected session could be mistaken for a late one and
+  never join the room; and the first person in a room typed invisibly,
+  because the editor chooses single-user mode when it starts alone and
+  never reconsidered. Sessions now start regardless of arrival order,
+  and a room re-engages collaboration the moment company arrives,
+  preserving any unsent work.
+- The collaboration handshake now records itself in the in-app
+  diagnostics, so a future failure names its own cause.
+
 ## [0.40.6] - 2026-08-09
 
 ### Fixed
