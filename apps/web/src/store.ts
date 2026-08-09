@@ -25,6 +25,7 @@ import { uploadLanes, withAnalysisSlot } from "./analysisslot";
 import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { clearSession, suspendSession, type Session } from "./session";
+import { autoReleaseMatches, forgetAutoRelease } from "./autorelease";
 import { holdTransferLock, releaseTransferLock } from "./wakelock";
 import { analyzeFile, downloadAndDecrypt, downloadThumbnail, encryptAndUpload } from "./transfer";
 import { recognizeImage, recognizePdf } from "./intel/ocr";
@@ -262,6 +263,9 @@ interface StoreState {
   ingestRequestUploads: () => Promise<number>;
   /** Invitations someone has claimed, waiting for this owner to approve. */
   pendingClaims: PendingClaim[];
+  /** One-shot toast text after an automatic key release; consumed by the UI. */
+  autoReleasedNote: string | null;
+  consumeAutoReleaseNote: () => void;
   refreshPendingClaims: () => Promise<void>;
   /** Releases the file key to the account that claimed this invitation. */
   approveClaim: (token: string) => Promise<void>;
@@ -454,6 +458,7 @@ export const useStore = create<StoreState>((set, get) => {
 
   /** The last sync sequence applied in this tab; 0 forces a full sync. */
   let syncCursor = 0;
+  let autoReleasing = false;
 
   /** Decrypts a complete row set into fresh maps, skipping tombstones and
    * pending uploads, and carrying warmed search text over from the current
@@ -668,6 +673,8 @@ export const useStore = create<StoreState>((set, get) => {
   return {
     session: null,
     pendingClaims: [],
+    autoReleasedNote: null,
+    consumeAutoReleaseNote: () => set({ autoReleasedNote: null }),
     synced: false,
     syncError: null,
     folders: new Map(),
@@ -1636,6 +1643,32 @@ export const useStore = create<StoreState>((set, get) => {
         });
       }
       set({ pendingClaims: claims });
+      // Invitations that named their person release without a second
+      // trip, to exactly that address; every other claim keeps waiting
+      // for the explicit approval. Guarded: approveClaim refreshes the
+      // claims again, and the nested pass must not double-grant.
+      if (autoReleasing) {
+        return;
+      }
+      autoReleasing = true;
+      try {
+        for (const claim of claims) {
+          if (!autoReleaseMatches(claim.token, claim.claimantEmail)) {
+            continue;
+          }
+          try {
+            await get().approveClaim(claim.token);
+            forgetAutoRelease(claim.token);
+            set({
+              autoReleasedNote: `Key released to ${claim.claimantEmail} for ${claim.fileName}.`,
+            });
+          } catch {
+            // The claim stays pending and the manual button still works.
+          }
+        }
+      } finally {
+        autoReleasing = false;
+      }
     },
 
     approveClaim: async (token) => {
