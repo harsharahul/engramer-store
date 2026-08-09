@@ -153,14 +153,18 @@ export function OfficeEditor(props: {
       s.applyEffects(b.onRemoteFrame(frame));
     };
 
-    const resync = () => {
+    const resync = (counted = true) => {
       // Frames went missing; the stream cannot be trusted. Reload the
       // document from its current generation, the same road as a conflict.
       // Bounded: a channel that cannot be repaired (frames sealed under a
       // retired key, a stream this build cannot follow) must become an
-      // error, never an infinite spinner.
+      // error, never an infinite spinner. A dropped-and-redialed SOCKET
+      // is not that: connections flap on phones, and a reconnect reload
+      // must not spend the repair budget.
       if (!cancelled) {
-        resyncCountRef.current += 1;
+        if (counted) {
+          resyncCountRef.current += 1;
+        }
         if (resyncCountRef.current > 3) {
           setStage("failed");
           setError(
@@ -254,7 +258,8 @@ export function OfficeEditor(props: {
                 if (bridge) {
                   // A redial lands on a new connection and a new index; the
                   // engine's identity is fixed at init, so reopen cleanly.
-                  resync();
+                  // Uncounted: a flapping connection is not a broken stream.
+                  resync(false);
                   return;
                 }
                 connId = welcome.you;
@@ -346,6 +351,14 @@ export function OfficeEditor(props: {
                 const s = sessionRef.current;
                 if (b && s) {
                   s.applyEffects(b.onOwnFrameAcked(ref, seq));
+                }
+              },
+              onPleaseSnapshot: () => {
+                // The relay is refusing further posts until someone
+                // snapshots; the elected member saves now rather than on
+                // the next quiet spell, unclogging the room for everyone.
+                if (collabRef.current === "live" && electedSnapshotter(latestMembers) === connId) {
+                  saveRef.current();
                 }
               },
               onTruncated: (generation, snapshotSeq) => {
