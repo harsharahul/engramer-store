@@ -3,6 +3,18 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.40.5] - 2026-08-09
+
+### Fixed
+- **A shared document no longer becomes unopenable after co-editing.**
+  A save during live collaboration could leave the document's change
+  stream in a state every fresh open misread as corruption, reloading
+  forever; affected documents open normally again on their own.
+- If a live session genuinely cannot be repaired, the editor now says
+  so instead of spinning indefinitely.
+- Saving during live collaboration no longer raises a false conflict
+  when a co-editor saved moments earlier.
+
 ## [0.40.4] - 2026-08-08
 
 ### Added
