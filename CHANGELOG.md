@@ -3,6 +3,34 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.40.6] - 2026-08-09
+
+### Fixed
+- **Shared documents open even when the collaboration connection is
+  slow or unreachable.** The document loads immediately and in
+  parallel; a session that cannot reach the live channel within ten
+  seconds opens solo and fully editable, and upgrades to live when the
+  connection arrives.
+- Live sessions survive quiet spells behind proxies: the connection
+  carries a heartbeat, and reconnecting no longer counts against the
+  session's repair attempts.
+- A live room whose change log reaches its size ceiling now saves a
+  snapshot automatically instead of silently refusing further changes.
+- The rotate-key question now appears on iPhone; it previously used a
+  dialog the iOS app could not display, so rotation was silently
+  skipped when removing someone's access from a phone.
+
+### Added
+- **The Shared page now opens with the people you share files with**,
+  across the whole library, manageable in place; links and file
+  requests follow.
+- **Snapshot links.** Share a frozen copy of a document's current
+  contents with its own link; the original keeps evolving privately.
+- **Automatic key release to a named invitee.** Enter their email when
+  creating an invitation and the key releases itself the moment that
+  exact account claims it; unnamed invitations keep the explicit
+  approval step.
+
 ## [0.40.5] - 2026-08-09
 
 ### Fixed
