@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { decryptJson, toB64, utf8Encode } from "@engramer/crypto";
-import { api, type FileRequestInfo, type ShareInfo } from "../api";
+import { api, type FileRequestInfo, type ShareInfo, type SharedPersonInfo } from "../api";
 import { useStore } from "../store";
 import { formatDate } from "../format";
-import { describeShare, shareLink } from "./ShareDialog";
-import { CopyGlyph, InboxGlyph, KeyGlyph, LinkGlyph, PlusGlyph, TrashGlyph } from "./Icon";
+import { describeShare, shareLink, ShareDialog } from "./ShareDialog";
+import { CopyGlyph, InboxGlyph, KeyGlyph, LinkGlyph, PeopleGlyph, PlusGlyph, TrashGlyph } from "./Icon";
 
 const EXPIRY_CHOICES = [
   { label: "Never expires", ms: null },
@@ -29,15 +29,19 @@ export function SharedView(props: { onToast: (message: string) => void }) {
   const store = useStore();
   const [shares, setShares] = useState<ShareInfo[] | null>(null);
   const [requests, setRequests] = useState<RequestEntry[] | null>(null);
+  const [people, setPeople] = useState<SharedPersonInfo[]>([]);
+  const [manageId, setManageId] = useState<string | null>(null);
   const [newRequestOpen, setNewRequestOpen] = useState(false);
 
   const load = useCallback(async () => {
     const masterKey = store.session?.masterKey;
-    const [shareList, requestList] = await Promise.all([
+    const [shareList, requestList, peopleList] = await Promise.all([
       api.listShares(),
       api.listFileRequests(),
+      api.listSharedPeople().catch(() => ({ shared: [] as SharedPersonInfo[] })),
     ]);
     setShares(shareList.shares);
+    setPeople(peopleList.shared);
     setRequests(
       requestList.requests.map((r) => {
         let label = "File request";
@@ -99,8 +103,47 @@ export function SharedView(props: { onToast: (message: string) => void }) {
 
   const activeRequests = requests.filter((r) => !r.revoked);
 
+  const manageFile = manageId ? store.files.get(manageId) : undefined;
+
   return (
     <div className="shared-view">
+      <section>
+        <div className="shared-head">
+          <h3>
+            <PeopleGlyph size={15} /> People you share with
+          </h3>
+        </div>
+        {people.length === 0 ? (
+          <p className="shared-empty">
+            No one yet. Invite someone from a document's Share panel; they appear here with
+            their role, per file.
+          </p>
+        ) : (
+          <div className="rows">
+            {people.map((person) => {
+              const file = store.files.get(person.fileId);
+              return (
+                <div key={`${person.fileId}:${person.userId}`} className="share-row">
+                  <div className="share-row-main">
+                    <span className="share-row-token">{file?.name ?? "a document"}</span>
+                    <span className="badge">
+                      {person.email} · {person.role === "editor" ? "co-edits" : "views"}
+                    </span>
+                    <span className="share-row-meta">since {formatDate(person.createdAt)}</span>
+                  </div>
+                  <button
+                    className="btn"
+                    disabled={!file}
+                    onClick={() => setManageId(person.fileId)}
+                  >
+                    Manage
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
       <section>
         <div className="shared-head">
           <h3>
@@ -211,6 +254,16 @@ export function SharedView(props: { onToast: (message: string) => void }) {
             props.onToast("Request link copied. Send it to anyone.");
           }}
           onClose={() => setNewRequestOpen(false)}
+        />
+      )}
+      {manageFile && (
+        <ShareDialog
+          file={manageFile}
+          onClose={() => {
+            setManageId(null);
+            void load().catch(() => {});
+          }}
+          onToast={props.onToast}
         />
       )}
     </div>
