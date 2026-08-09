@@ -224,6 +224,32 @@ export function registerCollabRoutes(app: FastifyInstance): void {
     return reply.code(201).send({ ok: true });
   });
 
+  /** Everyone this account shares files with, across the whole library. */
+  app.get("/api/collab/files", auth, async (request) => {
+    const uid = request.user.uid;
+    const rows = await app.db.all<{
+      file_id: string;
+      user_id: number;
+      email: string;
+      role: string;
+      created_at: number;
+    }>(
+      `SELECT c.file_id, c.user_id, u.email, c.role, c.created_at
+         FROM file_collaborators c JOIN users u ON u.id = c.user_id
+        WHERE c.owner_id = ? AND c.revoked = 0 ORDER BY c.created_at DESC`,
+      uid,
+    );
+    return {
+      shared: rows.map((row) => ({
+        fileId: row.file_id,
+        userId: row.user_id,
+        email: row.email,
+        role: row.role,
+        createdAt: row.created_at,
+      })),
+    };
+  });
+
   app.get("/api/collab/files/:fileId/collaborators", auth, async (request, reply) => {
     const { fileId } = request.params as { fileId: string };
     const uid = request.user.uid;

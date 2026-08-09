@@ -70,6 +70,15 @@ export interface CollabInviteInfo {
   claimantPublicKey?: string;
 }
 
+/** One person on one file, across the whole library's people shares. */
+export interface SharedPersonInfo {
+  fileId: string;
+  userId: number;
+  email: string;
+  role: "viewer" | "editor";
+  createdAt: number;
+}
+
 export interface CollaboratorInfo {
   userId: number;
   email: string;
@@ -260,6 +269,8 @@ export const api = {
     }),
   listCollaborators: (fileId: string) =>
     request<{ collaborators: CollaboratorInfo[] }>(`/api/collab/files/${fileId}/collaborators`),
+  listSharedPeople: () =>
+    request<{ shared: SharedPersonInfo[] }>("/api/collab/files"),
   patchCollaborator: (fileId: string, userId: number, role: "viewer" | "editor") =>
     request<void>(`/api/collab/files/${fileId}/collaborators/${userId}`, {
       method: "PATCH",

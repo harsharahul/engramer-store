@@ -4,6 +4,7 @@ import { api, type CollabInviteInfo, type CollaboratorInfo, type ShareInfo, type
 import { useStore, type FileEntry } from "../store";
 import { inviteLink } from "../collab";
 import { rememberAutoRelease } from "../autorelease";
+import { downloadAndDecrypt } from "../transfer";
 import { formatDate } from "../format";
 import { CopyGlyph, KeyGlyph, PeopleGlyph, TrashGlyph, XGlyph } from "./Icon";
 
@@ -66,6 +67,7 @@ export function ShareDialog(props: {
   const [rotateAsk, setRotateAsk] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
+  const [snapshotting, setSnapshotting] = useState(false);
 
   const load = async () => {
     const { shares } = await api.listShares();
@@ -129,6 +131,63 @@ export function ShareDialog(props: {
       setError(err instanceof Error ? err.message : "could not create the link");
     } finally {
       setCreating(false);
+    }
+  };
+
+  /**
+   * A link to a frozen duplicate: the recipient gets exactly this
+   * moment's contents, and the original evolves privately afterward.
+   * The duplicate is a normal vault file, so its link honors the same
+   * expiry, download and password options as any other.
+   */
+  const shareSnapshot = async () => {
+    setSnapshotting(true);
+    setError(null);
+    try {
+      const bytes = await downloadAndDecrypt(file.id, file.key, file.digest);
+      const copyId = await useStore.getState().saveFileCopy(file.id, bytes);
+      const dot = file.name.lastIndexOf(".");
+      const snapName =
+        dot > 0
+          ? `${file.name.slice(0, dot)} (shared copy)${file.name.slice(dot)}`
+          : `${file.name} (shared copy)`;
+      await useStore.getState().renameFile(copyId, snapName).catch(() => {});
+      const snapshot = useStore.getState().files.get(copyId);
+      if (!snapshot) {
+        throw new Error("the copy was not created");
+      }
+      const options: ShareOptions = {
+        expiresAt: EXPIRY_CHOICES[expiry]!.ms ? Date.now() + EXPIRY_CHOICES[expiry]!.ms! : null,
+        maxDownloads: DOWNLOAD_CHOICES[limit]!.value,
+      };
+      const trimmed = password.trim();
+      if (trimmed) {
+        const protection = protectShareKey(snapshot.key, trimmed);
+        options.password = {
+          digest: protection.accessKeyDigest,
+          kdf: protection.kdf,
+          wrappedKey: protection.wrappedKey,
+        };
+      }
+      const { token } = await api.createShare(snapshot.id, options);
+      const created: ShareInfo = {
+        token,
+        fileId: snapshot.id,
+        createdAt: Date.now(),
+        expiresAt: options.expiresAt ?? null,
+        maxDownloads: options.maxDownloads ?? null,
+        downloadCount: 0,
+        protected: Boolean(options.password),
+      };
+      await navigator.clipboard.writeText(shareLink(created, snapshot.key));
+      props.onToast(
+        "Snapshot link copied. It serves this moment's contents; the original stays private.",
+      );
+      setPassword("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "could not create the snapshot");
+    } finally {
+      setSnapshotting(false);
     }
   };
 
@@ -319,7 +378,7 @@ export function ShareDialog(props: {
         </div>
         <div className="share-option-row">
           <button className="btn" disabled={inviting} onClick={() => void invitePerson("editor")}>
-            Invite to edit
+            Invite to co-edit
           </button>
           <button className="btn" disabled={inviting} onClick={() => void invitePerson("viewer")}>
             Invite to view
@@ -395,6 +454,9 @@ export function ShareDialog(props: {
         <div className="modal-actions">
           <button className="btn btn-ghost" onClick={props.onClose}>
             Done
+          </button>
+          <button className="btn" onClick={() => void shareSnapshot()} disabled={snapshotting}>
+            {snapshotting ? "Freezing…" : "Snapshot link"}
           </button>
           <button className="btn btn-primary" onClick={() => void create()} disabled={creating}>
             {creating
