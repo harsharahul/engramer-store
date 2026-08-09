@@ -62,6 +62,8 @@ export function OfficeEditor(props: {
   // hands on; it needs whatever save() currently is, not the one that existed
   // when the session was built.
   const saveRef = useRef<() => void>(() => {});
+  /** The awaitable save, for flows that must sequence after it. */
+  const savePromiseRef = useRef<() => Promise<void>>(() => Promise.resolve());
   // Read synchronously when closing, because the change that a commit
   // produces arrives after the render that would have updated the state.
   const dirtyRef = useRef(false);
@@ -137,6 +139,11 @@ export function OfficeEditor(props: {
     let bridge: CollabBridge | undefined;
     let order: ChannelOrder = newChannelOrder(opened.id);
     let connId = "";
+    /** Whether the engine's auth saw anyone else; solo auth cannot co-edit. */
+    let bridgeCompany = false;
+    /** Set once the collab decision reached the session; a welcome after
+     * this cannot join the current engine and upgrades via reload. */
+    let sessionBegun = false;
     let outCounter = 0;
     // What the relay says each connection's participant index is; the only
     // trustworthy source, since frame contents are member-forgeable.
@@ -219,6 +226,9 @@ export function OfficeEditor(props: {
           onPost: (out) => {
             if (channel) {
               outCounter += 1;
+              if (outCounter === 1) {
+                diag("collab", "first frame posted to the channel");
+              }
               if (out.k === "chg") {
                 pendingFramesRef.current += 1;
                 lastFrameAtRef.current = Date.now();
@@ -238,8 +248,14 @@ export function OfficeEditor(props: {
             );
           },
         },
-        bridge,
       );
+
+    // The session listens from the very first moment: the editor frame
+    // announces itself exactly once, on its own schedule, and a warm
+    // cache can fire that announce before any network settles. A session
+    // created later missed it and the engine waited forever.
+    const session = makeSession();
+    sessionRef.current = session;
 
     void (async () => {
       try {
@@ -281,7 +297,7 @@ export function OfficeEditor(props: {
                   resync(false);
                   return;
                 }
-                if (sessionRef.current) {
+                if (sessionBegun) {
                   // The welcome outran its deadline and this session
                   // already opened solo. One reload upgrades it to live;
                   // a dial that keeps missing the deadline stays solo
@@ -295,7 +311,9 @@ export function OfficeEditor(props: {
                   return;
                 }
                 connId = welcome.you;
+                diag("collab", `welcome: member ${welcome.yourIndex}, ${welcome.members.length} present`);
                 order = newChannelOrder(opened.id);
+                bridgeCompany = welcome.members.length > 1;
                 bridge = new CollabBridge({
                   fileId: opened.id,
                   selfConnId: welcome.you,
@@ -377,6 +395,23 @@ export function OfficeEditor(props: {
                 if (b && s && engineReady) {
                   s.applyEffects(b.onMembers(members));
                 }
+                // The engine decides single-user or co-editing at auth
+                // time and never revisits it. A session that authed alone
+                // types locally and broadcasts nothing, so the first
+                // person in a room would edit invisibly forever. Company
+                // arriving re-auths through the ordinary reload, with any
+                // unsent local work committed first so nothing is lost.
+                if (b && !bridgeCompany && members.length > 1) {
+                  bridgeCompany = true;
+                  if (dirtyRef.current) {
+                    void savePromiseRef
+                      .current()
+                      .catch(() => {})
+                      .finally(() => resync(false));
+                  } else {
+                    resync(false);
+                  }
+                }
               },
               onAck: (ref, seq) => {
                 const b = bridge;
@@ -433,8 +468,11 @@ export function OfficeEditor(props: {
         if (cancelled) {
           return;
         }
-        const session = makeSession();
-        sessionRef.current = session;
+        // The collaboration decision is made; the engine may now init,
+        // with the channel identity when live and alone otherwise.
+        sessionBegun = true;
+        diag("collab", bridge ? `engine begins live as index ${bridge.index}` : "engine begins solo");
+        session.begin(bridge);
         const imported = await docPromise;
         if (cancelled || !imported) {
           return;
@@ -598,6 +636,7 @@ export function OfficeEditor(props: {
 
   useEffect(() => {
     saveRef.current = () => void save();
+    savePromiseRef.current = save;
   }, [save]);
 
   useEffect(() => {

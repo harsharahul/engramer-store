@@ -170,7 +170,34 @@ export class EditorSession {
     window.addEventListener("message", this.onMessage);
   }
 
-  private readonly collab: CollabBridge | undefined;
+  private collab: CollabBridge | undefined;
+  /**
+   * The editor announces itself exactly once, whenever its assets finish
+   * loading; the app decides solo-or-live on its own clock. Whichever
+   * side arrives first waits for the other here, so the announce can
+   * never again be lost to timing and leave the engine waiting forever
+   * for a config nobody sends.
+   */
+  private announced = false;
+  private started = false;
+  private initSent = false;
+
+  /** The app's collaboration decision has been made; start when ready. */
+  begin(collab: CollabBridge | undefined): void {
+    this.collab = collab;
+    this.started = true;
+    this.maybeStart();
+  }
+
+  private maybeStart(): void {
+    if (!this.announced || !this.started || this.initSent || this.closed) {
+      return;
+    }
+    this.initSent = true;
+    this.handlers.onLoading();
+    this.send("init", { config: this.editorConfig() });
+    this.send("openDocument", { doc: this.documentConfig() });
+  }
 
   /** Feeds bridge effects (remote frames, acks, membership) to the engine. */
   applyEffects(effects: BridgeEffects): void {
@@ -295,9 +322,8 @@ export class EditorSession {
     }
     switch (message.event) {
       case "onAppReady":
-        this.handlers.onLoading();
-        this.send("init", { config: this.editorConfig() });
-        this.send("openDocument", { doc: this.documentConfig() });
+        this.announced = true;
+        this.maybeStart();
         return;
       case "onDocumentReady":
         this.handlers.onReady();
