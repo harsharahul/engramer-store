@@ -27,6 +27,7 @@ import { collectDropped, fromDirectoryInput } from "../uploader";
 import { MOBILE_QUERY, useMediaQuery } from "../media";
 import { installMediaKeyResponder } from "../mediastream";
 import { installHandoffForegroundRefresh } from "../handoff";
+import { installAutoSync } from "../autosync";
 import { useLongPress } from "../longpress";
 import {
   clearNativeUnlock,
@@ -1014,6 +1015,11 @@ export function Vault() {
   // returning to the foreground rewrites the extension handoff and
   // signals the drive, so that trip actually reconnects it.
   useEffect(() => installHandoffForegroundRefresh(() => useStore.getState().session), []);
+
+  // Sync is a client-driven pull; this adds the foreground-and-interval
+  // heartbeat that makes shared documents and phone uploads appear on
+  // their own.
+  useEffect(() => installAutoSync(), []);
 
   // Desktop shell only: pick up watched-folder arrivals, past and live.
   useEffect(() => {

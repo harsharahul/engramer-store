@@ -40,6 +40,7 @@ commands.allow = [
     "files_provider_available",
     "files_provider_enable",
     "files_provider_signal",
+    "outbox_drain",
     "files_provider_disable",
     "photos_available",
     "photos_authorize",

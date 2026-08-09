@@ -59,9 +59,9 @@ export function CollabInviteView() {
             <h1>Invitation accepted</h1>
             <p className="sub">
               {state.ownerEmail} is sharing a document with you
-              {state.role === "editor" ? " to edit" : " to view"}. It appears in{" "}
-              <strong>Shared with me</strong> as soon as they release the key, which their
-              vault does automatically the next time it is open.
+              {state.role === "editor" ? " to edit" : " to view"}. They still hold the key:
+              once they approve your request from the document's Share panel, it appears in
+              your <strong>Shared with me</strong>.
             </p>
             <button className="btn btn-primary" onClick={() => navigate("/")}>
               Open your vault

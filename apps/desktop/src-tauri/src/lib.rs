@@ -13,6 +13,7 @@ mod handoff;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod keychain;
 mod media;
+mod outbox;
 mod photolib;
 mod photos;
 mod serverurl;
@@ -133,6 +134,7 @@ pub fn run() {
             filesprovider::files_provider_enable,
             filesprovider::files_provider_signal,
             filesprovider::files_provider_disable,
+            outbox::outbox_drain,
             photolib::photos_available,
             photolib::photos_authorize,
             photolib::photos_list,

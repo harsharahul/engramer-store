@@ -120,6 +120,12 @@ pub fn get(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
 /// visible the way the extensions ask for it; the answer separates "the
 /// record was never stored" from "the group itself is refused".
 pub fn probe(service: &str) -> Result<Option<usize>, String> {
+    Ok(read_any(service)?.map(|data| data.len()))
+}
+
+/// The record itself through the same account-less lookup, for app code
+/// that acts on the extensions' behalf (draining their staged uploads).
+pub fn read_any(service: &str) -> Result<Option<Vec<u8>>, String> {
     let mut pairs: Vec<(CFString, CFType)> = vec![
         (
             cf_str(unsafe { kSecClass.cast() }),
@@ -153,7 +159,7 @@ pub fn probe(service: &str) -> Result<Option<usize>, String> {
         return Err(format!("keychain probe failed ({status})"));
     }
     let data = unsafe { CFData::wrap_under_create_rule(result.cast()) };
-    Ok(Some(data.len() as usize))
+    Ok(Some(data.bytes().to_vec()))
 }
 
 pub fn delete(service: &str, account: &str) -> Result<(), String> {

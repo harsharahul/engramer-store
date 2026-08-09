@@ -157,6 +157,27 @@ export async function nativeFilesProviderDisable(email: string): Promise<void> {
   await invoke("files_provider_disable", { email }).catch(() => {});
 }
 
+// ----- share-sheet outbox (iOS; staged uploads the app can flush) -----
+
+/** What a drain pass did with the extension's staged uploads. */
+export interface OutboxDrainReport {
+  uploaded: number;
+  cleaned: number;
+  pending: number;
+}
+
+export async function nativeOutboxDrain(): Promise<OutboxDrainReport | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  try {
+    return (await invoke("outbox_drain")) as OutboxDrainReport;
+  } catch {
+    return null;
+  }
+}
+
 // ----- server override (one binary, many servers) -----
 
 /** The stored server override, or null when the build's default is in use. */
