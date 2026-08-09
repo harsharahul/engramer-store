@@ -59,6 +59,11 @@ export function ShareDialog(props: {
   const [password, setPassword] = useState("");
   const [creating, setCreating] = useState(false);
   const [inviting, setInviting] = useState(false);
+  // The rotate question as a real dialog: a browser-native confirm never
+  // renders in the iOS shell, which silently skipped rotation every time
+  // access was removed from a phone.
+  const [rotateAsk, setRotateAsk] = useState(false);
+  const [rotating, setRotating] = useState(false);
 
   const load = async () => {
     const { shares } = await api.listShares();
@@ -175,20 +180,25 @@ export function ShareDialog(props: {
     // Honest about the limit: revocation stops future access, it cannot
     // unsee what was already read. Rotation is what makes it stick for
     // everything the document becomes from here on.
-    if (
-      window.confirm(
-        "Access removed. Also rotate this document's key? They already have the current contents; rotating stops them reading anything saved from now on.",
-      )
-    ) {
-      try {
-        await useStore.getState().rotateFileKey(file.id);
-        props.onToast("Key rotated. Remaining people were re-keyed automatically.");
-      } catch {
-        props.onToast("Could not rotate the key. You can retry from this dialog by removing access again.");
-      }
-    } else {
-      props.onToast("Access removed. They keep what they already read; the file stops updating for them.");
+    setRotateAsk(true);
+  };
+
+  const rotateNow = async () => {
+    setRotating(true);
+    try {
+      await useStore.getState().rotateFileKey(file.id);
+      props.onToast("Key rotated. Remaining people were re-keyed automatically.");
+    } catch {
+      props.onToast("Could not rotate the key. You can retry from this dialog by removing access again.");
+    } finally {
+      setRotating(false);
+      setRotateAsk(false);
     }
+  };
+
+  const keepKey = () => {
+    setRotateAsk(false);
+    props.onToast("Access removed. They keep what they already read; the file stops updating for them.");
   };
 
   return (
@@ -380,6 +390,25 @@ export function ShareDialog(props: {
           </button>
         </div>
       </div>
+      {rotateAsk && (
+        <div className="overlay" onClick={(e) => e.stopPropagation()}>
+          <div className="modal">
+            <h2>Also rotate this document's key?</h2>
+            <p className="modal-sub">
+              They already have the current contents; rotating stops them reading anything saved
+              from now on, and clears the document's live-session history.
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={keepKey} disabled={rotating}>
+                Keep the key
+              </button>
+              <button className="btn btn-primary" onClick={() => void rotateNow()} disabled={rotating}>
+                {rotating ? "Rotating…" : "Rotate the key"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
