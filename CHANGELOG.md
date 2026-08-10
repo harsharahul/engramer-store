@@ -12,6 +12,14 @@ All notable changes to Engram Store are documented here, following
   attributed instead of guessed at. Nothing is transmitted or stored.
 
 ### Fixed
+- **A shared document opens correctly right after a co-editor saved
+  it.** Opening used the reader's cached record of the file, so a save
+  that had just moved the content was refused as an integrity mismatch
+  until the next background sync, which on phones could take long
+  enough to look like the document was permanently broken. A mismatch
+  on a shared file now refreshes that record once and retries; a
+  mismatch that survives the refresh still fails, so real corruption
+  is caught exactly as before.
 - Closing a document with unsaved changes, discarding a text edit, and
   restoring a file version now ask with in-app dialogs. The previous
   browser-native confirmations never render in the iOS app, which

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore, type FileEntry } from "../store";
 import { api } from "../api";
 import { downloadAndDecrypt } from "../transfer";
+import { openWithFreshEntry } from "../freshen";
 import { SaveConflictError, describeConflict } from "../conflict";
 import { Converter } from "../office/x2t";
 import { EditorSession, editorFrameUrl } from "../office/session";
@@ -340,7 +341,18 @@ export function OfficeEditor(props: {
         // awaited it hung on "starting" forever, for every member.
         const docPromise = (async () => {
           setStage("decrypting");
-          const plaintext = await downloadAndDecrypt(opened.id, opened.key, opened.digest);
+          // A co-editor's save moves the digest while this client's poll
+          // is still pending; opening from the cached entry then refuses
+          // good bytes. One refresh and one retry, shared files only.
+          const plaintext = await openWithFreshEntry(
+            opened,
+            (entry) => downloadAndDecrypt(entry.id, entry.key, entry.digest),
+            async () => {
+              diag("integrity", "shared entry may be stale; refreshing the library once");
+              await useStore.getState().refresh();
+              return useStore.getState().files.get(opened.id) ?? null;
+            },
+          );
           if (cancelled) {
             return null;
           }
