@@ -14,6 +14,35 @@ describe("electedSnapshotter", () => {
   it("elects nobody in an empty room", () => {
     expect(electedSnapshotter([])).toBeNull();
   });
+
+  it("never elects a viewer, even at the lowest index", () => {
+    const members = [
+      { connId: "v", index: 1, role: "viewer" },
+      { connId: "e", index: 4, role: "editor" },
+      { connId: "o", index: 9, role: "owner" },
+    ];
+    expect(electedSnapshotter(members)).toBe("e");
+  });
+
+  it("elects nobody in a room of viewers", () => {
+    expect(
+      electedSnapshotter([
+        { connId: "v1", index: 1, role: "viewer" },
+        { connId: "v2", index: 2, role: "viewer" },
+      ]),
+    ).toBeNull();
+  });
+
+  it("treats a member with no stated role as electable", () => {
+    // An older server names no roles; degrading to the old election is
+    // strictly better than a room where nobody ever snapshots.
+    expect(
+      electedSnapshotter([
+        { connId: "x", index: 3 },
+        { connId: "v", index: 1, role: "viewer" },
+      ]),
+    ).toBe("x");
+  });
 });
 
 describe("shouldAutoSnapshot", () => {

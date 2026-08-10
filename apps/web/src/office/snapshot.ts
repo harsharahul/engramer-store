@@ -16,12 +16,17 @@ const SNAPSHOT_AFTER_FRAMES = 200;
 const SNAPSHOT_IDLE_MS = 30_000;
 
 export function electedSnapshotter(
-  members: Array<{ connId: string; index: number }>,
+  members: Array<{ connId: string; index: number; role?: string }>,
 ): string | null {
-  if (members.length === 0) {
+  // A viewer cannot write, so electing one jams the room: its save would
+  // be refused and nobody else would consider themselves responsible. A
+  // member with no stated role comes from an older server and stays
+  // electable, which is exactly the old behavior.
+  const writers = members.filter((m) => m.role === undefined || m.role !== "viewer");
+  if (writers.length === 0) {
     return null;
   }
-  return members.reduce((low, m) => (m.index < low.index ? m : low)).connId;
+  return writers.reduce((low, m) => (m.index < low.index ? m : low)).connId;
 }
 
 export function shouldAutoSnapshot(state: {

@@ -134,9 +134,9 @@ export function OfficeEditor(props: {
   const pendingFramesRef = useRef(0);
   const lastFrameAtRef = useRef(0);
   // The effect's membership tracker; callbacks reach it through this seam.
-  const membersHook = useRef<(members: Array<{ connId: string; index: number; name?: string }>) => void>(
-    () => {},
-  );
+  const membersHook = useRef<
+    (members: Array<{ connId: string; index: number; name?: string; role?: string }>) => void
+  >(() => {});
   // The save barrier's seams into the open effect: freezing pauses remote
   // frames at the queue (order bookkeeping still runs), the drain hook
   // releases them, and the stats/connection refs let save() read the
@@ -147,6 +147,11 @@ export function OfficeEditor(props: {
   const connRef = useRef("");
   /** The relay is refusing posts until someone snapshots. */
   const ceilingRef = useRef(false);
+  /** The save currently running, for flows that must sequence after it. */
+  const saveInFlightRef = useRef<Promise<void> | null>(null);
+  /** The last live save this client committed, to recognize its own
+   * truncation frame against an older server that does not skip authors. */
+  const lastSaveRef = useRef<{ upTo: number; at: number } | null>(null);
 
   // The frame's address depends only on the kind of document, so the editor
   // begins loading its several megabytes immediately, while this file is
@@ -286,6 +291,59 @@ export function OfficeEditor(props: {
         setCollab("connecting");
         setReloadNonce((n) => n + 1);
       }
+    };
+
+    /**
+     * The room crosses a checkpoint together: everyone re-derives from
+     * the committed snapshot instead of holding an engine whose change
+     * base and digest moved underneath it. Unsent work is flushed through
+     * the channel first, because frames above the trim survive and replay
+     * after the reload; work that cannot reach the log within the budget
+     * raises the conflict UI holding the exported bytes, never a silent
+     * discard. Uncounted, because a checkpoint is not a broken stream.
+     */
+    const crossCheckpoint = async () => {
+      if (cancelled) {
+        return;
+      }
+      await (saveInFlightRef.current ?? Promise.resolve()).catch(() => {});
+      const s = sessionRef.current;
+      if (s) {
+        const deadline = Date.now() + 5_000;
+        for (;;) {
+          if (cancelled) {
+            return;
+          }
+          const flush = await s.flushChanges();
+          const pending = statsRef.current?.pendingAcks.size ?? 0;
+          if (flush.haveChanges !== true && pending === 0) {
+            break;
+          }
+          if (Date.now() > deadline) {
+            if (dirtyRef.current) {
+              diag("collab", "checkpoint flush stalled with unsaved work; keeping the bytes");
+              try {
+                const bin = await s.save();
+                const kept = bin
+                  ? await converter.exportDocument(`document.${fileType}`, bin)
+                  : null;
+                if (!cancelled) {
+                  setConflict({ bytes: kept });
+                }
+              } catch {
+                if (!cancelled) {
+                  setConflict({ bytes: null });
+                }
+              }
+              return;
+            }
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+      await refreshLibraryOnce();
+      resync(false);
     };
 
     const sendEph = (out: OutFrame) => {
@@ -592,14 +650,15 @@ export function OfficeEditor(props: {
                 // signal: refresh the library so this client's entry (and
                 // any preview or reopen it feeds) matches the new bytes.
                 void refreshLibraryOnce();
-                // Truncation deletes replay rows, not deliveries: a live
-                // member already holds every frame the snapshot contains.
-                // Only a position BEHIND the truncation point means frames
-                // this client never saw are gone, and the current
-                // generation is the only honest source left.
-                if ((channelRef.current?.lastSeenSeq ?? 0) < snapshotSeq) {
-                  resync();
+                // The author's engine IS the snapshot and must not reload.
+                // A new server never sends the author this frame; against
+                // an older one, the save this client just committed at
+                // exactly this position is the tell.
+                const last = lastSaveRef.current;
+                if (last && last.upTo === snapshotSeq && Date.now() - last.at < 15_000) {
+                  return;
                 }
+                void crossCheckpoint();
               },
               onDead: () => {
                 if (!cancelled) {
@@ -689,8 +748,10 @@ export function OfficeEditor(props: {
     // nobody saves in still converges and the log stays bounded. Election
     // is the lowest index present, computed identically everywhere; a
     // second snapshotter would be redundant, never harmful.
-    let latestMembers: Array<{ connId: string; index: number; name?: string }> = [];
-    const rememberMembers = (members: Array<{ connId: string; index: number; name?: string }>) => {
+    let latestMembers: Array<{ connId: string; index: number; name?: string; role?: string }> = [];
+    const rememberMembers = (
+      members: Array<{ connId: string; index: number; name?: string; role?: string }>,
+    ) => {
       latestMembers = members;
       indexByConn.clear();
       for (const m of members) {
@@ -858,10 +919,17 @@ export function OfficeEditor(props: {
     }
     setBusy(true);
     setError(null);
+    let release: () => void = () => {};
+    saveInFlightRef.current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     let out: Uint8Array | null = null;
     try {
       let bin: string;
       let upTo = 0;
+      // A room at its byte ceiling needs a trim, and this save is the one
+      // that carries it; every other live save leaves the log alone.
+      const checkpoint = live && ceilingRef.current;
       if (live) {
         // A live save writes bytes and stamps where they stand; it must
         // never guess. The barrier makes the position exact or declines.
@@ -885,17 +953,23 @@ export function OfficeEditor(props: {
       await props.onSave(out, {
         snapshot: live,
         upTo,
-        mode: live ? "content" : undefined,
+        mode: live ? (checkpoint ? "checkpoint" : "content") : undefined,
         conn: live && connRef.current ? connRef.current : undefined,
       });
       setDirty(false);
       dirtyRef.current = false;
       setSavedAt(Date.now());
       openedAtRef.current = useStore.getState().files.get(fileId)?.updatedAt ?? Date.now();
-      if (live && upTo > 0) {
-        // The server decides what, if anything, gets trimmed as part of
-        // committing this save; nothing here may ask for it.
-        pendingFramesRef.current = 0;
+      if (live) {
+        lastSaveRef.current = { upTo, at: Date.now() };
+        if (checkpoint) {
+          ceilingRef.current = false;
+        }
+        if (upTo > 0) {
+          // The server decides what, if anything, gets trimmed as part of
+          // committing this save; nothing here may ask for it.
+          pendingFramesRef.current = 0;
+        }
       }
       diag("office", `saved ${file.name} (${out.length} bytes)`);
     } catch (err) {
@@ -908,6 +982,8 @@ export function OfficeEditor(props: {
       }
     } finally {
       setBusy(false);
+      saveInFlightRef.current = null;
+      release();
     }
   }, [busy, stage, conflict, fileId, fileType, props, file.name, settleBarrier]);
 
