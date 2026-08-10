@@ -80,8 +80,13 @@ vi.mock("./transfer", async (importOriginal) => {
   };
 });
 
+vi.mock("./intel/semantic", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./intel/semantic")>()),
+  embedImage: async () => new Float32Array([0.5, 0.5, 0.5, 0.5]),
+}));
+
 import { api } from "./api";
-import { metadataOf, useStore, type FileEntry } from "./store";
+import { clipComparable, metadataOf, needsClip, useStore, type FileEntry } from "./store";
 
 /**
  * Metadata is rebuilt from the in-memory entry on every patch, so anything
@@ -135,6 +140,11 @@ describe("metadataOf", () => {
 
   it("writes no facts field at all for a file that carries none", () => {
     expect(metadataOf(entry())).not.toHaveProperty("facts");
+  });
+
+  it("keeps the embedding model version, which a patch would otherwise erase", () => {
+    expect(metadataOf(entry({ hasClip: true, clipVersion: 3 })).clipVersion).toBe(3);
+    expect(metadataOf(entry({}))).not.toHaveProperty("clipVersion");
   });
 
   it("keeps the backup source id, which a patch would otherwise erase", () => {
@@ -292,6 +302,7 @@ describe("sweeps remember what they attempted", () => {
 
   it("embedAllImages skips ids in the given set and records new attempts", async () => {
     const calls: string[] = [];
+    const original = useStore.getState().embedFile;
     useStore.setState({
       files: new Map([["p1", entry({ id: "p1", mime: "image/jpeg", hasClip: false })]]),
       embedFile: async (id: string) => {
@@ -299,16 +310,21 @@ describe("sweeps remember what they attempted", () => {
         throw new Error("unreadable");
       },
     });
-    const skip = new Set<string>();
-    await useStore.getState().embedAllImages({ skip });
-    expect(calls).toEqual(["p1"]);
-    expect(skip.has("p1")).toBe(true);
-    await useStore.getState().embedAllImages({ skip });
-    expect(calls).toEqual(["p1"]);
+    try {
+      const skip = new Set<string>();
+      await useStore.getState().embedAllImages({ skip });
+      expect(calls).toEqual(["p1"]);
+      expect(skip.has("p1")).toBe(true);
+      await useStore.getState().embedAllImages({ skip });
+      expect(calls).toEqual(["p1"]);
+    } finally {
+      useStore.setState({ embedFile: original });
+    }
   });
 
   it("recognizeAllImages skips ids in the given set and records new attempts", async () => {
     const calls: string[] = [];
+    const original = useStore.getState().recognizeFile;
     useStore.setState({
       files: new Map([["s1", entry({ id: "s1", mime: "image/jpeg", hasText: false })]]),
       recognizeFile: async (id: string) => {
@@ -316,12 +332,16 @@ describe("sweeps remember what they attempted", () => {
         return false;
       },
     });
-    const skip = new Set<string>();
-    await useStore.getState().recognizeAllImages({ skip });
-    expect(calls).toEqual(["s1"]);
-    expect(skip.has("s1")).toBe(true);
-    await useStore.getState().recognizeAllImages({ skip });
-    expect(calls).toEqual(["s1"]);
+    try {
+      const skip = new Set<string>();
+      await useStore.getState().recognizeAllImages({ skip });
+      expect(calls).toEqual(["s1"]);
+      expect(skip.has("s1")).toBe(true);
+      await useStore.getState().recognizeAllImages({ skip });
+      expect(calls).toEqual(["s1"]);
+    } finally {
+      useStore.setState({ recognizeFile: original });
+    }
   });
 
   it("scanLibraryForFacts skips ids in the given set and records new attempts", async () => {
@@ -344,6 +364,77 @@ describe("sweeps remember what they attempted", () => {
     await useStore.getState().scanLibraryForFacts({ skip });
     expect(totals).toEqual([]);
     unsub();
+  });
+});
+
+/**
+ * Meaning vectors from different models are not comparable: a cosine
+ * between them is noise that ranks with confidence. Every embedding
+ * therefore carries the version of the model that made it, the sweep
+ * re-opens files whose version lags, and search only compares vectors the
+ * current model can answer for. Absence reads as version 1: everything
+ * stored before the tag existed came from the first model.
+ */
+describe("embedding model version", () => {
+  it("needsClip re-opens files without a vector or with a stale one", () => {
+    const image = (over: Partial<FileEntry>) => entry({ mime: "image/jpeg", ...over });
+    expect(needsClip(image({ hasClip: false }), 1)).toBe(true);
+    expect(needsClip(image({ hasClip: true }), 1)).toBe(false);
+    expect(needsClip(image({ hasClip: true }), 2)).toBe(true);
+    expect(needsClip(image({ hasClip: true, clipVersion: 2 }), 2)).toBe(false);
+    expect(needsClip(image({ hasClip: true, trashed: true }), 2)).toBe(false);
+    // A video embeds from its stored poster frame; without one there is
+    // nothing to embed yet.
+    expect(needsClip(entry({ mime: "video/mp4", hasThumb: false }), 1)).toBe(false);
+    expect(needsClip(entry({ mime: "video/mp4", hasThumb: true }), 1)).toBe(true);
+    expect(needsClip(entry({ mime: "application/pdf" }), 1)).toBe(false);
+  });
+
+  it("clipComparable admits only vectors from the current model", () => {
+    const clip = new Float32Array(4);
+    expect(clipComparable(entry({ hasClip: true, clip }), 1)).toBe(true);
+    expect(clipComparable(entry({ hasClip: true, clip, clipVersion: 1 }), 2)).toBe(false);
+    expect(clipComparable(entry({ hasClip: true, clip, clipVersion: 2 }), 2)).toBe(true);
+    expect(clipComparable(entry({ hasClip: true }), 1)).toBe(false);
+  });
+
+  it("embedFile stamps the model version into metadata", async () => {
+    await ready();
+    const masterKey = generateKey();
+    const file = entry({ id: "v1", mime: "image/jpeg", hasClip: false, key: generateKey() });
+    useStore.setState({
+      session: {
+        email: "t@example.com",
+        token: "t",
+        masterKey,
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      refreshUsage: async () => {},
+      files: new Map([[file.id, file]]),
+    });
+    (api as unknown as Record<string, unknown>).patchFile = async (
+      id: string,
+      patch: { encryptedMeta: FileDto["encryptedMeta"] },
+    ): Promise<FileDto> => ({
+      id,
+      folderId: null,
+      encryptedKey: secretBoxSeal(file.key, masterKey),
+      encryptedMeta: patch.encryptedMeta,
+      size: 16,
+      thumbSize: 0,
+      indexSize: 9,
+      uploaded: true,
+      trashed: false,
+      deleted: false,
+      updateSeq: 2,
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    expect(await useStore.getState().embedFile("v1")).toBe(true);
+    const after = useStore.getState().files.get("v1")!;
+    expect(after.hasClip).toBe(true);
+    expect(after.clipVersion).toBe(1);
   });
 });
 

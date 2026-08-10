@@ -37,7 +37,7 @@ import {
 import { openWithFreshEntry } from "./freshen";
 import { recognizeImage, recognizePdf } from "./intel/ocr";
 import { isPdf } from "./intel/extract";
-import { embedImage } from "./intel/semantic";
+import { CLIP_MODEL_VERSION, embedImage } from "./intel/semantic";
 import { asFacts, mergeFacts, reconcileFacts, type Fact, type FactEvidence } from "./intel/facts";
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import { EXACT_SOURCES, tripTag, type TripSuggestion } from "./intel/trips";
@@ -74,6 +74,8 @@ export interface FileEntry {
   clips?: Float32Array[];
   /** The index blob carries a semantic embedding for this file. */
   hasClip: boolean;
+  /** Which embedding model made the vector; absent = the first model. */
+  clipVersion?: number;
   /** Legacy row still carrying text inside its metadata. */
   inlineText: boolean;
   category?: string;
@@ -338,6 +340,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array, prior?: FileEntry): Fi
     text: meta.text,
     hasText: meta.hasText === true || meta.text !== undefined,
     hasClip: meta.hasClip === true,
+    clipVersion: meta.clipVersion,
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -386,6 +389,7 @@ export function entryFromUpdate(
     text: meta.text,
     hasText: meta.hasText === true || meta.text !== undefined,
     hasClip: meta.hasClip === true,
+    clipVersion: meta.clipVersion,
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -423,6 +427,7 @@ export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEnt
     text: meta.text,
     hasText: meta.hasText === true || meta.text !== undefined,
     hasClip: meta.hasClip === true,
+    clipVersion: meta.clipVersion,
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -465,6 +470,9 @@ export function metadataOf(file: FileEntry): FileMetadata {
     // only the marker, with text living in the index blob.
     ...(file.inlineText ? { text: file.text } : file.hasText ? { hasText: true } : {}),
     ...(file.hasClip ? { hasClip: true } : {}),
+    // Provenance of the vector; losing it would make a model upgrade
+    // unable to tell fresh embeddings from stale ones.
+    ...(file.clipVersion !== undefined ? { clipVersion: file.clipVersion } : {}),
     category: file.category,
     tags: file.tags,
     ...(file.facts.length > 0 ? { facts: file.facts } : {}),
@@ -478,6 +486,35 @@ export function metadataOf(file: FileEntry): FileMetadata {
     // pass re-upload every already-backed-up photo.
     ...(file.sourceId ? { sourceId: file.sourceId } : {}),
   };
+}
+
+/**
+ * Whether the meaning sweep should (re-)embed this file: it has no vector,
+ * or its vector came from an older model than `currentVersion`. Metadata
+ * without a version predates the tag and reads as version 1.
+ */
+export function needsClip(file: FileEntry, currentVersion: number): boolean {
+  if (file.trashed) {
+    return false;
+  }
+  const embeddable =
+    file.mime.startsWith("image/") || (file.mime.startsWith("video/") && file.hasThumb);
+  if (!embeddable) {
+    return false;
+  }
+  return !file.hasClip || (file.clipVersion ?? 1) < currentVersion;
+}
+
+/**
+ * Whether this file's warmed vector may be scored against the current
+ * model's output. Vectors from different models are not comparable; a
+ * stale one stays out of results until the sweep re-embeds it.
+ */
+export function clipComparable(
+  file: FileEntry,
+  currentVersion: number,
+): file is FileEntry & { clip: Float32Array } {
+  return file.clip !== undefined && (file.clipVersion ?? 1) === currentVersion;
 }
 
 export const useStore = create<StoreState>((set, get) => {
@@ -1968,6 +2005,7 @@ export const useStore = create<StoreState>((set, get) => {
       );
       await patchFileMeta(id, {
         hasClip: true,
+        clipVersion: CLIP_MODEL_VERSION,
         ...(file.inlineText && text !== undefined ? { hasText: true, text: undefined } : {}),
       });
       if (file.inlineText && text !== undefined) {
@@ -1980,11 +2018,7 @@ export const useStore = create<StoreState>((set, get) => {
     /** Makes photos and videos searchable by meaning, one file at a time. */
     embedAllImages: async (opts) => {
       const candidates = [...get().files.values()].filter(
-        (f) =>
-          !f.trashed &&
-          !f.hasClip &&
-          !opts?.skip?.has(f.id) &&
-          (f.mime.startsWith("image/") || (f.mime.startsWith("video/") && f.hasThumb)),
+        (f) => needsClip(f, CLIP_MODEL_VERSION) && !opts?.skip?.has(f.id),
       );
       let indexed = 0;
       for (let i = 0; i < candidates.length; i++) {

@@ -61,6 +61,7 @@ vi.mock("./intel/ocr", () => ({
 vi.mock("./intel/semantic", () => ({
   semanticEnabled: () => true,
   embedImage: vi.fn(async () => new Float32Array(4)),
+  CLIP_MODEL_VERSION: 1,
 }));
 
 vi.mock("./intel/scan", () => ({
@@ -196,6 +197,9 @@ describe("deferred analysis", () => {
     expect(scanForFacts).toHaveBeenCalled();
     expect(prepared.meta.hasText).toBe(true);
     expect(prepared.meta.hasClip).toBe(true);
+    // The vector's provenance travels with it; a model change re-opens
+    // the file instead of mixing incomparable vectors.
+    expect(prepared.meta.clipVersion).toBe(1);
   });
 });
 
