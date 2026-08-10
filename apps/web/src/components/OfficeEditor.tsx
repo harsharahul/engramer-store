@@ -230,6 +230,8 @@ export function OfficeEditor(props: {
     let knownCollaborative = false;
     let order: ChannelOrder = newChannelOrder(opened.id);
     let connId = "";
+    /** Whether the engine's auth saw anyone else; solo auth cannot co-edit. */
+    let bridgeCompany = false;
     /** Set once the collab decision reached the session; a welcome after
      * this cannot join the current engine and upgrades via reload. */
     let sessionBegun = false;
@@ -598,6 +600,7 @@ export function OfficeEditor(props: {
                     : null;
                 diag("collab", `welcome: member ${welcome.yourIndex}, ${welcome.members.length} present`);
                 order = newChannelOrder(opened.id);
+                bridgeCompany = welcome.members.length > 1;
                 bridge = new CollabBridge({
                   fileId: opened.id,
                   selfConnId: welcome.you,
@@ -698,19 +701,33 @@ export function OfficeEditor(props: {
                 setPeers(members.length);
                 // The bridge's view of the room tracks the truth even
                 // while the engine is still loading; the effects a loading
-                // engine cannot take are re-derived at ready. Company
-                // arriving needs NO reload: the phantom keeper has kept
-                // every session in co-authoring mode since its first
-                // keystroke, so the connectState here introduces the
-                // newcomer the way it introduces any membership change.
-                // The reload this used to do predates the phantom and
-                // discarded a working engine on every join.
+                // engine cannot take are re-derived at ready.
                 const b = bridge;
                 if (b) {
                   const effects = b.onMembers(members);
                   const s = sessionRef.current;
                   if (s && engineReady) {
                     s.applyEffects(effects);
+                  }
+                }
+                // The reload on company's arrival was tried WITHOUT and
+                // failed the harness (2026-08-10): a connectState alone
+                // introduces the newcomer, but the JOINER's engine then
+                // defers the solo-authed member's structure edits forever
+                // (haveOtherChanges stuck true, locks pending, document
+                // frozen) — the engine's lock and identity model wants
+                // both sides authed into the same room shape. Until that
+                // contract is understood, company arriving re-auths
+                // through the ordinary reload, dirty work saved first.
+                if (b && !bridgeCompany && members.length > 1) {
+                  bridgeCompany = true;
+                  if (dirtyRef.current) {
+                    void savePromiseRef
+                      .current()
+                      .catch(() => {})
+                      .finally(() => resync(false));
+                  } else {
+                    resync(false);
                   }
                 }
               },
