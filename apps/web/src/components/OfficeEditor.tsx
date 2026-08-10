@@ -335,13 +335,80 @@ export function OfficeEditor(props: {
     };
 
     /**
+     * Posts what the engine still holds before a reload would discard
+     * it: frames that reach the log survive any remount and replay into
+     * the next incarnation. Work that cannot reach the log within the
+     * budget is kept in the conflict UI holding the exported bytes,
+     * never silently discarded. Returns "kept" when the conflict UI now
+     * owns the outcome and no reload should follow.
+     */
+    const foldIn = async (deadlineMs: number): Promise<"clean" | "kept"> => {
+      const s = sessionRef.current;
+      if (!s || !engineReady) {
+        return "clean";
+      }
+      const deadline = Date.now() + deadlineMs;
+      for (;;) {
+        if (cancelled) {
+          return "clean";
+        }
+        const flush = await s.flushChanges();
+        const pending = statsRef.current?.pendingAcks.size ?? 0;
+        if (flush.haveChanges !== true && pending === 0) {
+          return "clean";
+        }
+        if (Date.now() > deadline) {
+          if (dirtyRef.current) {
+            diag("collab", "fold-in stalled with unsaved work; keeping the bytes");
+            try {
+              const bin = await s.save();
+              const kept = bin ? await converter.exportDocument(`document.${fileType}`, bin) : null;
+              if (!cancelled) {
+                setConflict({ bytes: kept });
+              }
+            } catch {
+              if (!cancelled) {
+                setConflict({ bytes: null });
+              }
+            }
+            return "kept";
+          }
+          return "clean";
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    };
+
+    /**
+     * A mid-session repair fold: what the engine holds goes to the log
+     * first, so the remount that follows discards nothing. Concurrent
+     * triggers coalesce (a broken order answers resync per frame).
+     */
+    let folding = false;
+    const foldInThenResync = (counted: boolean) => {
+      if (folding || resyncing || cancelled) {
+        return;
+      }
+      folding = true;
+      void (async () => {
+        try {
+          if ((await foldIn(3_000)) === "kept") {
+            return;
+          }
+        } catch {
+          // Fold-in is best effort; the reload still repairs.
+        }
+        resync(counted);
+      })();
+    };
+
+    /**
      * The room crosses a checkpoint together: everyone re-derives from
      * the committed snapshot instead of holding an engine whose change
      * base and digest moved underneath it. Unsent work is flushed through
      * the channel first, because frames above the trim survive and replay
-     * after the reload; work that cannot reach the log within the budget
-     * raises the conflict UI holding the exported bytes, never a silent
-     * discard. Uncounted, because a checkpoint is not a broken stream.
+     * after the reload. Uncounted, because a checkpoint is not a broken
+     * stream.
      */
     let crossing = false;
     const crossCheckpoint = async () => {
@@ -360,40 +427,8 @@ export function OfficeEditor(props: {
       crossing = true;
       diag("collab", "crossing the checkpoint: flushing, then reloading from the snapshot");
       await (saveInFlightRef.current ?? Promise.resolve()).catch(() => {});
-      const s = sessionRef.current;
-      if (s) {
-        const deadline = Date.now() + 5_000;
-        for (;;) {
-          if (cancelled) {
-            return;
-          }
-          const flush = await s.flushChanges();
-          const pending = statsRef.current?.pendingAcks.size ?? 0;
-          if (flush.haveChanges !== true && pending === 0) {
-            break;
-          }
-          if (Date.now() > deadline) {
-            if (dirtyRef.current) {
-              diag("collab", "checkpoint flush stalled with unsaved work; keeping the bytes");
-              try {
-                const bin = await s.save();
-                const kept = bin
-                  ? await converter.exportDocument(`document.${fileType}`, bin)
-                  : null;
-                if (!cancelled) {
-                  setConflict({ bytes: kept });
-                }
-              } catch {
-                if (!cancelled) {
-                  setConflict({ bytes: null });
-                }
-              }
-              return;
-            }
-            break;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 250));
-        }
+      if ((await foldIn(5_000)) === "kept") {
+        return;
       }
       await refreshLibraryOnce();
       resync(false);
@@ -640,7 +675,9 @@ export function OfficeEditor(props: {
                     return;
                   }
                   if (verdict === "resync") {
-                    resync();
+                    // Fold the engine's held work into the log first; the
+                    // remount then discards nothing.
+                    foldInThenResync(true);
                     return;
                   }
                   if (verdict === "drop") {
@@ -663,8 +700,9 @@ export function OfficeEditor(props: {
                   }
                 } catch {
                   // A frame that does not open under our key is noise from a
-                  // rotation boundary; the reload path recovers.
-                  resync();
+                  // rotation boundary; the reload path recovers, with the
+                  // engine's held work folded into the log first.
+                  foldInThenResync(true);
                 }
               },
               onCaughtUp: () => {
