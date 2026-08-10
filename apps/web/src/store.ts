@@ -68,6 +68,8 @@ export interface FileEntry {
   text?: string;
   /** An encrypted search-text blob exists for this file. */
   hasText: boolean;
+  /** A text reading ran and found nothing; the file is read, not pending. */
+  noText?: boolean;
   /** In-memory semantic embedding (lazily fetched from the index blob). */
   clip?: Float32Array;
   /** All meaning vectors when a video sampled several frames. */
@@ -339,6 +341,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array, prior?: FileEntry): Fi
     blur: meta.blur,
     text: meta.text,
     hasText: meta.hasText === true || meta.text !== undefined,
+    ...(meta.noText ? { noText: true } : {}),
     hasClip: meta.hasClip === true,
     clipVersion: meta.clipVersion,
     inlineText: meta.text !== undefined,
@@ -388,6 +391,7 @@ export function entryFromUpdate(
     blur: meta.blur,
     text: meta.text,
     hasText: meta.hasText === true || meta.text !== undefined,
+    ...(meta.noText ? { noText: true } : {}),
     hasClip: meta.hasClip === true,
     clipVersion: meta.clipVersion,
     inlineText: meta.text !== undefined,
@@ -426,6 +430,7 @@ export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEnt
     blur: meta.blur,
     text: meta.text,
     hasText: meta.hasText === true || meta.text !== undefined,
+    ...(meta.noText ? { noText: true } : {}),
     hasClip: meta.hasClip === true,
     clipVersion: meta.clipVersion,
     inlineText: meta.text !== undefined,
@@ -469,6 +474,7 @@ export function metadataOf(file: FileEntry): FileMetadata {
     // Legacy rows keep their inline text until migrated; split rows carry
     // only the marker, with text living in the index blob.
     ...(file.inlineText ? { text: file.text } : file.hasText ? { hasText: true } : {}),
+    ...(file.noText ? { noText: true } : {}),
     ...(file.hasClip ? { hasClip: true } : {}),
     // Provenance of the vector; losing it would make a model upgrade
     // unable to tell fresh embeddings from stale ones.
@@ -486,6 +492,55 @@ export function metadataOf(file: FileEntry): FileMetadata {
     // pass re-upload every already-backed-up photo.
     ...(file.sourceId ? { sourceId: file.sourceId } : {}),
   };
+}
+
+/** Whether the thumbnail sweep still owes this file a preview. */
+export function needsThumb(file: FileEntry): boolean {
+  return (
+    !file.trashed &&
+    !file.hasThumb &&
+    (file.mime.startsWith("image/") || file.mime.startsWith("video/"))
+  );
+}
+
+/** Whether the text sweep still owes this file a reading. A reading that
+ * ran and found nothing (`noText`) counts as done, or every ordinary
+ * photo would sit in the queue forever. */
+export function needsText(file: FileEntry): boolean {
+  return (
+    !file.trashed &&
+    !file.hasText &&
+    !file.noText &&
+    (file.mime.startsWith("image/") || isPdf(file.name, file.mime))
+  );
+}
+
+/**
+ * What each sweep still has to do, counted with the sweeps' own
+ * predicates so the numbers a person reads are exactly the work the
+ * sweeps would take up. Facts are deliberately absent: a file with
+ * unanswered facts stays rescan-eligible by design, so its "remaining"
+ * count would never reach zero and would read as a stuck queue.
+ */
+export function pendingDerivatives(
+  files: Map<string, FileEntry>,
+  clipVersion: number,
+): { thumbs: number; text: number; meaning: number } {
+  let thumbs = 0;
+  let text = 0;
+  let meaning = 0;
+  for (const file of files.values()) {
+    if (needsThumb(file)) {
+      thumbs++;
+    }
+    if (needsText(file)) {
+      text++;
+    }
+    if (needsClip(file, clipVersion)) {
+      meaning++;
+    }
+  }
+  return { thumbs, text, meaning };
 }
 
 /**
@@ -1838,6 +1893,9 @@ export const useStore = create<StoreState>((set, get) => {
         ? await recognizeImage(blob)
         : await recognizePdf(blob);
       if (!text) {
+        // Record the empty reading, or this file would be re-read on
+        // every device, every session, forever.
+        await patchFileMeta(id, { noText: true });
         return false;
       }
       await uploadBlob(
@@ -1857,11 +1915,7 @@ export const useStore = create<StoreState>((set, get) => {
      */
     recognizeAllImages: async (opts) => {
       const candidates = [...get().files.values()].filter(
-        (f) =>
-          !f.trashed &&
-          !f.hasText &&
-          !opts?.skip?.has(f.id) &&
-          (f.mime.startsWith("image/") || isPdf(f.name, f.mime)),
+        (f) => needsText(f) && !opts?.skip?.has(f.id),
       );
       let found = 0;
       for (let i = 0; i < candidates.length; i++) {
@@ -2092,11 +2146,9 @@ export const useStore = create<StoreState>((set, get) => {
       const candidates = [...get().files.values()]
         .filter(
           (f) =>
-            !f.trashed &&
-            !f.hasThumb &&
+            needsThumb(f) &&
             !opts?.skip?.has(f.id) &&
-            (opts?.maxBytes === undefined || f.size <= opts.maxBytes) &&
-            (f.mime.startsWith("image/") || f.mime.startsWith("video/")),
+            (opts?.maxBytes === undefined || f.size <= opts.maxBytes),
         )
         // Smallest first: many quick wins before one large video.
         .sort((a, b) => a.size - b.size);

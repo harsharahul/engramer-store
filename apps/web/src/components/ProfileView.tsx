@@ -27,8 +27,9 @@ import {
   type VerifyProgress,
   type VerifyResult,
 } from "../verify";
-import { useStore } from "../store";
+import { pendingDerivatives, useStore } from "../store";
 import { runBackfill } from "../backfill";
+import { CLIP_MODEL_VERSION } from "../intel/semantic";
 import { api, setAuthToken } from "../api";
 import { changePassword } from "../changepassword";
 import { revealRecoveryKey, rotateRecoveryKey } from "../recoverykey";
@@ -213,6 +214,10 @@ export function ProfileView(props: {
       verifyAbort.current = null;
     }
   };
+
+  // What each derivative sweep still has to do, by the sweeps' own
+  // predicates, so these numbers are exactly the remaining work.
+  const pending = pendingDerivatives(store.files, CLIP_MODEL_VERSION);
 
   // Files with nothing to check against: stored before digests existed, or
   // renamed while a metadata patch still dropped the digest.
@@ -1097,6 +1102,118 @@ export function ProfileView(props: {
             </button>
           </div>
         )}
+      </section>
+
+      <section className="profile-card">
+        <h3>Library index</h3>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <div className="profile-row-sub">
+              Thumbnails, search text, and meaning vectors are made on your devices, never on
+              the server. Anything a device could not produce at upload fills in automatically
+              while a vault is open somewhere; these numbers are what is left right now.
+              {pending.thumbs === 0 && pending.text === 0 && pending.meaning === 0 && (
+                <>
+                  {" "}
+                  <b>Everything is indexed.</b>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Previews</b>
+            <div className="profile-row-sub">
+              {pending.thumbs === 0
+                ? "Every image and video has a thumbnail."
+                : `${pending.thumbs} media file${pending.thumbs === 1 ? "" : "s"} without a thumbnail, usually added from outside this app.`}
+            </div>
+            {store.thumbProgress && (
+              <div className="profile-row-sub">
+                Preparing {store.thumbProgress.current} · {store.thumbProgress.done + 1} of{" "}
+                {store.thumbProgress.total}
+              </div>
+            )}
+          </div>
+          <button
+            className="btn"
+            disabled={pending.thumbs === 0 || store.thumbProgress !== null}
+            onClick={() => {
+              void store.backfillThumbnails().then((made) => {
+                props.onToast(
+                  made > 0
+                    ? `Made thumbnails for ${made} file${made === 1 ? "" : "s"}.`
+                    : "No thumbnails could be made right now.",
+                );
+              });
+            }}
+          >
+            Generate
+          </button>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Search text</b>
+            <div className="profile-row-sub">
+              {pending.text === 0
+                ? "Every image and scan has been read."
+                : `${pending.text} image${pending.text === 1 ? "" : "s"} and scan${pending.text === 1 ? "" : "s"} not yet read for search, on-device.`}
+            </div>
+            {store.ocrProgress && (
+              <div className="profile-row-sub">
+                Reading {store.ocrProgress.current} · {store.ocrProgress.done + 1} of{" "}
+                {store.ocrProgress.total}
+              </div>
+            )}
+          </div>
+          <button
+            className="btn"
+            disabled={pending.text === 0 || store.ocrProgress !== null}
+            onClick={() => {
+              void store.recognizeAllImages().then((found) => {
+                props.onToast(
+                  found > 0
+                    ? `Read text in ${found} file${found === 1 ? "" : "s"}.`
+                    : "No new text found.",
+                );
+              });
+            }}
+          >
+            Read
+          </button>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Meaning</b>
+            <div className="profile-row-sub">
+              {pending.meaning === 0
+                ? "Every photo and video is searchable by meaning."
+                : `${pending.meaning} file${pending.meaning === 1 ? "" : "s"} not yet searchable by meaning, or indexed by an older model.`}
+            </div>
+            {store.semanticProgress && (
+              <div className="profile-row-sub">
+                Indexing {store.semanticProgress.current} · {store.semanticProgress.done + 1} of{" "}
+                {store.semanticProgress.total}
+              </div>
+            )}
+          </div>
+          <button
+            className="btn"
+            disabled={pending.meaning === 0 || store.semanticProgress !== null}
+            onClick={() => {
+              void store.embedAllImages().then((indexed) => {
+                props.onToast(
+                  indexed > 0
+                    ? `Indexed ${indexed} file${indexed === 1 ? "" : "s"} by meaning.`
+                    : "Nothing new to index.",
+                );
+              });
+            }}
+          >
+            Index
+          </button>
+        </div>
       </section>
 
       <section className="profile-card">

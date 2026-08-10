@@ -57,6 +57,10 @@ export interface FileMetadata {
   text?: string;
   /** Marks that an encrypted search-text blob exists for this file. */
   hasText?: boolean;
+  /** A text reading ran and found nothing. Distinguishes "read, empty"
+   * from "never read", so sweeps and remaining-work counts do not treat
+   * every ordinary photo as unfinished forever. */
+  noText?: boolean;
   /** Marks that the index blob carries a semantic image embedding. */
   hasClip?: boolean;
   /** Which embedding model made the vector; absent = the first model.

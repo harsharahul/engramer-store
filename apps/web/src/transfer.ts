@@ -418,13 +418,16 @@ export async function analyzeFile(
   // Everything that READS the image works from the bounded copy: the
   // original is decoded once, for the thumbnail, and never again.
   const readable = thumbnail?.readable ?? file;
+  let ocrRan = false;
   if (!defer && text === undefined && mime.startsWith("image/") && ocrEnabled()) {
     onPhase?.("reading text");
+    ocrRan = true;
     text = await withDeadline(recognizeImage(readable), ANALYSIS_DEADLINE_MS * 3, signal);
   }
   // A PDF with no text layer is a scan; its pages read like photos.
   if (!defer && text === undefined && isPdf(file.name, file.type) && ocrEnabled()) {
     onPhase?.("reading scanned pages");
+    ocrRan = true;
     text = await withDeadline(recognizePdf(file), ANALYSIS_DEADLINE_MS * 6, signal);
   }
   cancelled();
@@ -533,6 +536,9 @@ export async function analyzeFile(
     ...(thumbnail ? { width: thumbnail.width, height: thumbnail.height } : {}),
     ...(thumbnail?.blur ? { blur: thumbnail.blur } : {}),
     ...(text !== undefined ? { hasText: true } : {}),
+    // A reading that ran and found nothing is finished work, and only a
+    // reading that actually ran may say so.
+    ...(text === undefined && ocrRan ? { noText: true } : {}),
     ...(clip ? { hasClip: true, clipVersion: CLIP_MODEL_VERSION } : {}),
     ...(facts.length > 0 ? { facts } : {}),
   };

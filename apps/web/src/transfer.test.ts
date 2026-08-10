@@ -203,6 +203,23 @@ describe("deferred analysis", () => {
   });
 });
 
+describe("a reading that finds nothing", () => {
+  it("is recorded in metadata so no sweep re-reads the file forever", async () => {
+    const { recognizeImage } = await import("./intel/ocr");
+    const { analyzeFile } = await import("./transfer");
+    vi.mocked(recognizeImage).mockResolvedValueOnce(undefined);
+    const photo = new File([new Uint8Array([1, 2, 3])], "p.png", { type: "image/png" });
+    const prepared = await analyzeFile(photo);
+    expect(prepared.meta.hasText).toBeUndefined();
+    expect(prepared.meta.noText).toBe(true);
+
+    // Deferred analysis never ran the reader, so it must NOT claim one
+    // happened: the sweep still owes this file its first reading.
+    const deferred = await analyzeFile(photo, undefined, undefined, { defer: true });
+    expect(deferred.meta.noText).toBeUndefined();
+  });
+});
+
 describe("downloadContent and the moving digest", () => {
   it("accepts strictly newer authenticated bytes over a stale entry digest", async () => {
     const { encryptBytes, contentDigest, utf8Encode } = await import("@engramer/crypto");

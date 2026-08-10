@@ -1,4 +1,5 @@
 import { uploadLanes } from "./analysisslot";
+import { scheduleBackfill } from "./backfill";
 import {
   nativePhotoFile,
   nativePhotosAuthorize,
@@ -92,6 +93,8 @@ export interface BackupProgress {
   done: number;
   total: number;
   failed: number;
+  /** The photo most recently taken up, once its name is known. */
+  current?: string;
 }
 
 function keep(asset: NativePhotoAsset, policy: BackupPolicy, since: number): boolean {
@@ -138,6 +141,8 @@ export async function runBackup(
       if (!file) {
         progress.failed++;
       } else {
+        progress.current = file.name;
+        onProgress?.({ ...progress });
         await useStore.getState().backupAsset(file, asset.id);
         progress.done++;
       }
@@ -149,4 +154,70 @@ export async function runBackup(
     onProgress?.({ ...progress });
   });
   return progress;
+}
+
+/**
+ * Backup used to run only from the button in Profile, which quietly meant
+ * "never" on a phone that opens the app to look at photos. The automatic
+ * pass runs when the app opens or returns to the foreground, spaced by a
+ * cooldown so focus-flapping does not re-list the photo library every few
+ * seconds. It narrates itself through the shared batch pill, so the
+ * activity is visible on any screen, not only in Profile.
+ */
+const AUTO_COOLDOWN_MS = 10 * 60_000;
+let lastAutoPass = -Infinity;
+let autoRunning = false;
+let autoInstalled = false;
+
+export async function autoBackupPass(now = Date.now()): Promise<BackupProgress | null> {
+  if (autoRunning || now - lastAutoPass < AUTO_COOLDOWN_MS) {
+    return null;
+  }
+  const policy = loadPolicy();
+  if (!policy.enabled) {
+    return null;
+  }
+  if (!(await nativePhotosAvailable())) {
+    return null;
+  }
+  const store = useStore.getState();
+  const uploading = store.uploads.some((u) => u.status !== "done" && u.status !== "error");
+  if (!store.session || !store.synced || uploading || store.batch) {
+    return null;
+  }
+  autoRunning = true;
+  lastAutoPass = now;
+  try {
+    const progress = await runBackup(policy, (p) => {
+      if (p.total > 0) {
+        useStore.setState({
+          batch: { done: p.done, total: p.total, failed: p.failed, current: p.current ?? "" },
+        });
+      }
+    });
+    // The pass ships photos with their heavy scanners deferred; let the
+    // backfill catch up while the app is still open.
+    scheduleBackfill();
+    return progress;
+  } finally {
+    useStore.setState({ batch: null });
+    autoRunning = false;
+  }
+}
+
+/** Installs the app-open and return-to-foreground triggers, once. */
+export function installAutoBackup(): void {
+  if (autoInstalled) {
+    return;
+  }
+  autoInstalled = true;
+  const kick = () => {
+    void autoBackupPass().catch(() => {});
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      kick();
+    }
+  });
+  kick();
 }
