@@ -476,7 +476,12 @@ export function OfficeEditor(props: {
           // names the generation it served, for pairing with the marker.
           let generation: number | null = null;
           const plaintext = await openSharedContent(opened, async (entry) => {
-            const result = await downloadContent(entry.id, entry.key, entry.digest);
+            // A shared entry only ever lags behind the server; bytes of a
+            // strictly newer generation are accepted so a busy room's
+            // saves cannot outrun this open forever.
+            const result = await downloadContent(entry.id, entry.key, entry.digest, {
+              newerThan: entry.shared ? (entry.generation ?? 0) : null,
+            });
             generation = result.generation;
             return result.bytes;
           });

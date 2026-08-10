@@ -883,15 +883,37 @@ export async function downloadAndDecrypt(
  * The same verified download, keeping the generation the server names for
  * the bytes so a collaborative open can pair them with the channel's
  * content marker exactly. Null against an older server.
+ *
+ * With `newerThan`, bytes of a STRICTLY newer generation than the caller's
+ * library entry are accepted even when the entry's digest disagrees. The
+ * bytes decrypted under the file key, which authenticates them; the digest
+ * exists to refuse rollback, and a newer generation is the opposite of a
+ * rollback: it means a co-editor saved after this client's last sync, and
+ * in a busy room the saves can outrun any refresh-and-retry forever. An
+ * equal or older generation with a digest mismatch stays a hard refusal.
  */
 export async function downloadContent(
   fileId: string,
   fileKey: Uint8Array,
   expectedDigest?: string,
+  opts?: { newerThan?: number | null },
 ): Promise<{ bytes: Uint8Array; generation: number | null }> {
   const { bytes: ciphertext, generation } = await api.downloadBlobDetailed(fileId, "data");
   const bytes = decryptContent(ciphertext, fileKey);
   if (!digestMatches(bytes, expectedDigest)) {
+    if (
+      opts?.newerThan !== undefined &&
+      opts.newerThan !== null &&
+      generation !== null &&
+      generation > opts.newerThan
+    ) {
+      diag(
+        "integrity",
+        `${fileId} is ahead of the library (generation ${generation} > ${opts.newerThan}); ` +
+          `accepting the newer authenticated bytes`,
+      );
+      return { bytes, generation };
+    }
     diag(
       "integrity",
       `${fileId} does not match the digest recorded when it was uploaded ` +
