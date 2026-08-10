@@ -344,6 +344,10 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     if (retryAfter !== null) {
       return reply.code(429).header("retry-after", retryAfter).send({ error: "too many attempts" });
     }
+    // Every begin spends throttle budget: an attacker must not mint
+    // challenge rows or probe response timing at leisure. A successful
+    // prove clears it, so a real recovery never feels this.
+    await throttle.fail(throttleKey(request, body.email));
     const user = await app.db.get<UserRow>("SELECT * FROM users WHERE email = ?", body.email);
     if (!user) {
       return {
@@ -389,6 +393,8 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     }
     await throttle.succeed(throttleKey(request, "recovery-prove"));
     const user = await getUser(uid);
+    // The proof also clears the begin budget for this address.
+    await throttle.succeed(throttleKey(request, user.email));
     if (user.disabled === 1) {
       return reply.code(403).send({ error: "this account is disabled" });
     }
@@ -427,7 +433,12 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       return reply.code(401).send({ error: "that code is not valid" });
     }
     await throttle.succeed(throttleKey(request, user.email));
-    await consumeChallenge(app.db, parsed.id, parsed.secret, "reset-pending-2fa");
+    // The pending step is spent exactly once; a parallel attempt that
+    // lost this race gets nothing, not a second reset token.
+    const spent = await consumeChallenge(app.db, parsed.id, parsed.secret, "reset-pending-2fa");
+    if (spent === null) {
+      return reply.code(401).send({ error: "sign in again" });
+    }
     const reset = await issueChallenge(app.db, uid, "reset", 15 * 60_000);
     return { resetToken: `${reset.id}.${reset.secret}` };
   });

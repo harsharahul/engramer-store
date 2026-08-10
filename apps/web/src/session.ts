@@ -100,6 +100,12 @@ function sessionFromKeys(
   };
 }
 
+/** Installs a session everywhere a fresh login would: token, unlock
+ * record, extension handoff, and the tab's own storage. */
+export function activateSession(session: Session): void {
+  activate(session);
+}
+
 function activate(session: Session): void {
   setAuthToken(session.token);
   // A fresh login renews the device-unlock record's 30-day token window.

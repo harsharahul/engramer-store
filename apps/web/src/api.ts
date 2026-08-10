@@ -192,6 +192,40 @@ export const api = {
       { method: "POST", body: JSON.stringify({ pendingToken, code }) },
     ),
 
+  recoveryBegin: (email: string) =>
+    request<{
+      challengeId: string;
+      publicKey: string;
+      masterKeyEncryptedWithRecoveryKey: SecretBox;
+      encryptedPrivateKey: SecretBox;
+      sealedChallenge: string;
+    }>("/api/auth/recovery/begin", { method: "POST", body: JSON.stringify({ email }) }),
+
+  recoveryProve: (challengeId: string, nonce: string) =>
+    request<{ resetToken: string; twoFactorRequired: boolean }>("/api/auth/recovery/prove", {
+      method: "POST",
+      body: JSON.stringify({ challengeId, nonce }),
+    }),
+
+  recoveryTwoFactor: (resetToken: string, code: string) =>
+    request<{ resetToken: string }>("/api/auth/recovery/2fa", {
+      method: "POST",
+      body: JSON.stringify({ resetToken, code }),
+    }),
+
+  recoveryFinish: (
+    resetToken: string,
+    loginKey: string,
+    kdf: KdfParams,
+    encryptedMasterKey: SecretBox,
+  ) =>
+    request<{ token: string; keyAttributes: KeyAttributes }>("/api/auth/recovery/finish", {
+      method: "POST",
+      body: JSON.stringify({ resetToken, loginKey, kdf, encryptedMasterKey }),
+    }),
+
+  keyAttributes: () => request<{ keyAttributes: KeyAttributes }>("/api/user/key-attributes"),
+
   totpSetup: () =>
     request<{ secret: string; otpauthUri: string }>("/api/auth/totp/setup", { method: "POST", body: "{}" }),
 
