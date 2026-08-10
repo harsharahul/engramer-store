@@ -3,6 +3,37 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.43.0] - 2026-08-10
+
+### Added
+- **Joining a live document no longer reloads anyone.** When a second
+  person opens a co-edited document, the first person's editor keeps
+  running untouched: the newcomer is introduced through a participant
+  update carrying the room's currently held paragraph locks, matching
+  the join protocol of the reference implementations. Structure edits
+  cross between members within a second of a join.
+- Live sessions expose deeper diagnostics: received frames that do not
+  reach the editor are counted by reason, and a connection can ask the
+  relay which members it would actually deliver to.
+
+### Fixed
+- **A brief network hiccup while typing could silently leave a member
+  missing the other side's text**, with everything appearing healthy:
+  the connection's replay cursor advanced on acknowledgments of its own
+  changes, so the frames it never received were skipped on reconnect.
+  Only received frames move the cursor now, and missed runs are
+  replayed or repaired visibly.
+- **The other member's cursor now follows their typing** instead of
+  freezing between rare selection changes: the caret position the
+  editor attaches to each change batch is delivered through, as the
+  reference server does.
+- Unsent local work is posted to the log before any mid-session repair
+  reload, so a repair discards nothing; work that cannot reach the log
+  is kept and offered instead of silently dropped.
+- A reconnection that raced a slow earlier connection can no longer
+  orphan the working socket; a new connection takes over only once the
+  relay has welcomed it.
+
 ## [0.42.0] - 2026-08-10
 
 ### Changed
