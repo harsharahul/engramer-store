@@ -19,6 +19,15 @@ import {
 import { electedSnapshotter, shouldAutoSnapshot } from "../office/snapshot";
 import { editorFrameKey } from "../office/reload";
 import { trailingThrottle } from "../office/throttle";
+import {
+  describeCollabStats,
+  newCollabStats,
+  noteAck,
+  noteEphReceived,
+  noteEphSent,
+  notePost,
+  type CollabStats,
+} from "../office/stats";
 import { diag } from "../diag";
 import { PeopleGlyph, XGlyph } from "./Icon";
 
@@ -155,6 +164,11 @@ export function OfficeEditor(props: {
     let tail: Array<ReturnType<typeof decryptFrame>> = [];
     let engineReady = false;
 
+    // One set of counters per open attempt, readable from the console as
+    // window.engramCollab() during a live session.
+    const stats = newCollabStats();
+    (window as unknown as { engramCollab?: () => CollabStats }).engramCollab = () => stats;
+
     const feedFrame = (frame: ReturnType<typeof decryptFrame>) => {
       const b = bridge;
       const s = sessionRef.current;
@@ -162,6 +176,7 @@ export function OfficeEditor(props: {
         return;
       }
       s.applyEffects(b.onRemoteFrame(frame));
+      stats.changesIndex = b.changes;
     };
 
     const resync = (counted = true) => {
@@ -191,6 +206,7 @@ export function OfficeEditor(props: {
     };
 
     const sendEph = (out: OutFrame) => {
+      noteEphSent(stats);
       channel?.eph(
         encryptFrame({ ch: opened.id, s: connId, n: 0, k: out.k, d: out.d }, opened.key),
       );
@@ -246,6 +262,7 @@ export function OfficeEditor(props: {
               if (out.k === "chg") {
                 pendingFramesRef.current += 1;
                 lastFrameAtRef.current = Date.now();
+                notePost(stats, out.ref, Date.now());
               }
               channel.post(
                 out.ref,
@@ -394,6 +411,7 @@ export function OfficeEditor(props: {
                   if (claimedIndex !== undefined && realIndex !== undefined && claimedIndex !== realIndex) {
                     return;
                   }
+                  noteEphReceived(stats, sender);
                   const b = bridge;
                   const s = sessionRef.current;
                   if (b && s && engineReady) {
@@ -430,10 +448,12 @@ export function OfficeEditor(props: {
                 }
               },
               onAck: (ref, seq) => {
+                noteAck(stats, ref, Date.now());
                 const b = bridge;
                 const s = sessionRef.current;
                 if (b && s) {
                   s.applyEffects(b.onOwnFrameAcked(ref, seq));
+                  stats.changesIndex = b.changes;
                 }
               },
               onPleaseSnapshot: () => {
@@ -529,10 +549,22 @@ export function OfficeEditor(props: {
       }
     }, 10_000);
 
+    // The counters land in the diagnostics panel on a slow pulse, and once
+    // more on the way out, so a session that ended badly leaves its numbers.
+    const statsPulse = window.setInterval(() => {
+      if (collabRef.current === "live") {
+        diag("collab", describeCollabStats(stats));
+      }
+    }, 30_000);
+
     return () => {
       cancelled = true;
       window.clearTimeout(startupDeadline);
       window.clearInterval(autoSnapshot);
+      window.clearInterval(statsPulse);
+      if (stats.chgPosted || stats.ephSent || stats.ephReceivedBySender.size) {
+        diag("collab", `closing: ${describeCollabStats(stats)}`);
+      }
       cursorThrottle.cancel();
       channel?.close();
       channelRef.current = null;

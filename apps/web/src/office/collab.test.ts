@@ -72,6 +72,13 @@ describe("remote changes", () => {
     const message = second.toEditor.find((m) => m.type === "saveChanges")!;
     expect(message.changesIndex).toBe(3);
   });
+
+  it("exposes the cumulative count for diagnostics", () => {
+    const b = bridge();
+    expect(b.changes).toBe(0);
+    b.onRemoteFrame({ ch: "file-1", s: "conn-peer", n: 1, k: "chg", d: { idx: 2, changes: ["a"] } });
+    expect(b.changes).toBe(1);
+  });
 });
 
 describe("own changes", () => {

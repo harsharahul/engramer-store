@@ -5,6 +5,12 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Added
+- Live sessions count their traffic (changes posted and acknowledged,
+  acknowledgement latency, cursor frames sent and received per member)
+  in the in-app diagnostics, so a collaboration problem can be
+  attributed instead of guessed at. Nothing is transmitted or stored.
+
 ### Fixed
 - Remote cursor positions are coalesced to at most ten frames a second
   instead of one websocket frame per keystroke, which reduces typing
