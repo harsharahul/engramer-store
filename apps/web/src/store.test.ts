@@ -85,8 +85,22 @@ vi.mock("./intel/semantic", async (importOriginal) => ({
   embedImage: async () => new Float32Array([0.5, 0.5, 0.5, 0.5]),
 }));
 
+vi.mock("./intel/ocr", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./intel/ocr")>()),
+  recognizeImage: async () => undefined,
+}));
+
 import { api } from "./api";
-import { clipComparable, metadataOf, needsClip, useStore, type FileEntry } from "./store";
+import {
+  clipComparable,
+  metadataOf,
+  needsClip,
+  needsText,
+  needsThumb,
+  pendingDerivatives,
+  useStore,
+  type FileEntry,
+} from "./store";
 
 /**
  * Metadata is rebuilt from the in-memory entry on every patch, so anything
@@ -388,6 +402,85 @@ describe("embedding model version", () => {
     expect(needsClip(entry({ mime: "video/mp4", hasThumb: false }), 1)).toBe(false);
     expect(needsClip(entry({ mime: "video/mp4", hasThumb: true }), 1)).toBe(true);
     expect(needsClip(entry({ mime: "application/pdf" }), 1)).toBe(false);
+  });
+
+  it("needsThumb wants exactly the untrashed media without a preview", () => {
+    expect(needsThumb(entry({ mime: "image/jpeg", hasThumb: false }))).toBe(true);
+    expect(needsThumb(entry({ mime: "video/mp4", hasThumb: false }))).toBe(true);
+    expect(needsThumb(entry({ mime: "image/jpeg", hasThumb: true }))).toBe(false);
+    expect(needsThumb(entry({ mime: "image/jpeg", trashed: true }))).toBe(false);
+    expect(needsThumb(entry({ mime: "application/pdf" }))).toBe(false);
+  });
+
+  it("needsText wants exactly the unread images and scannable PDFs", () => {
+    expect(needsText(entry({ mime: "image/jpeg", hasText: false }))).toBe(true);
+    expect(needsText(entry({ name: "scan.pdf", mime: "application/pdf", hasText: false }))).toBe(
+      true,
+    );
+    expect(needsText(entry({ mime: "image/jpeg", hasText: true }))).toBe(false);
+    // Read once with nothing found is DONE, not forever-pending: without
+    // this, every ordinary photo counts as unfinished work for all time.
+    expect(needsText(entry({ mime: "image/jpeg", noText: true }))).toBe(false);
+    expect(needsText(entry({ mime: "image/jpeg", trashed: true }))).toBe(false);
+    expect(needsText(entry({ name: "notes.txt", mime: "text/plain" }))).toBe(false);
+  });
+
+  it("a reading that finds nothing is recorded, so the file leaves the queue", async () => {
+    await ready();
+    const masterKey = generateKey();
+    const file = entry({ id: "r1", name: "sunset.jpg", mime: "image/jpeg", key: generateKey() });
+    useStore.setState({
+      session: {
+        email: "t@example.com",
+        token: "t",
+        masterKey,
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      refreshUsage: async () => {},
+      files: new Map([[file.id, file]]),
+    });
+    (api as unknown as Record<string, unknown>).patchFile = async (
+      id: string,
+      patch: { encryptedMeta: FileDto["encryptedMeta"] },
+    ): Promise<FileDto> => ({
+      id,
+      folderId: null,
+      encryptedKey: secretBoxSeal(file.key, masterKey),
+      encryptedMeta: patch.encryptedMeta,
+      size: 16,
+      thumbSize: 0,
+      indexSize: 0,
+      uploaded: true,
+      trashed: false,
+      deleted: false,
+      updateSeq: 2,
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    expect(await useStore.getState().recognizeFile("r1")).toBe(false);
+    const after = useStore.getState().files.get("r1")!;
+    expect(after.noText).toBe(true);
+    expect(needsText(after)).toBe(false);
+  });
+
+  it("pendingDerivatives counts what each sweep still has to do", () => {
+    const files = new Map<string, FileEntry>(
+      (
+        [
+          entry({ id: "a", mime: "image/jpeg", hasThumb: false, hasText: false, hasClip: false }),
+          entry({ id: "b", mime: "image/jpeg", hasThumb: true, hasText: true, hasClip: true }),
+          entry({ id: "c", name: "scan.pdf", mime: "application/pdf", hasText: false }),
+          entry({ id: "d", name: "clip.mp4", mime: "video/mp4", hasThumb: false, hasClip: false }),
+          entry({ id: "e", mime: "image/png", trashed: true }),
+        ] as FileEntry[]
+      ).map((f) => [f.id, f]),
+    );
+    // "a" needs all three; "c" needs text; "d" needs a thumb but cannot
+    // embed until its poster frame exists; "b" is done; "e" is trash.
+    expect(pendingDerivatives(files, 1)).toEqual({ thumbs: 2, text: 2, meaning: 1 });
+    // A model bump re-opens the already-embedded file.
+    expect(pendingDerivatives(files, 2)).toEqual({ thumbs: 2, text: 2, meaning: 2 });
   });
 
   it("clipComparable admits only vectors from the current model", () => {

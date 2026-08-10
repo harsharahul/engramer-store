@@ -14,6 +14,7 @@ import { detailsSubjectId } from "../details";
 import { stepThrough } from "../neighbors";
 import { clipComparable, useStore, type FileEntry, type FolderEntry } from "../store";
 import { scheduleBackfill } from "../backfill";
+import { installAutoBackup } from "../backup";
 import { api } from "../api";
 import {
   ACCENTS,
@@ -1046,6 +1047,15 @@ export function Vault() {
   useEffect(() => {
     if (store.synced) {
       scheduleBackfill();
+    }
+  }, [store.synced]);
+
+  // Photo backup runs itself when the app opens or comes back to the
+  // foreground (iOS shell only; a no-op everywhere else). Waiting for
+  // sync first keeps the already-backed-up ledger honest.
+  useEffect(() => {
+    if (store.synced) {
+      installAutoBackup();
     }
   }, [store.synced]);
 

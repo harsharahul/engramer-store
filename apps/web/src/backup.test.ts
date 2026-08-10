@@ -4,6 +4,14 @@ const rig = vi.hoisted(() => ({
   running: 0,
   peak: 0,
   backedUp: [] as string[],
+  batches: [] as ({ done: number; total: number; current: string } | null)[],
+  backfills: 0,
+}));
+
+vi.mock("./backfill", () => ({
+  scheduleBackfill: () => {
+    rig.backfills++;
+  },
 }));
 
 vi.mock("./native", () => ({
@@ -25,6 +33,10 @@ vi.mock("./native", () => ({
 vi.mock("./store", () => ({
   useStore: {
     getState: () => ({
+      session: { email: "t@example.com" },
+      synced: true,
+      uploads: [],
+      batch: null,
       backedUpSourceIds: () => new Set<string>(),
       backupAsset: async (_file: File, sourceId: string) => {
         rig.running++;
@@ -35,6 +47,9 @@ vi.mock("./store", () => ({
         return sourceId;
       },
     }),
+    setState: (patch: { batch?: { done: number; total: number; current: string } | null }) => {
+      rig.batches.push(patch.batch ?? null);
+    },
   },
 }));
 
@@ -42,7 +57,14 @@ vi.mock("./analysisslot", () => ({
   uploadLanes: () => 2,
 }));
 
-import { DEFAULT_POLICY, loadPolicy, runBackup, savePolicy, windowStartMs } from "./backup";
+import {
+  DEFAULT_POLICY,
+  autoBackupPass,
+  loadPolicy,
+  runBackup,
+  savePolicy,
+  windowStartMs,
+} from "./backup";
 
 // The policy lives in localStorage; give the node test env one.
 beforeAll(() => {
@@ -73,13 +95,17 @@ describe("runBackup", () => {
     const progress = await runBackup({ ...DEFAULT_POLICY, enabled: true }, (p) =>
       seen.push(p.done),
     );
-    expect(progress).toEqual({ done: 6, total: 6, failed: 0 });
+    expect(progress).toEqual({ done: 6, total: 6, failed: 0, current: expect.any(String) });
     expect(rig.backedUp).toHaveLength(6);
     expect(rig.peak).toBe(2);
-    // One initial report, then one per photo, done never decreasing.
-    expect(seen).toHaveLength(7);
+    // One initial report, then two per photo (name known, then done),
+    // done never decreasing.
+    expect(seen).toHaveLength(13);
     expect(seen[0]).toBe(0);
-    expect(seen[6]).toBe(6);
+    expect(seen[12]).toBe(6);
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]!);
+    }
   });
 
   it("stops picking up new photos once aborted", async () => {
@@ -93,6 +119,42 @@ describe("runBackup", () => {
       }
     }, signal);
     expect(progress.done).toBeLessThan(6);
+  });
+});
+
+/**
+ * Backup used to run only when someone pressed the button in Profile.
+ * The automatic pass runs when the app opens or returns to the
+ * foreground, with a cooldown so focus-flapping does not re-list the
+ * photo library every few seconds, and it narrates itself through the
+ * shared batch pill so the upload activity is visible anywhere.
+ */
+describe("autoBackupPass", () => {
+  it("does nothing while backup is turned off", async () => {
+    localStorage.clear();
+    rig.batches.length = 0;
+    expect(await autoBackupPass(5_000_000)).toBeNull();
+    expect(rig.batches).toEqual([]);
+  });
+
+  it("runs when enabled, narrates the batch pill, and schedules the backfill", async () => {
+    savePolicy({ ...DEFAULT_POLICY, enabled: true });
+    rig.batches.length = 0;
+    rig.backfills = 0;
+    const progress = await autoBackupPass(10_000_000);
+    expect(progress?.done).toBe(6);
+    // The pill saw real progress with real names, then cleared.
+    expect(rig.batches.length).toBeGreaterThan(1);
+    expect(rig.batches.some((b) => b?.total === 6 && /asset-\d\.jpg/.test(b.current))).toBe(true);
+    expect(rig.batches[rig.batches.length - 1]).toBeNull();
+    expect(rig.backfills).toBe(1);
+  });
+
+  it("cools down between passes", async () => {
+    savePolicy({ ...DEFAULT_POLICY, enabled: true });
+    expect(await autoBackupPass(10_060_000)).toBeNull();
+    expect(await autoBackupPass(10_000_000 + 11 * 60_000)).not.toBeNull();
+    localStorage.clear();
   });
 });
 
