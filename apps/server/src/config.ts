@@ -106,13 +106,15 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
     ),
     collabRelay:
       overrides.collabRelay ?? (process.env.ENGRAMER_COLLAB_RELAY ?? "on") !== "off",
-    // The floor only rules out a nonsense zero (which would refuse every
-    // frame); how much tail to carry above that is the operator's call.
-    channelMaxBytes: Math.max(
-      1024,
+    // A ceiling smaller than one checkpoint crossing's worth of typing
+    // puts a busy room into a trim-reload spiral no client can follow:
+    // stress runs showed refused frames dying with the remounts they
+    // cause. 64 KiB is minutes of typing, far above any crossing, and
+    // still small enough to test the checkpoint machinery locally. Test
+    // code that needs a tiny cap passes it as a programmatic override.
+    channelMaxBytes:
       overrides.channelMaxBytes ??
-        Number(process.env.ENGRAMER_CHANNEL_MAX_BYTES ?? 8 * 1024 * 1024),
-    ),
+      Math.max(65_536, Number(process.env.ENGRAMER_CHANNEL_MAX_BYTES ?? 8 * 1024 * 1024)),
     webDistDir:
       overrides.webDistDir !== undefined
         ? overrides.webDistDir
