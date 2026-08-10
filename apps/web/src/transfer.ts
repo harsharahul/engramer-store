@@ -875,7 +875,21 @@ export async function downloadAndDecrypt(
   fileKey: Uint8Array,
   expectedDigest?: string,
 ): Promise<Uint8Array> {
-  const ciphertext = await api.downloadBlob(fileId, "data");
+  const { bytes } = await downloadContent(fileId, fileKey, expectedDigest);
+  return bytes;
+}
+
+/**
+ * The same verified download, keeping the generation the server names for
+ * the bytes so a collaborative open can pair them with the channel's
+ * content marker exactly. Null against an older server.
+ */
+export async function downloadContent(
+  fileId: string,
+  fileKey: Uint8Array,
+  expectedDigest?: string,
+): Promise<{ bytes: Uint8Array; generation: number | null }> {
+  const { bytes: ciphertext, generation } = await api.downloadBlobDetailed(fileId, "data");
   const bytes = decryptContent(ciphertext, fileKey);
   if (!digestMatches(bytes, expectedDigest)) {
     diag(
@@ -885,7 +899,7 @@ export async function downloadAndDecrypt(
     );
     throw new IntegrityError(bytes);
   }
-  return bytes;
+  return { bytes, generation };
 }
 
 /**

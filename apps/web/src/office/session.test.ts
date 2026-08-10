@@ -221,4 +221,84 @@ describe("the announce handshake", () => {
     expect(commandsIn(sent)).toEqual([]);
     second.close();
   });
+
+  describe("the save barrier", () => {
+    function rpcSent(sent: unknown[]): Array<{ id: number; method: string }> {
+      return sent.filter(
+        (m): m is { id: number; method: string } =>
+          typeof m === "object" && m !== null && (m as { t?: string }).t === "engramEditorRpc",
+      );
+    }
+
+    function answer(contentWindow: unknown, id: number, value: unknown) {
+      for (const listener of [...listeners]) {
+        listener({ source: contentWindow, data: { t: "engramEditorRpcResult", id, value } });
+      }
+    }
+
+    it("resolves stale without bytes when the engine was still moving", async () => {
+      const { frame, sent, contentWindow } = fakeFrame();
+      const session = new EditorSession(frame, "docx", "doc", handlers());
+      const pending = session.saveAtBarrier();
+      const rpc = rpcSent(sent);
+      expect(rpc.length).toBe(1);
+      expect(rpc[0]!.method).toBe("saveAtBarrier");
+      answer(contentWindow, rpc[0]!.id, { stale: true });
+      expect(await pending).toEqual({ stale: true, bin: "" });
+      session.close();
+    });
+
+    it("hands back the serialization when the engine was quiet", async () => {
+      const { frame, sent, contentWindow } = fakeFrame();
+      const session = new EditorSession(frame, "docx", "doc", handlers());
+      const pending = session.saveAtBarrier();
+      const rpc = rpcSent(sent);
+      answer(contentWindow, rpc[0]!.id, { stale: false, bin: "DOCY;v5;data" });
+      expect(await pending).toEqual({ stale: false, bin: "DOCY;v5;data" });
+      session.close();
+    });
+
+    it("surfaces the engine's own flags from a flush", async () => {
+      const { frame, sent, contentWindow } = fakeFrame();
+      const session = new EditorSession(frame, "docx", "doc", handlers());
+      const pending = session.flushChanges();
+      const rpc = rpcSent(sent);
+      expect(rpc[0]!.method).toBe("flushChanges");
+      answer(contentWindow, rpc[0]!.id, {
+        started: true,
+        haveChanges: true,
+        haveOtherChanges: false,
+        canSave: true,
+      });
+      expect(await pending).toEqual({
+        started: true,
+        haveChanges: true,
+        haveOtherChanges: false,
+        canSave: true,
+      });
+      session.close();
+    });
+
+    it("degrades to the plain save against a shim without the method", async () => {
+      const { frame, sent, contentWindow } = fakeFrame();
+      const session = new EditorSession(frame, "docx", "doc", handlers());
+      const pending = session.saveAtBarrier();
+      const first = rpcSent(sent);
+      // The stale shim rejects the unknown method; the fallback asks for
+      // the plain, old-behavior save instead.
+      for (const listener of [...listeners]) {
+        listener({
+          source: contentWindow,
+          data: { t: "engramEditorRpcResult", id: first[0]!.id, error: "unknown method saveAtBarrier" },
+        });
+      }
+      // The fallback issues its save on a microtask after the rejection.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const second = rpcSent(sent).find((r) => r.method === "save");
+      expect(second).toBeDefined();
+      answer(contentWindow, second!.id, "DOCY;v5;legacy");
+      expect(await pending).toEqual({ stale: false, bin: "DOCY;v5;legacy" });
+      session.close();
+    });
+  });
 });

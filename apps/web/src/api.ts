@@ -377,13 +377,30 @@ export const api = {
   deleteForever: (id: string) => request<void>(`/api/trash/${id}`, { method: "DELETE" }),
 
   downloadBlob: async (id: string, kind: "data" | "thumbnail" | "index"): Promise<Uint8Array> => {
+    const { bytes } = await api.downloadBlobDetailed(id, kind);
+    return bytes;
+  },
+
+  /**
+   * The same download, keeping the generation the server names for the
+   * bytes, so callers can pair them with the channel's content marker
+   * exactly. Null on an older server that does not name one.
+   */
+  downloadBlobDetailed: async (
+    id: string,
+    kind: "data" | "thumbnail" | "index",
+  ): Promise<{ bytes: Uint8Array; generation: number | null }> => {
     const response = await fetch(`/api/files/${id}/${kind}`, {
       headers: { authorization: `Bearer ${authToken}` },
     });
     if (!response.ok) {
       throw new ApiError(response.status, `download failed (${response.status})`);
     }
-    return new Uint8Array(await response.arrayBuffer());
+    const named = response.headers.get("x-generation");
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      generation: named === null ? null : Number(named),
+    };
   },
 
   /**
@@ -580,6 +597,8 @@ function putBytes(
     signal?: AbortSignal;
     errorFor?: (status: number) => string | undefined;
     headers?: Record<string, string>;
+    /** The parsed response body, for callers that need more than size. */
+    onBody?: (body: unknown) => void;
   },
 ): Promise<number | null> {
   return new Promise((resolve, reject) => {
@@ -627,6 +646,7 @@ function putBytes(
           try {
             const body = JSON.parse(xhr.responseText) as { size?: unknown };
             written = typeof body.size === "number" ? body.size : null;
+            opts.onBody?.(body);
           } catch {
             // Not every endpoint answers with a body; absence is not failure.
           }
@@ -721,20 +741,35 @@ export function uploadBlob(
   payload: Uint8Array,
   onProgress?: (fraction: number) => void,
   signal?: AbortSignal,
-  opts?: { collabSnapshot?: boolean; collabUpTo?: number },
+  opts?: {
+    collabSnapshot?: boolean;
+    collabUpTo?: number;
+    /** "content" writes bytes and stamps the marker without trimming the
+     * log; "checkpoint" (or absence, for older bundles) trims as before. */
+    collabMode?: "content" | "checkpoint";
+    /** This member's channel connection, so the room's broadcasts can
+     * skip the author of the save they describe. */
+    collabConn?: string;
+    onBody?: (body: unknown) => void;
+  },
 ): Promise<number | null> {
   return putBytes(`/api/files/${fileId}/${kind}`, payload, {
     auth: true,
     onProgress,
     signal,
     errorFor: (status) => (status === 413 ? "storage quota exceeded" : undefined),
+    onBody: opts?.onBody,
     // Marks this whole-document write as a claimed snapshot of the live
-    // channel, which is what lets it through the tail-base guard.
+    // channel, which is what lets it through the tail-base guard. The
+    // snapshot header always travels with a live save, even for a content
+    // save, so an older server still admits the write.
     ...(opts?.collabSnapshot
       ? {
           headers: {
             "x-collab-snapshot": "1",
             "x-collab-upto": String(opts.collabUpTo ?? 0),
+            ...(opts.collabMode ? { "x-collab-mode": opts.collabMode } : {}),
+            ...(opts.collabConn ? { "x-collab-conn": opts.collabConn } : {}),
           },
         }
       : {}),

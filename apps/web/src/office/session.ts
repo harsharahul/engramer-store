@@ -261,6 +261,58 @@ export class EditorSession {
   }
 
   /**
+   * Asks the engine to send what it still holds and reports its own view
+   * of pending work. Null fields mean the build lacks the predicate; a
+   * rejected call (a stale shim without the method) reports nothing
+   * started so callers fall back to legacy saving.
+   */
+  async flushChanges(): Promise<{
+    started: boolean;
+    haveChanges: boolean | null;
+    haveOtherChanges: boolean | null;
+    canSave: boolean | null;
+  }> {
+    try {
+      const value = (await this.call("flushChanges")) as {
+        started?: boolean;
+        haveChanges?: boolean | null;
+        haveOtherChanges?: boolean | null;
+        canSave?: boolean | null;
+      } | null;
+      return {
+        started: value?.started === true,
+        haveChanges: value?.haveChanges ?? null,
+        haveOtherChanges: value?.haveOtherChanges ?? null,
+        canSave: value?.canSave ?? null,
+      };
+    } catch {
+      return { started: false, haveChanges: null, haveOtherChanges: null, canSave: null };
+    }
+  }
+
+  /**
+   * The barrier serialization: quiet is decided and the document read in
+   * one synchronous turn inside the frame, so nothing can land between
+   * the check and the bytes. Stale means the engine was still moving and
+   * nothing was serialized. A stale shim without the method degrades to
+   * the plain save, which is the old, inexact behavior.
+   */
+  async saveAtBarrier(): Promise<{ stale: boolean; bin: string }> {
+    try {
+      const value = (await this.call("saveAtBarrier")) as {
+        stale?: boolean;
+        bin?: string;
+      } | null;
+      if (value?.stale === true) {
+        return { stale: true, bin: "" };
+      }
+      return { stale: false, bin: typeof value?.bin === "string" ? value.bin : "" };
+    } catch {
+      return { stale: false, bin: await this.save() };
+    }
+  }
+
+  /**
    * Hands the keyboard to the editor.
    *
    * Two separate things have to happen and each looks like the other when it
