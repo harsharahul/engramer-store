@@ -63,6 +63,9 @@ export function editorFrameUrl(fileType: FileType): string {
 export interface SessionHandlers {
   /** The frame's one-shot announce arrived; the assets did load. */
   onAnnounced?(): void;
+  /** The engine logged through its client-log channel; error-level
+   * entries fire BEFORE a document visibly breaks. */
+  onEngineLog?(level: string, message: string): void;
   /** The editor is up and asking for its document. */
   onLoading(): void;
   /** The document is open and editable. */
@@ -358,7 +361,19 @@ export class EditorSession {
    * tests; this only routes the effects.
    */
   private onServerMessage(message: OOMessage): void {
+    if (message.type === "clientLog") {
+      const detail = message as { level?: unknown; msg?: unknown };
+      this.handlers.onEngineLog?.(String(detail.level ?? "info"), String(detail.msg ?? ""));
+      return;
+    }
     this.applyEffects(answerServerMessage(message, this.collab));
+  }
+
+  /** The engine's collaboration internals, read by the shim inside the
+   * frame; the opaque origin makes this the only window in. */
+  async probe(): Promise<Record<string, unknown>> {
+    const value = await this.call("collabProbe");
+    return (value ?? {}) as Record<string, unknown>;
   }
 
   private editorConfig(): Record<string, unknown> {
