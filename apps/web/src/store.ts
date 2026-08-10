@@ -99,6 +99,9 @@ export interface FileEntry {
   keyEpoch?: number;
   /** Which content generation is current; snapshot bookkeeping reads it. */
   generation?: number;
+  /** Anyone else holds a key: the owner-side collaboration marker, since
+   * shared only ever marks the recipient. Stale-entry healing reads it. */
+  hasCollaborators?: boolean;
 }
 
 /** A claimed invitation whose key the owner has not released yet. */
@@ -298,7 +301,7 @@ function decryptFolder(dto: FolderDto, masterKey: Uint8Array): FolderEntry {
   };
 }
 
-function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
+function decryptFile(dto: FileDto, masterKey: Uint8Array, prior?: FileEntry): FileEntry {
   const key = secretBoxOpen(dto.encryptedKey, masterKey);
   const meta = decryptFileMetadata(dto.encryptedMeta, key);
   return {
@@ -328,6 +331,9 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array): FileEntry {
     updatedAt: dto.updatedAt,
     keyEpoch: dto.keyEpoch ?? 0,
     generation: dto.generation ?? 0,
+    // Sticky across replies that did not compute it (cached rows, older
+    // servers): known-collaborative must not flicker back to private.
+    hasCollaborators: dto.hasCollaborators ?? prior?.hasCollaborators ?? false,
   };
 }
 
@@ -344,7 +350,7 @@ export function entryFromUpdate(
   masterKey: Uint8Array,
 ): FileEntry {
   if (!prior?.shared) {
-    return decryptFile(dto, masterKey);
+    return decryptFile(dto, masterKey, prior);
   }
   const meta = decryptFileMetadata(dto.encryptedMeta, prior.key);
   return {

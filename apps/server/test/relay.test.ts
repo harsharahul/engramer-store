@@ -1270,3 +1270,33 @@ describe("live content saves stay out of version history", () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
   });
 });
+
+/**
+ * The owner's file row is otherwise indistinguishable from a private
+ * one, and every stale-entry healing keyed on the recipient-side shared
+ * flag skipped owners. The sync feed now says whether anyone else holds
+ * a key.
+ */
+describe("the owner's rows know they are collaborative", () => {
+  it("marks the shared file and not a private one", async () => {
+    const made = await app.inject({
+      method: "POST",
+      url: "/api/files",
+      headers: auth(owner),
+      payload: {
+        folderId: null,
+        encryptedKey: secretBoxSeal(generateKey(), owner.keys.masterKey),
+        encryptedMeta: encryptFileMetadata(
+          { name: "private.docx", mime: "application/octet-stream", size: 1, mtime: 1 },
+          fileKey,
+        ),
+      },
+    });
+    const privateId = made.json().id as string;
+
+    const sync = await app.inject({ method: "GET", url: "/api/sync?since=0", headers: auth(owner) });
+    const rows = sync.json().files as Array<{ id: string; hasCollaborators?: boolean }>;
+    expect(rows.find((r) => r.id === fileId)?.hasCollaborators).toBe(true);
+    expect(rows.find((r) => r.id === privateId)?.hasCollaborators).toBe(false);
+  });
+});
