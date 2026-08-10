@@ -160,6 +160,10 @@ export class CollabBridge {
           "chg",
           {
             changes,
+            // The blocks this member holds ride the frame: for text
+            // documents the locks array on a saveChanges is the only way
+            // a peer's engine ever clears them.
+            locks: this.ownBlocks(),
             deleteIndex: message.deleteIndex ?? null,
             excelAdditionalInfo: message.excelAdditionalInfo ?? null,
           },
@@ -270,6 +274,11 @@ export class CollabBridge {
         this.appliedChanges += changes.length;
         this.releaseBlocksOf(senderIndex);
         const time = Date.now();
+        // The sender's held blocks travel on the frame; handing them to
+        // the engine here is what clears its red lock brackets.
+        const released = ((data.locks as string[] | undefined) ?? []).map((block) =>
+          lockEntry(block, senderIndex),
+        );
         effects.toEditor.push({
           type: "saveChanges",
           changes: changes.map((change) => ({
@@ -281,7 +290,7 @@ export class CollabBridge {
           changesIndex: this.appliedChanges,
           syncChangesIndex: this.appliedChanges,
           endSaveChanges: true,
-          locks: [],
+          locks: released,
         });
         return effects;
       }
@@ -322,8 +331,18 @@ export class CollabBridge {
     }
   }
 
-  /** The channel's membership moved; the engine learns via connectState. */
+  /**
+   * The channel's membership moved; the engine learns via connectState.
+   * A departed member can never commit or unlock again, so its held
+   * blocks are released on its behalf, delivered to the engine on the
+   * same locks-on-saveChanges vehicle a commit would use, and its cursor
+   * is erased with the engine's own empty-cursor string.
+   */
   onMembers(members: Member[]): BridgeEffects {
+    const present = new Set(members.map((m) => m.index));
+    const departed = [...new Set([...this.locks.values()])].filter(
+      (holder) => holder !== this.selfIndex && !present.has(holder),
+    );
     this.members = members;
     const effects = none();
     effects.toEditor.push({
@@ -331,7 +350,40 @@ export class CollabBridge {
       participants: members.map(participant),
       participantsTimestamp: Date.now(),
     });
+    for (const index of departed) {
+      const released = [...this.locks.entries()]
+        .filter(([, holder]) => holder === index)
+        .map(([block]) => lockEntry(block, index));
+      this.releaseBlocksOf(index);
+      if (released.length > 0) {
+        effects.toEditor.push({
+          type: "saveChanges",
+          changes: [],
+          changesIndex: this.appliedChanges,
+          syncChangesIndex: this.appliedChanges,
+          endSaveChanges: true,
+          locks: released,
+        });
+      }
+      effects.toEditor.push({
+        type: "cursor",
+        messages: [
+          {
+            cursor: EMPTY_CURSOR,
+            user: engineUserId(index),
+            useridoriginal: engineUserId(index),
+          },
+        ],
+      });
+    }
     return effects;
+  }
+
+  /** The non-save blocks this member currently holds. */
+  private ownBlocks(): string[] {
+    return [...this.locks.entries()]
+      .filter(([block, holder]) => holder === this.selfIndex && block !== SAVE_LOCK)
+      .map(([block]) => block);
   }
 
   private postFrame(
@@ -362,3 +414,11 @@ export class CollabBridge {
 
 /** The whole-document save lock rides the lock table under one name. */
 const SAVE_LOCK = "__save__";
+
+/** A released lock as the engine's saveChanges handler expects it. */
+function lockEntry(block: string, holder: number) {
+  return { block, user: engineUserId(holder), time: Date.now() };
+}
+
+/** The engine's own "no cursor" string; showing it erases a caret. */
+const EMPTY_CURSOR = "10;AgAAADIAAAAAAA==";
