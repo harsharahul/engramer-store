@@ -28,6 +28,7 @@ import { clearSession, suspendSession, type Session } from "./session";
 import { autoReleaseMatches, forgetAutoRelease } from "./autorelease";
 import { holdTransferLock, releaseTransferLock } from "./wakelock";
 import { analyzeFile, downloadAndDecrypt, downloadThumbnail, encryptAndUpload } from "./transfer";
+import { openWithFreshEntry } from "./freshen";
 import { recognizeImage, recognizePdf } from "./intel/ocr";
 import { isPdf } from "./intel/extract";
 import { embedImage } from "./intel/semantic";
@@ -1691,7 +1692,18 @@ export const useStore = create<StoreState>((set, get) => {
       if (!file || !scannable) {
         return false;
       }
-      const bytes = await downloadAndDecrypt(file.id, file.key, file.digest);
+      // A stale shared entry must read as "refresh and retry", never as a
+      // damaged file: a sweep marking a co-edited file corrupt poisons the
+      // library for everyone. openWithFreshEntry directly, because the
+      // shared adapter imports this store.
+      const bytes = await openWithFreshEntry(
+        file,
+        (entry) => downloadAndDecrypt(entry.id, entry.key, entry.digest),
+        async () => {
+          await get().refresh();
+          return get().files.get(id) ?? null;
+        },
+      );
       const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime });
       const text = file.mime.startsWith("image/")
         ? await recognizeImage(blob)
@@ -1824,7 +1836,14 @@ export const useStore = create<StoreState>((set, get) => {
         return false;
       }
       const bytes = isImage
-        ? await downloadAndDecrypt(file.id, file.key, file.digest)
+        ? await openWithFreshEntry(
+            file,
+            (entry) => downloadAndDecrypt(entry.id, entry.key, entry.digest),
+            async () => {
+              await get().refresh();
+              return get().files.get(id) ?? null;
+            },
+          )
         : await downloadThumbnail(file.id, file.key);
       const clip = await embedImage(
         new Blob([bytes.slice().buffer as ArrayBuffer], {

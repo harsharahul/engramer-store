@@ -1,10 +1,15 @@
 import { IntegrityError, downloadAndDecrypt } from "./transfer";
+import { openSharedContent } from "./openshared";
 import type { FileEntry } from "./store";
 
 export async function saveDecryptedFile(file: FileEntry): Promise<void> {
   let bytes: Uint8Array;
   try {
-    bytes = await downloadAndDecrypt(file.id, file.key, file.digest);
+    // A shared entry's digest can merely be stale; refresh and retry
+    // before concluding anything about the bytes themselves.
+    bytes = await openSharedContent(file, (entry) =>
+      downloadAndDecrypt(entry.id, entry.key, entry.digest),
+    );
   } catch (err) {
     // A file that fails its check is still handed over: something is better
     // than nothing when the alternative is an unreachable file.

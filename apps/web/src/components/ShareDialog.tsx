@@ -5,6 +5,7 @@ import { useStore, type FileEntry } from "../store";
 import { inviteLink } from "../collab";
 import { rememberAutoRelease } from "../autorelease";
 import { downloadAndDecrypt } from "../transfer";
+import { openSharedContent } from "../openshared";
 import { formatDate } from "../format";
 import { CopyGlyph, KeyGlyph, PeopleGlyph, TrashGlyph, XGlyph } from "./Icon";
 
@@ -144,7 +145,9 @@ export function ShareDialog(props: {
     setSnapshotting(true);
     setError(null);
     try {
-      const bytes = await downloadAndDecrypt(file.id, file.key, file.digest);
+      const bytes = await openSharedContent(file, (entry) =>
+        downloadAndDecrypt(entry.id, entry.key, entry.digest),
+      );
       const copyId = await useStore.getState().saveFileCopy(file.id, bytes);
       const dot = file.name.lastIndexOf(".");
       const snapName =

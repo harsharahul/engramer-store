@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FileEntry } from "../store";
 import { downloadAndDecrypt } from "../transfer";
+import { openSharedContent } from "../openshared";
 import { formatBytes } from "../format";
 import { XGlyph } from "./Icon";
 import { Confirm } from "./Dialogs";
@@ -24,7 +25,9 @@ export function Editor(props: {
 
   useEffect(() => {
     let cancelled = false;
-    void downloadAndDecrypt(file.id, file.key, file.digest)
+    void openSharedContent(file, (entry) =>
+      downloadAndDecrypt(entry.id, entry.key, entry.digest),
+    )
       .then((bytes) => {
         if (!cancelled) {
           const decoded = new TextDecoder().decode(bytes);
