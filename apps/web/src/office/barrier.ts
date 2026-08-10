@@ -33,6 +33,8 @@ export interface BarrierState {
   postsNow: number;
   /** The relay is refusing further posts until someone snapshots. */
   ceilingReached: boolean;
+  /** This save will carry the trim that unclogs the room. */
+  checkpoint: boolean;
   /** Zero-based retry attempt. */
   attempt: number;
 }
@@ -48,6 +50,14 @@ export function barrierVerdict(state: BarrierState): BarrierVerdict {
     return "capture";
   }
   if (!engineMoving && !posted && state.ceilingReached) {
+    return "proceed-unlogged";
+  }
+  // At the hard ceiling the relay refuses every post, so the engine's
+  // save cycle cannot complete and quiet is unreachable; the checkpoint
+  // that trims the log must still land or the room livelocks. Its bytes
+  // carry the engine's held changes, which have no log positions, so
+  // nothing can ever replay them and the marker stays exact.
+  if (state.ceilingReached && state.checkpoint && state.attempt >= 2) {
     return "proceed-unlogged";
   }
   if (state.attempt >= MAX_ATTEMPTS) {

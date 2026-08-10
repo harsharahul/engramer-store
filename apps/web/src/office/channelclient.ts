@@ -69,7 +69,18 @@ export class ChannelClient {
     const socket = new WebSocket(
       `${scheme}://${location.host}/api/collab/${this.fileId}/channel?ticket=${ticket}`,
     );
+    // One live socket, ever. A redial racing a slow earlier dial would
+    // otherwise leave two sockets replaying the same log interleaved,
+    // which reads as counter gaps and burns the repair budget; closing
+    // the loser here and gating every handler below on identity makes
+    // the newest dial the only voice.
+    const superseded = this.socket;
     this.socket = socket;
+    if (superseded && superseded !== socket) {
+      superseded.onmessage = null;
+      superseded.onclose = null;
+      superseded.close();
+    }
     if (this.keepalive === null) {
       this.keepalive = window.setInterval(() => {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
@@ -83,6 +94,9 @@ export class ChannelClient {
         socket.send(JSON.stringify({ t: "hello", lastSeq: this.lastSeq }));
       };
       socket.onmessage = (event) => {
+        if (this.socket !== socket) {
+          return;
+        }
         const frame = JSON.parse(String(event.data)) as { t: string; [key: string]: unknown };
         switch (frame.t) {
           case "welcome": {
@@ -141,7 +155,7 @@ export class ChannelClient {
         }
       };
       socket.onclose = () => {
-        if (this.closed) {
+        if (this.closed || this.socket !== socket) {
           return;
         }
         if (!welcomed) {
