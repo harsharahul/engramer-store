@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { electedSnapshotter, shouldAutoSnapshot } from "./snapshot";
+import { electedSnapshotter, shouldContentSave } from "./snapshot";
 
 describe("electedSnapshotter", () => {
   it("elects the lowest member index, identically for every client", () => {
@@ -45,17 +45,17 @@ describe("electedSnapshotter", () => {
   });
 });
 
-describe("shouldAutoSnapshot", () => {
+describe("shouldContentSave", () => {
   it("never fires with nothing pending", () => {
-    expect(shouldAutoSnapshot({ pendingFrames: 0, msSinceLastFrame: 60_000 })).toBe(false);
-  });
-
-  it("fires once enough frames pile up, regardless of quiet", () => {
-    expect(shouldAutoSnapshot({ pendingFrames: 200, msSinceLastFrame: 0 })).toBe(true);
+    expect(shouldContentSave({ pendingFrames: 0, msSinceLastFrame: 60_000 })).toBe(false);
   });
 
   it("fires after a quiet spell with anything pending", () => {
-    expect(shouldAutoSnapshot({ pendingFrames: 1, msSinceLastFrame: 30_000 })).toBe(true);
-    expect(shouldAutoSnapshot({ pendingFrames: 1, msSinceLastFrame: 5_000 })).toBe(false);
+    expect(shouldContentSave({ pendingFrames: 1, msSinceLastFrame: 30_000 })).toBe(true);
+    expect(shouldContentSave({ pendingFrames: 1, msSinceLastFrame: 5_000 })).toBe(false);
+  });
+
+  it("never fires on frame count alone; the byte ceiling owns the trim", () => {
+    expect(shouldContentSave({ pendingFrames: 10_000, msSinceLastFrame: 0 })).toBe(false);
   });
 });

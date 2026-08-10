@@ -10,9 +10,7 @@
  * at worst two members snapshot and the second is merely redundant.
  */
 
-/** Frames worth carrying before a snapshot happens regardless of quiet. */
-const SNAPSHOT_AFTER_FRAMES = 200;
-/** A quiet spell with anything pending is the natural snapshot moment. */
+/** A quiet spell with anything pending is the natural save moment. */
 const SNAPSHOT_IDLE_MS = 30_000;
 
 export function electedSnapshotter(
@@ -29,14 +27,20 @@ export function electedSnapshotter(
   return writers.reduce((low, m) => (m.index < low.index ? m : low)).connId;
 }
 
-export function shouldAutoSnapshot(state: {
+/**
+ * The elected member's idle tick: a quiet spell with anything pending
+ * writes current bytes so every non-collaborative surface (previews, the
+ * phone's Files drive, share links) sees the room's work. It is a content
+ * save, not a trim; the log's growth is the byte ceiling's business, and
+ * the relay asks for that checkpoint itself, on a slope, before refusing
+ * anything.
+ */
+export function shouldContentSave(state: {
   pendingFrames: number;
   msSinceLastFrame: number;
 }): boolean {
   if (state.pendingFrames <= 0) {
     return false;
   }
-  return (
-    state.pendingFrames >= SNAPSHOT_AFTER_FRAMES || state.msSinceLastFrame >= SNAPSHOT_IDLE_MS
-  );
+  return state.msSinceLastFrame >= SNAPSHOT_IDLE_MS;
 }

@@ -5,7 +5,7 @@ import { downloadContent } from "../transfer";
 import { openSharedContent, refreshLibraryOnce } from "../openshared";
 import { barrierDelayMs, barrierVerdict } from "../office/barrier";
 import { reconcile, type ContentMarker } from "../office/content";
-import { SaveConflictError, describeConflict } from "../conflict";
+import { SaveConflictError, describeConflict, satisfiedByPeer } from "../conflict";
 import { Converter } from "../office/x2t";
 import { EditorSession, editorFrameUrl } from "../office/session";
 import { CollabBridge, type OutFrame } from "../office/collab";
@@ -19,7 +19,7 @@ import {
   sealChannelBaseline,
   type ChannelOrder,
 } from "../office/channel";
-import { electedSnapshotter, shouldAutoSnapshot } from "../office/snapshot";
+import { electedSnapshotter, shouldContentSave } from "../office/snapshot";
 import { describeStartupStall, editorFrameKey } from "../office/reload";
 import { trailingThrottle } from "../office/throttle";
 import {
@@ -145,8 +145,10 @@ export function OfficeEditor(props: {
   const drainHookRef = useRef<() => void>(() => {});
   const statsRef = useRef<CollabStats | null>(null);
   const connRef = useRef("");
-  /** The relay is refusing posts until someone snapshots. */
+  /** The relay is refusing posts until someone snapshots (hard ceiling). */
   const ceilingRef = useRef(false);
+  /** The relay asked for a trim; the next save carries a checkpoint. */
+  const trimAskRef = useRef(false);
   /** The save currently running, for flows that must sequence after it. */
   const saveInFlightRef = useRef<Promise<void> | null>(null);
   /** The last live save this client committed, to recognize its own
@@ -633,19 +635,26 @@ export function OfficeEditor(props: {
                 markerBox.current = { generation: contentGeneration, seq: contentChannelSeq };
                 void refreshLibraryOnce();
               },
-              onPleaseSnapshot: () => {
-                ceilingRef.current = true;
-                // The relay is refusing further posts until someone
-                // snapshots; the elected member saves now rather than on
-                // the next quiet spell, unclogging the room for everyone.
+              onPleaseSnapshot: (reason) => {
+                // The next save carries the trim. "soft" arrives on the
+                // slope with posts still landing; "ceiling" (or nothing,
+                // from an older server) means posts are being refused,
+                // which the barrier needs to know to proceed unlogged.
+                trimAskRef.current = true;
+                if (reason !== "soft") {
+                  ceilingRef.current = true;
+                }
+                // The elected member saves now rather than on the next
+                // quiet spell, unclogging the room for everyone.
                 if (collabRef.current === "live" && electedSnapshotter(latestMembers) === connId) {
                   saveRef.current(true);
                 }
               },
               onTruncated: (generation, snapshotSeq) => {
                 void generation;
-                // The trim cleared whatever refusal the ceiling had raised.
+                // The trim cleared whatever ask or refusal was standing.
                 ceilingRef.current = false;
+                trimAskRef.current = false;
                 // A truncation is also the "somebody moved the digest"
                 // signal: refresh the library so this client's entry (and
                 // any preview or reopen it feeds) matches the new bytes.
@@ -763,7 +772,7 @@ export function OfficeEditor(props: {
       if (
         collabRef.current === "live" &&
         electedSnapshotter(latestMembers) === connId &&
-        shouldAutoSnapshot({
+        shouldContentSave({
           pendingFrames: pendingFramesRef.current,
           msSinceLastFrame: Date.now() - lastFrameAtRef.current,
         })
@@ -814,6 +823,7 @@ export function OfficeEditor(props: {
       statsRef.current = null;
       connRef.current = "";
       ceilingRef.current = false;
+      trimAskRef.current = false;
     };
   }, [fileId, fileType, reloadNonce]);
 
@@ -924,12 +934,12 @@ export function OfficeEditor(props: {
       release = resolve;
     });
     let out: Uint8Array | null = null;
+    // A room the relay asked to trim needs a checkpoint, and this save is
+    // the one that carries it; every other live save leaves the log alone.
+    const checkpoint = live && trimAskRef.current;
     try {
       let bin: string;
       let upTo = 0;
-      // A room at its byte ceiling needs a trim, and this save is the one
-      // that carries it; every other live save leaves the log alone.
-      const checkpoint = live && ceilingRef.current;
       if (live) {
         // A live save writes bytes and stamps where they stand; it must
         // never guess. The barrier makes the position exact or declines.
@@ -964,6 +974,7 @@ export function OfficeEditor(props: {
         lastSaveRef.current = { upTo, at: Date.now() };
         if (checkpoint) {
           ceilingRef.current = false;
+          trimAskRef.current = false;
         }
         if (upTo > 0) {
           // The server decides what, if anything, gets trimmed as part of
@@ -974,6 +985,26 @@ export function OfficeEditor(props: {
       diag("office", `saved ${file.name} (${out.length} bytes)`);
     } catch (err) {
       if (err instanceof SaveConflictError) {
+        const pendingAcks = statsRef.current?.pendingAcks.size ?? 0;
+        if (!checkpoint && satisfiedByPeer({ live, pendingAcks })) {
+          // The winner's bytes and the surviving log carry everything
+          // this engine holds; losing the race lost nothing.
+          setDirty(false);
+          dirtyRef.current = false;
+          setSavedAt(Date.now());
+          void refreshLibraryOnce();
+          diag("collab", "another member's save carried this content; nothing was lost");
+          return;
+        }
+        if (checkpoint) {
+          // The trim did not happen and the room may still be refusing
+          // posts; refresh, then retry once the busy flag has cleared.
+          diag("collab", "checkpoint save lost the race; retrying after a refresh");
+          void refreshLibraryOnce().then(() => {
+            window.setTimeout(() => saveRef.current(true), 400);
+          });
+          return;
+        }
         // The export already happened; stash the very bytes that were
         // refused so "Save as a copy" keeps exactly what was typed.
         setConflict({ bytes: out });

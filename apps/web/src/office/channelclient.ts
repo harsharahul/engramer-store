@@ -32,8 +32,9 @@ export interface ChannelEvents {
   onTruncated(snapshotGeneration: number, snapshotSeq: number): void;
   /** A content save moved the stored bytes without touching the log. */
   onContent?(contentGeneration: number, contentChannelSeq: number): void;
-  /** The log passed its byte ceiling; only a snapshot save clears it. */
-  onPleaseSnapshot(): void;
+  /** The log wants a trim: "soft" warns while posts still land, "ceiling"
+   * (or nothing, from an older server) means posts are being refused. */
+  onPleaseSnapshot(reason?: string): void;
   /** The channel is gone and redialing has been abandoned. */
   onDead(): void;
 }
@@ -131,7 +132,9 @@ export class ChannelClient {
             );
             return;
           case "please-snapshot":
-            this.events.onPleaseSnapshot();
+            this.events.onPleaseSnapshot(
+              typeof frame.reason === "string" ? frame.reason : undefined,
+            );
             return;
           default:
             return;
