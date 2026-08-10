@@ -3,6 +3,20 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+- **Live co-editing no longer wedges after edits that add or restructure
+  paragraphs.** The editor identifies itself and its collaborators by a
+  composite id it builds internally; we were sending a shorter form, so
+  the editor could mistake its own paragraph locks for a stranger's,
+  draw a red bracket, and refuse the next keystroke. It also had no way
+  to clear a collaborator's lock once that person committed or left, so
+  the brackets accumulated until one side could not type while the other
+  saw everything. Identity now matches what the editor expects, locks
+  are released when their holder commits or leaves, and a session that
+  loses contact with the relay repairs itself instead of going quiet.
+
 ## [0.41.0] - 2026-08-10
 
 ### Added
