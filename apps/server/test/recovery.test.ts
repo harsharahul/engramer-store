@@ -8,6 +8,7 @@ import {
   generateAccountKeys,
   proveRecoveryPossession,
   rewrapMasterKey,
+  rewrapRecoveryKey,
   unlockWithRecoveryKey,
   type AccountKeys,
   type KeyAttributes,
@@ -378,6 +379,139 @@ describe("change password while signed in", () => {
       headers: { authorization: `Bearer ${fresh}` },
     });
     expect(live.statusCode).toBe(200);
+  });
+});
+
+describe("rotate the recovery key while signed in", () => {
+  let app: FastifyInstance;
+  let dataDir: string;
+  let account: AccountKeys;
+  let token: string;
+
+  beforeAll(async () => {
+    await ready();
+    dataDir = mkdtempSync(join(tmpdir(), "engramer-rotatekey-"));
+    app = await buildApp({ dataDir, webDistDir: null });
+    account = generateAccountKeys("rotate my recovery key");
+    const registered = await app.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      payload: {
+        email: "rotator@example.com",
+        loginKey: account.loginKey,
+        keyAttributes: account.keyAttributes,
+      },
+    });
+    token = (registered.json() as { token: string }).token;
+  });
+
+  afterAll(async () => {
+    await app.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it("refuses without a session", async () => {
+    const rotated = rewrapRecoveryKey(account.masterKey, account.keyAttributes);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/user/recovery-key",
+      payload: {
+        currentLoginKey: account.loginKey,
+        masterKeyEncryptedWithRecoveryKey:
+          rotated.keyAttributes.masterKeyEncryptedWithRecoveryKey,
+        recoveryKeyEncryptedWithMasterKey:
+          rotated.keyAttributes.recoveryKeyEncryptedWithMasterKey,
+      },
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("refuses a wrong current password", async () => {
+    const rotated = rewrapRecoveryKey(account.masterKey, account.keyAttributes);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/user/recovery-key",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        currentLoginKey: "A".repeat(43),
+        masterKeyEncryptedWithRecoveryKey:
+          rotated.keyAttributes.masterKeyEncryptedWithRecoveryKey,
+        recoveryKeyEncryptedWithMasterKey:
+          rotated.keyAttributes.recoveryKeyEncryptedWithMasterKey,
+      },
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("refuses to smuggle a password-wrapping change through this route", async () => {
+    const rotated = rewrapRecoveryKey(account.masterKey, account.keyAttributes);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/user/recovery-key",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        currentLoginKey: account.loginKey,
+        masterKeyEncryptedWithRecoveryKey:
+          rotated.keyAttributes.masterKeyEncryptedWithRecoveryKey,
+        recoveryKeyEncryptedWithMasterKey:
+          rotated.keyAttributes.recoveryKeyEncryptedWithMasterKey,
+        encryptedMasterKey: { ciphertext: "attacker", nonce: "attacker" },
+      },
+    });
+    // The strict schema rejects the extra field outright.
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("rotates the stored recovery wrapping and keeps the session and password", async () => {
+    const rotated = rewrapRecoveryKey(account.masterKey, account.keyAttributes);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/user/recovery-key",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        currentLoginKey: account.loginKey,
+        masterKeyEncryptedWithRecoveryKey:
+          rotated.keyAttributes.masterKeyEncryptedWithRecoveryKey,
+        recoveryKeyEncryptedWithMasterKey:
+          rotated.keyAttributes.recoveryKeyEncryptedWithMasterKey,
+      },
+    });
+    expect(response.statusCode).toBe(200);
+
+    // The new recovery key now recovers this account; the old one does not.
+    const begin = (
+      await app.inject({
+        method: "POST",
+        url: "/api/auth/recovery/begin",
+        payload: { email: "rotator@example.com" },
+      })
+    ).json() as {
+      publicKey: string;
+      masterKeyEncryptedWithRecoveryKey: { ciphertext: string; nonce: string };
+      encryptedPrivateKey: { ciphertext: string; nonce: string };
+    };
+    const attrs = {
+      publicKey: begin.publicKey,
+      masterKeyEncryptedWithRecoveryKey: begin.masterKeyEncryptedWithRecoveryKey,
+      encryptedPrivateKey: begin.encryptedPrivateKey,
+    } as KeyAttributes;
+    expect(unlockWithRecoveryKey(rotated.recoveryKeyHex, attrs)).toEqual(account.masterKey);
+    expect(() => unlockWithRecoveryKey(account.recoveryKeyHex, attrs)).toThrow();
+
+    // The session token still works (rotation does not bump the epoch), and
+    // the password is unchanged.
+    const stillIn = await app.inject({
+      method: "GET",
+      url: "/api/user",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(stillIn.statusCode).toBe(200);
+    const login = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "rotator@example.com", loginKey: account.loginKey },
+    });
+    expect(login.statusCode).toBe(200);
   });
 });
 
