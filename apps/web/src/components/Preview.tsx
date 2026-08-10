@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore, type FileEntry } from "../store";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
+import { openSharedContent } from "../openshared";
 import { bridgeMediaUrl, mediaBridgeAvailable, mediaUrl, onMediaProgress, registerMediaKey } from "../mediastream";
 import { nativeShell } from "../native";
 import { swipeStep } from "../neighbors";
@@ -355,7 +356,9 @@ export function Preview(props: {
       return;
     }
     try {
-      const bytes = await downloadAndDecrypt(file.id, file.key, file.digest);
+      const bytes = await openSharedContent(file, (entry) =>
+        downloadAndDecrypt(entry.id, entry.key, entry.digest),
+      );
       const url = URL.createObjectURL(
         new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime }),
       );
@@ -398,7 +401,9 @@ export function Preview(props: {
         blobTried.current = false;
       };
     }
-    void downloadAndDecrypt(file.id, file.key, file.digest)
+    void openSharedContent(file, (entry) =>
+      downloadAndDecrypt(entry.id, entry.key, entry.digest),
+    )
       .then((bytes) => {
         if (cancelled) {
           return;
@@ -463,7 +468,9 @@ export function Preview(props: {
   }, [props]);
 
   const download = async () => {
-    const bytes = await downloadAndDecrypt(file.id, file.key, file.digest);
+    const bytes = await openSharedContent(file, (entry) =>
+      downloadAndDecrypt(entry.id, entry.key, entry.digest),
+    );
     triggerDownload(
       new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime }),
       file.name,

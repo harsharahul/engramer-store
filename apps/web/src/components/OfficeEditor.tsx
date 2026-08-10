@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore, type FileEntry } from "../store";
 import { api } from "../api";
 import { downloadAndDecrypt } from "../transfer";
-import { openWithFreshEntry } from "../freshen";
+import { openSharedContent, refreshLibraryOnce } from "../openshared";
 import { SaveConflictError, describeConflict } from "../conflict";
 import { Converter } from "../office/x2t";
 import { EditorSession, editorFrameUrl } from "../office/session";
@@ -355,15 +355,9 @@ export function OfficeEditor(props: {
           setStage("decrypting");
           // A co-editor's save moves the digest while this client's poll
           // is still pending; opening from the cached entry then refuses
-          // good bytes. One refresh and one retry, shared files only.
-          const plaintext = await openWithFreshEntry(
-            opened,
-            (entry) => downloadAndDecrypt(entry.id, entry.key, entry.digest),
-            async () => {
-              diag("integrity", "shared entry may be stale; refreshing the library once");
-              await useStore.getState().refresh();
-              return useStore.getState().files.get(opened.id) ?? null;
-            },
+          // good bytes. Refresh and retry, shared files only.
+          const plaintext = await openSharedContent(opened, (entry) =>
+            downloadAndDecrypt(entry.id, entry.key, entry.digest),
           );
           if (cancelled) {
             return null;
@@ -531,6 +525,10 @@ export function OfficeEditor(props: {
               },
               onTruncated: (generation, snapshotSeq) => {
                 void generation;
+                // A truncation is also the "somebody moved the digest"
+                // signal: refresh the library so this client's entry (and
+                // any preview or reopen it feeds) matches the new bytes.
+                void refreshLibraryOnce();
                 // Truncation deletes replay rows, not deliveries: a live
                 // member already holds every frame the snapshot contains.
                 // Only a position BEHIND the truncation point means frames
