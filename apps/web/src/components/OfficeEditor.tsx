@@ -5,7 +5,7 @@ import { downloadAndDecrypt } from "../transfer";
 import { SaveConflictError, describeConflict } from "../conflict";
 import { Converter } from "../office/x2t";
 import { EditorSession, editorFrameUrl } from "../office/session";
-import { CollabBridge } from "../office/collab";
+import { CollabBridge, type OutFrame } from "../office/collab";
 import { ChannelClient, type ChannelWelcome } from "../office/channelclient";
 import {
   acceptEphemeral,
@@ -18,6 +18,7 @@ import {
 } from "../office/channel";
 import { electedSnapshotter, shouldAutoSnapshot } from "../office/snapshot";
 import { editorFrameKey } from "../office/reload";
+import { trailingThrottle } from "../office/throttle";
 import { diag } from "../diag";
 import { PeopleGlyph, XGlyph } from "./Icon";
 
@@ -189,6 +190,17 @@ export function OfficeEditor(props: {
       }
     };
 
+    const sendEph = (out: OutFrame) => {
+      channel?.eph(
+        encryptFrame({ ch: opened.id, s: connId, n: 0, k: out.k, d: out.d }, opened.key),
+      );
+    };
+    // The engine emits a cursor message per selection change and each one
+    // was its own websocket frame. Cursors are last-write-wins, so inside
+    // the window only the latest matters; other ephemeral kinds pass
+    // straight through, since coalescing would swallow them entirely.
+    const cursorThrottle = trailingThrottle(100, sendEph);
+
     const makeSession = () =>
       new EditorSession(
         frame,
@@ -245,9 +257,11 @@ export function OfficeEditor(props: {
             }
           },
           onEph: (out) => {
-            channel?.eph(
-              encryptFrame({ ch: opened.id, s: connId, n: 0, k: out.k, d: out.d }, opened.key),
-            );
+            if (out.k === "cursor") {
+              cursorThrottle.push(out);
+            } else {
+              sendEph(out);
+            }
           },
         },
       );
@@ -519,6 +533,7 @@ export function OfficeEditor(props: {
       cancelled = true;
       window.clearTimeout(startupDeadline);
       window.clearInterval(autoSnapshot);
+      cursorThrottle.cancel();
       channel?.close();
       channelRef.current = null;
       sessionRef.current?.close();
