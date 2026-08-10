@@ -12,6 +12,9 @@
 export interface CollabStats {
   ephSent: number;
   ephReceivedBySender: Map<string, number>;
+  /** Total ephemeral frames fed to the engine; a plain number because an
+   * external probe reading this object serializes Maps into nothing. */
+  ephReceivedTotal: number;
   chgPosted: number;
   chgAcked: number;
   ackLatency: { count: number; totalMs: number; maxMs: number; lastMs: number };
@@ -19,18 +22,28 @@ export interface CollabStats {
   changesIndex: number;
   /** Posted refs waiting for their ack, by the time they left. */
   pendingAcks: Map<number, number>;
+  /** Received frames that never reached the engine, counted by reason.
+   * A plain object, so a probe can read it: a silent feed death is
+   * invisible exactly when it matters most. */
+  skips: Record<string, number>;
 }
 
 export function newCollabStats(): CollabStats {
   return {
     ephSent: 0,
     ephReceivedBySender: new Map(),
+    ephReceivedTotal: 0,
     chgPosted: 0,
     chgAcked: 0,
     ackLatency: { count: 0, totalMs: 0, maxMs: 0, lastMs: 0 },
     changesIndex: 0,
     pendingAcks: new Map(),
+    skips: {},
   };
+}
+
+export function noteSkip(stats: CollabStats, reason: string): void {
+  stats.skips[reason] = (stats.skips[reason] ?? 0) + 1;
 }
 
 export function notePost(stats: CollabStats, ref: number, at: number): void {
@@ -61,6 +74,7 @@ export function noteEphSent(stats: CollabStats): void {
 
 export function noteEphReceived(stats: CollabStats, sender: string): void {
   stats.ephReceivedBySender.set(sender, (stats.ephReceivedBySender.get(sender) ?? 0) + 1);
+  stats.ephReceivedTotal += 1;
 }
 
 /**
