@@ -36,8 +36,14 @@ export function openSharedContent<T>(
   entry: FileEntry,
   open: (entry: FileEntry) => Promise<T>,
 ): Promise<T> {
-  return openWithFreshEntry(entry, open, async () => {
-    diag("integrity", "shared entry may be stale; refreshing the library");
+  // Collaborative is what matters, and shared only marks the recipient
+  // side: the OWNER's entry of a co-edited file says shared: false while
+  // co-editors move its digest all the same. The retry gate reads the
+  // effective truth.
+  const collaborative = entry.shared === true || entry.hasCollaborators === true;
+  const effective = collaborative && !entry.shared ? { ...entry, shared: true } : entry;
+  return openWithFreshEntry(effective, open, async () => {
+    diag("integrity", "collaborative entry may be stale; refreshing the library");
     await refreshLibraryOnce();
     return useStore.getState().files.get(entry.id) ?? null;
   });

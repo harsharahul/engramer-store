@@ -59,7 +59,7 @@ function folderToDto(row: FolderRow) {
   };
 }
 
-export function fileToDto(row: FileRow) {
+export function fileToDto(row: FileRow & { has_collaborators?: number | boolean }) {
   return {
     id: row.id,
     folderId: row.folder_id,
@@ -76,6 +76,13 @@ export function fileToDto(row: FileRow) {
     updateSeq: row.update_seq,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    // Whether anyone else holds a key. The owner's entry is otherwise
+    // indistinguishable from a private file, and every stale-entry
+    // healing keyed on the recipient-side shared flag skipped owners.
+    // Only emitted when the query computed it; absent means unknown.
+    ...(row.has_collaborators !== undefined
+      ? { hasCollaborators: Boolean(row.has_collaborators) }
+      : {}),
   };
 }
 
@@ -1069,7 +1076,13 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       );
       await touchCollaborators(t, id, now);
     });
-    const row = (await app.db.get<FileRow>("SELECT * FROM files WHERE id = ?", id))!;
+    const row = (await app.db.get<FileRow & { has_collaborators: number | boolean }>(
+      `SELECT files.*, EXISTS(
+         SELECT 1 FROM file_collaborators c WHERE c.file_id = files.id AND c.revoked = 0
+       ) AS has_collaborators
+       FROM files WHERE id = ?`,
+      id,
+    ))!;
     const dto = fileToDto(row);
     if (access.role !== "owner") {
       // The owner's wrapped key is theirs alone: a collaborator holds the
@@ -1373,8 +1386,11 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       since,
       upTo,
     );
-    let files = await app.db.all<FileRow>(
-      "SELECT * FROM files WHERE user_id = ? AND update_seq > ? AND update_seq <= ? ORDER BY update_seq" +
+    let files = await app.db.all<FileRow & { has_collaborators: number | boolean }>(
+      `SELECT files.*, EXISTS(
+         SELECT 1 FROM file_collaborators c WHERE c.file_id = files.id AND c.revoked = 0
+       ) AS has_collaborators
+       FROM files WHERE user_id = ? AND update_seq > ? AND update_seq <= ? ORDER BY update_seq` +
         probe,
       uid,
       since,

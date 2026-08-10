@@ -21,6 +21,8 @@ export interface FileDto {
   keyEpoch?: number;
   /** Content generation; absent on rows cached before it traveled. */
   generation?: number;
+  /** Whether anyone else holds a key; absent when the query did not say. */
+  hasCollaborators?: boolean;
   size: number;
   thumbSize: number;
   indexSize: number;
