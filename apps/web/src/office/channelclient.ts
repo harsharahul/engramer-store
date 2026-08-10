@@ -47,7 +47,13 @@ export class ChannelClient {
   private socket: WebSocket | null = null;
   private closed = false;
   private redials = 0;
+  /** Highest position RECEIVED (log/caught-up); what a hello may claim. */
   private lastSeq = 0;
+  /** Highest position our own posts were acked at. Kept apart from
+   * lastSeq: an ack proves our frame's position, not that we received
+   * the positions below it, and conflating them let a receive gap be
+   * papered over by the next hello. */
+  private lastAckSeq = 0;
   /** Posts issued while offline wait here and drain in order on reconnect. */
   private outbox: Array<{ ref: number; payload: string }> = [];
 
@@ -134,7 +140,7 @@ export class ChannelClient {
             this.events.onMembers(frame.members as Array<{ connId: string; index: number; name?: string }>);
             return;
           case "ack":
-            this.lastSeq = Math.max(this.lastSeq, Number(frame.seq));
+            this.lastAckSeq = Math.max(this.lastAckSeq, Number(frame.seq));
             this.events.onAck(Number(frame.ref), Number(frame.seq));
             return;
           case "truncated":
@@ -231,9 +237,11 @@ export class ChannelClient {
     }
   }
 
-  /** The highest channel position this client has seen or been acked. */
+  /** The highest channel position represented in this client's engine:
+   * everything received plus its own acked posts. The save barrier's
+   * marker reads this; the hello's replay cursor deliberately does not. */
   get lastSeenSeq(): number {
-    return this.lastSeq;
+    return Math.max(this.lastSeq, this.lastAckSeq);
   }
 
   close(): void {
