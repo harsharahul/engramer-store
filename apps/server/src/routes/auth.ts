@@ -497,6 +497,56 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     return { keyAttributes: JSON.parse(user.key_attributes) as unknown };
   });
 
+  /**
+   * Changes the vault password from a signed-in session. The current
+   * password is proven by its login-key digest before anything changes;
+   * only the kdf and the password wrapping may move, and the token epoch
+   * advances so other devices are signed out. The client keeps the
+   * returned token so the calling tab survives its own epoch bump.
+   */
+  app.post("/api/auth/password", auth, async (request, reply) => {
+    const body = z
+      .object({
+        currentLoginKey: base64Key,
+        loginKey: base64Key,
+        kdf: kdfSchema,
+        encryptedMasterKey: secretBoxSchema,
+      })
+      .strict()
+      .parse(request.body);
+    const user = await getUser(request.user.uid);
+    const retryAfter = await gate(request, user.email);
+    if (retryAfter !== null) {
+      return reply.code(429).header("retry-after", retryAfter).send({ error: "too many attempts" });
+    }
+    if (!digestsMatch(loginKeyDigest(body.currentLoginKey), user.login_key_digest)) {
+      await throttle.fail(throttleKey(request, user.email));
+      return reply.code(401).send({ error: "that password is not correct" });
+    }
+    await throttle.succeed(throttleKey(request, user.email));
+    const stored = JSON.parse(user.key_attributes) as KeyAttributes;
+    let merged: KeyAttributes;
+    try {
+      merged = mergeKeyAttributes(
+        stored,
+        { ...stored, kdf: body.kdf, encryptedMasterKey: body.encryptedMasterKey },
+        ["kdf", "encryptedMasterKey"],
+      );
+    } catch (err) {
+      if (err instanceof ForbiddenKeyChange) {
+        return reply.code(400).send({ error: err.message });
+      }
+      throw err;
+    }
+    await app.db.run(
+      "UPDATE users SET login_key_digest = ?, key_attributes = ?, token_epoch = token_epoch + 1 WHERE id = ?",
+      loginKeyDigest(body.loginKey),
+      JSON.stringify(merged),
+      user.id,
+    );
+    return sessionResponse(await getUser(user.id));
+  });
+
   // ----- enrollment (an authenticated session manages its own 2FA) -----
 
   app.post("/api/auth/totp/setup", auth, async (request, reply) => {

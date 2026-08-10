@@ -259,6 +259,128 @@ describe("account recovery", () => {
   });
 });
 
+describe("change password while signed in", () => {
+  let app: FastifyInstance;
+  let dataDir: string;
+  let account: AccountKeys;
+  let token: string;
+
+  const currentLoginKey = () => account.loginKey;
+
+  beforeAll(async () => {
+    await ready();
+    dataDir = mkdtempSync(join(tmpdir(), "engramer-changepw-"));
+    app = await buildApp({ dataDir, webDistDir: null });
+    account = generateAccountKeys("first password");
+    const registered = await app.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      payload: {
+        email: "changer@example.com",
+        loginKey: account.loginKey,
+        keyAttributes: account.keyAttributes,
+      },
+    });
+    token = (registered.json() as { token: string }).token;
+  });
+
+  afterAll(async () => {
+    await app.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const change = (
+    currentKey: string,
+    next: ReturnType<typeof rewrapMasterKey>,
+    bearer = token,
+  ) =>
+    app.inject({
+      method: "POST",
+      url: "/api/auth/password",
+      headers: { authorization: `Bearer ${bearer}` },
+      payload: {
+        currentLoginKey: currentKey,
+        loginKey: next.loginKey,
+        kdf: next.keyAttributes.kdf,
+        encryptedMasterKey: next.keyAttributes.encryptedMasterKey,
+      },
+    });
+
+  it("refuses without a session", async () => {
+    const next = rewrapMasterKey("second password", account.masterKey, account.keyAttributes);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/password",
+      payload: {
+        currentLoginKey: currentLoginKey(),
+        loginKey: next.loginKey,
+        kdf: next.keyAttributes.kdf,
+        encryptedMasterKey: next.keyAttributes.encryptedMasterKey,
+      },
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("refuses a wrong current password", async () => {
+    const next = rewrapMasterKey("second password", account.masterKey, account.keyAttributes);
+    // A well-formed login key (43 base64url chars) that is simply not theirs.
+    const response = await change("A".repeat(43), next);
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("refuses smuggled identity-key changes", async () => {
+    const next = rewrapMasterKey("second password", account.masterKey, account.keyAttributes);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/password",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        currentLoginKey: currentLoginKey(),
+        loginKey: next.loginKey,
+        kdf: next.keyAttributes.kdf,
+        encryptedMasterKey: next.keyAttributes.encryptedMasterKey,
+        publicKey: "attacker-key",
+      },
+    });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("changes the password, signs old tokens out, and keeps the returned one alive", async () => {
+    const next = rewrapMasterKey("second password", account.masterKey, account.keyAttributes);
+    const response = await change(currentLoginKey(), next);
+    expect(response.statusCode).toBe(200);
+    const fresh = (response.json() as { token: string }).token;
+
+    // The new password signs in; the old one no longer does.
+    const newLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "changer@example.com", loginKey: next.loginKey },
+    });
+    expect(newLogin.statusCode).toBe(200);
+    const oldLogin = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "changer@example.com", loginKey: account.loginKey },
+    });
+    expect(oldLogin.statusCode).toBe(401);
+
+    // The pre-change token is dead; the returned one works.
+    const stale = await app.inject({
+      method: "GET",
+      url: "/api/user",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(stale.statusCode).toBe(401);
+    const live = await app.inject({
+      method: "GET",
+      url: "/api/user",
+      headers: { authorization: `Bearer ${fresh}` },
+    });
+    expect(live.statusCode).toBe(200);
+  });
+});
+
 describe("account recovery with two-factor", () => {
   let app: FastifyInstance;
   let dataDir: string;
