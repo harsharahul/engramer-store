@@ -20,6 +20,8 @@ export interface UserRow {
   quota_bytes: number | null;
   /** Optional name shown to collaborators in place of the email. */
   display_name: string | null;
+  /** Advances on a credential change; tokens minted before it stop working. */
+  token_epoch: number;
 }
 
 export interface InviteRow {
@@ -196,6 +198,8 @@ export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; type: str
   { table: "shares", column: "wrapped_key", type: "TEXT" },
   // Advances when the file key is rotated after a collaborator is revoked.
   { table: "files", column: "key_epoch", type: "BIGINT NOT NULL DEFAULT 0" },
+  // Advances on a credential change; tokens minted before it stop working.
+  { table: "users", column: "token_epoch", type: "BIGINT NOT NULL DEFAULT 0" },
 ];
 
 /** Tables shared verbatim between the two dialects. */

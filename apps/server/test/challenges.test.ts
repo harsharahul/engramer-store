@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { openDatabase, type Db } from "../src/db.js";
-import { consumeChallenge, issueChallenge } from "../src/challenges.js";
+import { consumeChallenge, issueChallenge, peekChallenge } from "../src/challenges.js";
 
 describe("auth challenges", () => {
   let dir: string;
@@ -63,6 +63,14 @@ describe("auth challenges", () => {
     expect(row?.secret_digest).toBeTruthy();
     expect(row?.secret_digest).not.toBe(secret);
     expect(row?.secret_digest.includes(secret)).toBe(false);
+  });
+
+  it("peeks without spending, so a later step can fail and retry", async () => {
+    const { id, secret } = await issueChallenge(db, uid, "reset-pending-2fa", 60_000);
+    expect(await peekChallenge(db, id, secret, "reset-pending-2fa")).toBe(uid);
+    expect(await peekChallenge(db, id, "wrong", "reset-pending-2fa")).toBeNull();
+    expect(await consumeChallenge(db, id, secret, "reset-pending-2fa")).toBe(uid);
+    expect(await peekChallenge(db, id, secret, "reset-pending-2fa")).toBeNull();
   });
 
   it("lets concurrent consumers win exactly once", async () => {

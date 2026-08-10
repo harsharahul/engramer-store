@@ -1,10 +1,12 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { loginKeyDigest } from "@engramer/crypto";
+import { loginKeyDigest, sealToPublicKey, type KeyAttributes } from "@engramer/crypto";
 import { storageUsed, userQuota, type UserRow } from "../db.js";
 import { AuthThrottle } from "../ratelimit.js";
 import { generateTotpSecret, otpauthUri, verifyTotp } from "../totp.js";
+import { consumeChallenge, issueChallenge, peekChallenge } from "../challenges.js";
+import { ForbiddenKeyChange, mergeKeyAttributes } from "../keyattrs.js";
 
 const secretBoxSchema = z.object({ ciphertext: z.string(), nonce: z.string() });
 
@@ -109,9 +111,69 @@ export function registerAuthRoutes(app: FastifyInstance): void {
 
   /** The full session response; only ever issued after every factor passed. */
   const sessionResponse = (user: UserRow) => ({
-    token: app.jwt.sign({ uid: user.id }),
+    token: app.jwt.sign({ uid: user.id, ep: user.token_epoch ?? 0 }),
     keyAttributes: JSON.parse(user.key_attributes) as unknown,
   });
+
+  /** A valid TOTP code or an unused one-time recovery code; used by both
+   * the login second step and the recovery flow, so the logic exists once. */
+  const verifySecondFactor = async (
+    user: UserRow,
+    code: string,
+  ): Promise<{ ok: boolean; recoveryCodesLeft?: number }> => {
+    if (user.totp_enabled !== 1 || !user.totp_secret) {
+      return { ok: false };
+    }
+    const totp = verifyTotp(user.totp_secret, code, Date.now());
+    if (totp.valid && totp.step > user.totp_last_step) {
+      await app.db.run("UPDATE users SET totp_last_step = ? WHERE id = ?", totp.step, user.id);
+      return { ok: true };
+    }
+    // Recovery codes are one-time: a match consumes the digest.
+    const digests = JSON.parse(user.recovery_code_digests ?? "[]") as string[];
+    const presented = hashRecoveryCode(code);
+    const index = digests.findIndex((d) => digestsMatch(d, presented));
+    if (index >= 0) {
+      digests.splice(index, 1);
+      await app.db.run(
+        "UPDATE users SET recovery_code_digests = ? WHERE id = ?",
+        JSON.stringify(digests),
+        user.id,
+      );
+      return { ok: true, recoveryCodesLeft: digests.length };
+    }
+    return { ok: false };
+  };
+
+  /**
+   * Pseudo-ciphertext for an email with no account, stable per email like
+   * a real account's wrapped keys would be. Under a key nobody holds, real
+   * ciphertext and expanded hashes are indistinguishable; a client fails
+   * at the same step, with the same error, either way.
+   */
+  const decoyBytes = (email: string, field: string, length: number): string => {
+    const out = Buffer.alloc(length);
+    let offset = 0;
+    let counter = 0;
+    while (offset < length) {
+      const block = createHash("sha256")
+        .update(`engram-decoy-attrs|${app.config.jwtSecret}|${email}|${field}|${counter}`)
+        .digest();
+      counter += 1;
+      block.copy(out, offset);
+      offset += block.length;
+    }
+    return out.toString("base64url");
+  };
+
+  /** Reset tokens travel as "id.secret"; only the digest of the secret is stored. */
+  const parseResetToken = (token: string): { id: string; secret: string } | null => {
+    const dot = token.indexOf(".");
+    if (dot <= 0 || dot === token.length - 1) {
+      return null;
+    }
+    return { id: token.slice(0, dot), secret: token.slice(dot + 1) };
+  };
 
   /** Lets the client adapt its sign-up form to this server's policy. */
   app.get("/api/auth/registration", async () => ({ mode: app.config.registration }));
@@ -161,7 +223,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
         }
         return user!;
       });
-      const token = app.jwt.sign({ uid: created.id });
+      const token = app.jwt.sign({ uid: created.id, ep: 0 });
       return reply.code(201).send({ token });
     } catch (err) {
       if (err instanceof InviteInvalidError) {
@@ -253,30 +315,175 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       return reply.code(401).send({ error: "sign in again" });
     }
 
-    const totp = verifyTotp(user.totp_secret, body.code, Date.now());
-    if (totp.valid && totp.step > user.totp_last_step) {
-      await app.db.run("UPDATE users SET totp_last_step = ? WHERE id = ?", totp.step, user.id);
+    const second = await verifySecondFactor(user, body.code);
+    if (second.ok) {
       await throttle.succeed(throttleKey(request, user.email));
-      return sessionResponse(user);
-    }
-
-    // Recovery codes are one-time: a match consumes the digest.
-    const digests = JSON.parse(user.recovery_code_digests ?? "[]") as string[];
-    const presented = hashRecoveryCode(body.code);
-    const index = digests.findIndex((d) => digestsMatch(d, presented));
-    if (index >= 0) {
-      digests.splice(index, 1);
-      await app.db.run(
-        "UPDATE users SET recovery_code_digests = ? WHERE id = ?",
-        JSON.stringify(digests),
-        user.id,
-      );
-      await throttle.succeed(throttleKey(request, user.email));
-      return { ...sessionResponse(user), recoveryCodesLeft: digests.length };
+      return second.recoveryCodesLeft === undefined
+        ? sessionResponse(user)
+        : { ...sessionResponse(user), recoveryCodesLeft: second.recoveryCodesLeft };
     }
 
     await throttle.fail(throttleKey(request, user.email));
     return reply.code(401).send({ error: "that code is not valid" });
+  });
+
+  // ----- recovery (a lost password, redeemed with the recovery key) -----
+
+  /**
+   * Hands out what a recovery attempt needs: the recovery-wrapped master
+   * key, the sealed private key, and a challenge sealed to the account's
+   * public key. Deliberately absent: the kdf and the password-wrapped
+   * master key, which would hand any caller an offline password-cracking
+   * target. The recovery wrapping is sealed under a 256-bit random key,
+   * so disclosing it is safe; an unknown email gets a stable decoy of the
+   * same shape, so this is not an enumeration oracle either.
+   */
+  app.post("/api/auth/recovery/begin", async (request, reply) => {
+    const body = z.object({ email: z.string().email().toLowerCase() }).parse(request.body);
+    const retryAfter = await gate(request, body.email);
+    if (retryAfter !== null) {
+      return reply.code(429).header("retry-after", retryAfter).send({ error: "too many attempts" });
+    }
+    const user = await app.db.get<UserRow>("SELECT * FROM users WHERE email = ?", body.email);
+    if (!user) {
+      return {
+        challengeId: randomUUID(),
+        publicKey: decoyBytes(body.email, "pub", 32),
+        masterKeyEncryptedWithRecoveryKey: {
+          ciphertext: decoyBytes(body.email, "mkr", 48),
+          nonce: decoyBytes(body.email, "mkr-nonce", 24),
+        },
+        encryptedPrivateKey: {
+          ciphertext: decoyBytes(body.email, "epk", 48),
+          nonce: decoyBytes(body.email, "epk-nonce", 24),
+        },
+        // Fresh per call, like a real challenge; 91 bytes is the sealed
+        // size of a real challenge secret.
+        sealedChallenge: randomBytes(91).toString("base64url"),
+      };
+    }
+    const attrs = JSON.parse(user.key_attributes) as KeyAttributes;
+    const challenge = await issueChallenge(app.db, user.id, "recovery-proof", 10 * 60_000);
+    return {
+      challengeId: challenge.id,
+      publicKey: attrs.publicKey,
+      masterKeyEncryptedWithRecoveryKey: attrs.masterKeyEncryptedWithRecoveryKey,
+      encryptedPrivateKey: attrs.encryptedPrivateKey,
+      sealedChallenge: sealToPublicKey(new TextEncoder().encode(challenge.secret), attrs.publicKey),
+    };
+  });
+
+  /** Returning the opened nonce proves the caller holds the private key. */
+  app.post("/api/auth/recovery/prove", async (request, reply) => {
+    const body = z
+      .object({ challengeId: z.string().min(1).max(128), nonce: z.string().min(1).max(128) })
+      .parse(request.body);
+    const retryAfter = await gate(request, "recovery-prove");
+    if (retryAfter !== null) {
+      return reply.code(429).header("retry-after", retryAfter).send({ error: "too many attempts" });
+    }
+    const uid = await consumeChallenge(app.db, body.challengeId, body.nonce, "recovery-proof");
+    if (uid === null) {
+      await throttle.fail(throttleKey(request, "recovery-prove"));
+      return reply.code(401).send({ error: "that recovery attempt is not valid" });
+    }
+    await throttle.succeed(throttleKey(request, "recovery-prove"));
+    const user = await getUser(uid);
+    if (user.disabled === 1) {
+      return reply.code(403).send({ error: "this account is disabled" });
+    }
+    // Only after possession is proven does the response say whether a
+    // second factor stands in the way; before that it would be a probe.
+    if (user.totp_enabled === 1) {
+      const pending = await issueChallenge(app.db, uid, "reset-pending-2fa", 15 * 60_000);
+      return { resetToken: `${pending.id}.${pending.secret}`, twoFactorRequired: true };
+    }
+    const reset = await issueChallenge(app.db, uid, "reset", 15 * 60_000);
+    return { resetToken: `${reset.id}.${reset.secret}`, twoFactorRequired: false };
+  });
+
+  /** The second factor still guards a recovery, exactly as it guards a login. */
+  app.post("/api/auth/recovery/2fa", async (request, reply) => {
+    const body = z
+      .object({ resetToken: z.string().min(3).max(256), code: z.string().min(1).max(64) })
+      .parse(request.body);
+    const parsed = parseResetToken(body.resetToken);
+    if (!parsed) {
+      return reply.code(401).send({ error: "sign in again" });
+    }
+    // Peeked, not spent: a mistyped code must not burn the proven step.
+    const uid = await peekChallenge(app.db, parsed.id, parsed.secret, "reset-pending-2fa");
+    if (uid === null) {
+      return reply.code(401).send({ error: "sign in again" });
+    }
+    const user = await getUser(uid);
+    const retryAfter = await gate(request, user.email);
+    if (retryAfter !== null) {
+      return reply.code(429).header("retry-after", retryAfter).send({ error: "too many attempts" });
+    }
+    const second = await verifySecondFactor(user, body.code);
+    if (!second.ok) {
+      await throttle.fail(throttleKey(request, user.email));
+      return reply.code(401).send({ error: "that code is not valid" });
+    }
+    await throttle.succeed(throttleKey(request, user.email));
+    await consumeChallenge(app.db, parsed.id, parsed.secret, "reset-pending-2fa");
+    const reset = await issueChallenge(app.db, uid, "reset", 15 * 60_000);
+    return { resetToken: `${reset.id}.${reset.secret}` };
+  });
+
+  /**
+   * Installs the re-wrapped password. Only the kdf and the password
+   * wrapping may change; the identity keys and the recovery wrapping are
+   * merged from what is stored, never from the request. The token epoch
+   * advances, so every session issued before the reset is signed out.
+   */
+  app.post("/api/auth/recovery/finish", async (request, reply) => {
+    const body = z
+      .object({
+        resetToken: z.string().min(3).max(256),
+        loginKey: base64Key,
+        kdf: kdfSchema,
+        encryptedMasterKey: secretBoxSchema,
+      })
+      .strict()
+      .parse(request.body);
+    const parsed = parseResetToken(body.resetToken);
+    if (!parsed) {
+      return reply.code(401).send({ error: "sign in again" });
+    }
+    const uid = await consumeChallenge(app.db, parsed.id, parsed.secret, "reset");
+    if (uid === null) {
+      return reply.code(401).send({ error: "that reset is no longer valid" });
+    }
+    const user = await getUser(uid);
+    const stored = JSON.parse(user.key_attributes) as KeyAttributes;
+    let merged: KeyAttributes;
+    try {
+      merged = mergeKeyAttributes(
+        stored,
+        { ...stored, kdf: body.kdf, encryptedMasterKey: body.encryptedMasterKey },
+        ["kdf", "encryptedMasterKey"],
+      );
+    } catch (err) {
+      if (err instanceof ForbiddenKeyChange) {
+        return reply.code(400).send({ error: err.message });
+      }
+      throw err;
+    }
+    await app.db.run(
+      "UPDATE users SET login_key_digest = ?, key_attributes = ?, token_epoch = token_epoch + 1 WHERE id = ?",
+      loginKeyDigest(body.loginKey),
+      JSON.stringify(merged),
+      uid,
+    );
+    return sessionResponse(await getUser(uid));
+  });
+
+  /** The stored attributes, for flows that re-wrap them while signed in. */
+  app.get("/api/user/key-attributes", auth, async (request) => {
+    const user = await getUser(request.user.uid);
+    return { keyAttributes: JSON.parse(user.key_attributes) as unknown };
   });
 
   // ----- enrollment (an authenticated session manages its own 2FA) -----
