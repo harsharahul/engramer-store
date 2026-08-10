@@ -320,6 +320,51 @@
           }
         } catch (e) {}
         value = api.asc_nativeGetFile();          // a STRING ("DOCY;v5;…"), never a buffer
+      } else if (d.method === 'flushChanges') {
+        // Pushes whatever the engine still holds toward the channel: commit
+        // the open cell and any composition, then ask for the autosave
+        // cycle that sends pending changes as a saveChanges batch. The
+        // reply reports the engine's own view, so the app can tell a quiet
+        // engine from one still moving.
+        try {
+          if (typeof api.asc_closeCellEditor === 'function') { api.asc_closeCellEditor(false); }
+        } catch (e) {}
+        try {
+          var fctx = window.AscCommon && window.AscCommon.g_inputContext;
+          if (fctx && typeof fctx.externalEndCompositeInput === 'function') {
+            fctx.externalEndCompositeInput();
+          }
+        } catch (e) {}
+        var flushed = { started: false, haveChanges: null, haveOtherChanges: null, canSave: null };
+        try { flushed.started = api.asc_Save(true) === true; } catch (e) {}
+        try { flushed.haveChanges = api._haveChanges ? api._haveChanges() === true : null; } catch (e) {}
+        try {
+          flushed.haveOtherChanges = api._haveOtherChanges ? api._haveOtherChanges() === true : null;
+        } catch (e) {}
+        try { flushed.canSave = api.canSave; } catch (e) {}
+        value = flushed;
+      } else if (d.method === 'saveAtBarrier') {
+        // The exactness a content marker needs: decide quiet and serialize
+        // in ONE synchronous turn, so no keystroke and no remote batch can
+        // land between the check and the bytes. An engine still moving
+        // returns stale instead of a serialization the marker would lie
+        // about. Where a build lacks the predicates, this degrades to a
+        // plain serialization, which is exactly the old behavior.
+        try {
+          if (typeof api.asc_closeCellEditor === 'function') { api.asc_closeCellEditor(false); }
+        } catch (e) {}
+        try {
+          var bctx = window.AscCommon && window.AscCommon.g_inputContext;
+          if (bctx && typeof bctx.externalEndCompositeInput === 'function') {
+            bctx.externalEndCompositeInput();
+          }
+        } catch (e) {}
+        var moving = false;
+        try { moving = api._haveChanges ? api._haveChanges() === true : false; } catch (e) {}
+        try {
+          if (!moving && api._haveOtherChanges) { moving = api._haveOtherChanges() === true; }
+        } catch (e) {}
+        value = moving ? { stale: true } : { stale: false, bin: api.asc_nativeGetFile() };
       } else if (d.method === 'collabProbe') {
         // The engine's collaboration internals, for the diagnostics
         // panel. The frame is an opaque origin, so only this shim can
@@ -334,6 +379,10 @@
             probe.needUnlock = ce.m_aNeedUnlock ? ce.m_aNeedUnlock.length : null;
             probe.needUnlock2 = ce.m_aNeedUnlock2 ? ce.m_aNeedUnlock2.length : null;
           }
+        } catch (e) {}
+        try { probe.haveChanges = api._haveChanges ? api._haveChanges() === true : null; } catch (e) {}
+        try {
+          probe.haveOtherChanges = api._haveOtherChanges ? api._haveOtherChanges() === true : null;
         } catch (e) {}
         try {
           var co = api.CoAuthoringApi;
