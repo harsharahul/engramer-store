@@ -200,6 +200,14 @@ export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; type: str
   { table: "files", column: "key_epoch", type: "BIGINT NOT NULL DEFAULT 0" },
   // Advances on a credential change; tokens minted before it stop working.
   { table: "users", column: "token_epoch", type: "BIGINT NOT NULL DEFAULT 0" },
+  // Which generation the stored bytes are, and the channel position those
+  // bytes contain, so a save can record where it stands without trimming
+  // the log. Zero means no save has stamped a marker yet.
+  { table: "channel_state", column: "content_generation", type: "BIGINT NOT NULL DEFAULT 0" },
+  { table: "channel_state", column: "content_channel_seq", type: "BIGINT NOT NULL DEFAULT 0" },
+  // The role the connection joined with, so clients can elect a member
+  // that is actually allowed to write.
+  { table: "channel_presence", column: "role", type: "TEXT" },
 ];
 
 /** Tables shared verbatim between the two dialects. */
@@ -338,6 +346,8 @@ export const COMMON_SCHEMA = `
       snapshot_seq BIGINT NOT NULL DEFAULT 0,
       bytes BIGINT NOT NULL DEFAULT 0,
       member_counter BIGINT NOT NULL DEFAULT 0,
+      content_generation BIGINT NOT NULL DEFAULT 0,
+      content_channel_seq BIGINT NOT NULL DEFAULT 0,
       updated_at BIGINT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS collab_tickets (
@@ -352,6 +362,7 @@ export const COMMON_SCHEMA = `
       pod_id TEXT NOT NULL,
       user_id BIGINT NOT NULL,
       user_index BIGINT NOT NULL,
+      role TEXT,
       joined_at BIGINT NOT NULL,
       last_seen BIGINT NOT NULL,
       PRIMARY KEY (file_id, conn_id)

@@ -47,8 +47,8 @@ export function registerCollabRoutes(app: FastifyInstance): void {
 
   /** The file, but only when the caller owns it and it is live. */
   const ownedFile = (fileId: string, uid: number) =>
-    app.db.get<{ id: string; key_epoch: number }>(
-      "SELECT id, key_epoch FROM files WHERE id = ? AND user_id = ? AND deleted = 0 AND trashed = 0 AND uploaded = 1",
+    app.db.get<{ id: string; key_epoch: number; generation: number }>(
+      "SELECT id, key_epoch, generation FROM files WHERE id = ? AND user_id = ? AND deleted = 0 AND trashed = 0 AND uploaded = 1",
       fileId,
       uid,
     );
@@ -358,8 +358,15 @@ export function registerCollabRoutes(app: FastifyInstance): void {
       // frame it cannot decrypt, reloads, meets it again, and never gets
       // in — the document would be permanently unopenable for everyone.
       await t.run("DELETE FROM channel_messages WHERE file_id = ?", fileId);
+      // The content marker moves with everything else: sequence numbers
+      // restart from zero, so a marker left standing would sit past the
+      // entire post-rekey log and every joiner would skip it. The current
+      // generation is the honest pairing for the just-re-encrypted bytes.
       await t.run(
-        "UPDATE channel_state SET last_seq = 0, snapshot_seq = 0, bytes = 0, updated_at = ? WHERE file_id = ?",
+        `UPDATE channel_state SET last_seq = 0, snapshot_seq = 0, bytes = 0,
+           content_generation = ?, content_channel_seq = 0, updated_at = ?
+         WHERE file_id = ?`,
+        file.generation,
         now,
         fileId,
       );

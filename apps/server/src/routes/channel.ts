@@ -202,8 +202,12 @@ export function registerChannelRoutes(app: FastifyInstance): void {
                 last_seq: number;
                 snapshot_generation: number;
                 snapshot_seq: number;
+                content_generation: number;
+                content_channel_seq: number;
               }>(
-                "SELECT last_seq, snapshot_generation, snapshot_seq FROM channel_state WHERE file_id = ?",
+                `SELECT last_seq, snapshot_generation, snapshot_seq,
+                        content_generation, content_channel_seq
+                 FROM channel_state WHERE file_id = ?`,
                 fileId,
               );
               conn.send({
@@ -211,6 +215,8 @@ export function registerChannelRoutes(app: FastifyInstance): void {
                 channelSeq: state?.last_seq ?? 0,
                 snapshotGeneration: state?.snapshot_generation ?? 0,
                 snapshotSeq: state?.snapshot_seq ?? 0,
+                contentGeneration: state?.content_generation ?? 0,
+                contentChannelSeq: state?.content_channel_seq ?? 0,
                 you: connId,
                 yourIndex: memberIndex,
                 members: (await membersFrame()).members,
