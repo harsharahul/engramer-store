@@ -3,6 +3,31 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.44.0] - 2026-08-10
+
+### Added
+- **Missing thumbnails fill themselves in.** Images and videos that
+  arrive without previews, such as files saved through the iOS Files
+  app, gain a thumbnail, dimensions, and a blur placeholder the next
+  time any signed-in device has the vault open. Devices coordinate
+  through the synced library itself: a desktop picks the work up
+  within seconds, a phone holds back so a desktop can win, and
+  completed work is visible to every device on its next sync. A
+  "Generate missing thumbnails" palette command runs the pass on
+  demand.
+- **Meaning-search embeddings record the model that produced them.**
+  Search only compares vectors from the current model, and a future
+  model upgrade re-indexes the library automatically instead of mixing
+  incomparable vectors.
+
+### Changed
+- **Photo backup is much faster.** Backup now overlaps transfers the
+  way manual uploads do (one photo uploads while the next is read),
+  and the heavy analysis passes (text recognition, meaning indexing,
+  date scanning) no longer hold up the upload: they complete
+  afterwards, from whichever signed-in device gets there first. The
+  grid still shows correct thumbnails immediately.
+
 ## [0.43.0] - 2026-08-10
 
 ### Added
