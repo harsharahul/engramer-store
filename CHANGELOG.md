@@ -3,6 +3,17 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+- **A collaborative session that repairs itself no longer sticks on
+  "Starting the editor".** The editor announces itself exactly once per
+  frame load, so a repair that rebuilt the session against the
+  already-loaded frame waited forever for an announce that had already
+  happened. Every repair now reloads the frame itself, so reconnects,
+  membership upgrades and channel repairs land back in the document
+  instead of a spinner.
+
 ## [0.40.7] - 2026-08-10
 
 ### Fixed

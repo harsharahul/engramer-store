@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { answerServerMessage } from "./session";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { answerServerMessage, EditorSession } from "./session";
+import type { SessionHandlers } from "./session";
 import { CollabBridge } from "./collab";
 
 /**
@@ -108,5 +109,100 @@ describe("collaborative answers (bridge attached)", () => {
     expect(effects.toEditor.some((m) => (m as { type?: string }).type === "unSaveLock")).toBe(
       false,
     );
+  });
+});
+
+/**
+ * The announce handshake. The editor frame announces itself exactly once
+ * per document load; the session that answers must have been listening
+ * from the frame's first moment. A session created over a frame that has
+ * already announced can never start, which is why OfficeEditor keys the
+ * iframe so every resync gets a fresh frame.
+ */
+describe("the announce handshake", () => {
+  type Listener = (event: unknown) => void;
+  let listeners: Listener[];
+
+  beforeEach(() => {
+    listeners = [];
+    (globalThis as { window?: unknown }).window = {
+      addEventListener: (_type: string, fn: Listener) => listeners.push(fn),
+      removeEventListener: (_type: string, fn: Listener) => {
+        listeners = listeners.filter((l) => l !== fn);
+      },
+    };
+  });
+
+  afterEach(() => {
+    delete (globalThis as { window?: unknown }).window;
+  });
+
+  function fakeFrame() {
+    const sent: unknown[] = [];
+    const contentWindow = {
+      postMessage: (message: unknown) => {
+        sent.push(message);
+      },
+      focus() {},
+    };
+    const frame = { contentWindow, focus() {} } as unknown as HTMLIFrameElement;
+    return { frame, sent, contentWindow };
+  }
+
+  function handlers(): SessionHandlers {
+    return {
+      onLoading() {},
+      onReady() {},
+      onChanged() {},
+      onShortcut() {},
+      onFailed() {},
+    };
+  }
+
+  function announce(contentWindow: unknown) {
+    for (const listener of [...listeners]) {
+      listener({ source: contentWindow, data: JSON.stringify({ event: "onAppReady" }) });
+    }
+  }
+
+  function commandsIn(sent: unknown[]): string[] {
+    return sent
+      .filter((m): m is string => typeof m === "string")
+      .map((m) => (JSON.parse(m) as { command?: string }).command ?? "");
+  }
+
+  it("waits for the collaboration decision before starting", () => {
+    const { frame, sent, contentWindow } = fakeFrame();
+    const session = new EditorSession(frame, "docx", "doc", handlers());
+    announce(contentWindow);
+    expect(commandsIn(sent)).toEqual([]);
+    session.begin(undefined);
+    expect(commandsIn(sent)).toEqual(["init", "openDocument"]);
+    session.close();
+  });
+
+  it("waits for the announce before starting", () => {
+    const { frame, sent, contentWindow } = fakeFrame();
+    const session = new EditorSession(frame, "docx", "doc", handlers());
+    session.begin(undefined);
+    expect(commandsIn(sent)).toEqual([]);
+    announce(contentWindow);
+    expect(commandsIn(sent)).toEqual(["init", "openDocument"]);
+    session.close();
+  });
+
+  it("never starts a second session over a frame that already announced", () => {
+    const { frame, sent, contentWindow } = fakeFrame();
+    const first = new EditorSession(frame, "docx", "doc", handlers());
+    announce(contentWindow);
+    first.begin(undefined);
+    expect(commandsIn(sent)).toEqual(["init", "openDocument"]);
+    first.close();
+
+    sent.length = 0;
+    const second = new EditorSession(frame, "docx", "doc", handlers());
+    second.begin(undefined);
+    expect(commandsIn(sent)).toEqual([]);
+    second.close();
   });
 });
