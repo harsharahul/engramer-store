@@ -134,3 +134,32 @@ describe("analysis reads a bounded copy, not the original", () => {
     expect(await boundedForReading(800, 600)).toBeNull();
   });
 });
+
+describe("downloadContent and the moving digest", () => {
+  it("accepts strictly newer authenticated bytes over a stale entry digest", async () => {
+    const { encryptBytes, contentDigest, utf8Encode } = await import("@engramer/crypto");
+    const { downloadContent, IntegrityError } = await import("./transfer");
+    const { api } = await import("./api");
+    const key = generateKey();
+    const current = utf8Encode("the room saved after my last sync");
+    const staleDigest = contentDigest(utf8Encode("what my library still expects"));
+    (api as unknown as Record<string, unknown>).downloadBlobDetailed = async () => ({
+      bytes: encryptBytes(current, key),
+      generation: 7,
+    });
+
+    // Newer generation: the entry is what lags; the bytes decrypted under
+    // the file key, which authenticates them.
+    const ahead = await downloadContent("f1", key, staleDigest, { newerThan: 5 });
+    expect(ahead.generation).toBe(7);
+    expect(ahead.bytes).toEqual(current);
+
+    // Same generation with a wrong digest is real damage, not lag.
+    await expect(
+      downloadContent("f1", key, staleDigest, { newerThan: 7 }),
+    ).rejects.toBeInstanceOf(IntegrityError);
+
+    // Without a stated baseline the check stays exactly as strict.
+    await expect(downloadContent("f1", key, staleDigest)).rejects.toBeInstanceOf(IntegrityError);
+  });
+});
