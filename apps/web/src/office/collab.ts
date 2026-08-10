@@ -207,7 +207,9 @@ export class CollabBridge {
         effects.eph.push({
           ref: 0,
           k: "cursor",
-          d: { idx: this.selfIndex, cursor: message.cursor },
+          // Cloned: the engine reuses and mutates the object it handed
+          // over, and the frame may be sealed on a later tick.
+          d: { idx: this.selfIndex, cursor: structuredClone(message.cursor) },
         });
         return effects;
       }
