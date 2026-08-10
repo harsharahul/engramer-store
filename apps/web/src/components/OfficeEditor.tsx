@@ -215,6 +215,8 @@ export function OfficeEditor(props: {
 
     let channel: ChannelClient | null = null;
     let bridge: CollabBridge | undefined;
+    /** Whether anyone else holds a key to this document, once known. */
+    let knownCollaborative = false;
     let order: ChannelOrder = newChannelOrder(opened.id);
     let connId = "";
     /** Whether the engine's auth saw anyone else; solo auth cannot co-edit. */
@@ -463,6 +465,23 @@ export function OfficeEditor(props: {
 
     void (async () => {
       try {
+        // A recipient knows the document is shared; an owner asks whether
+        // anyone else holds a key. The answer gates the channel dial AND
+        // how strictly the download judges its bytes, and it must cover
+        // the OWNER: an owner's entry says shared: false, yet co-editors
+        // move its digest exactly as they move a recipient's, and every
+        // stale-entry healing keyed on entry.shared silently skipped the
+        // one member every room has.
+        const collaborativePromise: Promise<boolean> =
+          opened.shared === true
+            ? Promise.resolve(true)
+            : Promise.race([
+                api
+                  .listCollaborators(opened.id)
+                  .then((r) => r.collaborators.length > 0)
+                  .catch(() => false),
+                new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5_000)),
+              ]);
         // The document's own bytes come first and never wait for anything
         // else: fetching and converting start immediately, while the
         // channel dials in parallel. A websocket a proxy or VPN
@@ -472,15 +491,19 @@ export function OfficeEditor(props: {
           setStage("decrypting");
           // A co-editor's save moves the digest while this client's poll
           // is still pending; opening from the cached entry then refuses
-          // good bytes. Refresh and retry, shared files only. The server
-          // names the generation it served, for pairing with the marker.
+          // good bytes. Refresh and retry, collaborative files only. The
+          // server names the generation it served, for the marker pairing.
+          const joint = await collaborativePromise;
+          // The freshen retry gates on entry.shared; hand it the truth
+          // about this document rather than the recipient-only flag.
+          const effective = joint && !opened.shared ? { ...opened, shared: true } : opened;
           let generation: number | null = null;
-          const plaintext = await openSharedContent(opened, async (entry) => {
-            // A shared entry only ever lags behind the server; bytes at or
-            // past the generation it knows are accepted so a busy room's
-            // saves cannot outrun this open, no matter their cadence.
+          const plaintext = await openSharedContent(effective, async (entry) => {
+            // A collaborative entry only ever lags behind the server;
+            // bytes at or past the generation it knows are accepted so a
+            // busy room's saves cannot outrun this open at any cadence.
             const result = await downloadContent(entry.id, entry.key, entry.digest, {
-              atLeast: entry.shared ? (entry.generation ?? 0) : null,
+              atLeast: joint ? (entry.generation ?? 0) : null,
             });
             generation = result.generation;
             return result.bytes;
@@ -493,18 +516,8 @@ export function OfficeEditor(props: {
           return { imported, generation };
         };
         const docPromise = fetchDocument();
-        // A recipient knows the document is shared; an owner asks whether
-        // anyone else holds a key. Only then is the channel worth dialing.
-        let collaborative = opened.shared === true;
-        if (!collaborative && !opened.shared) {
-          collaborative = await Promise.race([
-            api
-              .listCollaborators(opened.id)
-              .then((r) => r.collaborators.length > 0)
-              .catch(() => false),
-            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5_000)),
-          ]);
-        }
+        const collaborative = await collaborativePromise;
+        knownCollaborative = collaborative;
         if (collaborative && !cancelled) {
           setCollab("connecting");
           try {
@@ -783,7 +796,7 @@ export function OfficeEditor(props: {
           // road, not a permanent refusal screen: the next incarnation
           // downloads the then-current bytes, and the breaker still ends
           // a truly unfollowable session honestly.
-          if (err instanceof IntegrityError && (bridge || opened.shared)) {
+          if (err instanceof IntegrityError && (bridge || opened.shared || knownCollaborative)) {
             diag("collab", "the digest moved under the open; taking the repair road");
             resync();
             return;
