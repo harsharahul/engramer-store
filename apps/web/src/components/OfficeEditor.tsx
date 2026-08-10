@@ -230,8 +230,6 @@ export function OfficeEditor(props: {
     let knownCollaborative = false;
     let order: ChannelOrder = newChannelOrder(opened.id);
     let connId = "";
-    /** Whether the engine's auth saw anyone else; solo auth cannot co-edit. */
-    let bridgeCompany = false;
     /** Set once the collab decision reached the session; a welcome after
      * this cannot join the current engine and upgrades via reload. */
     let sessionBegun = false;
@@ -429,6 +427,13 @@ export function OfficeEditor(props: {
             // A door that opened proves the channel is followable again.
             resyncCountRef.current = 0;
             drainTail();
+            // Members may have moved while the engine loaded; hand it the
+            // current room so a join during startup is never lost.
+            const b = bridge;
+            const s = sessionRef.current;
+            if (b && s && latestMembers.length > 0) {
+              s.applyEffects(b.onMembers(latestMembers));
+            }
             setStage("ready");
           },
           onChanged: (modified) => {
@@ -593,7 +598,6 @@ export function OfficeEditor(props: {
                     : null;
                 diag("collab", `welcome: member ${welcome.yourIndex}, ${welcome.members.length} present`);
                 order = newChannelOrder(opened.id);
-                bridgeCompany = welcome.members.length > 1;
                 bridge = new CollabBridge({
                   fileId: opened.id,
                   selfConnId: welcome.you,
@@ -665,11 +669,16 @@ export function OfficeEditor(props: {
                 try {
                   const decoded = decryptFrame(payload, opened.key);
                   if (!acceptEphemeral(opened.id, decoded, sender)) {
+                    skippedFrame("eph-refused", 0);
                     return;
                   }
                   const claimedIndex = (decoded.d as { idx?: number } | undefined)?.idx;
                   const realIndex = indexByConn.get(sender);
                   if (claimedIndex !== undefined && realIndex !== undefined && claimedIndex !== realIndex) {
+                    // A cursor wearing the wrong index is spoof-shaped, but
+                    // the common cause is an index table lagging a members
+                    // frame; named so a trailing caret can be attributed.
+                    skippedFrame("eph-index", 0);
                     return;
                   }
                   noteEphReceived(stats, sender);
@@ -677,6 +686,8 @@ export function OfficeEditor(props: {
                   const s = sessionRef.current;
                   if (b && s && engineReady) {
                     s.applyEffects(b.onRemoteFrame(decoded));
+                  } else {
+                    skippedFrame("eph-early", 0);
                   }
                 } catch {
                   // Lossy by design; a bad cursor frame costs nothing.
@@ -685,26 +696,21 @@ export function OfficeEditor(props: {
               onMembers: (members) => {
                 membersHook.current(members);
                 setPeers(members.length);
+                // The bridge's view of the room tracks the truth even
+                // while the engine is still loading; the effects a loading
+                // engine cannot take are re-derived at ready. Company
+                // arriving needs NO reload: the phantom keeper has kept
+                // every session in co-authoring mode since its first
+                // keystroke, so the connectState here introduces the
+                // newcomer the way it introduces any membership change.
+                // The reload this used to do predates the phantom and
+                // discarded a working engine on every join.
                 const b = bridge;
-                const s = sessionRef.current;
-                if (b && s && engineReady) {
-                  s.applyEffects(b.onMembers(members));
-                }
-                // The engine decides single-user or co-editing at auth
-                // time and never revisits it. A session that authed alone
-                // types locally and broadcasts nothing, so the first
-                // person in a room would edit invisibly forever. Company
-                // arriving re-auths through the ordinary reload, with any
-                // unsent local work committed first so nothing is lost.
-                if (b && !bridgeCompany && members.length > 1) {
-                  bridgeCompany = true;
-                  if (dirtyRef.current) {
-                    void savePromiseRef
-                      .current()
-                      .catch(() => {})
-                      .finally(() => resync(false));
-                  } else {
-                    resync(false);
+                if (b) {
+                  const effects = b.onMembers(members);
+                  const s = sessionRef.current;
+                  if (s && engineReady) {
+                    s.applyEffects(effects);
                   }
                 }
               },
