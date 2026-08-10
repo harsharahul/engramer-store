@@ -190,6 +190,71 @@ describe("locks derive from the total order", () => {
   });
 });
 
+/**
+ * For text documents the ONLY way a peer's paragraph lock clears in the
+ * engine is a locks array riding a saveChanges. A committing member must
+ * carry the blocks it held, and a member who leaves must have its blocks
+ * released for it, or the red brackets accumulate until nobody can type.
+ */
+describe("locks release into the engine", () => {
+  it("carries the committing member's held blocks on its change frame", () => {
+    const b = bridge();
+    const claim = b.onEngineMessage({ type: "getLock", block: "para-1" });
+    b.onOwnFrameAcked(claim.post[0]!.ref, 5);
+    const save = b.onEngineMessage({
+      type: "saveChanges",
+      changes: JSON.stringify(["edit"]),
+      startSaveChanges: true,
+      endSaveChanges: true,
+      deleteIndex: null,
+    });
+    expect(save.post[0]!.d.locks).toContain("para-1");
+  });
+
+  it("releases a remote committer's blocks into the local engine", () => {
+    const b = bridge();
+    const effects = b.onRemoteFrame({
+      ch: "file-1",
+      s: "conn-peer",
+      n: 1,
+      k: "chg",
+      d: { idx: 2, changes: ["edit"], locks: ["para-1"] },
+    });
+    const save = effects.toEditor.find((m) => m.type === "saveChanges")!;
+    expect(save.locks).toEqual([
+      expect.objectContaining({ block: "para-1", user: engineUserId(2) }),
+    ]);
+  });
+
+  it("releases a departed member's locks and erases its cursor", () => {
+    const b = bridge();
+    b.onRemoteFrame({ ch: "file-1", s: "conn-peer", n: 1, k: "lock", d: { idx: 2, block: "para-9" } });
+    const effects = b.onMembers([{ connId: "conn-self", index: 3 }]);
+    const release = effects.toEditor.find(
+      (m) => m.type === "saveChanges" && Array.isArray(m.locks) && (m.locks as unknown[]).length > 0,
+    )!;
+    expect(release.locks).toContainEqual(
+      expect.objectContaining({ block: "para-9", user: engineUserId(2) }),
+    );
+    const cursor = effects.toEditor.find((m) => m.type === "cursor")!;
+    const msg = (cursor.messages as Array<{ user: string }>)[0]!;
+    expect(msg.user).toBe(engineUserId(2));
+  });
+
+  it("does not release blocks for a member who is still present", () => {
+    const b = bridge();
+    b.onRemoteFrame({ ch: "file-1", s: "conn-peer", n: 1, k: "lock", d: { idx: 2, block: "para-9" } });
+    const effects = b.onMembers([
+      { connId: "conn-self", index: 3 },
+      { connId: "conn-peer", index: 2 },
+    ]);
+    const release = effects.toEditor.find(
+      (m) => m.type === "saveChanges" && Array.isArray(m.locks) && (m.locks as unknown[]).length > 0,
+    );
+    expect(release).toBeUndefined();
+  });
+});
+
 describe("presence and cursors", () => {
   it("sends cursors as ephemerals, never as durable frames", () => {
     const b = bridge();
