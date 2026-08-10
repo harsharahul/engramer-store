@@ -168,6 +168,8 @@ export interface OcrProgress {
  */
 export interface SweepOptions {
   skip?: Set<string>;
+  /** Consulted between files; true stops the sweep after the file in hand. */
+  stop?: () => boolean;
 }
 
 /** Aggregate progress for a large transfer; per-file rows would drown the UI. */
@@ -195,6 +197,8 @@ interface StoreState {
   semanticProgress: OcrProgress | null;
   thumbProgress: OcrProgress | null;
   batch: BatchProgress | null;
+  /** Stops whatever the batch pill is narrating; set by the pass that owns it. */
+  batchStop: (() => void) | null;
   /** Search-index warm-up progress; null when idle or complete. */
   indexWarm: { done: number; total: number } | null;
 
@@ -813,6 +817,7 @@ export const useStore = create<StoreState>((set, get) => {
     semanticProgress: null,
     thumbProgress: null,
     batch: null,
+    batchStop: null,
     indexWarm: null,
 
     // A failed first sync must never strand the user on a spinner: the
@@ -1919,6 +1924,9 @@ export const useStore = create<StoreState>((set, get) => {
       );
       let found = 0;
       for (let i = 0; i < candidates.length; i++) {
+        if (opts?.stop?.()) {
+          break;
+        }
         const file = candidates[i]!;
         set({ ocrProgress: { done: i, total: candidates.length, current: file.name } });
         opts?.skip?.add(file.id);
@@ -1957,6 +1965,9 @@ export const useStore = create<StoreState>((set, get) => {
       );
       let found = 0;
       for (let i = 0; i < candidates.length; i++) {
+        if (opts?.stop?.()) {
+          break;
+        }
         const file = candidates[i]!;
         set({ ocrProgress: { done: i, total: candidates.length, current: file.name } });
         opts?.skip?.add(file.id);
@@ -2076,6 +2087,9 @@ export const useStore = create<StoreState>((set, get) => {
       );
       let indexed = 0;
       for (let i = 0; i < candidates.length; i++) {
+        if (opts?.stop?.()) {
+          break;
+        }
         const file = candidates[i]!;
         set({ semanticProgress: { done: i, total: candidates.length, current: file.name } });
         opts?.skip?.add(file.id);
@@ -2154,6 +2168,9 @@ export const useStore = create<StoreState>((set, get) => {
         .sort((a, b) => a.size - b.size);
       let made = 0;
       for (let i = 0; i < candidates.length; i++) {
+        if (opts?.stop?.()) {
+          break;
+        }
         const file = candidates[i]!;
         set({ thumbProgress: { done: i, total: candidates.length, current: file.name } });
         opts?.skip?.add(file.id);

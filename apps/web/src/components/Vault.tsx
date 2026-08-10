@@ -2231,6 +2231,11 @@ export function Vault() {
             Uploading {store.batch.current || "…"} · {store.batch.done + store.batch.failed} of{" "}
             {store.batch.total}
             {store.batch.failed > 0 ? ` · ${store.batch.failed} failed` : ""}
+            {store.batchStop && (
+              <button className="tray-cancel" onClick={() => store.batchStop?.()}>
+                Stop
+              </button>
+            )}
           </div>
         )}
         {store.ocrProgress && (

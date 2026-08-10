@@ -5,6 +5,7 @@ const rig = vi.hoisted(() => ({
   peak: 0,
   backedUp: [] as string[],
   batches: [] as ({ done: number; total: number; current: string } | null)[],
+  stops: [] as ((() => void) | null | undefined)[],
   backfills: 0,
 }));
 
@@ -47,8 +48,16 @@ vi.mock("./store", () => ({
         return sourceId;
       },
     }),
-    setState: (patch: { batch?: { done: number; total: number; current: string } | null }) => {
-      rig.batches.push(patch.batch ?? null);
+    setState: (patch: {
+      batch?: { done: number; total: number; current: string } | null;
+      batchStop?: (() => void) | null;
+    }) => {
+      if ("batch" in patch) {
+        rig.batches.push(patch.batch ?? null);
+      }
+      if ("batchStop" in patch) {
+        rig.stops.push(patch.batchStop);
+      }
     },
   },
 }));
@@ -63,6 +72,7 @@ import {
   loadPolicy,
   runBackup,
   savePolicy,
+  stopAutoBackup,
   windowStartMs,
 } from "./backup";
 
@@ -154,6 +164,30 @@ describe("autoBackupPass", () => {
     savePolicy({ ...DEFAULT_POLICY, enabled: true });
     expect(await autoBackupPass(10_060_000)).toBeNull();
     expect(await autoBackupPass(10_000_000 + 11 * 60_000)).not.toBeNull();
+    localStorage.clear();
+  });
+
+  it("offers a stop that halts the pass and hands the store the control", async () => {
+    savePolicy({ ...DEFAULT_POLICY, enabled: true });
+    rig.batches.length = 0;
+    rig.backedUp.length = 0;
+    rig.stops.length = 0;
+    const pass = autoBackupPass(100_000_000);
+    // Stop as soon as the first photo reports; in-flight lanes finish,
+    // the rest are never taken up.
+    await vi.waitFor(() => {
+      if (rig.batches.length === 0) {
+        throw new Error("not started");
+      }
+    });
+    stopAutoBackup();
+    const progress = await pass;
+    expect(progress).not.toBeNull();
+    expect(progress!.done).toBeLessThan(6);
+    // The pill got a working stop control and both cleared at the end.
+    expect(rig.stops.some((s) => typeof s === "function")).toBe(true);
+    expect(rig.stops[rig.stops.length - 1]).toBeNull();
+    expect(rig.batches[rig.batches.length - 1]).toBeNull();
     localStorage.clear();
   });
 });

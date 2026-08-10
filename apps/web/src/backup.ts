@@ -168,6 +168,14 @@ const AUTO_COOLDOWN_MS = 10 * 60_000;
 let lastAutoPass = -Infinity;
 let autoRunning = false;
 let autoInstalled = false;
+let autoAbort: { aborted: boolean } | null = null;
+
+/** Stops the running automatic pass; in-flight photos finish, the rest wait. */
+export function stopAutoBackup(): void {
+  if (autoAbort) {
+    autoAbort.aborted = true;
+  }
+}
 
 export async function autoBackupPass(now = Date.now()): Promise<BackupProgress | null> {
   if (autoRunning || now - lastAutoPass < AUTO_COOLDOWN_MS) {
@@ -187,20 +195,29 @@ export async function autoBackupPass(now = Date.now()): Promise<BackupProgress |
   }
   autoRunning = true;
   lastAutoPass = now;
+  autoAbort = { aborted: false };
+  // Visibility and control travel together: the pill that narrates the
+  // pass is also where it can be stopped.
+  useStore.setState({ batchStop: stopAutoBackup });
   try {
-    const progress = await runBackup(policy, (p) => {
-      if (p.total > 0) {
-        useStore.setState({
-          batch: { done: p.done, total: p.total, failed: p.failed, current: p.current ?? "" },
-        });
-      }
-    });
+    const progress = await runBackup(
+      policy,
+      (p) => {
+        if (p.total > 0) {
+          useStore.setState({
+            batch: { done: p.done, total: p.total, failed: p.failed, current: p.current ?? "" },
+          });
+        }
+      },
+      autoAbort,
+    );
     // The pass ships photos with their heavy scanners deferred; let the
     // backfill catch up while the app is still open.
     scheduleBackfill();
     return progress;
   } finally {
-    useStore.setState({ batch: null });
+    useStore.setState({ batch: null, batchStop: null });
+    autoAbort = null;
     autoRunning = false;
   }
 }

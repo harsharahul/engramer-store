@@ -382,6 +382,99 @@ describe("sweeps remember what they attempted", () => {
 });
 
 /**
+ * A running sweep must stop when asked: the file in hand finishes, the
+ * rest wait for another day. Downloading someone's originals is not
+ * something an app gets to insist on.
+ */
+describe("sweeps stop when asked", () => {
+  const stopAfter = (n: number) => {
+    let seen = 0;
+    return {
+      probe: () => seen >= n,
+      count: () => seen++,
+    };
+  };
+
+  it("backfillThumbnails stops between files", async () => {
+    const gate = stopAfter(1);
+    useStore.setState({
+      files: new Map([
+        ["t1", entry({ id: "t1", name: "a.jpg", mime: "image/jpeg" })],
+        ["t2", entry({ id: "t2", name: "b.jpg", mime: "image/jpeg" })],
+      ]),
+      backfillThumbnail: async () => {
+        gate.count();
+        return true;
+      },
+    });
+    const made = await useStore.getState().backfillThumbnails({ stop: gate.probe });
+    expect(made).toBe(1);
+  });
+
+  it("recognizeAllImages stops between files", async () => {
+    const gate = stopAfter(1);
+    const original = useStore.getState().recognizeFile;
+    useStore.setState({
+      files: new Map([
+        ["s1", entry({ id: "s1", name: "a.jpg", mime: "image/jpeg" })],
+        ["s2", entry({ id: "s2", name: "b.jpg", mime: "image/jpeg" })],
+      ]),
+      recognizeFile: async () => {
+        gate.count();
+        return true;
+      },
+    });
+    try {
+      expect(await useStore.getState().recognizeAllImages({ stop: gate.probe })).toBe(1);
+    } finally {
+      useStore.setState({ recognizeFile: original });
+    }
+  });
+
+  it("embedAllImages stops between files", async () => {
+    const gate = stopAfter(1);
+    const original = useStore.getState().embedFile;
+    useStore.setState({
+      files: new Map([
+        ["e1", entry({ id: "e1", name: "a.jpg", mime: "image/jpeg", hasClip: false })],
+        ["e2", entry({ id: "e2", name: "b.jpg", mime: "image/jpeg", hasClip: false })],
+      ]),
+      embedFile: async () => {
+        gate.count();
+        return true;
+      },
+    });
+    try {
+      expect(await useStore.getState().embedAllImages({ stop: gate.probe })).toBe(1);
+    } finally {
+      useStore.setState({ embedFile: original });
+    }
+  });
+
+  it("scanLibraryForFacts stops between files", async () => {
+    useStore.setState({
+      files: new Map([
+        ["d1", entry({ id: "d1", name: "a.txt", mime: "text/plain", text: "plain words" })],
+        ["d2", entry({ id: "d2", name: "b.txt", mime: "text/plain", text: "plain words" })],
+      ]),
+    });
+    const totals: number[] = [];
+    const unsub = useStore.subscribe((s) => {
+      if (s.ocrProgress) {
+        totals.push(s.ocrProgress.done);
+      }
+    });
+    let iterations = 0;
+    await useStore.getState().scanLibraryForFacts({
+      stop: () => iterations++ >= 1,
+    });
+    unsub();
+    // Two candidates, one iteration before the stop was honored.
+    expect(totals).toEqual([0]);
+  });
+});
+
+/**
  * Meaning vectors from different models are not comparable: a cosine
  * between them is noise that ranks with confidence. Every embedding
  * therefore carries the version of the model that made it, the sweep

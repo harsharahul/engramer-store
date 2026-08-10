@@ -21,6 +21,38 @@ import { useStore } from "./store";
 /** Auto runs on a phone leave big originals for a desktop or a hand-run. */
 export const HANDHELD_AUTO_MAX_BYTES = 32 * 1024 * 1024;
 
+const AUTO_PREF_KEY = "engram-backfill-auto";
+
+/**
+ * Whether this device volunteers for automatic backfill. On by default:
+ * the feature exists so gaps close without anyone thinking about them.
+ * The off switch exists because backfill downloads originals to make
+ * derivatives, and on a metered connection that is the user's call, not
+ * the app's. Hand-run buttons and palette commands ignore this.
+ */
+export function autoBackfillEnabled(): boolean {
+  try {
+    return localStorage.getItem(AUTO_PREF_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setAutoBackfillEnabled(on: boolean): void {
+  try {
+    localStorage.setItem(AUTO_PREF_KEY, on ? "1" : "0");
+  } catch {
+    // Preference persistence is best-effort.
+  }
+}
+
+let stopAsked = false;
+
+/** Stops the running pass after the file in hand; the next pass starts fresh. */
+export function stopBackfill(): void {
+  stopAsked = true;
+}
+
 const DESKTOP_DELAY_MS = 3_000;
 const HANDHELD_DELAY_MS = 90_000;
 const HANDHELD_JITTER_MS = 30_000;
@@ -63,7 +95,7 @@ export interface BackfillResult {
  * exactly the gate its inline counterpart honors at upload.
  */
 export async function runBackfill(): Promise<BackfillResult | null> {
-  if (running) {
+  if (running || !autoBackfillEnabled()) {
     return null;
   }
   const store = useStore.getState();
@@ -74,18 +106,23 @@ export async function runBackfill(): Promise<BackfillResult | null> {
     return null;
   }
   running = true;
+  stopAsked = false;
+  const stop = () => stopAsked;
   try {
     const cap = isHandheld() ? { maxBytes: HANDHELD_AUTO_MAX_BYTES } : {};
-    const thumbs = await store.backfillThumbnails({ skip: attemptedThumbs, ...cap });
-    const text = ocrEnabled()
-      ? await useStore.getState().recognizeAllImages({ skip: attemptedOcr })
-      : 0;
-    const meaning = semanticEnabled()
-      ? await useStore.getState().embedAllImages({ skip: attemptedClip })
-      : 0;
-    const facts = factsEnabled()
-      ? await useStore.getState().scanLibraryForFacts({ skip: attemptedFacts })
-      : 0;
+    const thumbs = await store.backfillThumbnails({ skip: attemptedThumbs, stop, ...cap });
+    const text =
+      !stopAsked && ocrEnabled()
+        ? await useStore.getState().recognizeAllImages({ skip: attemptedOcr, stop })
+        : 0;
+    const meaning =
+      !stopAsked && semanticEnabled()
+        ? await useStore.getState().embedAllImages({ skip: attemptedClip, stop })
+        : 0;
+    const facts =
+      !stopAsked && factsEnabled()
+        ? await useStore.getState().scanLibraryForFacts({ skip: attemptedFacts, stop })
+        : 0;
     return { thumbs, text, meaning, facts };
   } finally {
     running = false;
