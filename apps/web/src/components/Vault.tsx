@@ -2320,6 +2320,8 @@ export function Vault() {
               await store.saveFileBinary(editorFile.id, bytes, text, {
                 collabSnapshot: opts?.snapshot,
                 collabUpTo: opts?.upTo,
+                collabMode: opts?.mode,
+                collabConn: opts?.conn,
               });
             }}
             onSaveCopy={async (bytes) => {

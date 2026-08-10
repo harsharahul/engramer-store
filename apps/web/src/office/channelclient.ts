@@ -13,9 +13,13 @@ export interface ChannelWelcome {
   channelSeq: number;
   snapshotGeneration: number;
   snapshotSeq: number;
+  /** Which generation the stored bytes are; absent on an older server. */
+  contentGeneration?: number;
+  /** The channel position those bytes contain; absent on an older server. */
+  contentChannelSeq?: number;
   you: string;
   yourIndex: number;
-  members: Array<{ connId: string; index: number; name?: string }>;
+  members: Array<{ connId: string; index: number; name?: string; role?: string }>;
 }
 
 export interface ChannelEvents {
@@ -23,9 +27,11 @@ export interface ChannelEvents {
   onLog(seq: number, sender: string, payload: string): void;
   onCaughtUp(seq: number): void;
   onEph(sender: string, payload: string): void;
-  onMembers(members: Array<{ connId: string; index: number; name?: string }>): void;
+  onMembers(members: Array<{ connId: string; index: number; name?: string; role?: string }>): void;
   onAck(ref: number, seq: number): void;
   onTruncated(snapshotGeneration: number, snapshotSeq: number): void;
+  /** A content save moved the stored bytes without touching the log. */
+  onContent?(contentGeneration: number, contentChannelSeq: number): void;
   /** The log passed its byte ceiling; only a snapshot save clears it. */
   onPleaseSnapshot(): void;
   /** The channel is gone and redialing has been abandoned. */
@@ -108,7 +114,21 @@ export class ChannelClient {
             this.events.onAck(Number(frame.ref), Number(frame.seq));
             return;
           case "truncated":
+            // A checkpoint also names where the new bytes stand; keep the
+            // marker fresh before the truncation decision runs.
+            if (frame.contentGeneration !== undefined) {
+              this.events.onContent?.(
+                Number(frame.contentGeneration),
+                Number(frame.contentChannelSeq),
+              );
+            }
             this.events.onTruncated(Number(frame.snapshotGeneration), Number(frame.snapshotSeq));
+            return;
+          case "content":
+            this.events.onContent?.(
+              Number(frame.contentGeneration),
+              Number(frame.contentChannelSeq),
+            );
             return;
           case "please-snapshot":
             this.events.onPleaseSnapshot();

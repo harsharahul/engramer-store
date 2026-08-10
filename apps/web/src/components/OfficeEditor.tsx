@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore, type FileEntry } from "../store";
 import { api } from "../api";
-import { downloadAndDecrypt } from "../transfer";
+import { downloadContent } from "../transfer";
 import { openSharedContent, refreshLibraryOnce } from "../openshared";
+import { barrierDelayMs, barrierVerdict } from "../office/barrier";
+import { reconcile, type ContentMarker } from "../office/content";
 import { SaveConflictError, describeConflict } from "../conflict";
 import { Converter } from "../office/x2t";
 import { EditorSession, editorFrameUrl } from "../office/session";
@@ -62,7 +64,15 @@ const STAGE_LABEL: Record<Stage, string> = {
 export function OfficeEditor(props: {
   file: FileEntry;
   fileType: "docx" | "xlsx";
-  onSave: (bytes: Uint8Array, opts?: { snapshot?: boolean; upTo?: number }) => Promise<void>;
+  onSave: (
+    bytes: Uint8Array,
+    opts?: {
+      snapshot?: boolean;
+      upTo?: number;
+      mode?: "content" | "checkpoint";
+      conn?: string;
+    },
+  ) => Promise<void>;
   /** A conflicting save kept as a new file of the editor's own. */
   onSaveCopy: (bytes: Uint8Array) => Promise<void>;
   onClose: () => void;
@@ -75,7 +85,7 @@ export function OfficeEditor(props: {
   // The editor's own save shortcut arrives as a message, which the session
   // hands on; it needs whatever save() currently is, not the one that existed
   // when the session was built.
-  const saveRef = useRef<() => void>(() => {});
+  const saveRef = useRef<(auto?: boolean) => void>(() => {});
   /** The awaitable save, for flows that must sequence after it. */
   const savePromiseRef = useRef<() => Promise<void>>(() => Promise.resolve());
   // Read synchronously when closing, because the change that a commit
@@ -127,6 +137,16 @@ export function OfficeEditor(props: {
   const membersHook = useRef<(members: Array<{ connId: string; index: number; name?: string }>) => void>(
     () => {},
   );
+  // The save barrier's seams into the open effect: freezing pauses remote
+  // frames at the queue (order bookkeeping still runs), the drain hook
+  // releases them, and the stats/connection refs let save() read the
+  // channel's state from outside the effect's closures.
+  const freezeRef = useRef(false);
+  const drainHookRef = useRef<() => void>(() => {});
+  const statsRef = useRef<CollabStats | null>(null);
+  const connRef = useRef("");
+  /** The relay is refusing posts until someone snapshots. */
+  const ceilingRef = useRef(false);
 
   // The frame's address depends only on the kind of document, so the editor
   // begins loading its several megabytes immediately, while this file is
@@ -199,15 +219,24 @@ export function OfficeEditor(props: {
     // What the relay says each connection's participant index is; the only
     // trustworthy source, since frame contents are member-forgeable.
     const indexByConn = new Map<string, number>();
-    // Log frames arriving before the engine is open wait here; the spike
+    // Log frames arriving before the engine is open (or while a save is
+    // holding the barrier) wait here with their positions; the spike
     // proved catch-up must replay AFTER the document is ready.
-    let tail: Array<ReturnType<typeof decryptFrame>> = [];
+    let tail: Array<{ seq: number; frame: ReturnType<typeof decryptFrame> }> = [];
     let engineReady = false;
+    // Which channel position the downloaded bytes already contain: frames
+    // at or below it never reach the engine, or they would apply twice.
+    let feedFloor = 0;
+    // Where the stored bytes stand, per the server; welcome sets it and
+    // content/checkpoint broadcasts keep it fresh. Boxed because it is
+    // written from channel callbacks and read on the open path.
+    const markerBox: { current: ContentMarker | null } = { current: null };
 
     // One set of counters per open attempt, readable from the console as
     // window.engramCollab() during a live session; engramCollabProbe()
     // reads the engine's own lock tables through the frame's shim.
     const stats = newCollabStats();
+    statsRef.current = stats;
     (window as unknown as { engramCollab?: () => CollabStats }).engramCollab = () => stats;
     (
       window as unknown as { engramCollabProbe?: () => Promise<unknown> }
@@ -222,6 +251,16 @@ export function OfficeEditor(props: {
       s.applyEffects(b.onRemoteFrame(frame));
       stats.changesIndex = b.changes;
     };
+
+    /** Releases queued frames to the engine, skipping what the bytes hold. */
+    const drainTail = () => {
+      for (const queued of tail.splice(0)) {
+        if (queued.seq > feedFloor) {
+          feedFrame(queued.frame);
+        }
+      }
+    };
+    drainHookRef.current = drainTail;
 
     const resync = (counted = true) => {
       // Frames went missing; the stream cannot be trusted. Reload the
@@ -283,9 +322,7 @@ export function OfficeEditor(props: {
             engineReady = true;
             // A door that opened proves the channel is followable again.
             resyncCountRef.current = 0;
-            for (const queued of tail.splice(0)) {
-              feedFrame(queued);
-            }
+            drainTail();
             setStage("ready");
           },
           onChanged: (modified) => {
@@ -351,20 +388,26 @@ export function OfficeEditor(props: {
         // channel dials in parallel. A websocket a proxy or VPN
         // black-holes settles neither way for minutes, and an open that
         // awaited it hung on "starting" forever, for every member.
-        const docPromise = (async () => {
+        const fetchDocument = async () => {
           setStage("decrypting");
           // A co-editor's save moves the digest while this client's poll
           // is still pending; opening from the cached entry then refuses
-          // good bytes. Refresh and retry, shared files only.
-          const plaintext = await openSharedContent(opened, (entry) =>
-            downloadAndDecrypt(entry.id, entry.key, entry.digest),
-          );
+          // good bytes. Refresh and retry, shared files only. The server
+          // names the generation it served, for pairing with the marker.
+          let generation: number | null = null;
+          const plaintext = await openSharedContent(opened, async (entry) => {
+            const result = await downloadContent(entry.id, entry.key, entry.digest);
+            generation = result.generation;
+            return result.bytes;
+          });
           if (cancelled) {
             return null;
           }
           setStage("converting");
-          return converter.importDocument(`document.${fileType}`, plaintext);
-        })();
+          const imported = await converter.importDocument(`document.${fileType}`, plaintext);
+          return { imported, generation };
+        };
+        const docPromise = fetchDocument();
         // A recipient knows the document is shared; an owner asks whether
         // anyone else holds a key. Only then is the channel worth dialing.
         let collaborative = opened.shared === true;
@@ -403,6 +446,15 @@ export function OfficeEditor(props: {
                   return;
                 }
                 connId = welcome.you;
+                connRef.current = welcome.you;
+                // Where the stored bytes stand; pairs with the download.
+                markerBox.current =
+                  welcome.contentGeneration !== undefined
+                    ? {
+                        generation: Number(welcome.contentGeneration),
+                        seq: Number(welcome.contentChannelSeq ?? 0),
+                      }
+                    : null;
                 diag("collab", `welcome: member ${welcome.yourIndex}, ${welcome.members.length} present`);
                 order = newChannelOrder(opened.id);
                 bridgeCompany = welcome.members.length > 1;
@@ -416,7 +468,6 @@ export function OfficeEditor(props: {
                 setPeers(welcome.members.length);
               },
               onLog: (seq, sender, payload) => {
-                void seq;
                 try {
                   const decoded = decryptFrame(payload, opened.key);
                   const verdict = acceptFrame(order, decoded, sender);
@@ -442,10 +493,12 @@ export function OfficeEditor(props: {
                       pendingFramesRef.current += 1;
                       lastFrameAtRef.current = Date.now();
                     }
-                    if (engineReady) {
-                      feedFrame(decoded);
+                    if (engineReady && !freezeRef.current) {
+                      if (seq > feedFloor) {
+                        feedFrame(decoded);
+                      }
                     } else {
-                      tail.push(decoded);
+                      tail.push({ seq, frame: decoded });
                     }
                   }
                 } catch {
@@ -515,16 +568,26 @@ export function OfficeEditor(props: {
                   stats.changesIndex = b.changes;
                 }
               },
+              onContent: (contentGeneration, contentChannelSeq) => {
+                // Someone's save moved the stored bytes without touching
+                // the log; remember where they stand for the next pairing,
+                // and refresh so this client's entry follows the digest.
+                markerBox.current = { generation: contentGeneration, seq: contentChannelSeq };
+                void refreshLibraryOnce();
+              },
               onPleaseSnapshot: () => {
+                ceilingRef.current = true;
                 // The relay is refusing further posts until someone
                 // snapshots; the elected member saves now rather than on
                 // the next quiet spell, unclogging the room for everyone.
                 if (collabRef.current === "live" && electedSnapshotter(latestMembers) === connId) {
-                  saveRef.current();
+                  saveRef.current(true);
                 }
               },
               onTruncated: (generation, snapshotSeq) => {
                 void generation;
+                // The trim cleared whatever refusal the ceiling had raised.
+                ceilingRef.current = false;
                 // A truncation is also the "somebody moved the digest"
                 // signal: refresh the library so this client's entry (and
                 // any preview or reopen it feeds) matches the new bytes.
@@ -572,11 +635,47 @@ export function OfficeEditor(props: {
         sessionBegun = true;
         diag("collab", bridge ? `engine begins live as index ${bridge.index}` : "engine begins solo");
         session.begin(bridge);
-        const imported = await docPromise;
-        if (cancelled || !imported) {
+        let doc = await docPromise;
+        if (cancelled || !doc?.imported) {
           return;
         }
-        session.deliver(imported.bin, imported.media);
+        if (bridge) {
+          // Pair the downloaded bytes with the channel's marker: the
+          // replay must skip exactly the frames the bytes already
+          // contain. Bytes of a different generation than the marker
+          // names cannot be paired; one refreshed re-download usually
+          // heals it (a save landed mid-open), else the reload path.
+          let verdict = reconcile({
+            bytesGeneration: doc.generation,
+            marker: markerBox.current,
+            refetched: false,
+          });
+          if (verdict === "refetch") {
+            diag("collab", "bytes and channel marker disagree; refreshing and refetching once");
+            await refreshLibraryOnce();
+            const again = await fetchDocument();
+            if (cancelled) {
+              return;
+            }
+            if (again?.imported) {
+              doc = again;
+            }
+            verdict = reconcile({
+              bytesGeneration: doc.generation,
+              marker: markerBox.current,
+              refetched: true,
+            });
+          }
+          if (verdict === "resync") {
+            resync();
+            return;
+          }
+          feedFloor = verdict === "ready" && markerBox.current ? markerBox.current.seq : 0;
+          if (feedFloor > 0) {
+            diag("collab", `bytes contain the log through ${feedFloor}; replay starts after it`);
+          }
+        }
+        session.deliver(doc.imported.bin, doc.imported.media);
         setStage("loading");
       } catch (err) {
         if (!cancelled) {
@@ -608,7 +707,7 @@ export function OfficeEditor(props: {
           msSinceLastFrame: Date.now() - lastFrameAtRef.current,
         })
       ) {
-        saveRef.current();
+        saveRef.current(true);
       }
     }, 10_000);
 
@@ -649,6 +748,11 @@ export function OfficeEditor(props: {
       sessionRef.current = null;
       converter.close();
       converterRef.current = null;
+      freezeRef.current = false;
+      drainHookRef.current = () => {};
+      statsRef.current = null;
+      connRef.current = "";
+      ceilingRef.current = false;
     };
   }, [fileId, fileType, reloadNonce]);
 
@@ -665,7 +769,76 @@ export function OfficeEditor(props: {
     }
   }, [stage]);
 
-  const save = useCallback(async () => {
+  /**
+   * The save barrier: brings the engine and channel to a moment of quiet,
+   * then captures the position and the serialization with nothing able to
+   * land in between.
+   *
+   * Flushing runs with remote frames still applying, because a marker may
+   * only ever name frames the bytes truly contain: freezing first would
+   * let arrivals queue while lastSeenSeq kept counting them. Only once
+   * everything seen is applied and acked does the freeze land, the
+   * position get read, and the frame serialize; the shim re-checks quiet
+   * in the same synchronous turn as the serialization, and any post that
+   * slipped in re-runs the loop. Null means the room never went quiet and
+   * the save is declined rather than inexact.
+   */
+  const settleBarrier = useCallback(async (): Promise<{ bin: string; upTo: number } | null> => {
+    const session = sessionRef.current;
+    if (!session) {
+      return null;
+    }
+    try {
+      for (let attempt = 0; attempt <= 8; attempt += 1) {
+        const delay = barrierDelayMs(attempt);
+        if (delay > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+        const flush = await session.flushChanges();
+        const stats = statsRef.current;
+        const verdict = barrierVerdict({
+          haveChanges: flush.haveChanges === true,
+          haveOtherChanges: flush.haveOtherChanges === true,
+          pendingAcks: stats?.pendingAcks.size ?? 0,
+          postsAtCapture: 0,
+          postsNow: 0,
+          ceilingReached: ceilingRef.current,
+          attempt,
+        });
+        if (verdict === "retry") {
+          continue;
+        }
+        if (verdict === "abandon") {
+          return null;
+        }
+        // Quiet. Freeze remote delivery and read the position in the same
+        // synchronous block: everything seen is applied, so lastSeenSeq is
+        // exactly what the serialization will contain.
+        freezeRef.current = true;
+        const upTo = channelRef.current?.lastSeenSeq ?? 0;
+        const postsAtCapture = stats?.chgPosted ?? 0;
+        const result = await session.saveAtBarrier();
+        const moved =
+          result.stale ||
+          (statsRef.current?.chgPosted ?? 0) !== postsAtCapture ||
+          (verdict === "capture" && (statsRef.current?.pendingAcks.size ?? 0) !== 0);
+        if (moved) {
+          freezeRef.current = false;
+          drainHookRef.current();
+          continue;
+        }
+        freezeRef.current = false;
+        drainHookRef.current();
+        return { bin: result.bin, upTo };
+      }
+      return null;
+    } finally {
+      freezeRef.current = false;
+      drainHookRef.current();
+    }
+  }, []);
+
+  const save = useCallback(async (auto = false) => {
     const converter = converterRef.current;
     const session = sessionRef.current;
     if (!converter || !session || busy || stage !== "ready" || conflict) {
@@ -674,9 +847,9 @@ export function OfficeEditor(props: {
     // Most conflicts can be caught before the work of exporting: if the
     // library's entry moved since this editor opened, someone else already
     // saved, and the question gets asked now rather than after a 409. In a
-    // LIVE room this gate must not run: a co-editor's snapshot moves the
+    // LIVE room this gate must not run: a co-editor's save moves the
     // entry on every sync, but its content already reached this engine as
-    // frames, so a snapshot save from here is cooperative, not a conflict.
+    // frames, so a save from here is cooperative, not a conflict.
     const live = collabRef.current === "live";
     const current = useStore.getState().files.get(fileId);
     if (!live && current && describeConflict(openedAtRef.current, current.updatedAt) === "stale") {
@@ -687,22 +860,41 @@ export function OfficeEditor(props: {
     setError(null);
     let out: Uint8Array | null = null;
     try {
-      // Everything the channel delivered up to here is applied and will be
-      // in the export; that position is what the snapshot may truncate.
-      const upTo = live ? (channelRef.current?.lastSeenSeq ?? 0) : 0;
-      const bin = await session.save();
+      let bin: string;
+      let upTo = 0;
+      if (live) {
+        // A live save writes bytes and stamps where they stand; it must
+        // never guess. The barrier makes the position exact or declines.
+        const settled = await settleBarrier();
+        if (!settled) {
+          diag("collab", "the room never went quiet; save declined rather than inexact");
+          if (!auto) {
+            setError("still catching up with the room's changes; try again in a moment");
+          }
+          return;
+        }
+        bin = settled.bin;
+        upTo = settled.upTo;
+      } else {
+        bin = await session.save();
+      }
       if (!bin) {
         throw new Error("the editor returned nothing to save");
       }
       out = await converter.exportDocument(`document.${fileType}`, bin);
-      await props.onSave(out, { snapshot: live, upTo });
+      await props.onSave(out, {
+        snapshot: live,
+        upTo,
+        mode: live ? "content" : undefined,
+        conn: live && connRef.current ? connRef.current : undefined,
+      });
       setDirty(false);
       dirtyRef.current = false;
       setSavedAt(Date.now());
       openedAtRef.current = useStore.getState().files.get(fileId)?.updatedAt ?? Date.now();
       if (live && upTo > 0) {
-        // The server trims the channel itself, as part of committing this
-        // save; nothing here may ask for it.
+        // The server decides what, if anything, gets trimmed as part of
+        // committing this save; nothing here may ask for it.
         pendingFramesRef.current = 0;
       }
       diag("office", `saved ${file.name} (${out.length} bytes)`);
@@ -717,7 +909,7 @@ export function OfficeEditor(props: {
     } finally {
       setBusy(false);
     }
-  }, [busy, stage, conflict, fileId, fileType, props, file.name]);
+  }, [busy, stage, conflict, fileId, fileType, props, file.name, settleBarrier]);
 
   /** Discards this editor's changes and reopens the winner's document. */
   const reloadTheirs = useCallback(async () => {
@@ -761,7 +953,7 @@ export function OfficeEditor(props: {
   }, [conflict, fileType, props]);
 
   useEffect(() => {
-    saveRef.current = () => void save();
+    saveRef.current = (auto = false) => void save(auto);
     savePromiseRef.current = save;
   }, [save]);
 
