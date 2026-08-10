@@ -1300,3 +1300,56 @@ describe("the owner's rows know they are collaborative", () => {
     expect(rows.find((r) => r.id === privateId)?.hasCollaborators).toBe(false);
   });
 });
+
+/**
+ * A save used to write bytes and metadata as two requests, and every
+ * reader landing between them saw the new generation beside the old
+ * digest: the root of the whole stale-digest family. Metadata may now
+ * ride the data PUT and commit in the same transaction.
+ */
+describe("metadata rides the save", () => {
+  it("commits bytes and metadata in one transaction", async () => {
+    const nextMeta = encryptFileMetadata(
+      { name: "doc.docx", mime: "application/octet-stream", size: 9, mtime: 2 },
+      fileKey,
+    );
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/api/files/${fileId}/data`,
+      headers: {
+        ...auth(owner),
+        "content-type": "application/octet-stream",
+        "x-encrypted-meta": Buffer.from(JSON.stringify(nextMeta)).toString("base64"),
+      },
+      payload: Buffer.from(encryptBytes(utf8Encode("meta rides"), fileKey)),
+    });
+    expect(saved.statusCode).toBe(200);
+    const returned = saved.json().file as {
+      encryptedMeta: { nonce: string; ciphertext: string };
+      generation: number;
+    };
+    expect(returned.encryptedMeta.ciphertext).toBe(nextMeta.ciphertext);
+    expect(returned.generation).toBe(Number(saved.json().generation));
+
+    // The sync feed shows the new metadata without any PATCH happening.
+    const sync = await app.inject({ method: "GET", url: "/api/sync?since=0", headers: auth(owner) });
+    const row = (sync.json().files as Array<{ id: string; encryptedMeta: { ciphertext: string } }>).find(
+      (r) => r.id === fileId,
+    )!;
+    expect(row.encryptedMeta.ciphertext).toBe(nextMeta.ciphertext);
+  });
+
+  it("refuses a malformed metadata header outright", async () => {
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/api/files/${fileId}/data`,
+      headers: {
+        ...auth(owner),
+        "content-type": "application/octet-stream",
+        "x-encrypted-meta": "not base64 json at all",
+      },
+      payload: Buffer.from(encryptBytes(utf8Encode("bad meta"), fileKey)),
+    });
+    expect(saved.statusCode).toBe(400);
+  });
+});

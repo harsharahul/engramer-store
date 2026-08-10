@@ -1089,17 +1089,38 @@ export const useStore = create<StoreState>((set, get) => {
         throw new Error("file not found");
       }
       const bytes = utf8Encode(text);
+      const digest = contentDigest(bytes);
+      const searchText = text.slice(0, 100_000);
+      // Metadata rides the bytes and commits with them; see saveFileBinary.
+      const rescanned = await rescanFacts(file, searchText, digest);
+      const nextMeta = encryptFileMetadata(
+        {
+          ...metadataOf(file),
+          size: bytes.length,
+          mtime: Date.now(),
+          hasText: true,
+          text: undefined,
+          digest,
+          ...(rescanned ? { facts: rescanned.facts } : {}),
+        },
+        file.key,
+      );
+      const metaFits = JSON.stringify(nextMeta).length < 6_000;
+      let committed: FileDto | null = null;
       try {
-        await uploadBlob(id, "data", encryptBytes(bytes, file.key));
+        await uploadBlob(id, "data", encryptBytes(bytes, file.key), undefined, undefined, {
+          ...(metaFits ? { encryptedMeta: nextMeta } : {}),
+          onBody: (body) => {
+            const reply = body as { file?: FileDto };
+            committed = reply.file ?? null;
+          },
+        });
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
           throw new SaveConflictError(id);
         }
         throw err;
       }
-      const digest = contentDigest(bytes);
-      const searchText = text.slice(0, 100_000);
-      const rescanned = await rescanFacts(file, searchText, digest);
       await uploadBlob(
         id,
         "index",
@@ -1113,14 +1134,18 @@ export const useStore = create<StoreState>((set, get) => {
           file.key,
         ),
       );
-      await patchFileMeta(id, {
-        size: bytes.length,
-        mtime: Date.now(),
-        hasText: true,
-        text: undefined,
-        digest,
-        ...(rescanned ? { facts: rescanned.facts } : {}),
-      });
+      if (committed) {
+        applyFile(committed);
+      } else {
+        await patchFileMeta(id, {
+          size: bytes.length,
+          mtime: Date.now(),
+          hasText: true,
+          text: undefined,
+          digest,
+          ...(rescanned ? { facts: rescanned.facts } : {}),
+        });
+      }
       setEntryText(id, searchText, false);
       await get().refreshUsage();
     },
@@ -1138,15 +1163,44 @@ export const useStore = create<StoreState>((set, get) => {
       // and the previous version stays the current one.
       const sealed = encryptBytes(bytes, file.key);
       const readBack = decryptBytes(sealed, file.key);
-      if (!digestMatches(readBack, contentDigest(bytes))) {
+      const digest = contentDigest(bytes);
+      if (!digestMatches(readBack, digest)) {
         throw new Error("this save could not be verified and was not stored");
       }
+      // The metadata describing these bytes is built BEFORE the upload so
+      // it can commit in the same transaction: written separately, every
+      // reader landing between the two requests saw the new generation
+      // beside the old digest.
+      const rescanned = await rescanFacts(file, searchText, digest);
+      const nextMeta = encryptFileMetadata(
+        {
+          ...metadataOf(file),
+          size: bytes.length,
+          mtime: Date.now(),
+          // The digest describes the bytes just written; dropping it would
+          // leave the previous version's digest attached to new content
+          // and a verification pass would call a healthy file damaged.
+          digest,
+          ...(searchText !== undefined ? { hasText: true, text: undefined } : {}),
+          ...(rescanned ? { facts: rescanned.facts } : {}),
+        },
+        file.key,
+      );
+      // Oversized metadata falls back to the two-request path rather than
+      // risk a header limit; the paced open retries still cover that gap.
+      const metaFits = JSON.stringify(nextMeta).length < 6_000;
+      let committed: FileDto | null = null;
       try {
         await uploadBlob(id, "data", sealed, undefined, undefined, {
           collabSnapshot: opts?.collabSnapshot,
           collabUpTo: opts?.collabUpTo,
           collabMode: opts?.collabMode,
           collabConn: opts?.collabConn,
+          ...(metaFits ? { encryptedMeta: nextMeta } : {}),
+          onBody: (body) => {
+            const reply = body as { file?: FileDto };
+            committed = reply.file ?? null;
+          },
         });
       } catch (err) {
         // Someone else's save landed first. Typed, so the editor can offer
@@ -1156,8 +1210,6 @@ export const useStore = create<StoreState>((set, get) => {
         }
         throw err;
       }
-      const digest = contentDigest(bytes);
-      const rescanned = await rescanFacts(file, searchText, digest);
       if (searchText !== undefined || rescanned) {
         await uploadBlob(
           id,
@@ -1173,18 +1225,21 @@ export const useStore = create<StoreState>((set, get) => {
           ),
         );
       }
-      await patchFileMeta(id, {
-        size: bytes.length,
-        mtime: Date.now(),
-        // The digest describes the bytes just written. It was computed here
-        // and then dropped, which was survivable only while metadata forgot
-        // the digest entirely; now that a patch preserves it, omitting it
-        // would leave the previous version's digest attached to new content
-        // and a verification pass would call a healthy file damaged.
-        digest,
-        ...(searchText !== undefined ? { hasText: true, text: undefined } : {}),
-        ...(rescanned ? { facts: rescanned.facts } : {}),
-      });
+      if (committed) {
+        // The server committed the metadata with the bytes and returned
+        // the row; nothing else to write.
+        applyFile(committed);
+      } else {
+        // An older server ignored the riding metadata (or it was too
+        // large); the classic second request keeps the row coherent.
+        await patchFileMeta(id, {
+          size: bytes.length,
+          mtime: Date.now(),
+          digest,
+          ...(searchText !== undefined ? { hasText: true, text: undefined } : {}),
+          ...(rescanned ? { facts: rescanned.facts } : {}),
+        });
+      }
       if (searchText !== undefined) {
         setEntryText(id, searchText.slice(0, 100_000), false);
       }

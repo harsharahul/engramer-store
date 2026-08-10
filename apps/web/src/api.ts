@@ -752,28 +752,40 @@ export function uploadBlob(
     /** This member's channel connection, so the room's broadcasts can
      * skip the author of the save they describe. */
     collabConn?: string;
+    /** Metadata to commit in the same transaction as the bytes, closing
+     * the window where a reader sees a new generation beside an old
+     * digest. An older server ignores it; the reply says whether it
+     * landed by carrying the committed file. */
+    encryptedMeta?: SecretBox;
     onBody?: (body: unknown) => void;
   },
 ): Promise<number | null> {
+  // One headers object: metadata riding the save and the live-save
+  // markers can travel together.
+  const headers: Record<string, string> = {};
+  if (opts?.encryptedMeta) {
+    headers["x-encrypted-meta"] = btoa(JSON.stringify(opts.encryptedMeta));
+  }
+  // Marks this whole-document write as a claimed snapshot of the live
+  // channel, which is what lets it through the tail-base guard. The
+  // snapshot header always travels with a live save, even for a content
+  // save, so an older server still admits the write.
+  if (opts?.collabSnapshot) {
+    headers["x-collab-snapshot"] = "1";
+    headers["x-collab-upto"] = String(opts.collabUpTo ?? 0);
+    if (opts.collabMode) {
+      headers["x-collab-mode"] = opts.collabMode;
+    }
+    if (opts.collabConn) {
+      headers["x-collab-conn"] = opts.collabConn;
+    }
+  }
   return putBytes(`/api/files/${fileId}/${kind}`, payload, {
     auth: true,
     onProgress,
     signal,
     errorFor: (status) => (status === 413 ? "storage quota exceeded" : undefined),
     onBody: opts?.onBody,
-    // Marks this whole-document write as a claimed snapshot of the live
-    // channel, which is what lets it through the tail-base guard. The
-    // snapshot header always travels with a live save, even for a content
-    // save, so an older server still admits the write.
-    ...(opts?.collabSnapshot
-      ? {
-          headers: {
-            "x-collab-snapshot": "1",
-            "x-collab-upto": String(opts.collabUpTo ?? 0),
-            ...(opts.collabMode ? { "x-collab-mode": opts.collabMode } : {}),
-            ...(opts.collabConn ? { "x-collab-conn": opts.collabConn } : {}),
-          },
-        }
-      : {}),
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
   });
 }

@@ -325,6 +325,21 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         .send({ error: "someone is editing this document live; open it to join them" });
     }
     const channel = kind === "data" ? await channelPlan(id, request.headers, uid) : undefined;
+    // Metadata riding the save commits with the bytes, so no reader can
+    // ever see a new generation beside an old digest: the two-request gap
+    // was the root of the whole stale-digest family. Sealed and opaque
+    // here like everywhere else; only its shape is checked.
+    let metaUpdate: string | null = null;
+    if (kind === "data" && request.headers["x-encrypted-meta"] !== undefined) {
+      try {
+        const decoded: unknown = JSON.parse(
+          Buffer.from(String(request.headers["x-encrypted-meta"]), "base64").toString("utf8"),
+        );
+        metaUpdate = JSON.stringify(secretBoxSchema.parse(decoded));
+      } catch {
+        return reply.code(400).send({ error: "invalid request" });
+      }
+    }
     // Every byte of a shared file belongs to its owner: quota, sizes and
     // sync attribution all key off the file's owner, never the writer.
     const ownerUid = file.user_id;
@@ -403,6 +418,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       written,
       hasher.digest("hex"),
       channel,
+      { metaUpdate, role: access.role },
     );
   };
 
@@ -540,6 +556,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     written: number,
     contentHash: string | null,
     channel?: ChannelAction,
+    meta?: { metaUpdate: string | null; role: string },
   ) => {
     const keepsVersions = app.config.maxVersions > 0;
     const replacesContent = file.uploaded === 1;
@@ -608,10 +625,13 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         }
         const now = Date.now();
         await t.run(
-          "UPDATE files SET size = ?, generation = ?, uploaded = 1, content_hash = ?, update_seq = ?, updated_at = ? WHERE id = ?",
+          `UPDATE files SET size = ?, generation = ?, uploaded = 1, content_hash = ?,
+             encrypted_meta = COALESCE(?, encrypted_meta), update_seq = ?, updated_at = ?
+           WHERE id = ?`,
           written,
           nextGen,
           contentHash,
+          meta?.metaUpdate ?? null,
           await nextSeq(t, uid),
           now,
           id,
@@ -706,6 +726,25 @@ export function registerStorageRoutes(app: FastifyInstance): void {
           contentChannelSeq: contentSeq,
         });
       }
+    }
+    if (meta?.metaUpdate) {
+      // The committed row travels back, shaped exactly like a PATCH
+      // reply, so the saver applies it directly and never needs the
+      // second request whose gap this feature erases.
+      const row = (await app.db.get<FileRow & { has_collaborators: number | boolean }>(
+        `SELECT files.*, EXISTS(
+           SELECT 1 FROM file_collaborators c WHERE c.file_id = files.id AND c.revoked = 0
+         ) AS has_collaborators
+         FROM files WHERE id = ?`,
+        id,
+      ))!;
+      const dto = fileToDto(row);
+      if (meta.role !== "owner") {
+        const { encryptedKey, ...forCollaborator } = dto;
+        void encryptedKey;
+        return { size: written, generation: nextGen, file: { ...forCollaborator, folderId: null } };
+      }
+      return { size: written, generation: nextGen, file: dto };
     }
     return { size: written, generation: nextGen };
   };
