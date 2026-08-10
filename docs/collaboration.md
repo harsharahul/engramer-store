@@ -41,19 +41,42 @@ log.
 
 ## Saving, and what the log is for
 
-The log is a tail between saves, not storage. Any participant's save is a
-**snapshot**: it writes the whole document the normal way — re-encrypted,
-verified by reading it back, stored as a new generation with its own entry
-in version history — and the server then trims the log up to the point that
-save covered. Frames that arrived after it survive and replay on top.
+Saving and trimming the log are two different operations.
+
+A **content save** writes the whole document the normal way (re-encrypted,
+verified by reading it back, stored as a new generation) and records a
+marker: which generation the stored bytes are, and the log position those
+bytes contain. The log itself is untouched. The marker obeys one rule, and
+everything else follows from it: no frame past the marker may be
+represented in the bytes, and every frame at or before it must be in the
+bytes or still in the log. To keep the marker exact, a save first settles
+at a barrier: the editor sends what it still holds, waits until everything
+seen is applied and acknowledged, and reads the document in the same
+breath as the final check, so nothing can land in between. A page opening
+the document downloads the bytes, pairs them with the marker, and replays
+only the frames the bytes do not already contain.
+
+A **checkpoint** additionally trims the log up to the marker and is rare:
+the relay asks for one as the log approaches its byte ceiling (well before
+anything is refused), and a participant saving with nobody else connected
+gets the trim for free. When a checkpoint lands, every other participant
+sends any unsent work through the channel and reloads from the new
+snapshot together; the author's editor already is the snapshot and stays
+put. Work that cannot reach the channel in time is kept and offered, never
+discarded.
 
 Only a save the server itself committed can trim the log. There is no
 message a page can send to ask for it, because a page that could name the
 position could discard other people's unsaved work.
 
-A quiet room still converges: the participant with the lowest index (an
-election every page computes identically) saves on its own after a spell of
-silence or a long enough log.
+A quiet room still converges: the participant with the lowest index that
+may write (an election every page computes identically) performs a content
+save after a spell of silence, so previews, mobile file access and share
+links always see the room's work.
+
+Live editing keeps checkpoints in version history, not keystrokes: the
+periodic content saves of a live room replace the current bytes without
+adding restore points, while checkpoints and ordinary saves keep them.
 
 ## Roles
 
