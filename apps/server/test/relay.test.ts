@@ -39,6 +39,7 @@ let member: TestAccount;
 let stranger: TestAccount;
 let viewer: TestAccount;
 let fileId: string;
+let fileKey: Uint8Array;
 
 const auth = (account: TestAccount) => ({ authorization: `Bearer ${account.token}` });
 
@@ -158,7 +159,7 @@ beforeAll(async () => {
   viewer = await register("viewer@example.com", "lantern pebble driftwood");
 
   // One shared file: owner uploads, member joins via invite claim + grant.
-  const fileKey = generateKey();
+  fileKey = generateKey();
   const content = utf8Encode("relay body");
   const created = await app.inject({
     method: "POST",
@@ -785,5 +786,250 @@ describe("who is in the room", () => {
       payload: { displayName: "   " },
     });
     expect(cleared.json().displayName).toBeNull();
+  });
+});
+
+/**
+ * A content save records where the stored bytes stand without touching the
+ * log: the file tracks current content for every non-collab surface, while
+ * live members keep their engines and joiners learn exactly which frames
+ * the bytes already contain.
+ */
+describe("a content save leaves the log alone", () => {
+  it("writes bytes, stamps the marker, and trims nothing", async () => {
+    const a = await connect(owner);
+    await a.next((f) => f.t === "caught-up");
+    a.send({ t: "post", ref: "c1", payload: "baked-into-content" });
+    const covered = await a.next((f) => f.t === "ack" && f.ref === "c1");
+    a.send({ t: "post", ref: "c2", payload: "still-live-after" });
+    await a.next((f) => f.t === "ack" && f.ref === "c2");
+
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/api/files/${fileId}/data`,
+      headers: {
+        ...auth(owner),
+        "content-type": "application/octet-stream",
+        "x-collab-snapshot": "1",
+        "x-collab-mode": "content",
+        "x-collab-upto": String(covered.seq),
+      },
+      payload: Buffer.from(encryptBytes(utf8Encode("content bytes"), generateKey())),
+    });
+    expect(saved.statusCode).toBe(200);
+    const generation = Number(saved.json().generation);
+    expect(generation).toBeGreaterThan(0);
+
+    // The room hears where the bytes stand; nothing is truncated.
+    const content = await a.next((f) => f.t === "content");
+    expect(Number(content.contentChannelSeq)).toBe(Number(covered.seq));
+    expect(Number(content.contentGeneration)).toBe(generation);
+    expect(await a.silence((f) => f.t === "truncated", 400)).toBe(true);
+    a.close();
+
+    // A fresh joiner learns the marker in the welcome and still replays
+    // every frame, including the ones the bytes already contain: the
+    // client decides what to feed, the server never guesses.
+    const probe = await connect(member);
+    const welcome = await probe.next((f) => f.t === "welcome");
+    expect(Number(welcome.contentChannelSeq)).toBe(Number(covered.seq));
+    expect(Number(welcome.contentGeneration)).toBe(generation);
+    const seen: string[] = [];
+    for (;;) {
+      const frame = await probe.next((f) => f.t === "log" || f.t === "caught-up");
+      if (frame.t === "caught-up") break;
+      seen.push(String(frame.payload));
+    }
+    expect(seen).toContain("baked-into-content");
+    expect(seen).toContain("still-live-after");
+    probe.close();
+  });
+
+  it("names the generation of the bytes it serves", async () => {
+    const got = await app.inject({
+      method: "GET",
+      url: `/api/files/${fileId}/data`,
+      headers: auth(owner),
+    });
+    expect(got.statusCode).toBe(200);
+    expect(Number(got.headers["x-generation"])).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * With nobody live, a plain write's bytes have no relationship to whatever
+ * frames the log still holds; replaying them over the new bytes on the next
+ * join would double-apply. The write itself proves the room is empty, so it
+ * may clear the log outright.
+ */
+describe("a save with the room empty clears the log", () => {
+  it("purges every frame and stamps the marker at the log's end", async () => {
+    const a = await connect(owner);
+    await a.next((f) => f.t === "caught-up");
+    a.send({ t: "post", ref: "e1", payload: "orphaned-by-empty-room" });
+    await a.next((f) => f.t === "ack" && f.ref === "e1");
+    a.close();
+    // The presence row is deleted in the socket's close handler.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const plain = await app.inject({
+      method: "PUT",
+      url: `/api/files/${fileId}/data`,
+      headers: { ...auth(owner), "content-type": "application/octet-stream" },
+      payload: Buffer.from(encryptBytes(utf8Encode("empty room write"), generateKey())),
+    });
+    expect(plain.statusCode).toBe(200);
+    const generation = Number(plain.json().generation);
+
+    const probe = await connect(member);
+    const welcome = await probe.next((f) => f.t === "welcome");
+    expect(Number(welcome.contentGeneration)).toBe(generation);
+    expect(Number(welcome.contentChannelSeq)).toBe(Number(welcome.channelSeq));
+    const first = await probe.next((f) => f.t === "log" || f.t === "caught-up");
+    expect(first.t).toBe("caught-up");
+    probe.close();
+  });
+});
+
+/**
+ * Restoring a version moves the file's generation backward, which invalidates
+ * everything the channel holds. Live members would be stranded mid-history,
+ * so a live room refuses the restore; an empty room takes it with a purge.
+ */
+describe("restoring a version respects the live room", () => {
+  it("refuses a restore while members are live", async () => {
+    const live = await connect(owner);
+    await live.next((f) => f.t === "caught-up");
+    const versions = await app.inject({
+      method: "GET",
+      url: `/api/files/${fileId}/versions`,
+      headers: auth(owner),
+    });
+    const gen = (versions.json().versions as Array<{ generation: number }>)[0]!.generation;
+    const refused = await app.inject({
+      method: "POST",
+      url: `/api/files/${fileId}/versions/${gen}/restore`,
+      headers: auth(owner),
+      payload: {
+        encryptedMeta: encryptFileMetadata(
+          { name: "doc.docx", mime: "application/octet-stream", size: 1, mtime: 1 },
+          fileKey,
+        ),
+      },
+    });
+    expect(refused.statusCode).toBe(409);
+    live.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+
+  it("purges the channel when a restore lands in an empty room", async () => {
+    const a = await connect(owner);
+    await a.next((f) => f.t === "caught-up");
+    a.send({ t: "post", ref: "r1", payload: "pre-restore-frame" });
+    await a.next((f) => f.t === "ack" && f.ref === "r1");
+    a.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const versions = await app.inject({
+      method: "GET",
+      url: `/api/files/${fileId}/versions`,
+      headers: auth(owner),
+    });
+    const gen = (versions.json().versions as Array<{ generation: number }>)[0]!.generation;
+    const restored = await app.inject({
+      method: "POST",
+      url: `/api/files/${fileId}/versions/${gen}/restore`,
+      headers: auth(owner),
+      payload: {
+        encryptedMeta: encryptFileMetadata(
+          { name: "doc.docx", mime: "application/octet-stream", size: 1, mtime: 1 },
+          fileKey,
+        ),
+      },
+    });
+    expect(restored.statusCode).toBe(200);
+
+    const probe = await connect(member);
+    const welcome = await probe.next((f) => f.t === "welcome");
+    expect(Number(welcome.contentGeneration)).toBe(gen);
+    expect(Number(welcome.contentChannelSeq)).toBe(Number(welcome.channelSeq));
+    const first = await probe.next((f) => f.t === "log" || f.t === "caught-up");
+    expect(first.t).toBe("caught-up");
+    probe.close();
+  });
+});
+
+/**
+ * A rotation purges the log and restarts its sequence from zero, so a marker
+ * left standing would point past the entire post-rekey log and every joiner
+ * would skip it. The rekey must move the marker with everything else.
+ */
+describe("a rekey resets the content marker", () => {
+  it("hands out a zeroed marker at the file's current generation", async () => {
+    // The previous test's socket close deletes its presence row async.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const collaborators = await app.inject({
+      method: "GET",
+      url: `/api/collab/files/${fileId}/collaborators`,
+      headers: auth(owner),
+    });
+    const rows = collaborators.json().collaborators as Array<{
+      userId: number;
+      email: string;
+    }>;
+    const memberUid = rows.find((r) => r.email === member.email)!.userId;
+    const viewerUid = rows.find((r) => r.email === viewer.email)!.userId;
+
+    const newKey = generateKey();
+    const content = utf8Encode("post-rotation body");
+    const put = await app.inject({
+      method: "PUT",
+      url: `/api/files/${fileId}/data`,
+      headers: { ...auth(owner), "content-type": "application/octet-stream" },
+      payload: Buffer.from(encryptBytes(content, newKey)),
+    });
+    expect(put.statusCode).toBe(200);
+    const generation = Number(put.json().generation);
+    const patched = await app.inject({
+      method: "PATCH",
+      url: `/api/files/${fileId}`,
+      headers: auth(owner),
+      payload: {
+        encryptedKey: secretBoxSeal(newKey, owner.keys.masterKey),
+        encryptedMeta: encryptFileMetadata(
+          { name: "doc.docx", mime: "application/octet-stream", size: content.length, mtime: 1 },
+          newKey,
+        ),
+      },
+    });
+    expect(patched.statusCode).toBe(200);
+    const rekeyed = await app.inject({
+      method: "POST",
+      url: `/api/collab/files/${fileId}/rekey`,
+      headers: auth(owner),
+      payload: {
+        epoch: Number(patched.json().keyEpoch),
+        keys: [
+          {
+            userId: memberUid,
+            sealedKey: sealToPublicKey(newKey, member.keys.keyAttributes.publicKey),
+          },
+          {
+            userId: viewerUid,
+            sealedKey: sealToPublicKey(newKey, viewer.keys.keyAttributes.publicKey),
+          },
+        ],
+      },
+    });
+    expect(rekeyed.statusCode).toBe(204);
+
+    const probe = await connect(member);
+    const welcome = await probe.next((f) => f.t === "welcome");
+    expect(Number(welcome.channelSeq)).toBe(0);
+    expect(Number(welcome.contentChannelSeq)).toBe(0);
+    expect(Number(welcome.contentGeneration)).toBe(generation);
+    const first = await probe.next((f) => f.t === "log" || f.t === "caught-up");
+    expect(first.t).toBe("caught-up");
+    probe.close();
   });
 });

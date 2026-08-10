@@ -317,6 +317,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         .code(409)
         .send({ error: "someone is editing this document live; open it to join them" });
     }
+    const channel = kind === "data" ? await channelPlan(id, request.headers) : undefined;
     // Every byte of a shared file belongs to its owner: quota, sizes and
     // sync attribution all key off the file's owner, never the writer.
     const ownerUid = file.user_id;
@@ -385,7 +386,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       return { size: written };
     }
 
-    const committed = await commitData(
+    return commitData(
       reply,
       ownerUid,
       id,
@@ -394,62 +395,41 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       targetKey,
       written,
       hasher.digest("hex"),
+      channel,
     );
-    // A snapshot is the only thing that may trim the channel, and only
-    // after its bytes are durably the current generation. The client says
-    // how far its export reached; the server decides whether that is a
-    // real position and whether a save actually happened, because a client
-    // that could name the position alone could discard other people's
-    // unsynced work without saving anything at all.
-    if (
-      typeof committed === "object" &&
-      committed !== null &&
-      "size" in committed &&
-      request.headers["x-collab-snapshot"] !== undefined
-    ) {
-      await truncateChannel(id, Number(request.headers["x-collab-upto"] ?? 0), nextGen);
-    }
-    return committed;
   };
 
-  /** Trims a document channel up to a position a committed save covered. */
-  const truncateChannel = async (fileId: string, upTo: number, generation: number) => {
-    if (!Number.isInteger(upTo) || upTo <= 0) {
-      return;
+  /**
+   * How a data commit should treat the document's channel, decided by the
+   * declared mode and who is live right now.
+   *
+   * A checkpoint is the only thing that may trim the log, and only as part
+   * of committing its bytes. The client says how far its export reached;
+   * the server decides whether that is a real position and whether a save
+   * actually happened, because a client that could name the position alone
+   * could discard other people's unsynced work without saving anything.
+   *
+   * A content save records the same position without trimming anything:
+   * live members keep their engines, and joiners learn which frames the
+   * stored bytes already contain.
+   *
+   * A plain write with nobody live proves the room is empty; its bytes
+   * have no relationship to whatever the log still holds, so replaying
+   * those frames over them later would corrupt the document. The whole
+   * log goes with the write.
+   */
+  type ChannelAction = { purge: true } | { upTo: number; checkpoint: boolean };
+  const channelPlan = async (
+    fileId: string,
+    headers: FastifyRequest["headers"],
+  ): Promise<ChannelAction | undefined> => {
+    if (headers["x-collab-snapshot"] === undefined) {
+      return (await liveChannelMembers(fileId)) === 0 ? { purge: true } : undefined;
     }
-    const trimmed = await app.db.tx(async (t) => {
-      const state = await t.get<{ last_seq: number }>(
-        "SELECT last_seq FROM channel_state WHERE file_id = ?",
-        fileId,
-      );
-      // Never past what the channel has actually issued.
-      const bound = Math.min(upTo, Number(state?.last_seq ?? 0));
-      if (bound <= 0) {
-        return 0;
-      }
-      await t.run("DELETE FROM channel_messages WHERE file_id = ? AND seq <= ?", fileId, bound);
-      const remaining = await t.get<{ total: number | null }>(
-        "SELECT SUM(bytes) AS total FROM channel_messages WHERE file_id = ?",
-        fileId,
-      );
-      await t.run(
-        `UPDATE channel_state SET snapshot_generation = ?, snapshot_seq = ?, bytes = ?, updated_at = ?
-         WHERE file_id = ?`,
-        generation,
-        bound,
-        Number(remaining?.total ?? 0),
-        Date.now(),
-        fileId,
-      );
-      return bound;
-    });
-    if (trimmed > 0) {
-      app.hub.broadcast(fileId, {
-        t: "truncated",
-        snapshotGeneration: generation,
-        snapshotSeq: trimmed,
-      });
-    }
+    return {
+      upTo: Number(headers["x-collab-upto"] ?? 0),
+      checkpoint: headers["x-collab-mode"] !== "content",
+    };
   };
 
   /**
@@ -524,10 +504,17 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     targetKey: string,
     written: number,
     contentHash: string | null,
+    channel?: ChannelAction,
   ) => {
     const keepsVersions = app.config.maxVersions > 0;
     const replacesContent = file.uploaded === 1;
     const staleBlobs: string[] = [];
+    // The marker and any trim commit in the SAME transaction as the bytes'
+    // pointer: a second writer interleaving between them could otherwise
+    // trim past what the surviving generation actually contains, deleting
+    // frames no stored bytes hold. Broadcasts wait for the commit.
+    let contentSeq: number | null = null;
+    let trimmedTo = 0;
     try {
       await app.db.tx(async (t) => {
         const current = (await t.get<
@@ -567,6 +554,70 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         );
         await touchCollaborators(t, id, now);
         staleBlobs.push(...(await pruneVersions(t, id, uid)));
+        if (channel) {
+          // A file that never hosted a channel has no state row and needs
+          // none; only ever update what a join already created.
+          const state = await t.get<{ last_seq: number }>(
+            "SELECT last_seq FROM channel_state WHERE file_id = ?",
+            id,
+          );
+          if (state) {
+            const lastSeq = Number(state.last_seq);
+            if ("purge" in channel) {
+              await t.run("DELETE FROM channel_messages WHERE file_id = ?", id);
+              await t.run(
+                `UPDATE channel_state SET content_generation = ?, content_channel_seq = ?,
+                   snapshot_generation = ?, snapshot_seq = ?, bytes = 0, updated_at = ?
+                 WHERE file_id = ?`,
+                nextGen,
+                lastSeq,
+                nextGen,
+                lastSeq,
+                now,
+                id,
+              );
+            } else {
+              // Never past what the channel has actually issued.
+              const bound = Math.min(Math.max(Number(channel.upTo) || 0, 0), lastSeq);
+              contentSeq = bound;
+              if (channel.checkpoint && bound > 0) {
+                await t.run(
+                  "DELETE FROM channel_messages WHERE file_id = ? AND seq <= ?",
+                  id,
+                  bound,
+                );
+                const remaining = await t.get<{ total: number | null }>(
+                  "SELECT SUM(bytes) AS total FROM channel_messages WHERE file_id = ?",
+                  id,
+                );
+                await t.run(
+                  `UPDATE channel_state SET content_generation = ?, content_channel_seq = ?,
+                     snapshot_generation = ?, snapshot_seq = ?, bytes = ?, updated_at = ?
+                   WHERE file_id = ?`,
+                  nextGen,
+                  bound,
+                  nextGen,
+                  bound,
+                  Number(remaining?.total ?? 0),
+                  now,
+                  id,
+                );
+                trimmedTo = bound;
+              } else {
+                await t.run(
+                  `UPDATE channel_state SET content_generation = ?, content_channel_seq = ?, updated_at = ?
+                   WHERE file_id = ?`,
+                  nextGen,
+                  bound,
+                  now,
+                  id,
+                );
+              }
+            }
+          } else {
+            channel = undefined;
+          }
+        }
       });
     } catch (err) {
       if (err instanceof GenerationConflictError) {
@@ -580,7 +631,26 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     for (const key of staleBlobs) {
       await app.blobs.remove(key).catch(() => {});
     }
-    return { size: written };
+    if (channel && !("purge" in channel)) {
+      if (channel.checkpoint) {
+        if (trimmedTo > 0) {
+          app.hub.broadcast(id, {
+            t: "truncated",
+            snapshotGeneration: nextGen,
+            snapshotSeq: trimmedTo,
+            contentGeneration: nextGen,
+            contentChannelSeq: trimmedTo,
+          });
+        }
+      } else if (contentSeq !== null) {
+        app.hub.broadcast(id, {
+          t: "content",
+          contentGeneration: nextGen,
+          contentChannelSeq: contentSeq,
+        });
+      }
+    }
+    return { size: written, generation: nextGen };
   };
 
   /** Drops version rows beyond the retention window; returns their blob keys. */
@@ -807,7 +877,17 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     // A blob assembled from parts was never in one stream to hash, so it has
     // no digest until something reads it. The check records one then, and
     // says so, rather than pretending the file was verified on arrival.
-    const result = await commitData(reply, file.user_id, id, file, nextGen, row.blob_key, total, null);
+    const result = await commitData(
+      reply,
+      file.user_id,
+      id,
+      file,
+      nextGen,
+      row.blob_key,
+      total,
+      null,
+      await channelPlan(id, request.headers),
+    );
     await app.db.run("DELETE FROM upload_parts WHERE session_id = ?", row.id);
     await app.db.run("DELETE FROM upload_sessions WHERE id = ?", row.id);
     return result;
@@ -862,6 +942,10 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     // Content ranges let media players seek; the ciphertext itself is
     // random-access when the blob uses the chunked format.
     if (kind === "data") {
+      // Which generation these bytes are, so a client can pair them with
+      // the channel's content marker exactly instead of guessing from a
+      // possibly-stale library row.
+      reply.header("x-generation", file.generation);
       reply.header("accept-ranges", "bytes");
       const rangeHeader = request.headers.range;
       if (typeof rangeHeader === "string" && rangeHeader.length > 0) {
@@ -1100,6 +1184,14 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       }
       return reply.code(404).send({ error: "file not found" });
     }
+    // A restore moves the generation backward, which orphans every frame
+    // the channel holds. Live members would be stranded mid-history, so a
+    // live room refuses it outright; an empty room takes it with a purge.
+    if ((await liveChannelMembers(id)) > 0) {
+      return reply
+        .code(409)
+        .send({ error: "someone is editing this document live; open it to join them" });
+    }
     const generation = Number(gen);
     const row = await app.db.tx(async (t) => {
       const version = await t.get<FileVersionRow>(
@@ -1133,6 +1225,28 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         id,
       );
       await touchCollaborators(t, id, now);
+      // The log related to bytes that just stopped being current; replaying
+      // it over the restored content would double-apply history. Same
+      // transaction as the pointer swap, so no join can see one without
+      // the other.
+      const state = await t.get<{ last_seq: number }>(
+        "SELECT last_seq FROM channel_state WHERE file_id = ?",
+        id,
+      );
+      if (state) {
+        await t.run("DELETE FROM channel_messages WHERE file_id = ?", id);
+        await t.run(
+          `UPDATE channel_state SET content_generation = ?, content_channel_seq = ?,
+             snapshot_generation = ?, snapshot_seq = ?, bytes = 0, updated_at = ?
+           WHERE file_id = ?`,
+          generation,
+          Number(state.last_seq),
+          generation,
+          Number(state.last_seq),
+          now,
+          id,
+        );
+      }
       return (await t.get<FileRow>("SELECT * FROM files WHERE id = ?", id))!;
     });
     if (!row) {
