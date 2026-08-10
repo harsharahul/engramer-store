@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../api";
 import { nativeServerUrlSet, nativeShell } from "../native";
-import { login, registerAccount, type LoginResult, type Session } from "../session";
+import { activateSession, login, registerAccount, type LoginResult, type Session } from "../session";
+import { beginRecovery, type RecoveryStep, type SetPasswordStep } from "../recovery";
 import { useStore } from "../store";
 import { BrandMark, Wordmark } from "./FileArt";
 
-type Mode = "signin" | "signup";
+type Mode = "signin" | "signup" | "forgot";
 type RegistrationMode = "open" | "invite" | "closed";
 
 /** Reads an invite token from the fragment, falling back to the query. */
@@ -59,6 +60,10 @@ export function Auth() {
     session: Session;
     recoveryKeyHex: string;
   } | null>(null);
+  // The forgot-password walk: recovery key in hand, maybe a second
+  // factor, then a new password. Changes the password, never the key.
+  const [recoveryKey, setRecoveryKey] = useState("");
+  const [recoveryStep, setRecoveryStep] = useState<RecoveryStep | null>(null);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -68,6 +73,12 @@ export function Auth() {
     (document.activeElement as HTMLElement | null)?.blur?.();
     setError(null);
     try {
+      if (mode === "forgot") {
+        setBusy("Checking your recovery key.");
+        const step = await beginRecovery(email, recoveryKey, { api, activate: activateSession });
+        setRecoveryStep(step);
+        return;
+      }
       if (mode === "signup") {
         if (password.length < 10) {
           setError("Use at least 10 characters; this password protects your keys.");
@@ -114,6 +125,136 @@ export function Auth() {
       setBusy(null);
     }
   };
+
+  const submitRecoveryCode = async (event: FormEvent) => {
+    event.preventDefault();
+    if (recoveryStep?.kind !== "two-factor" || !code.trim()) {
+      return;
+    }
+    setError(null);
+    setBusy("Checking the code.");
+    try {
+      setRecoveryStep(await recoveryStep.complete(code.trim()));
+      setCode("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "that code is not valid");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const submitNewPassword = async (event: FormEvent) => {
+    event.preventDefault();
+    if (recoveryStep?.kind !== "set-password") {
+      return;
+    }
+    if (password.length < 10) {
+      setError("Use at least 10 characters; this password protects your keys.");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setError(null);
+    setBusy("Strengthening your password into encryption keys; slow on purpose.");
+    try {
+      const session = await (recoveryStep as SetPasswordStep).finish(password);
+      setBusy("Decrypting your library.");
+      await startSession(session);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "something went wrong");
+      setBusy(null);
+    }
+  };
+
+  if (mode === "forgot" && recoveryStep) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card">
+          <div className="auth-brand">
+            <BrandMark size={64} />
+            <h1>{recoveryStep.kind === "two-factor" ? "Two-factor check" : "Set a new password"}</h1>
+            <p>
+              {recoveryStep.kind === "two-factor"
+                ? "Your recovery key checked out. Enter the 6-digit code from your authenticator app, or a recovery code."
+                : "Your recovery key checked out. Choose a new password; your recovery key stays the same."}
+            </p>
+          </div>
+          {recoveryStep.kind === "two-factor" ? (
+            <form className="auth-form" onSubmit={submitRecoveryCode}>
+              <label htmlFor="recovery-totp">Code</label>
+              <input
+                id="recovery-totp"
+                autoFocus
+                autoComplete="one-time-code"
+                inputMode="numeric"
+                placeholder="123456 or a recovery code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+              />
+              {error && <div className="error-text">{error}</div>}
+              <button
+                className="btn btn-primary"
+                type="submit"
+                disabled={busy !== null || !code.trim()}
+              >
+                {busy ? <span className="spinner" /> : null}
+                {busy ? "Verifying" : "Verify"}
+              </button>
+              {busy && <div className="auth-note">{busy}</div>}
+            </form>
+          ) : (
+            <form className="auth-form" onSubmit={submitNewPassword}>
+              <label htmlFor="new-password">New password</label>
+              <input
+                id="new-password"
+                type="password"
+                required
+                autoFocus
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="A long, memorable passphrase"
+              />
+              <label htmlFor="new-confirm">Confirm new password</label>
+              <input
+                id="new-confirm"
+                type="password"
+                required
+                autoComplete="new-password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+              />
+              {error && <div className="error-text">{error}</div>}
+              <button className="btn btn-primary" type="submit" disabled={busy !== null}>
+                {busy ? <span className="spinner" /> : null}
+                {busy ? "Saving" : "Set password and open my vault"}
+              </button>
+              {busy && <div className="auth-note">{busy}</div>}
+            </form>
+          )}
+          <div className="auth-switch">
+            <a
+              href="#signin"
+              onClick={(e) => {
+                e.preventDefault();
+                setRecoveryStep(null);
+                setRecoveryKey("");
+                setPassword("");
+                setConfirm("");
+                setCode("");
+                setError(null);
+                setMode("signin");
+              }}
+            >
+              Back to sign in
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (twoFactor) {
     return (
@@ -193,16 +334,39 @@ export function Auth() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
           />
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            required
-            autoComplete={mode === "signup" ? "new-password" : "current-password"}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={mode === "signup" ? "A long, memorable passphrase" : "Your passphrase"}
-          />
+          {mode !== "forgot" && (
+            <>
+              <label htmlFor="password">Password</label>
+              <input
+                id="password"
+                type="password"
+                required
+                autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={mode === "signup" ? "A long, memorable passphrase" : "Your passphrase"}
+              />
+            </>
+          )}
+          {mode === "forgot" && (
+            <>
+              <label htmlFor="recovery-key">Recovery key</label>
+              <input
+                id="recovery-key"
+                required
+                autoComplete="off"
+                spellCheck={false}
+                className="mono"
+                value={recoveryKey}
+                onChange={(e) => setRecoveryKey(e.target.value)}
+                placeholder="The 64-character key you saved at signup"
+              />
+              <div className="auth-note">
+                This sets a new password. Your files and your recovery key stay exactly as they
+                are.
+              </div>
+            </>
+          )}
           {mode === "signup" && (
             <>
               <label htmlFor="confirm">Confirm password</label>
@@ -238,10 +402,14 @@ export function Auth() {
             {busy
               ? mode === "signup"
                 ? "Creating vault"
-                : "Unlocking"
+                : mode === "forgot"
+                  ? "Checking"
+                  : "Unlocking"
               : mode === "signup"
                 ? "Create vault"
-                : "Unlock"}
+                : mode === "forgot"
+                  ? "Continue"
+                  : "Unlock"}
           </button>
           {busy && <div className="auth-note">{busy}</div>}
         </form>
@@ -252,6 +420,17 @@ export function Auth() {
               New here?{" "}
               <a href="#signup" onClick={(e) => (e.preventDefault(), setMode("signup"))}>
                 Create a vault
+              </a>
+              {" · "}
+              <a href="#forgot" onClick={(e) => (e.preventDefault(), setMode("forgot"))}>
+                Forgot your password?
+              </a>
+            </>
+          ) : mode === "forgot" ? (
+            <>
+              Remembered it?{" "}
+              <a href="#signin" onClick={(e) => (e.preventDefault(), setMode("signin"))}>
+                Sign in
               </a>
             </>
           ) : (

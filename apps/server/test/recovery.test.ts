@@ -127,6 +127,16 @@ describe("account recovery", () => {
     expect(b64len(first["publicKey"] as string)).toBe(32);
   });
 
+  it("rations recovery begins per address, like failed logins", async () => {
+    // The throttle blocks after six failures; every begin counts as one,
+    // so an attacker cannot mint challenge rows or probe timing freely.
+    let lastStatus = 200;
+    for (let i = 0; i < 8; i++) {
+      lastStatus = (await begin("rationed@example.com")).statusCode;
+    }
+    expect(lastStatus).toBe(429);
+  });
+
   it("refuses a wrong nonce", async () => {
     const opened = (await begin("lost@example.com")).json() as { challengeId: string };
     const response = await app.inject({
