@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore, type FileEntry } from "../store";
 import { api } from "../api";
-import { IntegrityError, downloadContent } from "../transfer";
+import { IntegrityError, downloadContent, withDeadline } from "../transfer";
+
+/** The document fetch-and-convert exceeded its deadline. */
+class OpenStalledError extends Error {
+  constructor() {
+    super("the document could not be fetched in time");
+    this.name = "OpenStalledError";
+  }
+}
 import { openSharedContent, refreshLibraryOnce } from "../openshared";
 import { barrierDelayMs, barrierVerdict } from "../office/barrier";
 import { reconcile, type ContentMarker } from "../office/content";
@@ -503,7 +511,21 @@ export function OfficeEditor(props: {
         // channel dials in parallel. A websocket a proxy or VPN
         // black-holes settles neither way for minutes, and an open that
         // awaited it hung on "starting" forever, for every member.
+        // No await on the open path may be unbounded: a stalled fetch or a
+        // wedged conversion must become a visible, bounded retry, never a
+        // silent zombie incarnation. The same lesson the channel dial
+        // learned in 0.40.6, now applied to the document itself.
         const fetchDocument = async () => {
+          const result = await withDeadline(fetchDocumentBody(), 45_000);
+          if (result === undefined) {
+            if (cancelled) {
+              return null;
+            }
+            throw new OpenStalledError();
+          }
+          return result;
+        };
+        const fetchDocumentBody = async () => {
           setStage("decrypting");
           // A co-editor's save moves the digest while this client's poll
           // is still pending; opening from the cached entry then refuses
@@ -820,8 +842,11 @@ export function OfficeEditor(props: {
           // road, not a permanent refusal screen: the next incarnation
           // downloads the then-current bytes, and the breaker still ends
           // a truly unfollowable session honestly.
-          if (err instanceof IntegrityError && (bridge || opened.shared || knownCollaborative)) {
-            diag("collab", "the digest moved under the open; taking the repair road");
+          if (
+            (err instanceof IntegrityError || err instanceof OpenStalledError) &&
+            (bridge || opened.shared || knownCollaborative)
+          ) {
+            diag("collab", `open interrupted (${err.name}); taking the repair road`);
             resync();
             return;
           }
