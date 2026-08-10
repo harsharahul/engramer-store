@@ -1,6 +1,6 @@
 {
   "name": "@engramer/bridge",
-  "version": "0.41.1",
+  "version": "0.42.0",
   "description": "Local, zero-knowledge S3 bridge for Engram Store",
   "license": "AGPL-3.0-only",
   "type": "module",
