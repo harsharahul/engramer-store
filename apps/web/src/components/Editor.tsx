@@ -3,6 +3,7 @@ import type { FileEntry } from "../store";
 import { downloadAndDecrypt } from "../transfer";
 import { formatBytes } from "../format";
 import { XGlyph } from "./Icon";
+import { Confirm } from "./Dialogs";
 
 /**
  * In-app editor for text and Markdown. The plaintext exists only in this
@@ -73,8 +74,12 @@ export function Editor(props: {
     return () => window.removeEventListener("keydown", onKey);
   }, [save, dirty, props]);
 
+  // The question is asked with an in-app dialog: the iOS shell never
+  // renders window.confirm, which silently discarded the close instead.
+  const [pendingClose, setPendingClose] = useState(false);
   const close = () => {
-    if (dirty && !window.confirm("Discard unsaved changes?")) {
+    if (dirty) {
+      setPendingClose(true);
       return;
     }
     props.onClose();
@@ -82,6 +87,15 @@ export function Editor(props: {
 
   return (
     <div className="preview-shell">
+      {pendingClose && (
+        <Confirm
+          title="Discard unsaved changes?"
+          confirmLabel="Discard"
+          danger
+          onConfirm={props.onClose}
+          onClose={() => setPendingClose(false)}
+        />
+      )}
       <div className="preview-top">
         <span className="name">
           {file.name}

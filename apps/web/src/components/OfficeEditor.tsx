@@ -30,6 +30,7 @@ import {
 } from "../office/stats";
 import { diag } from "../diag";
 import { PeopleGlyph, XGlyph } from "./Icon";
+import { Confirm } from "./Dialogs";
 
 /**
  * Word and Excel editing.
@@ -100,6 +101,10 @@ export function OfficeEditor(props: {
   // A content blocker refused the editor frame's assets; failure is
   // named and worth a retry button once the blocker is off.
   const [blockedFrame, setBlockedFrame] = useState(false);
+  // Closing with unsaved changes asks with an in-app dialog: the iOS
+  // shell never renders window.confirm, which made a dirty close a
+  // silent no-op there.
+  const [pendingClose, setPendingClose] = useState(false);
   // Live collaboration: off (not a shared doc), connecting, live, or alone
   // (shared but the relay is unreachable; turn-based editing still works).
   const [collab, setCollab] = useState<"off" | "connecting" | "live" | "alone">("off");
@@ -741,7 +746,8 @@ export function OfficeEditor(props: {
     // editor to commit before deciding whether anything would be lost.
     await sessionRef.current?.commit();
     await new Promise((resolve) => setTimeout(resolve, 120));
-    if ((dirty || dirtyRef.current) && !window.confirm("Close without saving your changes?")) {
+    if (dirty || dirtyRef.current) {
+      setPendingClose(true);
       return;
     }
     props.onClose();
@@ -749,6 +755,15 @@ export function OfficeEditor(props: {
 
   return (
     <div className="preview-shell">
+      {pendingClose && (
+        <Confirm
+          title="Close without saving your changes?"
+          confirmLabel="Close"
+          danger
+          onConfirm={props.onClose}
+          onClose={() => setPendingClose(false)}
+        />
+      )}
       <div className="preview-top">
         <span className="name">
           {file.name}

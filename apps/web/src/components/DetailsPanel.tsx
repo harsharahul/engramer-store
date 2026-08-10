@@ -10,6 +10,7 @@ import { thumbnailUrl } from "../thumbs";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { triggerDownload } from "../download";
 import { SheetArt } from "./FileArt";
+import { Confirm } from "./Dialogs";
 import {
   ClockGlyph,
   DownloadGlyph,
@@ -59,6 +60,9 @@ export function DetailsPanel(props: {
   const [tagDraft, setTagDraft] = useState("");
   const [versions, setVersions] = useState<Array<FileVersionInfo & { contentSize: number }>>([]);
   const [restoring, setRestoring] = useState(false);
+  // Which version generation is waiting on the restore question. An
+  // in-app dialog, because the iOS shell never renders window.confirm.
+  const [pendingRestore, setPendingRestore] = useState<number | null>(null);
 
   useEffect(() => {
     setThumb(null);
@@ -325,20 +329,7 @@ export function DetailsPanel(props: {
                   className="icon-btn"
                   title="Restore this version"
                   disabled={restoring}
-                  onClick={() => {
-                    if (
-                      !window.confirm(
-                        "Restore this version? The current content stays in history, so this can be undone.",
-                      )
-                    ) {
-                      return;
-                    }
-                    setRestoring(true);
-                    void restoreVersion(file.id, version.generation)
-                      .then(() => props.onToast("Version restored. The replaced content is in history."))
-                      .catch(() => props.onToast("Could not restore this version."))
-                      .finally(() => setRestoring(false));
-                  }}
+                  onClick={() => setPendingRestore(version.generation)}
                 >
                   <RestoreGlyph size={13} />
                 </button>
@@ -352,6 +343,27 @@ export function DetailsPanel(props: {
         <button className="btn btn-ghost details-rename" onClick={() => props.onRename(file.id)}>
           <PencilGlyph size={13} /> Rename
         </button>
+      )}
+
+      {pendingRestore !== null && (
+        <Confirm
+          title="Restore this version?"
+          sub="The current content stays in history, so this can be undone."
+          confirmLabel="Restore"
+          onConfirm={async () => {
+            const generation = pendingRestore;
+            setRestoring(true);
+            try {
+              await restoreVersion(file.id, generation);
+              props.onToast("Version restored. The replaced content is in history.");
+            } catch {
+              props.onToast("Could not restore this version.");
+            } finally {
+              setRestoring(false);
+            }
+          }}
+          onClose={() => setPendingRestore(null)}
+        />
       )}
     </aside>
   );
