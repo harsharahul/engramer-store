@@ -37,6 +37,7 @@ import {
   noteEphReceived,
   noteEphSent,
   notePost,
+  noteSkip,
   oldestPendingMs,
   type CollabStats,
 } from "../office/stats";
@@ -265,9 +266,10 @@ export function OfficeEditor(props: {
     // is invisible exactly when it matters most.
     const skipDiagnosed = new Set<string>();
     const skippedFrame = (reason: string, seq: number) => {
+      noteSkip(stats, reason);
       if (!skipDiagnosed.has(reason)) {
         skipDiagnosed.add(reason);
-        diag("collab", `frame ${seq} not fed (${reason}); further ${reason} skips unlogged`);
+        diag("collab", `frame ${seq} not fed (${reason}); counting further ${reason} in skips`);
       }
     };
 
