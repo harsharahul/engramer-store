@@ -1,6 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { highlightParts, parseQuery, searchFiles, withinOneEdit } from "./search";
+import {
+  highlightParts,
+  mergeSearchHits,
+  parseQuery,
+  searchFiles,
+  withinOneEdit,
+  type SearchHit,
+} from "./search";
 import type { FileEntry, FolderEntry } from "./store";
+
+/**
+ * The header count, the keyboard cursor and the rendered list must all
+ * read the SAME merged list, or search contradicts itself: a meaning
+ * match visible under a "0 results" headline, reachable by mouse but
+ * not by arrow keys.
+ */
+describe("mergeSearchHits", () => {
+  const hit = (id: string): SearchHit => ({
+    file: { id } as FileEntry,
+    score: 1,
+    matchedText: null,
+    textRanges: [],
+    nameRanges: [],
+    matchedFolder: null,
+  });
+
+  it("appends meaning matches after literal ones, deduped by file", () => {
+    const merged = mergeSearchHits([hit("a"), hit("b")], [hit("b"), hit("c")]);
+    expect(merged.map((h) => h.file.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("lets meaning matches stand alone when nothing literal matched", () => {
+    expect(mergeSearchHits([], [hit("x")]).map((h) => h.file.id)).toEqual(["x"]);
+  });
+});
 
 function file(partial: Partial<FileEntry>): FileEntry {
   return {

@@ -24,7 +24,7 @@ import {
   currentTheme,
   type ThemeMode,
 } from "../theme";
-import { searchFiles, highlightParts, type SearchHit } from "../search";
+import { mergeSearchHits, searchFiles, highlightParts, type SearchHit } from "../search";
 import { collectDropped, fromDirectoryInput } from "../uploader";
 import { MOBILE_QUERY, useMediaQuery } from "../media";
 import { installMediaKeyResponder } from "../mediastream";
@@ -481,7 +481,13 @@ export function Vault() {
     [store.files, store.folders, query, searching],
   );
 
-  const visibleFiles = searching ? hits.map((h) => h.file) : viewFiles;
+  // THE search result list. Every consumer — the headline count, the
+  // keyboard cursor, Enter-to-open, the rendered rows — reads this one,
+  // or a meaning match sits under a "0 results" headline that arrow keys
+  // cannot reach.
+  const shownHits = useMemo(() => mergeSearchHits(hits, semanticHits), [hits, semanticHits]);
+
+  const visibleFiles = searching ? shownHits.map((h) => h.file) : viewFiles;
 
   const previewFile = previewId ? store.files.get(previewId) : undefined;
   const editorFile = editorId ? store.files.get(editorId) : undefined;
@@ -1372,7 +1378,7 @@ export function Vault() {
   );
 
   const viewTitle = searching
-    ? `${hits.length} result${hits.length === 1 ? "" : "s"}`
+    ? `${shownHits.length} result${shownHits.length === 1 ? "" : "s"}`
     : view.kind === "folder"
       ? (breadcrumbs[breadcrumbs.length - 1]?.name ?? "All files")
       : view.kind === "category"
@@ -1664,13 +1670,13 @@ export function Vault() {
                 }
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
-                  setSearchCursor((c) => Math.min(c + 1, hits.length - 1));
+                  setSearchCursor((c) => Math.min(c + 1, shownHits.length - 1));
                 } else if (e.key === "ArrowUp") {
                   e.preventDefault();
                   setSearchCursor((c) => Math.max(c - 1, 0));
-                } else if (e.key === "Enter" && hits[searchCursor]) {
+                } else if (e.key === "Enter" && shownHits[searchCursor]) {
                   e.preventDefault();
-                  openFile(hits[searchCursor]!.file.id);
+                  openFile(shownHits[searchCursor]!.file.id);
                 } else if (e.key === "Escape") {
                   setQuery("");
                   (e.target as HTMLInputElement).blur();
@@ -1957,7 +1963,7 @@ export function Vault() {
           )}
           {searching ? (
             <SearchResults
-              hits={[...hits, ...semanticHits.filter((s) => !hits.some((h) => h.file.id === s.file.id))]}
+              hits={shownHits}
               folders={store.folders}
               cursor={searchCursor}
               selection={selection}

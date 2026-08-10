@@ -22,6 +22,18 @@ export interface SearchHit {
   semantic?: boolean;
 }
 
+/**
+ * The one list search shows: literal hits first, meaning matches after,
+ * a file never listed twice. The header count, the keyboard cursor and
+ * the rendered rows must all read THIS list; when they compute their own,
+ * they drift, and a meaning match sits under a "0 results" headline that
+ * arrow keys cannot reach.
+ */
+export function mergeSearchHits(hits: SearchHit[], semanticHits: SearchHit[]): SearchHit[] {
+  const seen = new Set(hits.map((h) => h.file.id));
+  return [...hits, ...semanticHits.filter((s) => !seen.has(s.file.id))];
+}
+
 export interface ParsedQuery {
   terms: string[];
   tags: string[];
