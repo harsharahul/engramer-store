@@ -22,7 +22,7 @@ jobs:
       - name: Verify the changelog has an entry for this version
         run: |
           ver="$(node -p "require('./package.json').version")"
-          grep -q "^## $ver" CHANGELOG.md || { echo "::error::CHANGELOG.md has no entry for $ver"; exit 1; }
+          grep -q -e "^## $ver" -e "^## \[$ver\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no entry for $ver"; exit 1; }
       - uses: pnpm/action-setup@v6
         with:
           version: 11
