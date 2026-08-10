@@ -226,6 +226,17 @@ export const api = {
 
   keyAttributes: () => request<{ keyAttributes: KeyAttributes }>("/api/user/key-attributes"),
 
+  changePassword: (
+    currentLoginKey: string,
+    loginKey: string,
+    kdf: KdfParams,
+    encryptedMasterKey: SecretBox,
+  ) =>
+    request<{ token: string }>("/api/auth/password", {
+      method: "POST",
+      body: JSON.stringify({ currentLoginKey, loginKey, kdf, encryptedMasterKey }),
+    }),
+
   totpSetup: () =>
     request<{ secret: string; otpauthUri: string }>("/api/auth/totp/setup", { method: "POST", body: "{}" }),
 

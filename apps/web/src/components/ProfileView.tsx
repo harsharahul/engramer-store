@@ -28,7 +28,8 @@ import {
   type VerifyResult,
 } from "../verify";
 import { useStore } from "../store";
-import { api } from "../api";
+import { api, setAuthToken } from "../api";
+import { changePassword } from "../changepassword";
 import { formatBytes } from "../format";
 import { ACCENTS, type ThemeMode } from "../theme";
 import {
@@ -103,6 +104,12 @@ export function ProfileView(props: {
   const [backupOk, setBackupOk] = useState(false);
   const [policy, setPolicy] = useState<BackupPolicy>(() => loadPolicy());
   const [backupRun, setBackupRun] = useState<BackupProgress | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNext, setPwNext] = useState("");
+  const [pwConfirm, setPwConfirm] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
   useEffect(() => {
     void handoffSupported().then((supported) => {
       if (supported) {
@@ -394,6 +401,37 @@ export function ProfileView(props: {
     props.onToast("Device unlock is off. Your password unlocks the vault from now on.");
   };
 
+  const submitPasswordChange = async () => {
+    if (pwNext.length < 10) {
+      setPwError("Use at least 10 characters; this password protects your keys.");
+      return;
+    }
+    if (pwNext !== pwConfirm) {
+      setPwError("The new passwords do not match.");
+      return;
+    }
+    setPwError(null);
+    setPwBusy(true);
+    try {
+      await changePassword(pwCurrent, pwNext, { api, setAuthToken });
+      setChangingPassword(false);
+      setPwCurrent("");
+      setPwNext("");
+      setPwConfirm("");
+      props.onToast("Password changed. Your other devices have been signed out.");
+    } catch (err) {
+      // A wrong current password fails locally at the master-key open, or
+      // the server rejects the digest; both surface here.
+      setPwError(
+        err instanceof Error && /password/i.test(err.message)
+          ? "That current password is not correct."
+          : "Could not change the password. Check your current password and try again.",
+      );
+    } finally {
+      setPwBusy(false);
+    }
+  };
+
   return (
     <div className="profile">
       <section className="profile-card profile-head">
@@ -472,6 +510,18 @@ export function ProfileView(props: {
 
       <section className="profile-card">
         <h3>Security</h3>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Password</b>
+            <div className="profile-row-sub">
+              Changing it re-wraps your keys on this device and signs your other devices out. Your
+              files and recovery key stay the same.
+            </div>
+          </div>
+          <button className="btn" onClick={() => setChangingPassword(true)}>
+            <KeyGlyph size={13} /> Change
+          </button>
+        </div>
         <div className="profile-row">
           <div className="profile-row-main">
             <b>Two-factor authentication</b>
@@ -1037,6 +1087,76 @@ export function ProfileView(props: {
           <h3>Server administration</h3>
           <AdminBody onToast={props.onToast} />
         </section>
+      )}
+
+      {changingPassword && (
+        <div
+          className="overlay"
+          onClick={() => {
+            if (!pwBusy) {
+              setChangingPassword(false);
+            }
+          }}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Change password</h2>
+            <p className="modal-sub">
+              Your other signed-in devices will be signed out. Your files and recovery key are not
+              affected.
+            </p>
+            <form
+              className="auth-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void submitPasswordChange();
+              }}
+            >
+              <label htmlFor="pw-current">Current password</label>
+              <input
+                id="pw-current"
+                type="password"
+                autoComplete="current-password"
+                value={pwCurrent}
+                onChange={(e) => setPwCurrent(e.target.value)}
+              />
+              <label htmlFor="pw-next">New password</label>
+              <input
+                id="pw-next"
+                type="password"
+                autoComplete="new-password"
+                value={pwNext}
+                onChange={(e) => setPwNext(e.target.value)}
+              />
+              <label htmlFor="pw-confirm">Confirm new password</label>
+              <input
+                id="pw-confirm"
+                type="password"
+                autoComplete="new-password"
+                value={pwConfirm}
+                onChange={(e) => setPwConfirm(e.target.value)}
+              />
+              {pwError && <div className="error-text">{pwError}</div>}
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={pwBusy}
+                  onClick={() => setChangingPassword(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={pwBusy || !pwCurrent || !pwNext}
+                >
+                  {pwBusy ? <span className="spinner" /> : null}
+                  {pwBusy ? "Changing" : "Change password"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

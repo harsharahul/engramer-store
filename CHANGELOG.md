@@ -6,6 +6,11 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Added
+- **Change your vault password** from the profile's security section.
+  The current password is verified on your device before anything
+  changes, only the password wrapping is re-sealed (your files and
+  recovery key are untouched), and your other signed-in devices are
+  signed out.
 - Live sessions count their traffic (changes posted and acknowledged,
   acknowledgement latency, cursor frames sent and received per member)
   in the in-app diagnostics, so a collaboration problem can be
