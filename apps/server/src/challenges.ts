@@ -43,13 +43,7 @@ export async function issueChallenge(
   return { id, secret };
 }
 
-/**
- * Spends the challenge and returns its user, or null: unknown id, wrong
- * kind, wrong secret, expired, or already spent. A wrong secret does not
- * spend the row, so a guesser cannot deny the real holder; the routes'
- * throttle is what bounds the guessing.
- */
-export async function consumeChallenge(
+async function validChallenge(
   db: Db,
   id: string,
   secret: string,
@@ -67,9 +61,41 @@ export async function consumeChallenge(
   if (expected.length !== offered.length || !timingSafeEqual(expected, offered)) {
     return null;
   }
+  return Number(row.user_id);
+}
+
+/**
+ * Checks the challenge without spending it, for a step that gates on a
+ * further factor: a wrong second factor must not burn the step it guards.
+ */
+export async function peekChallenge(
+  db: Db,
+  id: string,
+  secret: string,
+  kind: ChallengeKind,
+): Promise<number | null> {
+  return validChallenge(db, id, secret, kind);
+}
+
+/**
+ * Spends the challenge and returns its user, or null: unknown id, wrong
+ * kind, wrong secret, expired, or already spent. A wrong secret does not
+ * spend the row, so a guesser cannot deny the real holder; the routes'
+ * throttle is what bounds the guessing.
+ */
+export async function consumeChallenge(
+  db: Db,
+  id: string,
+  secret: string,
+  kind: ChallengeKind,
+): Promise<number | null> {
+  const userId = await validChallenge(db, id, secret, kind);
+  if (userId === null) {
+    return null;
+  }
   const spent = await db.run(
     "UPDATE auth_challenges SET used = 1 WHERE id = ? AND used = 0",
     id,
   );
-  return spent.changes === 1 ? Number(row.user_id) : null;
+  return spent.changes === 1 ? userId : null;
 }

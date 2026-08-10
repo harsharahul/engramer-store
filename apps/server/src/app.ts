@@ -39,8 +39,8 @@ declare module "fastify" {
 
 declare module "@fastify/jwt" {
   interface FastifyJWT {
-    payload: { uid: number; pending?: boolean };
-    user: { uid: number; pending?: boolean };
+    payload: { uid: number; pending?: boolean; ep?: number };
+    user: { uid: number; pending?: boolean; ep?: number };
   }
 }
 
@@ -129,12 +129,18 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     }
     // Disabling an account must cut off its existing sessions too, not just
     // future logins; a token alone is never enough.
-    const state = await db.get<{ disabled: number }>(
-      "SELECT disabled FROM users WHERE id = ?",
+    const state = await db.get<{ disabled: number; token_epoch: number }>(
+      "SELECT disabled, token_epoch FROM users WHERE id = ?",
       request.user.uid,
     );
     if (!state || state.disabled === 1) {
       await reply.code(403).send({ error: "this account is disabled" });
+      return;
+    }
+    // A credential change advances the epoch; every token minted before it
+    // is dead, so "I lost my password" also means "sign my old devices out".
+    if ((request.user.ep ?? 0) !== (state.token_epoch ?? 0)) {
+      await reply.code(401).send({ error: "authentication required" });
     }
   });
 
