@@ -293,6 +293,8 @@ export function OfficeEditor(props: {
       for (const queued of tail.splice(0)) {
         if (queued.seq > feedFloor) {
           feedFrame(queued.frame);
+        } else {
+          skippedFrame("drain-below-floor", queued.seq);
         }
       }
     };
@@ -650,6 +652,7 @@ export function OfficeEditor(props: {
                 setPeers(welcome.members.length);
               },
               onLog: (seq, sender, payload) => {
+                stats.logReceivedTotal += 1;
                 // A remount is already on its way; frames that keep
                 // streaming until it lands change nothing it will not
                 // re-derive from the snapshot and the replay.
