@@ -191,6 +191,21 @@ describe("the announce handshake", () => {
     session.close();
   });
 
+  it("reports the announce to its handlers", () => {
+    const { frame, contentWindow } = fakeFrame();
+    let announces = 0;
+    const session = new EditorSession(frame, "docx", "doc", {
+      ...handlers(),
+      onAnnounced: () => {
+        announces += 1;
+      },
+    });
+    expect(announces).toBe(0);
+    announce(contentWindow);
+    expect(announces).toBe(1);
+    session.close();
+  });
+
   it("never starts a second session over a frame that already announced", () => {
     const { frame, sent, contentWindow } = fakeFrame();
     const first = new EditorSession(frame, "docx", "doc", handlers());

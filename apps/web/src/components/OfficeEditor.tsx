@@ -17,7 +17,7 @@ import {
   type ChannelOrder,
 } from "../office/channel";
 import { electedSnapshotter, shouldAutoSnapshot } from "../office/snapshot";
-import { editorFrameKey } from "../office/reload";
+import { describeStartupStall, editorFrameKey } from "../office/reload";
 import { trailingThrottle } from "../office/throttle";
 import {
   describeCollabStats,
@@ -97,6 +97,9 @@ export function OfficeEditor(props: {
   const openedAtRef = useRef(file.updatedAt);
   // Forces the open effect to run again for "Reload theirs".
   const [reloadNonce, setReloadNonce] = useState(0);
+  // A content blocker refused the editor frame's assets; failure is
+  // named and worth a retry button once the blocker is off.
+  const [blockedFrame, setBlockedFrame] = useState(false);
   // Live collaboration: off (not a shared doc), connecting, live, or alone
   // (shared but the relay is unreachable; turn-based editing still works).
   const [collab, setCollab] = useState<"off" | "connecting" | "live" | "alone">("off");
@@ -135,6 +138,7 @@ export function OfficeEditor(props: {
     const opened = fileRef.current;
     openedAtRef.current = opened.updatedAt;
     setConflict(null);
+    setBlockedFrame(false);
 
     // A frame that never reports ready would otherwise spin forever, which is
     // what a refused asset looks like from the outside. Generous, because the
@@ -145,6 +149,35 @@ export function OfficeEditor(props: {
         setError((current) => current ?? "the editor did not start");
       }
     }, 150_000);
+
+    // Long before that deadline, a frame that has not even announced while
+    // this origin answers is being refused, not loaded: content blockers
+    // treat the sandboxed frame's null-origin requests as third party.
+    let frameAnnounced = false;
+    const shieldProbe = window.setTimeout(() => {
+      if (cancelled || frameAnnounced) {
+        return;
+      }
+      void fetch("/version.json", { cache: "no-store" }).then(
+        () => {
+          if (cancelled || frameAnnounced) {
+            return;
+          }
+          if (describeStartupStall({ announced: false, originAlive: true }) === "blocked") {
+            diag("office", "no announce after 20s with the origin alive: a blocked frame");
+            setBlockedFrame(true);
+            setStage("failed");
+            setError(
+              "your content blocker is stopping the editor from loading; allow this site and try again",
+            );
+          }
+        },
+        () => {
+          // The origin itself is unreachable; the link is the problem and
+          // the generous startup deadline stays in charge.
+        },
+      );
+    }, 20_000);
 
     let channel: ChannelClient | null = null;
     let bridge: CollabBridge | undefined;
@@ -223,6 +256,9 @@ export function OfficeEditor(props: {
         fileType,
         opened.name,
         {
+          onAnnounced: () => {
+            frameAnnounced = true;
+          },
           onLoading: () => diag("office", "the editor is up and waiting for its document"),
           onReady: () => {
             window.clearTimeout(startupDeadline);
@@ -560,6 +596,7 @@ export function OfficeEditor(props: {
     return () => {
       cancelled = true;
       window.clearTimeout(startupDeadline);
+      window.clearTimeout(shieldProbe);
       window.clearInterval(autoSnapshot);
       window.clearInterval(statsPulse);
       if (stats.chgPosted || stats.ephSent || stats.ephReceivedBySender.size) {
@@ -761,7 +798,22 @@ export function OfficeEditor(props: {
       </div>
       <div className="office-body">
         {stage === "failed" ? (
-          <div className="preview-fallback">{error ?? "this document could not be opened"}</div>
+          <div className="preview-fallback">
+            {error ?? "this document could not be opened"}
+            {blockedFrame && (
+              <button
+                className="btn"
+                onClick={() => {
+                  setBlockedFrame(false);
+                  setError(null);
+                  setStage("decrypting");
+                  setReloadNonce((n) => n + 1);
+                }}
+              >
+                Try again
+              </button>
+            )}
+          </div>
         ) : null}
         {stage !== "ready" && stage !== "failed" && (
           <div className="office-loading">
