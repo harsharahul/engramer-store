@@ -230,8 +230,6 @@ export function OfficeEditor(props: {
     let knownCollaborative = false;
     let order: ChannelOrder = newChannelOrder(opened.id);
     let connId = "";
-    /** Whether the engine's auth saw anyone else; solo auth cannot co-edit. */
-    let bridgeCompany = false;
     /** Set once the collab decision reached the session; a welcome after
      * this cannot join the current engine and upgrades via reload. */
     let sessionBegun = false;
@@ -600,7 +598,6 @@ export function OfficeEditor(props: {
                     : null;
                 diag("collab", `welcome: member ${welcome.yourIndex}, ${welcome.members.length} present`);
                 order = newChannelOrder(opened.id);
-                bridgeCompany = welcome.members.length > 1;
                 bridge = new CollabBridge({
                   fileId: opened.id,
                   selfConnId: welcome.you,
@@ -710,26 +707,14 @@ export function OfficeEditor(props: {
                     s.applyEffects(effects);
                   }
                 }
-                // The reload on company's arrival was tried WITHOUT and
-                // failed the harness (2026-08-10): a connectState alone
-                // introduces the newcomer, but the JOINER's engine then
-                // defers the solo-authed member's structure edits forever
-                // (haveOtherChanges stuck true, locks pending, document
-                // frozen) — the engine's lock and identity model wants
-                // both sides authed into the same room shape. Until that
-                // contract is understood, company arriving re-auths
-                // through the ordinary reload, dirty work saved first.
-                if (b && !bridgeCompany && members.length > 1) {
-                  bridgeCompany = true;
-                  if (dirtyRef.current) {
-                    void savePromiseRef
-                      .current()
-                      .catch(() => {})
-                      .finally(() => resync(false));
-                  } else {
-                    resync(false);
-                  }
-                }
+                // Company arrives without reloading anyone: the newcomer
+                // is introduced by the connectState above, and the room's
+                // held-lock table now travels with it and in the joiner's
+                // auth. The first no-reload attempt failed because the
+                // joiner could not see held locks (its save cycle wedged
+                // on an invisible collision, per the stock server's and
+                // CryptPad's own join protocol); with the table restored
+                // this matches what both of them ship.
               },
               onAck: (ref, seq) => {
                 noteAck(stats, ref, Date.now());
