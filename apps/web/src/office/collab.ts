@@ -218,7 +218,10 @@ export class CollabBridge {
         this.appliedChanges += sent.changes.length;
         this.releaseOwnBlocks();
         if (sent.partial) {
-          effects.toEditor.push({ type: "savePartChanges", changesIndex: this.appliedChanges });
+          // -1 = "leave your counter alone": savePartChanges is only the
+          // ack that pulls the next chunk, and a live value here would
+          // feed the engine's deleteIndex arithmetic with our bookkeeping.
+          effects.toEditor.push({ type: "savePartChanges", changesIndex: -1 });
         } else {
           effects.toEditor.push({
             type: "unSaveLock",
