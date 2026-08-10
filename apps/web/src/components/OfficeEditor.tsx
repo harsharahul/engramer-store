@@ -269,6 +269,12 @@ export function OfficeEditor(props: {
     };
     drainHookRef.current = drainTail;
 
+    // One reload per incarnation. A broken order is sticky, so every frame
+    // after the break also answered "resync"; each call counted, and three
+    // frames burned the whole repair budget in a millisecond. The first
+    // call decides; the remount either heals (and resets the budget on
+    // ready) or fails and takes the next incarnation's single count.
+    let resyncing = false;
     const resync = (counted = true) => {
       // Frames went missing; the stream cannot be trusted. Reload the
       // document from its current generation, the same road as a conflict.
@@ -278,6 +284,10 @@ export function OfficeEditor(props: {
       // is not that: connections flap on phones, and a reconnect reload
       // must not spend the repair budget.
       if (!cancelled) {
+        if (resyncing) {
+          return;
+        }
+        resyncing = true;
         if (counted) {
           resyncCountRef.current += 1;
         }
@@ -528,6 +538,12 @@ export function OfficeEditor(props: {
                 setPeers(welcome.members.length);
               },
               onLog: (seq, sender, payload) => {
+                // A remount is already on its way; frames that keep
+                // streaming until it lands change nothing it will not
+                // re-derive from the snapshot and the replay.
+                if (resyncing) {
+                  return;
+                }
                 try {
                   const decoded = decryptFrame(payload, opened.key);
                   const verdict = acceptFrame(order, decoded, sender);
@@ -854,60 +870,74 @@ export function OfficeEditor(props: {
    * slipped in re-runs the loop. Null means the room never went quiet and
    * the save is declined rather than inexact.
    */
-  const settleBarrier = useCallback(async (): Promise<{ bin: string; upTo: number } | null> => {
-    const session = sessionRef.current;
-    if (!session) {
-      return null;
-    }
-    try {
-      for (let attempt = 0; attempt <= 8; attempt += 1) {
-        const delay = barrierDelayMs(attempt);
-        if (delay > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
-        const flush = await session.flushChanges();
-        const stats = statsRef.current;
-        const verdict = barrierVerdict({
-          haveChanges: flush.haveChanges === true,
-          haveOtherChanges: flush.haveOtherChanges === true,
-          pendingAcks: stats?.pendingAcks.size ?? 0,
-          postsAtCapture: 0,
-          postsNow: 0,
-          ceilingReached: ceilingRef.current,
-          attempt,
-        });
-        if (verdict === "retry") {
-          continue;
-        }
-        if (verdict === "abandon") {
-          return null;
-        }
-        // Quiet. Freeze remote delivery and read the position in the same
-        // synchronous block: everything seen is applied, so lastSeenSeq is
-        // exactly what the serialization will contain.
-        freezeRef.current = true;
-        const upTo = channelRef.current?.lastSeenSeq ?? 0;
-        const postsAtCapture = stats?.chgPosted ?? 0;
-        const result = await session.saveAtBarrier();
-        const moved =
-          result.stale ||
-          (statsRef.current?.chgPosted ?? 0) !== postsAtCapture ||
-          (verdict === "capture" && (statsRef.current?.pendingAcks.size ?? 0) !== 0);
-        if (moved) {
+  const settleBarrier = useCallback(
+    async (checkpoint: boolean): Promise<{ bin: string; upTo: number } | null> => {
+      const session = sessionRef.current;
+      if (!session) {
+        return null;
+      }
+      try {
+        for (let attempt = 0; attempt <= 8; attempt += 1) {
+          const delay = barrierDelayMs(attempt);
+          if (delay > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          }
+          const flush = await session.flushChanges();
+          const stats = statsRef.current;
+          const verdict = barrierVerdict({
+            haveChanges: flush.haveChanges === true,
+            haveOtherChanges: flush.haveOtherChanges === true,
+            pendingAcks: stats?.pendingAcks.size ?? 0,
+            postsAtCapture: 0,
+            postsNow: 0,
+            ceilingReached: ceilingRef.current,
+            checkpoint,
+            attempt,
+          });
+          if (verdict === "retry") {
+            continue;
+          }
+          if (verdict === "abandon") {
+            return null;
+          }
+          if (verdict === "proceed-unlogged") {
+            // The relay is refusing posts, so the log is frozen and
+            // lastSeenSeq cannot move; a plain serialization is exact,
+            // and whatever the engine still holds rides the bytes,
+            // never the log.
+            freezeRef.current = true;
+            const upTo = channelRef.current?.lastSeenSeq ?? 0;
+            const bin = await session.save();
+            return { bin, upTo };
+          }
+          // Quiet. Freeze remote delivery and read the position in the
+          // same synchronous block: everything seen is applied, so
+          // lastSeenSeq is exactly what the serialization will contain.
+          freezeRef.current = true;
+          const upTo = channelRef.current?.lastSeenSeq ?? 0;
+          const postsAtCapture = stats?.chgPosted ?? 0;
+          const result = await session.saveAtBarrier();
+          const moved =
+            result.stale ||
+            (statsRef.current?.chgPosted ?? 0) !== postsAtCapture ||
+            (statsRef.current?.pendingAcks.size ?? 0) !== 0;
+          if (moved) {
+            freezeRef.current = false;
+            drainHookRef.current();
+            continue;
+          }
           freezeRef.current = false;
           drainHookRef.current();
-          continue;
+          return { bin: result.bin, upTo };
         }
+        return null;
+      } finally {
         freezeRef.current = false;
         drainHookRef.current();
-        return { bin: result.bin, upTo };
       }
-      return null;
-    } finally {
-      freezeRef.current = false;
-      drainHookRef.current();
-    }
-  }, []);
+    },
+    [],
+  );
 
   const save = useCallback(async (auto = false) => {
     const converter = converterRef.current;
@@ -943,7 +973,7 @@ export function OfficeEditor(props: {
       if (live) {
         // A live save writes bytes and stamps where they stand; it must
         // never guess. The barrier makes the position exact or declines.
-        const settled = await settleBarrier();
+        const settled = await settleBarrier(checkpoint);
         if (!settled) {
           diag("collab", "the room never went quiet; save declined rather than inexact");
           if (!auto) {

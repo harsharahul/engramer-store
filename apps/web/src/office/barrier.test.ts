@@ -8,6 +8,7 @@ const quiet: BarrierState = {
   postsAtCapture: 4,
   postsNow: 4,
   ceilingReached: false,
+  checkpoint: false,
   attempt: 0,
 };
 
@@ -41,6 +42,27 @@ describe("barrierVerdict", () => {
     expect(
       barrierVerdict({ ...quiet, haveChanges: true, pendingAcks: 2, ceilingReached: true }),
     ).toBe("retry");
+  });
+
+  it("lets a checkpoint through the hard ceiling once flushing had its chance", () => {
+    // At the hard ceiling the relay refuses every post, so the engine's
+    // save cycle can never complete and quiet is unreachable: the room
+    // livelocks unless the one save that trims the log is allowed to
+    // carry the engine's held changes in its bytes. Those changes have
+    // no log positions, so nothing can ever replay them: the marker
+    // stays exact.
+    const wedged = {
+      ...quiet,
+      haveChanges: true,
+      pendingAcks: 2,
+      ceilingReached: true,
+      checkpoint: true,
+    };
+    expect(barrierVerdict({ ...wedged, attempt: 0 })).toBe("retry");
+    expect(barrierVerdict({ ...wedged, attempt: 1 })).toBe("retry");
+    expect(barrierVerdict({ ...wedged, attempt: 2 })).toBe("proceed-unlogged");
+    // A plain content save gets no such pass; only the trim unclogs.
+    expect(barrierVerdict({ ...wedged, checkpoint: false, attempt: 5 })).toBe("abandon");
   });
 
   it("abandons after the budget rather than saving something inexact", () => {
