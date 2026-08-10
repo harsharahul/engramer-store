@@ -1,10 +1,12 @@
 name: CI
 
+# Runs when a release is published, or on demand. Day-to-day verification
+# runs locally and in the project's own pipeline; hosted minutes are saved
+# for the moments a published release needs an independent check.
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
