@@ -28,6 +28,9 @@ export {
   unlockWithPassword,
   unlockWithRecoveryKey,
   rewrapMasterKey,
+  openRecoveryKey,
+  rewrapRecoveryKey,
+  proveRecoveryPossession,
 } from "./keys.js";
 export {
   STREAM_CHUNK_SIZE,

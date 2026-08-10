@@ -3,6 +3,7 @@ import { fromB64, toB64, toHex, fromHex } from "./encoding.js";
 import {
   generateKey,
   generateKeyPair,
+  openSealed,
   secretBoxOpen,
   secretBoxSeal,
   type SecretBox,
@@ -215,4 +216,47 @@ export function rewrapMasterKey(
     },
     loginKey: deriveLoginKey(kek),
   };
+}
+
+/** Opens the recovery key itself, for re-displaying it to its owner. */
+export function openRecoveryKey(masterKey: Uint8Array, attributes: KeyAttributes): string {
+  return toHex(secretBoxOpen(attributes.recoveryKeyEncryptedWithMasterKey, masterKey));
+}
+
+/**
+ * A fresh recovery key, both directions re-sealed. Only the recovery
+ * wrapping changes: the password wrapping, the keypair and every stored
+ * byte stay exactly as they were, so rotation is safe to do casually.
+ */
+export function rewrapRecoveryKey(
+  masterKey: Uint8Array,
+  attributes: KeyAttributes,
+): { keyAttributes: KeyAttributes; recoveryKeyHex: string } {
+  const recoveryKey = generateKey();
+  return {
+    keyAttributes: {
+      ...attributes,
+      masterKeyEncryptedWithRecoveryKey: secretBoxSeal(masterKey, recoveryKey),
+      recoveryKeyEncryptedWithMasterKey: secretBoxSeal(recoveryKey, masterKey),
+    },
+    recoveryKeyHex: toHex(recoveryKey),
+  };
+}
+
+/**
+ * Proves possession of the account to a server that knows only ciphertext:
+ * the recovery key opens the master key, the master key opens the private
+ * key, and the private key opens a challenge the server sealed to the
+ * account's public key. Sealed boxes are receiver-only-open, so returning
+ * the nonce proves the caller holds the private key and nothing else.
+ */
+export function proveRecoveryPossession(
+  recoveryKeyHex: string,
+  attributes: KeyAttributes,
+  sealedChallenge: string,
+): { masterKey: Uint8Array; privateKey: Uint8Array; nonce: Uint8Array } {
+  const masterKey = unlockWithRecoveryKey(recoveryKeyHex, attributes);
+  const privateKey = secretBoxOpen(attributes.encryptedPrivateKey, masterKey);
+  const nonce = openSealed(sealedChallenge, attributes.publicKey, privateKey);
+  return { masterKey, privateKey, nonce };
 }

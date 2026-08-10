@@ -11,6 +11,9 @@ import {
   unlockWithPassword,
   unlockWithRecoveryKey,
   rewrapMasterKey,
+  openRecoveryKey,
+  rewrapRecoveryKey,
+  proveRecoveryPossession,
   loginKeyDigest,
   encryptBytes,
   decryptBytes,
@@ -125,6 +128,49 @@ describe("account key hierarchy", () => {
     const unlocked = unlockWithPassword("a brand new password", keyAttributes);
     expect(unlocked.masterKey).toEqual(account.masterKey);
     expect(() => unlockWithPassword(password, keyAttributes)).toThrow();
+  });
+
+  it("re-displays the recovery key to a holder of the master key", () => {
+    expect(openRecoveryKey(account.masterKey, account.keyAttributes)).toBe(account.recoveryKeyHex);
+  });
+
+  it("rotates the recovery key and invalidates the old one", () => {
+    const rotated = rewrapRecoveryKey(account.masterKey, account.keyAttributes);
+    expect(rotated.recoveryKeyHex).not.toBe(account.recoveryKeyHex);
+    expect(unlockWithRecoveryKey(rotated.recoveryKeyHex, rotated.keyAttributes)).toEqual(
+      account.masterKey,
+    );
+    expect(() =>
+      unlockWithRecoveryKey(account.recoveryKeyHex, rotated.keyAttributes),
+    ).toThrow();
+    // The password wrapping is untouched by a recovery-key rotation.
+    expect(rotated.keyAttributes.encryptedMasterKey).toEqual(
+      account.keyAttributes.encryptedMasterKey,
+    );
+  });
+
+  it("proves possession by opening a challenge sealed to the account", () => {
+    const nonce = new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2, 1]);
+    const sealed = sealToPublicKey(nonce, account.keyAttributes.publicKey);
+    const proof = proveRecoveryPossession(account.recoveryKeyHex, account.keyAttributes, sealed);
+    expect(proof.nonce).toEqual(nonce);
+    expect(proof.masterKey).toEqual(account.masterKey);
+    expect(proof.privateKey).toEqual(account.privateKey);
+  });
+
+  it("cannot prove possession with the wrong recovery key", () => {
+    const sealed = sealToPublicKey(new Uint8Array(9), account.keyAttributes.publicKey);
+    expect(() =>
+      proveRecoveryPossession("00".repeat(32), account.keyAttributes, sealed),
+    ).toThrow();
+  });
+
+  it("cannot answer a challenge sealed to a different account", () => {
+    const stranger = generateKeyPair();
+    const sealed = sealToPublicKey(new Uint8Array(9), stranger.publicKey);
+    expect(() =>
+      proveRecoveryPossession(account.recoveryKeyHex, account.keyAttributes, sealed),
+    ).toThrow();
   });
 
   // Guards against a future change quietly weakening password derivation.
