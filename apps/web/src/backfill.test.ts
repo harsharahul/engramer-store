@@ -26,11 +26,27 @@ vi.mock("./analysisslot", async (importOriginal) => ({
 
 import {
   HANDHELD_AUTO_MAX_BYTES,
+  autoBackfillEnabled,
   backfillDelayMs,
   runBackfill,
   scheduleBackfill,
+  setAutoBackfillEnabled,
+  stopBackfill,
 } from "./backfill";
 import { useStore } from "./store";
+
+// The preference lives in localStorage; give the node test env one.
+const backing = new Map<string, string>();
+(globalThis as { localStorage?: Storage }).localStorage = {
+  getItem: (k: string) => backing.get(k) ?? null,
+  setItem: (k: string, v: string) => void backing.set(k, String(v)),
+  removeItem: (k: string) => void backing.delete(k),
+  clear: () => backing.clear(),
+  key: (i: number) => [...backing.keys()][i] ?? null,
+  get length() {
+    return backing.size;
+  },
+} as Storage;
 
 const session = {
   email: "t@example.com",
@@ -43,6 +59,7 @@ const session = {
 interface SweepCall {
   skip?: Set<string>;
   maxBytes?: number;
+  stop?: () => boolean;
 }
 
 /** Replaces every sweep with a recorder so runs are observable. */
@@ -82,7 +99,42 @@ afterEach(() => {
   knobs.semantic = true;
   knobs.facts = true;
   knobs.handheld = false;
+  localStorage.clear();
   vi.useRealTimers();
+});
+
+describe("the automatic backfill can be declined and stopped", () => {
+  it("is on by default and obeys the preference", async () => {
+    expect(autoBackfillEnabled()).toBe(true);
+    const calls = install();
+    setAutoBackfillEnabled(false);
+    expect(autoBackfillEnabled()).toBe(false);
+    expect(await runBackfill()).toBeNull();
+    expect(calls.thumbs).toHaveLength(0);
+    setAutoBackfillEnabled(true);
+    expect(await runBackfill()).not.toBeNull();
+  });
+
+  it("hands every sweep a stop probe and halts between passes once told", async () => {
+    const calls = install();
+    useStore.setState({
+      backfillThumbnails: async (o?: SweepCall) => {
+        calls.thumbs.push(o ?? {});
+        expect(o?.stop?.()).toBe(false);
+        stopBackfill();
+        expect(o?.stop?.()).toBe(true);
+        return 1;
+      },
+    });
+    const stopped = await runBackfill();
+    expect(stopped).toEqual({ thumbs: 1, text: 0, meaning: 0, facts: 0 });
+    expect(calls.ocr).toHaveLength(0);
+    expect(calls.clip).toHaveLength(0);
+    expect(calls.facts).toHaveLength(0);
+    // The stop is one pass's decision, not a permanent switch.
+    install();
+    expect(await runBackfill()).not.toBeNull();
+  });
 });
 
 describe("backfillDelayMs", () => {

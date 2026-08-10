@@ -28,7 +28,13 @@ import {
   type VerifyResult,
 } from "../verify";
 import { pendingDerivatives, useStore } from "../store";
-import { runBackfill } from "../backfill";
+import {
+  autoBackfillEnabled,
+  runBackfill,
+  scheduleBackfill,
+  setAutoBackfillEnabled,
+  stopBackfill,
+} from "../backfill";
 import { CLIP_MODEL_VERSION } from "../intel/semantic";
 import { api, setAuthToken } from "../api";
 import { changePassword } from "../changepassword";
@@ -139,6 +145,8 @@ export function ProfileView(props: {
     return next;
   };
 
+  const backupAbort = useRef<{ aborted: boolean } | null>(null);
+
   const startBackup = async (next: BackupPolicy) => {
     const status = await requestBackupAccess();
     if (status !== "authorized") {
@@ -151,7 +159,9 @@ export function ProfileView(props: {
       return;
     }
     props.onToast("Backing up your photos…");
-    const result = await runBackup(next, setBackupRun);
+    backupAbort.current = { aborted: false };
+    const result = await runBackup(next, setBackupRun, backupAbort.current);
+    backupAbort.current = null;
     setBackupRun(null);
     props.onToast(
       result.failed > 0
@@ -218,6 +228,15 @@ export function ProfileView(props: {
   // What each derivative sweep still has to do, by the sweeps' own
   // predicates, so these numbers are exactly the remaining work.
   const pending = pendingDerivatives(store.files, CLIP_MODEL_VERSION);
+  const [autoFill, setAutoFill] = useState(autoBackfillEnabled);
+  // One stop covers a hand-run sweep and the automatic one alike: the
+  // button that started the work is the button that ends it.
+  const indexStop = useRef(false);
+  const stopIndexing = () => {
+    indexStop.current = true;
+    stopBackfill();
+  };
+  const indexStopProbe = () => indexStop.current;
 
   // Files with nothing to check against: stored before digests existed, or
   // renamed while a metadata patch still dropped the digest.
@@ -989,10 +1008,17 @@ export function ProfileView(props: {
                 <>
                   <button
                     className="btn"
-                    disabled={backupRun !== null}
-                    onClick={() => void startBackup(policy)}
+                    onClick={() => {
+                      if (backupRun) {
+                        if (backupAbort.current) {
+                          backupAbort.current.aborted = true;
+                        }
+                        return;
+                      }
+                      void startBackup(policy);
+                    }}
                   >
-                    Back up now
+                    {backupRun ? "Stop" : "Back up now"}
                   </button>
                   <button className="btn btn-ghost" onClick={() => updatePolicy({ enabled: false })}>
                     Turn off
@@ -1123,6 +1149,36 @@ export function ProfileView(props: {
         </div>
         <div className="profile-row">
           <div className="profile-row-main">
+            <b>Fill in automatically</b>
+            <div className="profile-row-sub">
+              Filling in downloads a file's contents to this device to work on them. Turn
+              this off on a connection you pay by the megabyte; the buttons below always
+              work by hand.
+            </div>
+          </div>
+          <button
+            className="btn"
+            onClick={() => {
+              const next = !autoFill;
+              setAutoBackfillEnabled(next);
+              setAutoFill(next);
+              if (next) {
+                // Turning it on means "go": the next pass starts after
+                // the device's usual delay, not at some later sync.
+                scheduleBackfill();
+              }
+              props.onToast(
+                next
+                  ? "Missing items will fill in automatically while the app is open."
+                  : "Automatic filling is off on this device. Nothing downloads without you.",
+              );
+            }}
+          >
+            {autoFill ? "Turn off" : "Turn on"}
+          </button>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
             <b>Previews</b>
             <div className="profile-row-sub">
               {pending.thumbs === 0
@@ -1138,9 +1194,14 @@ export function ProfileView(props: {
           </div>
           <button
             className="btn"
-            disabled={pending.thumbs === 0 || store.thumbProgress !== null}
+            disabled={pending.thumbs === 0 && store.thumbProgress === null}
             onClick={() => {
-              void store.backfillThumbnails().then((made) => {
+              if (store.thumbProgress) {
+                stopIndexing();
+                return;
+              }
+              indexStop.current = false;
+              void store.backfillThumbnails({ stop: indexStopProbe }).then((made) => {
                 props.onToast(
                   made > 0
                     ? `Made thumbnails for ${made} file${made === 1 ? "" : "s"}.`
@@ -1149,7 +1210,7 @@ export function ProfileView(props: {
               });
             }}
           >
-            Generate
+            {store.thumbProgress ? "Stop" : "Generate"}
           </button>
         </div>
         <div className="profile-row">
@@ -1169,9 +1230,14 @@ export function ProfileView(props: {
           </div>
           <button
             className="btn"
-            disabled={pending.text === 0 || store.ocrProgress !== null}
+            disabled={pending.text === 0 && store.ocrProgress === null}
             onClick={() => {
-              void store.recognizeAllImages().then((found) => {
+              if (store.ocrProgress) {
+                stopIndexing();
+                return;
+              }
+              indexStop.current = false;
+              void store.recognizeAllImages({ stop: indexStopProbe }).then((found) => {
                 props.onToast(
                   found > 0
                     ? `Read text in ${found} file${found === 1 ? "" : "s"}.`
@@ -1180,7 +1246,7 @@ export function ProfileView(props: {
               });
             }}
           >
-            Read
+            {store.ocrProgress ? "Stop" : "Read"}
           </button>
         </div>
         <div className="profile-row">
@@ -1200,9 +1266,14 @@ export function ProfileView(props: {
           </div>
           <button
             className="btn"
-            disabled={pending.meaning === 0 || store.semanticProgress !== null}
+            disabled={pending.meaning === 0 && store.semanticProgress === null}
             onClick={() => {
-              void store.embedAllImages().then((indexed) => {
+              if (store.semanticProgress) {
+                stopIndexing();
+                return;
+              }
+              indexStop.current = false;
+              void store.embedAllImages({ stop: indexStopProbe }).then((indexed) => {
                 props.onToast(
                   indexed > 0
                     ? `Indexed ${indexed} file${indexed === 1 ? "" : "s"} by meaning.`
@@ -1211,7 +1282,7 @@ export function ProfileView(props: {
               });
             }}
           >
-            Index
+            {store.semanticProgress ? "Stop" : "Index"}
           </button>
         </div>
       </section>
