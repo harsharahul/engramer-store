@@ -146,7 +146,10 @@ describe("own changes", () => {
       deleteIndex: null,
     });
     const acked = b.onOwnFrameAcked(effects.post[0]!.ref, 4);
-    expect(acked.toEditor.some((m) => m.type === "savePartChanges")).toBe(true);
+    const part = acked.toEditor.find((m) => m.type === "savePartChanges")!;
+    // -1 is the engine's "leave your counter alone" sentinel; a live
+    // value here feeds its deleteIndex arithmetic with our bookkeeping.
+    expect(part.changesIndex).toBe(-1);
     expect(acked.toEditor.some((m) => m.type === "unSaveLock")).toBe(false);
   });
 });
