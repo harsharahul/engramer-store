@@ -15,6 +15,10 @@ export interface CollabStats {
   /** Total ephemeral frames fed to the engine; a plain number because an
    * external probe reading this object serializes Maps into nothing. */
   ephReceivedTotal: number;
+  /** Total log frames that ENTERED the receive handler, before any
+   * verdict: the counter that separates "not arriving" from "arriving
+   * and silently dying". */
+  logReceivedTotal: number;
   chgPosted: number;
   chgAcked: number;
   ackLatency: { count: number; totalMs: number; maxMs: number; lastMs: number };
@@ -33,6 +37,7 @@ export function newCollabStats(): CollabStats {
     ephSent: 0,
     ephReceivedBySender: new Map(),
     ephReceivedTotal: 0,
+    logReceivedTotal: 0,
     chgPosted: 0,
     chgAcked: 0,
     ackLatency: { count: 0, totalMs: 0, maxMs: 0, lastMs: 0 },
