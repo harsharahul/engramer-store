@@ -148,15 +148,19 @@ describe("downloadContent and the moving digest", () => {
       generation: 7,
     });
 
-    // Newer generation: the entry is what lags; the bytes decrypted under
-    // the file key, which authenticates them.
-    const ahead = await downloadContent("f1", key, staleDigest, { newerThan: 5 });
+    // At or past the known generation: the entry is what lags (a save
+    // writes bytes then metadata, and any refresh in that gap pairs the
+    // new generation with the old digest); the bytes decrypted under the
+    // file key, which authenticates them.
+    const ahead = await downloadContent("f1", key, staleDigest, { atLeast: 5 });
     expect(ahead.generation).toBe(7);
     expect(ahead.bytes).toEqual(current);
+    const equal = await downloadContent("f1", key, staleDigest, { atLeast: 7 });
+    expect(equal.generation).toBe(7);
 
-    // Same generation with a wrong digest is real damage, not lag.
+    // An OLDER generation than the library knows is a rollback: refused.
     await expect(
-      downloadContent("f1", key, staleDigest, { newerThan: 7 }),
+      downloadContent("f1", key, staleDigest, { atLeast: 9 }),
     ).rejects.toBeInstanceOf(IntegrityError);
 
     // Without a stated baseline the check stays exactly as strict.
