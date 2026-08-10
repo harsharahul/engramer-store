@@ -797,8 +797,12 @@ describe("who is in the room", () => {
  */
 describe("a content save leaves the log alone", () => {
   it("writes bytes, stamps the marker, and trims nothing", async () => {
+    // Two live members: a lone saver's content save is upgraded to a
+    // checkpoint by the server, which is its own test further down.
     const a = await connect(owner);
     await a.next((f) => f.t === "caught-up");
+    const b = await connect(member);
+    await b.next((f) => f.t === "caught-up");
     a.send({ t: "post", ref: "c1", payload: "baked-into-content" });
     const covered = await a.next((f) => f.t === "ack" && f.ref === "c1");
     a.send({ t: "post", ref: "c2", payload: "still-live-after" });
@@ -825,7 +829,10 @@ describe("a content save leaves the log alone", () => {
     expect(Number(content.contentChannelSeq)).toBe(Number(covered.seq));
     expect(Number(content.contentGeneration)).toBe(generation);
     expect(await a.silence((f) => f.t === "truncated", 400)).toBe(true);
+    expect(await b.silence((f) => f.t === "truncated", 100)).toBe(true);
     a.close();
+    b.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
     // A fresh joiner learns the marker in the welcome and still replays
     // every frame, including the ones the bytes already contain: the
@@ -956,6 +963,22 @@ describe("restoring a version respects the live room", () => {
     const first = await probe.next((f) => f.t === "log" || f.t === "caught-up");
     expect(first.t).toBe("caught-up");
     probe.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+
+  it("does not poison later saves with colliding history rows", async () => {
+    // A restore moves the generation backward; the numbers that follow it
+    // re-mint history rows that may still exist. Both describe the same
+    // blob, so the save must merge, never fail.
+    for (const body of ["after-restore-one", "after-restore-two", "after-restore-three"]) {
+      const saved = await app.inject({
+        method: "PUT",
+        url: `/api/files/${fileId}/data`,
+        headers: { ...auth(owner), "content-type": "application/octet-stream" },
+        payload: Buffer.from(encryptBytes(utf8Encode(body), generateKey())),
+      });
+      expect(saved.statusCode).toBe(200);
+    }
   });
 });
 
@@ -1031,5 +1054,145 @@ describe("a rekey resets the content marker", () => {
     const first = await probe.next((f) => f.t === "log" || f.t === "caught-up");
     expect(first.t).toBe("caught-up");
     probe.close();
+  });
+});
+
+/**
+ * A checkpoint is a barrier the whole room crosses together, except its
+ * author, whose engine IS the snapshot: reloading the author after every
+ * save would remount a solo editor endlessly. The connection named in the
+ * save decides who is skipped, and it must belong to the saver, or one
+ * member could silence another's reload.
+ */
+describe("a checkpoint tells everyone except its author", () => {
+  it("skips the connection the save names", async () => {
+    const a = await connect(owner);
+    const aWelcome = await a.next((f) => f.t === "welcome");
+    await a.next((f) => f.t === "caught-up");
+    const b = await connect(member);
+    await b.next((f) => f.t === "caught-up");
+    a.send({ t: "post", ref: "k1", payload: "checkpointed-work" });
+    const covered = await a.next((f) => f.t === "ack" && f.ref === "k1");
+
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/api/files/${fileId}/data`,
+      headers: {
+        ...auth(owner),
+        "content-type": "application/octet-stream",
+        "x-collab-snapshot": "1",
+        "x-collab-mode": "checkpoint",
+        "x-collab-upto": String(covered.seq),
+        "x-collab-conn": String(aWelcome.you),
+      },
+      payload: Buffer.from(encryptBytes(utf8Encode("checkpoint bytes"), generateKey())),
+    });
+    expect(saved.statusCode).toBe(200);
+
+    const told = await b.next((f) => f.t === "truncated");
+    expect(Number(told.snapshotSeq)).toBe(Number(covered.seq));
+    expect(Number(told.contentGeneration)).toBe(Number(saved.json().generation));
+    expect(await a.silence((f) => f.t === "truncated", 400)).toBe(true);
+    a.close();
+    b.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+
+  it("ignores a connection that does not belong to the saver", async () => {
+    const a = await connect(owner);
+    await a.next((f) => f.t === "caught-up");
+    const b = await connect(member);
+    const bWelcome = await b.next((f) => f.t === "welcome");
+    await b.next((f) => f.t === "caught-up");
+    a.send({ t: "post", ref: "k2", payload: "forged-conn-work" });
+    const covered = await a.next((f) => f.t === "ack" && f.ref === "k2");
+
+    // The owner names the MEMBER's connection as the author.
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/api/files/${fileId}/data`,
+      headers: {
+        ...auth(owner),
+        "content-type": "application/octet-stream",
+        "x-collab-snapshot": "1",
+        "x-collab-mode": "checkpoint",
+        "x-collab-upto": String(covered.seq),
+        "x-collab-conn": String(bWelcome.you),
+      },
+      payload: Buffer.from(encryptBytes(utf8Encode("forged conn bytes"), generateKey())),
+    });
+    expect(saved.statusCode).toBe(200);
+
+    // The forged name is ignored; the member still hears the truncation.
+    const told = await b.next((f) => f.t === "truncated");
+    expect(Number(told.snapshotSeq)).toBe(Number(covered.seq));
+    a.close();
+    b.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+});
+
+/**
+ * A member saving with nobody else live gets its trim for free: there is
+ * no one to coordinate with, and the log the bytes fully contain serves
+ * nobody. A second member present means the log stays.
+ */
+describe("a lone saver's content save trims itself", () => {
+  it("upgrades to a checkpoint when the saver is the only member", async () => {
+    const a = await connect(owner);
+    const aWelcome = await a.next((f) => f.t === "welcome");
+    await a.next((f) => f.t === "caught-up");
+    a.send({ t: "post", ref: "s1", payload: "solo-covered" });
+    const covered = await a.next((f) => f.t === "ack" && f.ref === "s1");
+    a.send({ t: "post", ref: "s2", payload: "solo-after" });
+    await a.next((f) => f.t === "ack" && f.ref === "s2");
+
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/api/files/${fileId}/data`,
+      headers: {
+        ...auth(owner),
+        "content-type": "application/octet-stream",
+        "x-collab-snapshot": "1",
+        "x-collab-mode": "content",
+        "x-collab-upto": String(covered.seq),
+        "x-collab-conn": String(aWelcome.you),
+      },
+      payload: Buffer.from(encryptBytes(utf8Encode("solo content bytes"), generateKey())),
+    });
+    expect(saved.statusCode).toBe(200);
+    // The author is skipped, so the trim is silent here.
+    expect(await a.silence((f) => f.t === "truncated", 400)).toBe(true);
+    a.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const probe = await connect(member);
+    const welcome = await probe.next((f) => f.t === "welcome");
+    expect(Number(welcome.contentChannelSeq)).toBe(Number(covered.seq));
+    const seen: string[] = [];
+    for (;;) {
+      const frame = await probe.next((f) => f.t === "log" || f.t === "caught-up");
+      if (frame.t === "caught-up") break;
+      seen.push(String(frame.payload));
+    }
+    expect(seen).not.toContain("solo-covered");
+    expect(seen).toContain("solo-after");
+    probe.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+});
+
+describe("the room knows who may write", () => {
+  it("carries each member's role in the members frame", async () => {
+    const a = await connect(owner);
+    const aWelcome = await a.next((f) => f.t === "welcome");
+    const v = await connect(viewer);
+    const vWelcome = await v.next((f) => f.t === "welcome");
+    const members = vWelcome.members as Array<{ connId: string; role?: string }>;
+    expect(members.find((m) => m.connId === aWelcome.you)?.role).toBe("owner");
+    expect(members.find((m) => m.connId === vWelcome.you)?.role).toBe("viewer");
+    a.close();
+    v.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
   });
 });

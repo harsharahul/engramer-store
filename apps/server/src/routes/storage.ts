@@ -317,7 +317,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         .code(409)
         .send({ error: "someone is editing this document live; open it to join them" });
     }
-    const channel = kind === "data" ? await channelPlan(id, request.headers) : undefined;
+    const channel = kind === "data" ? await channelPlan(id, request.headers, uid) : undefined;
     // Every byte of a shared file belongs to its owner: quota, sizes and
     // sync attribution all key off the file's owner, never the writer.
     const ownerUid = file.user_id;
@@ -418,18 +418,46 @@ export function registerStorageRoutes(app: FastifyInstance): void {
    * those frames over them later would corrupt the document. The whole
    * log goes with the write.
    */
-  type ChannelAction = { purge: true } | { upTo: number; checkpoint: boolean };
+  type ChannelAction = { purge: true } | { upTo: number; checkpoint: boolean; by?: string };
   const channelPlan = async (
     fileId: string,
     headers: FastifyRequest["headers"],
+    uid: number,
   ): Promise<ChannelAction | undefined> => {
     if (headers["x-collab-snapshot"] === undefined) {
       return (await liveChannelMembers(fileId)) === 0 ? { purge: true } : undefined;
     }
-    return {
-      upTo: Number(headers["x-collab-upto"] ?? 0),
-      checkpoint: headers["x-collab-mode"] !== "content",
-    };
+    const upTo = Number(headers["x-collab-upto"] ?? 0);
+    let checkpoint = headers["x-collab-mode"] !== "content";
+    if (!checkpoint) {
+      // A member saving with nobody else live gets its trim for free:
+      // there is no one to coordinate with, and a log the bytes fully
+      // contain serves nobody. Two rows of one account are still two
+      // connections, and each deserves the other's coordination.
+      const live = await app.db.all<{ user_id: number }>(
+        "SELECT user_id FROM channel_presence WHERE file_id = ? AND last_seen > ?",
+        fileId,
+        Date.now() - CHANNEL_PRESENCE_TTL_MS,
+      );
+      checkpoint = live.length === 1 && Number(live[0]!.user_id) === uid;
+    }
+    // The connection a save names is skipped by the broadcasts that
+    // describe it (its engine IS the snapshot), but only when it really
+    // belongs to the saver: a forged name would silence someone else's
+    // reload.
+    let by: string | undefined;
+    const claimed = headers["x-collab-conn"];
+    if (typeof claimed === "string" && claimed.length > 0) {
+      const owned = await app.db.get<{ user_id: number }>(
+        "SELECT user_id FROM channel_presence WHERE file_id = ? AND conn_id = ?",
+        fileId,
+        claimed,
+      );
+      if (owned && Number(owned.user_id) === uid) {
+        by = claimed;
+      }
+    }
+    return { upTo, checkpoint, by };
   };
 
   /**
@@ -528,9 +556,17 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         }
         if (replacesContent) {
           if (keepsVersions) {
+            // Upsert, because a restore moves the generation backward and
+            // later saves re-mint numbers whose history rows still exist.
+            // Both rows would describe the same blob, so keeping the
+            // newest metadata is the honest merge; a plain insert made
+            // the second save after any restore fail outright.
             await t.run(
               `INSERT INTO file_versions (file_id, user_id, generation, size, encrypted_meta, created_at)
-               VALUES (?, ?, ?, ?, ?, ?)`,
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT (file_id, generation) DO UPDATE SET
+                 user_id = excluded.user_id, size = excluded.size,
+                 encrypted_meta = excluded.encrypted_meta, created_at = excluded.created_at`,
               id,
               uid,
               current.generation,
@@ -634,13 +670,17 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     if (channel && !("purge" in channel)) {
       if (channel.checkpoint) {
         if (trimmedTo > 0) {
-          app.hub.broadcast(id, {
-            t: "truncated",
-            snapshotGeneration: nextGen,
-            snapshotSeq: trimmedTo,
-            contentGeneration: nextGen,
-            contentChannelSeq: trimmedTo,
-          });
+          app.hub.broadcast(
+            id,
+            {
+              t: "truncated",
+              snapshotGeneration: nextGen,
+              snapshotSeq: trimmedTo,
+              contentGeneration: nextGen,
+              contentChannelSeq: trimmedTo,
+            },
+            channel.by,
+          );
         }
       } else if (contentSeq !== null) {
         app.hub.broadcast(id, {
@@ -886,7 +926,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       row.blob_key,
       total,
       null,
-      await channelPlan(id, request.headers),
+      await channelPlan(id, request.headers, uid),
     );
     await app.db.run("DELETE FROM upload_parts WHERE session_id = ?", row.id);
     await app.db.run("DELETE FROM upload_sessions WHERE id = ?", row.id);
@@ -1205,7 +1245,10 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       }
       await t.run(
         `INSERT INTO file_versions (file_id, user_id, generation, size, encrypted_meta, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (file_id, generation) DO UPDATE SET
+           user_id = excluded.user_id, size = excluded.size,
+           encrypted_meta = excluded.encrypted_meta, created_at = excluded.created_at`,
         id,
         uid,
         file.generation,

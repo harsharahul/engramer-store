@@ -113,10 +113,11 @@ export function registerChannelRoutes(app: FastifyInstance): void {
           await app.db.all<{
             conn_id: string;
             user_index: number;
+            role: string | null;
             email: string;
             display_name: string | null;
           }>(
-            `SELECT p.conn_id, p.user_index, u.email, u.display_name
+            `SELECT p.conn_id, p.user_index, p.role, u.email, u.display_name
                FROM channel_presence p JOIN users u ON u.id = p.user_id
               WHERE p.file_id = ? AND p.last_seen > ?`,
             fileId,
@@ -125,6 +126,9 @@ export function registerChannelRoutes(app: FastifyInstance): void {
         ).map((row) => ({
           connId: row.conn_id,
           index: row.user_index,
+          // What this connection may do, so clients can elect a member
+          // that is actually allowed to write the checkpoint.
+          role: row.role ?? undefined,
           // The name they chose, or their address if they chose none: an
           // account has no name until someone sets one, and a blank label
           // beside a cursor is worse than an address.
@@ -166,13 +170,14 @@ export function registerChannelRoutes(app: FastifyInstance): void {
         );
         memberIndex = counted!.member_counter;
         await app.db.run(
-          `INSERT INTO channel_presence (file_id, conn_id, pod_id, user_id, user_index, joined_at, last_seen)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO channel_presence (file_id, conn_id, pod_id, user_id, user_index, role, joined_at, last_seen)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           fileId,
           connId,
           app.podId,
           claimed.user_id,
           memberIndex,
+          role,
           now,
           now,
         );
