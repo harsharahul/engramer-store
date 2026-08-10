@@ -1,6 +1,6 @@
 [package]
 name = "engram-ffi"
-version = "0.40.7"
+version = "0.41.0"
 edition = "2021"
 description = "Swift bindings over engram-core for the iOS app extensions"
 license = "AGPL-3.0-only"

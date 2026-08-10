@@ -3,7 +3,7 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## [Unreleased]
+## [0.41.0] - 2026-08-10
 
 ### Added
 - **See or rotate your recovery key** from the profile's security

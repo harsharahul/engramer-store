@@ -1,6 +1,6 @@
 {
   "name": "@engramer/desktop",
-  "version": "0.40.7",
+  "version": "0.41.0",
   "private": true,
   "description": "Engram Store native shell: desktop tray, watch folders, Keychain unlock, and the iOS app.",
   "scripts": {
