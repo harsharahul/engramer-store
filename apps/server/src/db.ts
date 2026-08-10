@@ -368,6 +368,16 @@ export const COMMON_SCHEMA = `
     );
     CREATE INDEX IF NOT EXISTS file_collaborators_user ON file_collaborators(user_id, update_seq);
     CREATE INDEX IF NOT EXISTS file_collaborators_file ON file_collaborators(file_id, revoked);
+    CREATE TABLE IF NOT EXISTS auth_challenges (
+      id TEXT PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id),
+      kind TEXT NOT NULL,
+      secret_digest TEXT NOT NULL,
+      expires_at BIGINT NOT NULL,
+      used BIGINT NOT NULL DEFAULT 0,
+      created_at BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS auth_challenges_user ON auth_challenges(user_id, kind, created_at);
 `;
 
 /** Embedded SQLite behind the async facade; every call is synchronous
