@@ -13,6 +13,7 @@ import { diag } from "../diag";
 import { detailsSubjectId } from "../details";
 import { stepThrough } from "../neighbors";
 import { useStore, type FileEntry, type FolderEntry } from "../store";
+import { scheduleBackfill } from "../backfill";
 import { api } from "../api";
 import {
   ACCENTS,
@@ -1031,6 +1032,15 @@ export function Vault() {
   // their own.
   useEffect(() => installAutoSync(), []);
 
+  // Once the library is in hand this device can see what other paths
+  // left unfinished: thumbnails for Files-app arrivals, scanners a
+  // backup deferred. The delay inside is what lets a desktop win.
+  useEffect(() => {
+    if (store.synced) {
+      scheduleBackfill();
+    }
+  }, [store.synced]);
+
   // Desktop shell only: pick up watched-folder arrivals, past and live.
   useEffect(() => {
     void startWatchSync();
@@ -1224,6 +1234,20 @@ export function Vault() {
               indexed > 0
                 ? `Indexed ${indexed} file${indexed === 1 ? "" : "s"} by meaning.`
                 : "No new photos or videos to index.",
+            );
+          });
+        },
+      },
+      {
+        id: "thumbs-all",
+        label: "Generate missing thumbnails",
+        hint: "for files added outside this app",
+        run: () => {
+          void store.backfillThumbnails().then((made) => {
+            showToast(
+              made > 0
+                ? `Made thumbnails for ${made} file${made === 1 ? "" : "s"}.`
+                : "Every image and video already has a thumbnail.",
             );
           });
         },
@@ -2197,6 +2221,13 @@ export function Vault() {
             <span className="spinner" />
             Indexing {store.semanticProgress.current} · {store.semanticProgress.done + 1} of{" "}
             {store.semanticProgress.total}
+          </div>
+        )}
+        {store.thumbProgress && (
+          <div className="ocr-pill">
+            <span className="spinner" />
+            Preparing {store.thumbProgress.current} · {store.thumbProgress.done + 1} of{" "}
+            {store.thumbProgress.total}
           </div>
         )}
         {toast && <div className="toast">{toast}</div>}

@@ -27,7 +27,13 @@ import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { clearSession, suspendSession, type Session } from "./session";
 import { autoReleaseMatches, forgetAutoRelease } from "./autorelease";
 import { holdTransferLock, releaseTransferLock } from "./wakelock";
-import { analyzeFile, downloadAndDecrypt, downloadThumbnail, encryptAndUpload } from "./transfer";
+import {
+  analyzeFile,
+  downloadAndDecrypt,
+  downloadThumbnail,
+  encryptAndUpload,
+  makeThumbnail,
+} from "./transfer";
 import { openWithFreshEntry } from "./freshen";
 import { recognizeImage, recognizePdf } from "./intel/ocr";
 import { isPdf } from "./intel/extract";
@@ -149,6 +155,17 @@ export interface OcrProgress {
   current: string;
 }
 
+/**
+ * How an automatic sweep remembers its session: every id it attempts goes
+ * into `skip`, and ids already there are not attempted again. Without this
+ * a file the sweep cannot improve (no text found, undecodable bytes) would
+ * be redone after every sync for as long as the tab lives. A hand-invoked
+ * sweep passes nothing and keeps its retry-everything behavior.
+ */
+export interface SweepOptions {
+  skip?: Set<string>;
+}
+
 /** Aggregate progress for a large transfer; per-file rows would drown the UI. */
 export interface BatchProgress {
   done: number;
@@ -172,6 +189,7 @@ interface StoreState {
   reveal: Reveal | null;
   ocrProgress: OcrProgress | null;
   semanticProgress: OcrProgress | null;
+  thumbProgress: OcrProgress | null;
   batch: BatchProgress | null;
   /** Search-index warm-up progress; null when idle or complete. */
   indexWarm: { done: number; total: number } | null;
@@ -279,11 +297,14 @@ interface StoreState {
   /** Releases the file key to the account that claimed this invitation. */
   approveClaim: (token: string) => Promise<void>;
   recognizeFile: (id: string) => Promise<boolean>;
-  recognizeAllImages: () => Promise<number>;
+  recognizeAllImages: (opts?: SweepOptions) => Promise<number>;
   /** Reads dates out of documents stored before this feature existed. */
-  scanLibraryForFacts: () => Promise<number>;
+  scanLibraryForFacts: (opts?: SweepOptions) => Promise<number>;
   embedFile: (id: string) => Promise<boolean>;
-  embedAllImages: () => Promise<number>;
+  embedAllImages: (opts?: SweepOptions) => Promise<number>;
+  /** Generates and stores the missing thumbnail for one stored image or video. */
+  backfillThumbnail: (id: string) => Promise<boolean>;
+  backfillThumbnails: (opts?: SweepOptions & { maxBytes?: number }) => Promise<number>;
   restoreVersion: (id: string, generation: number) => Promise<void>;
   warmSearchIndex: () => Promise<void>;
 }
@@ -698,6 +719,7 @@ export const useStore = create<StoreState>((set, get) => {
     reveal: null,
     ocrProgress: null,
     semanticProgress: null,
+    thumbProgress: null,
     batch: null,
     indexWarm: null,
 
@@ -1443,7 +1465,9 @@ export const useStore = create<StoreState>((set, get) => {
 
     backupAsset: async (file, sourceId) => {
       const key = masterKey();
-      const prepared = await withAnalysisSlot(() => analyzeFile(file));
+      // Deferred: the heavy scanners leave their flags unset and the
+      // backfill sweeps finish the job from whichever device is open.
+      const prepared = await withAnalysisSlot(() => analyzeFile(file, undefined, undefined, { defer: true }));
       // The library id rides inside the encrypted metadata, so a
       // reinstall rebuilds its ledger from the synced library alone.
       prepared.meta.sourceId = sourceId;
@@ -1794,15 +1818,19 @@ export const useStore = create<StoreState>((set, get) => {
      * candidate without text goes through OCR, one at a time so the tab
      * stays responsive.
      */
-    recognizeAllImages: async () => {
+    recognizeAllImages: async (opts) => {
       const candidates = [...get().files.values()].filter(
         (f) =>
-          !f.trashed && !f.hasText && (f.mime.startsWith("image/") || isPdf(f.name, f.mime)),
+          !f.trashed &&
+          !f.hasText &&
+          !opts?.skip?.has(f.id) &&
+          (f.mime.startsWith("image/") || isPdf(f.name, f.mime)),
       );
       let found = 0;
       for (let i = 0; i < candidates.length; i++) {
         const file = candidates[i]!;
         set({ ocrProgress: { done: i, total: candidates.length, current: file.name } });
+        opts?.skip?.add(file.id);
         try {
           if (await get().recognizeFile(file.id)) {
             found++;
@@ -1824,10 +1852,11 @@ export const useStore = create<StoreState>((set, get) => {
      * broken on an existing library, because only new uploads would ever be
      * read, which is the whole reason it is not optional.
      */
-    scanLibraryForFacts: async () => {
+    scanLibraryForFacts: async (opts) => {
       const candidates = [...get().files.values()].filter(
         (file) =>
           !file.trashed &&
+          !opts?.skip?.has(file.id) &&
           // Untouched by a human: nothing confirmed, nothing dismissed. A
           // file whose facts are all unanswered is fair game for a rescan,
           // which is what lets a reader improvement reach documents that
@@ -1839,6 +1868,7 @@ export const useStore = create<StoreState>((set, get) => {
       for (let i = 0; i < candidates.length; i++) {
         const file = candidates[i]!;
         set({ ocrProgress: { done: i, total: candidates.length, current: file.name } });
+        opts?.skip?.add(file.id);
         try {
           // Whatever is already in memory, else the file's own index blob.
           let text = get().files.get(file.id)?.text;
@@ -1948,17 +1978,19 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     /** Makes photos and videos searchable by meaning, one file at a time. */
-    embedAllImages: async () => {
+    embedAllImages: async (opts) => {
       const candidates = [...get().files.values()].filter(
         (f) =>
           !f.trashed &&
           !f.hasClip &&
+          !opts?.skip?.has(f.id) &&
           (f.mime.startsWith("image/") || (f.mime.startsWith("video/") && f.hasThumb)),
       );
       let indexed = 0;
       for (let i = 0; i < candidates.length; i++) {
         const file = candidates[i]!;
         set({ semanticProgress: { done: i, total: candidates.length, current: file.name } });
+        opts?.skip?.add(file.id);
         try {
           if (await get().embedFile(file.id)) {
             indexed++;
@@ -1969,6 +2001,86 @@ export const useStore = create<StoreState>((set, get) => {
       }
       set({ semanticProgress: null });
       return indexed;
+    },
+
+    /**
+     * Makes the missing thumbnail for one stored image or video. Files
+     * ingested through the iOS Files app arrive without one, because the
+     * provider process has no way to decode media and the server never
+     * sees pixels; whichever signed-in device runs this closes the gap.
+     */
+    backfillThumbnail: async (id) => {
+      const file = get().files.get(id);
+      const wantsThumb =
+        file &&
+        !file.trashed &&
+        !file.hasThumb &&
+        (file.mime.startsWith("image/") || file.mime.startsWith("video/"));
+      if (!file || !wantsThumb) {
+        return false;
+      }
+      const bytes = await openWithFreshEntry(
+        file,
+        (entry) => downloadAndDecrypt(entry.id, entry.key, entry.digest),
+        async () => {
+          await get().refresh();
+          return get().files.get(id) ?? null;
+        },
+      );
+      const source = new File([bytes.slice().buffer as ArrayBuffer], file.name, {
+        type: file.mime,
+      });
+      // The slot serializes the decode with every other analysis; a phone
+      // holds one decoded original at a time, no matter who asks.
+      const thumbnail = await withAnalysisSlot(() => makeThumbnail(source, file.mime));
+      if (!thumbnail) {
+        return false;
+      }
+      // Another device may have finished while the bytes were downloading;
+      // sync will have flipped the flag, and a second write is pure waste.
+      const current = get().files.get(id);
+      if (!current || current.hasThumb) {
+        return false;
+      }
+      await uploadBlob(id, "thumbnail", encryptBytes(thumbnail.bytes, current.key));
+      // The patch reply carries the row as it stands after the thumbnail
+      // landed, so hasThumb flips here without a separate refresh.
+      await patchFileMeta(id, {
+        width: thumbnail.width,
+        height: thumbnail.height,
+        blur: thumbnail.blur,
+      });
+      return true;
+    },
+
+    /** Fills every missing thumbnail, smallest file first. */
+    backfillThumbnails: async (opts) => {
+      const candidates = [...get().files.values()]
+        .filter(
+          (f) =>
+            !f.trashed &&
+            !f.hasThumb &&
+            !opts?.skip?.has(f.id) &&
+            (opts?.maxBytes === undefined || f.size <= opts.maxBytes) &&
+            (f.mime.startsWith("image/") || f.mime.startsWith("video/")),
+        )
+        // Smallest first: many quick wins before one large video.
+        .sort((a, b) => a.size - b.size);
+      let made = 0;
+      for (let i = 0; i < candidates.length; i++) {
+        const file = candidates[i]!;
+        set({ thumbProgress: { done: i, total: candidates.length, current: file.name } });
+        opts?.skip?.add(file.id);
+        try {
+          if (await get().backfillThumbnail(file.id)) {
+            made++;
+          }
+        } catch {
+          // One undecodable file never stops the sweep.
+        }
+      }
+      set({ thumbProgress: null });
+      return made;
     },
 
     /**

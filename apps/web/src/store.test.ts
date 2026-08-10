@@ -3,13 +3,39 @@ import { encryptFileMetadata, generateKey, ready, secretBoxSeal } from "@engrame
 import type { PreparedFile } from "./transfer";
 import type { FileDto } from "./api";
 
-const gauge = vi.hoisted(() => ({ running: 0, peak: 0 }));
+const gauge = vi.hoisted(() => ({
+  running: 0,
+  peak: 0,
+  analyzeOpts: [] as (undefined | { defer?: boolean })[],
+}));
+
+const rig = vi.hoisted(() => ({
+  blobPuts: [] as string[],
+  thumbAttempts: 0,
+}));
+
+vi.mock("./api", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./api")>();
+  return {
+    ...original,
+    uploadBlob: async (id: string, kind: string, bytes: Uint8Array) => {
+      rig.blobPuts.push(`${kind}:${id}`);
+      return bytes.length;
+    },
+  };
+});
 
 vi.mock("./transfer", async (importOriginal) => {
   const original = await importOriginal<typeof import("./transfer")>();
   return {
     ...original,
-    analyzeFile: async (file: File): Promise<PreparedFile> => {
+    analyzeFile: async (
+      file: File,
+      _signal?: AbortSignal,
+      _onPhase?: (phase: string) => void,
+      opts?: { defer?: boolean },
+    ): Promise<PreparedFile> => {
+      gauge.analyzeOpts.push(opts);
       gauge.running++;
       gauge.peak = Math.max(gauge.peak, gauge.running);
       await new Promise((resolve) => setTimeout(resolve, 25));
@@ -20,6 +46,13 @@ vi.mock("./transfer", async (importOriginal) => {
         thumbnail: null,
       };
     },
+    makeThumbnail: async (_file: File, mime: string) => {
+      rig.thumbAttempts++;
+      return mime.startsWith("image/")
+        ? { bytes: new Uint8Array(9), width: 100, height: 80, blur: "bl" }
+        : null;
+    },
+    downloadAndDecrypt: async () => new Uint8Array(16),
     encryptAndUpload: async (
       file: File,
       folderId: string | null,
@@ -154,6 +187,206 @@ describe("uploadFiles", () => {
     expect(gauge.peak).toBeGreaterThan(1);
     expect(gauge.peak).toBeLessThanOrEqual(4);
     expect(useStore.getState().files.size).toBe(6);
+  });
+});
+
+/**
+ * Files can arrive without thumbnails: the iOS Files-app provider has no
+ * way to make one, and nothing on the server ever can (the server never
+ * sees pixels). Whichever signed-in device notices the gap fills it, so
+ * these tests pin the sweep's contract: fill exactly the files that need
+ * it, honor the phone's size cap, and never retry a file that failed.
+ */
+describe("backfillThumbnails", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  const seed = (entries: FileEntry[]) => {
+    const masterKey = generateKey();
+    useStore.setState({
+      session: {
+        email: "t@example.com",
+        token: "t",
+        masterKey,
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      refreshUsage: async () => {},
+      files: new Map(entries.map((e) => [e.id, e])),
+    });
+    const keys = new Map(entries.map((e) => [e.id, e.key]));
+    (api as unknown as Record<string, unknown>).patchFile = async (
+      id: string,
+      patch: { encryptedMeta: FileDto["encryptedMeta"] },
+    ): Promise<FileDto> => ({
+      id,
+      folderId: null,
+      encryptedKey: secretBoxSeal(keys.get(id)!, masterKey),
+      encryptedMeta: patch.encryptedMeta,
+      size: 16,
+      // The thumbnail upload preceded this patch, so the reply's row
+      // already counts it; hasThumb flips from this very response.
+      thumbSize: 9,
+      indexSize: 0,
+      uploaded: true,
+      trashed: false,
+      deleted: false,
+      updateSeq: 2,
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    rig.blobPuts.length = 0;
+    rig.thumbAttempts = 0;
+  };
+
+  it("stores a thumbnail, its dimensions and blur for an image that has none", async () => {
+    seed([entry({ id: "img1", name: "roll.jpg", mime: "image/jpeg", hasThumb: false })]);
+    const made = await useStore.getState().backfillThumbnails();
+    expect(made).toBe(1);
+    expect(rig.blobPuts).toEqual(["thumbnail:img1"]);
+    const after = useStore.getState().files.get("img1")!;
+    expect(after.hasThumb).toBe(true);
+    expect(after.width).toBe(100);
+    expect(after.height).toBe(80);
+    expect(after.blur).toBe("bl");
+  });
+
+  it("skips non-candidates, honors the size cap, and never retries a failure", async () => {
+    seed([
+      entry({ id: "done", mime: "image/jpeg", hasThumb: true }),
+      entry({ id: "gone", mime: "image/jpeg", trashed: true }),
+      entry({ id: "doc", mime: "application/pdf" }),
+      entry({ id: "huge", mime: "image/jpeg", size: 50 * 1024 * 1024 }),
+      // The mock cannot thumbnail a video, standing in for a codec the
+      // web layer cannot decode: attempted once, then left alone.
+      entry({ id: "clip", mime: "video/mp4" }),
+    ]);
+    const skip = new Set<string>();
+    const made = await useStore
+      .getState()
+      .backfillThumbnails({ skip, maxBytes: 32 * 1024 * 1024 });
+    expect(made).toBe(0);
+    expect(rig.blobPuts).toEqual([]);
+    expect(rig.thumbAttempts).toBe(1);
+    expect(skip.has("clip")).toBe(true);
+
+    const again = await useStore
+      .getState()
+      .backfillThumbnails({ skip, maxBytes: 32 * 1024 * 1024 });
+    expect(again).toBe(0);
+    expect(rig.thumbAttempts).toBe(1);
+  });
+});
+
+/**
+ * The scanner sweeps were built for a hand-invoked palette command; run
+ * automatically they must remember what they already attempted, or one
+ * stubborn file would be rescanned after every sync for as long as the
+ * tab lives.
+ */
+describe("sweeps remember what they attempted", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  it("embedAllImages skips ids in the given set and records new attempts", async () => {
+    const calls: string[] = [];
+    useStore.setState({
+      files: new Map([["p1", entry({ id: "p1", mime: "image/jpeg", hasClip: false })]]),
+      embedFile: async (id: string) => {
+        calls.push(id);
+        throw new Error("unreadable");
+      },
+    });
+    const skip = new Set<string>();
+    await useStore.getState().embedAllImages({ skip });
+    expect(calls).toEqual(["p1"]);
+    expect(skip.has("p1")).toBe(true);
+    await useStore.getState().embedAllImages({ skip });
+    expect(calls).toEqual(["p1"]);
+  });
+
+  it("recognizeAllImages skips ids in the given set and records new attempts", async () => {
+    const calls: string[] = [];
+    useStore.setState({
+      files: new Map([["s1", entry({ id: "s1", mime: "image/jpeg", hasText: false })]]),
+      recognizeFile: async (id: string) => {
+        calls.push(id);
+        return false;
+      },
+    });
+    const skip = new Set<string>();
+    await useStore.getState().recognizeAllImages({ skip });
+    expect(calls).toEqual(["s1"]);
+    expect(skip.has("s1")).toBe(true);
+    await useStore.getState().recognizeAllImages({ skip });
+    expect(calls).toEqual(["s1"]);
+  });
+
+  it("scanLibraryForFacts skips ids in the given set and records new attempts", async () => {
+    useStore.setState({
+      files: new Map([
+        ["d1", entry({ id: "d1", mime: "text/plain", text: "no dates in here", facts: [] })],
+      ]),
+    });
+    const totals: number[] = [];
+    const unsub = useStore.subscribe((s) => {
+      if (s.ocrProgress) {
+        totals.push(s.ocrProgress.total);
+      }
+    });
+    const skip = new Set<string>();
+    await useStore.getState().scanLibraryForFacts({ skip });
+    expect(totals).toEqual([1]);
+    expect(skip.has("d1")).toBe(true);
+    totals.length = 0;
+    await useStore.getState().scanLibraryForFacts({ skip });
+    expect(totals).toEqual([]);
+    unsub();
+  });
+});
+
+/**
+ * A backup pass wants the photo on the server, not fully understood: the
+ * heavy scanners run later, from whichever signed-in device picks the file
+ * up. If backup ever ran them inline again, every photo would pay seconds
+ * of OCR and embedding before its first byte went out.
+ */
+describe("backupAsset", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  it("defers heavy analysis to the backfill sweeps", async () => {
+    const folderKey = generateKey();
+    useStore.setState({
+      session: {
+        email: "t@example.com",
+        token: "t",
+        masterKey: generateKey(),
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      refreshUsage: async () => {},
+      folders: new Map([
+        [
+          "camera-roll",
+          {
+            id: "camera-roll",
+            parentId: null,
+            name: "Camera Roll",
+            key: folderKey,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      ]),
+    });
+    gauge.analyzeOpts.length = 0;
+    const photo = new File([new Uint8Array(64)], "roll.jpg", { type: "image/jpeg" });
+    await useStore.getState().backupAsset(photo, "asset-1");
+    expect(gauge.analyzeOpts).toEqual([{ defer: true }]);
   });
 });
 

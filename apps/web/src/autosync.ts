@@ -1,3 +1,4 @@
+import { scheduleBackfill } from "./backfill";
 import { nativeOutboxDrain } from "./native";
 import { useStore } from "./store";
 
@@ -37,6 +38,10 @@ export function installAutoSync(): void {
     void (async () => {
       await nativeOutboxDrain();
       await useStore.getState().refresh();
+      // Sync may have brought files that arrived without derivatives
+      // (Files-app ingest, a deferred backup from the phone); whoever is
+      // open picks the work up after the device's own delay.
+      scheduleBackfill();
     })()
       .catch(() => {})
       .finally(() => {
