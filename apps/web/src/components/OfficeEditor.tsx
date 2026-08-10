@@ -171,6 +171,9 @@ export function OfficeEditor(props: {
 
     const opened = fileRef.current;
     openedAtRef.current = opened.updatedAt;
+    // The idle clock starts NOW, not at the epoch: a zero start made the
+    // first elected tick read decades of quiet and save immediately.
+    lastFrameAtRef.current = Date.now();
     setConflict(null);
     setBlockedFrame(false);
 
@@ -251,6 +254,17 @@ export function OfficeEditor(props: {
       window as unknown as { engramCollabProbe?: () => Promise<unknown> }
     ).engramCollabProbe = () => sessionRef.current?.probe() ?? Promise.resolve(null);
 
+    // Every reason a received frame does not reach the engine, named once
+    // per reason per incarnation in the diagnostics: a frozen receive path
+    // is invisible exactly when it matters most.
+    const skipDiagnosed = new Set<string>();
+    const skippedFrame = (reason: string, seq: number) => {
+      if (!skipDiagnosed.has(reason)) {
+        skipDiagnosed.add(reason);
+        diag("collab", `frame ${seq} not fed (${reason}); further ${reason} skips unlogged`);
+      }
+    };
+
     const feedFrame = (frame: ReturnType<typeof decryptFrame>) => {
       const b = bridge;
       const s = sessionRef.current;
@@ -326,10 +340,12 @@ export function OfficeEditor(props: {
       // how a burst of checkpoints became an unbounded reload storm.
       // Refreshing the library is all the in-flight open needs.
       if (crossing || !engineReady) {
+        diag("collab", "checkpoint noted mid-open; the open in flight will land on it");
         void refreshLibraryOnce();
         return;
       }
       crossing = true;
+      diag("collab", "crossing the checkpoint: flushing, then reloading from the snapshot");
       await (saveInFlightRef.current ?? Promise.resolve()).catch(() => {});
       const s = sessionRef.current;
       if (s) {
@@ -570,6 +586,7 @@ export function OfficeEditor(props: {
                 // streaming until it lands change nothing it will not
                 // re-derive from the snapshot and the replay.
                 if (resyncing) {
+                  skippedFrame("resyncing", seq);
                   return;
                 }
                 try {
@@ -586,11 +603,15 @@ export function OfficeEditor(props: {
                     realIndex !== undefined &&
                     claimedIndex !== realIndex
                   ) {
+                    skippedFrame("index-forged", seq);
                     return;
                   }
                   if (verdict === "resync") {
                     resync();
                     return;
+                  }
+                  if (verdict === "drop") {
+                    skippedFrame("order-drop", seq);
                   }
                   if (verdict === "apply") {
                     if (decoded.k === "chg") {
@@ -600,6 +621,8 @@ export function OfficeEditor(props: {
                     if (engineReady && !freezeRef.current) {
                       if (seq > feedFloor) {
                         feedFrame(decoded);
+                      } else {
+                        skippedFrame("below-floor", seq);
                       }
                     } else {
                       tail.push({ seq, frame: decoded });
@@ -684,6 +707,7 @@ export function OfficeEditor(props: {
                 // slope with posts still landing; "ceiling" (or nothing,
                 // from an older server) means posts are being refused,
                 // which the barrier needs to know to proceed unlogged.
+                diag("collab", `the relay asks for a trim (${reason ?? "legacy"})`);
                 trimAskRef.current = true;
                 if (reason !== "soft") {
                   ceilingRef.current = true;
@@ -831,6 +855,11 @@ export function OfficeEditor(props: {
           msSinceLastFrame: Date.now() - lastFrameAtRef.current,
         })
       ) {
+        diag(
+          "collab",
+          `idle tick saves: ${pendingFramesRef.current} pending, ` +
+            `${Math.round((Date.now() - lastFrameAtRef.current) / 1000)}s quiet`,
+        );
         saveRef.current(true);
       }
     }, 10_000);
