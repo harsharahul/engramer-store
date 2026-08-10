@@ -84,6 +84,26 @@ function participant(member: Member) {
   };
 }
 
+/**
+ * A phantom participant at reserved index 0, in every list the engine
+ * sees. The engine's lock-release machinery only runs while it believes
+ * other editors exist; alone, released locks stick at their intermediate
+ * state and the brackets never clear. The relay's member counter starts
+ * at 1, so index 0 can never collide with a real member.
+ */
+const HISTORY_KEEPER = {
+  id: engineUserId(0),
+  idOriginal: engineUserId(0),
+  username: "history",
+  indexUser: 0,
+  connectionId: "history-keeper",
+  view: false,
+};
+
+function participants(members: Member[]) {
+  return [HISTORY_KEEPER, ...members.map(participant)];
+}
+
 export class CollabBridge {
   private readonly fileId: string;
   private readonly selfIndex: number;
@@ -126,7 +146,7 @@ export class CollabBridge {
           type: "auth",
           result: 1,
           sessionId: "channel",
-          participants: this.members.map(participant),
+          participants: participants(this.members),
           locks: [],
           changes: [],
           changesIndex: 0,
@@ -350,7 +370,7 @@ export class CollabBridge {
     const effects = none();
     effects.toEditor.push({
       type: "connectState",
-      participants: members.map(participant),
+      participants: participants(members),
       participantsTimestamp: Date.now(),
     });
     for (const index of departed) {

@@ -91,7 +91,8 @@ describe("collaborative answers (bridge attached)", () => {
       unknown
     >;
     expect(auth.indexUser).toBe(4);
-    expect((auth.participants as unknown[]).length).toBe(2);
+    // Two members plus the history keeper the bridge always seats.
+    expect((auth.participants as unknown[]).length).toBe(3);
   });
 
   it("posts instead of self-acknowledging a saveChanges", () => {
