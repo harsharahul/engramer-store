@@ -901,7 +901,7 @@ checksum = "4ef6b89e5b37196644d8796de5268852ff179b44e96276cf4290264843743bb7"
 
 [[package]]
 name = "engram-core"
-version = "0.41.0"
+version = "0.41.1"
 dependencies = [
  "libsodium-sys-stable",
  "serde",
@@ -910,7 +910,7 @@ dependencies = [
 
 [[package]]
 name = "engram-ffi"
-version = "0.41.0"
+version = "0.41.1"
 dependencies = [
  "engram-core",
  "serde_json",
@@ -919,7 +919,7 @@ dependencies = [
 
 [[package]]
 name = "engram-store-desktop"
-version = "0.41.0"
+version = "0.41.1"
 dependencies = [
  "blake2",
  "block2",

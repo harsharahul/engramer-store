@@ -3,7 +3,7 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## [Unreleased]
+## [0.41.1] - 2026-08-10
 
 ### Fixed
 - **Live co-editing no longer wedges after edits that add or restructure
