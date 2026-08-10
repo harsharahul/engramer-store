@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CollabBridge, type EngineMessage } from "./collab";
+import { CollabBridge, engineUserId, type EngineMessage } from "./collab";
 
 /**
  * The bridge translates between the engine's collaboration protocol and
@@ -37,6 +37,41 @@ describe("auth", () => {
   });
 });
 
+/**
+ * The engine identifies itself as editorConfig.user.id concatenated with
+ * the indexUser from the auth reply, and matches that string against the
+ * `user` field on every lock and change frame. If a frame carries the
+ * bare index instead, the engine reads its OWN locks as foreign and
+ * undoes the keystroke. Every id on the wire must be the concatenated
+ * form, keyed only on the relay index so every client agrees.
+ */
+describe("engine identity", () => {
+  it("names each participant by the engine's concatenated id, not the bare index", () => {
+    const auth = authMessage(bridge()).toEditor.find((m) => m.type === "auth")!;
+    const participants = auth.participants as Array<Record<string, unknown>>;
+    const self = participants.find((p) => p.indexUser === 3)!;
+    expect(self.id).toBe(engineUserId(3));
+    expect(self.idOriginal).toBe(engineUserId(3));
+    // indexUser stays the numeric relay index the engine expects.
+    expect(self.indexUser).toBe(3);
+  });
+
+  it("labels a remote cursor with the engine id of its sender", () => {
+    const b = bridge();
+    const effects = b.onRemoteFrame({
+      ch: "file-1",
+      s: "conn-peer",
+      n: 1,
+      k: "cursor",
+      d: { idx: 2, cursor: "x" },
+    });
+    const cursor = effects.toEditor.find((m) => m.type === "cursor")!;
+    const msg = (cursor.messages as Array<{ user: string; useridoriginal: string }>)[0]!;
+    expect(msg.user).toBe(engineUserId(2));
+    expect(msg.useridoriginal).toBe(engineUserId(2));
+  });
+});
+
 describe("remote changes", () => {
   it("wraps each change string as its own JSON-string-literal entry", () => {
     const b = bridge();
@@ -54,7 +89,7 @@ describe("remote changes", () => {
     // hands the parsed value straight to its change reader, and an array
     // either crashes its sanity check or applies nothing.
     expect(JSON.parse(entries[0]!.change)).toBe("64;AAAA");
-    expect(entries[0]!.user).toBe("2");
+    expect(entries[0]!.user).toBe(engineUserId(2));
     expect(message.changesIndex).toBe(2);
     expect(message.endSaveChanges).toBe(true);
   });
@@ -124,7 +159,7 @@ describe("locks derive from the total order", () => {
     const acked = b.onOwnFrameAcked(claimed.post[0]!.ref, 10);
     const grant = acked.toEditor.find((m) => m.type === "getLock")!;
     const locks = grant.locks as Record<string, { user: string }>;
-    expect(locks["para-9"]!.user).toBe("3");
+    expect(locks["para-9"]!.user).toBe(engineUserId(3));
   });
 
   it("denies our claim when a remote claim came earlier in the order", () => {
@@ -141,7 +176,7 @@ describe("locks derive from the total order", () => {
     const acked = b.onOwnFrameAcked(claimed.post[0]!.ref, 6);
     const grant = acked.toEditor.find((m) => m.type === "getLock")!;
     const locks = grant.locks as Record<string, { user: string }>;
-    expect(locks["para-9"]!.user).toBe("2");
+    expect(locks["para-9"]!.user).toBe(engineUserId(2));
   });
 
   it("frees a block on unlock so the next claim wins", () => {
@@ -151,7 +186,7 @@ describe("locks derive from the total order", () => {
     const claimed = b.onEngineMessage({ type: "getLock", block: "p" });
     const acked = b.onOwnFrameAcked(claimed.post[0]!.ref, 9);
     const grant = acked.toEditor.find((m) => m.type === "getLock")!;
-    expect((grant.locks as Record<string, { user: string }>)["p"]!.user).toBe("3");
+    expect((grant.locks as Record<string, { user: string }>)["p"]!.user).toBe(engineUserId(3));
   });
 });
 

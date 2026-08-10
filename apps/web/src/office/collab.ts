@@ -26,6 +26,20 @@ export interface EngineMessage {
   [key: string]: unknown;
 }
 
+/**
+ * The prefix the editor's own user id carries. The engine computes its
+ * identity as editorConfig.user.id + indexUser and compares that string to
+ * the `user` field on every lock and change frame; session.ts sets the
+ * editor's user.id to this same prefix, so member N's identity is exactly
+ * engineUserId(N) on every client, keyed only on the relay index.
+ */
+export const ENGINE_USER_PREFIX = "u";
+
+/** The identity the engine holds for a member at this relay index. */
+export function engineUserId(index: number): string {
+  return `${ENGINE_USER_PREFIX}${index}`;
+}
+
 export type BridgeFrameKind = "chg" | "lock" | "unlock" | "cursor";
 
 /** A frame the caller must seal and post (durable) or broadcast (eph). */
@@ -62,8 +76,8 @@ const none = (): BridgeEffects => ({ toEditor: [], post: [], eph: [] });
 
 function participant(member: Member) {
   return {
-    id: String(member.index),
-    idOriginal: String(member.index),
+    id: engineUserId(member.index),
+    idOriginal: engineUserId(member.index),
     username: member.name ?? `member ${member.index}`,
     indexUser: member.index,
     connectionId: member.connId,
@@ -225,7 +239,7 @@ export class CollabBridge {
         } else {
           effects.toEditor.push({
             type: "getLock",
-            locks: { [block]: { user: String(holder), block, time: Date.now() } },
+            locks: { [block]: { user: engineUserId(holder), block, time: Date.now() } },
           });
         }
         return effects;
@@ -260,8 +274,8 @@ export class CollabBridge {
           type: "saveChanges",
           changes: changes.map((change) => ({
             change: JSON.stringify(change),
-            user: String(senderIndex),
-            useridoriginal: String(senderIndex),
+            user: engineUserId(senderIndex),
+            useridoriginal: engineUserId(senderIndex),
             time,
           })),
           changesIndex: this.appliedChanges,
@@ -279,7 +293,9 @@ export class CollabBridge {
         if (block !== SAVE_LOCK) {
           effects.toEditor.push({
             type: "getLock",
-            locks: { [block]: { user: String(this.locks.get(block)), block, time: Date.now() } },
+            locks: {
+              [block]: { user: engineUserId(this.locks.get(block)!), block, time: Date.now() },
+            },
           });
         }
         return effects;
@@ -291,7 +307,13 @@ export class CollabBridge {
       case "cursor": {
         effects.toEditor.push({
           type: "cursor",
-          messages: [{ cursor: data.cursor, user: String(senderIndex), useridoriginal: String(senderIndex) }],
+          messages: [
+            {
+              cursor: data.cursor,
+              user: engineUserId(senderIndex),
+              useridoriginal: engineUserId(senderIndex),
+            },
+          ],
         });
         return effects;
       }

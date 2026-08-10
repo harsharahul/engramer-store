@@ -17,6 +17,7 @@
  * and the frame is never given anything but bytes.
  */
 
+import { ENGINE_USER_PREFIX } from "./collab";
 import type { BridgeEffects, CollabBridge, EngineMessage, OutFrame } from "./collab";
 
 export type FileType = "docx" | "xlsx";
@@ -365,11 +366,15 @@ export class EditorSession {
       lang: "en",
       mode: "edit",
       canCoAuthoring: true,
-      // In a collaborative session the id is the channel's member index:
-      // the engine namespaces the object ids this participant creates by
-      // it, so it must be unique in the room and fixed before init.
+      // The engine builds its own identity as user.id + indexUser and
+      // matches that against the `user` field on every lock and change
+      // frame. The bridge sends those as engineUserId(index) = prefix +
+      // index, so user.id must be exactly that prefix; with indexUser set
+      // to this member's index at auth, the engine lands on the same
+      // string the room uses for it. A bare index here would make the
+      // engine read its own locks as foreign and undo the keystroke.
       user: {
-        id: String(this.collab?.index ?? 0),
+        id: ENGINE_USER_PREFIX,
         firstname: "you",
         name: "you",
       },
