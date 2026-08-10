@@ -398,3 +398,43 @@ describe("the room's held locks reach a joiner", () => {
     expect(effects.toEditor.some((m) => m.type === "getLock")).toBe(false);
   });
 });
+
+/**
+ * The engine straps its caret position to every change batch (the
+ * misleadingly named excelAdditionalInfo carries {UserId, UserShortId,
+ * CursorInfo} for word documents too) and updates foreign carets from
+ * the same field on receipt. Dropping it on delivery froze remote
+ * carets between rare selection changes; a stock server relays it
+ * verbatim and so does this bridge.
+ */
+describe("the caret rides the change batch", () => {
+  it("passes the sender's additional info through to the engine", () => {
+    const b = bridge();
+    const delivered = b.onRemoteFrame({
+      ch: "file-1",
+      s: "conn-peer",
+      n: 1,
+      k: "chg",
+      d: {
+        idx: 2,
+        changes: ["chg-a"],
+        excelAdditionalInfo: '{"UserId":"u22","CursorInfo":"10;AAA="}',
+      },
+    });
+    const save = delivered.toEditor.find((m) => m.type === "saveChanges")!;
+    expect(save.excelAdditionalInfo).toBe('{"UserId":"u22","CursorInfo":"10;AAA="}');
+  });
+
+  it("delivers null when the batch carried none", () => {
+    const b = bridge();
+    const delivered = b.onRemoteFrame({
+      ch: "file-1",
+      s: "conn-peer",
+      n: 1,
+      k: "chg",
+      d: { idx: 2, changes: ["chg-a"] },
+    });
+    const save = delivered.toEditor.find((m) => m.type === "saveChanges")!;
+    expect(save.excelAdditionalInfo).toBeNull();
+  });
+});

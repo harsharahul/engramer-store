@@ -333,6 +333,11 @@ export class CollabBridge {
           syncChangesIndex: this.appliedChanges,
           endSaveChanges: true,
           locks: released,
+          // The sender's caret rides its change batch (the misleadingly
+          // named field carries {UserId, UserShortId, CursorInfo} for
+          // word documents too), and the engine moves foreign carets
+          // from it on receipt. Verbatim, as a stock server relays it.
+          excelAdditionalInfo: (data.excelAdditionalInfo as string | null | undefined) ?? null,
         });
         return effects;
       }
