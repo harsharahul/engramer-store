@@ -27,6 +27,7 @@ import {
   noteEphReceived,
   noteEphSent,
   notePost,
+  oldestPendingMs,
   type CollabStats,
 } from "../office/stats";
 import { diag } from "../diag";
@@ -204,9 +205,13 @@ export function OfficeEditor(props: {
     let engineReady = false;
 
     // One set of counters per open attempt, readable from the console as
-    // window.engramCollab() during a live session.
+    // window.engramCollab() during a live session; engramCollabProbe()
+    // reads the engine's own lock tables through the frame's shim.
     const stats = newCollabStats();
     (window as unknown as { engramCollab?: () => CollabStats }).engramCollab = () => stats;
+    (
+      window as unknown as { engramCollabProbe?: () => Promise<unknown> }
+    ).engramCollabProbe = () => sessionRef.current?.probe() ?? Promise.resolve(null);
 
     const feedFrame = (frame: ReturnType<typeof decryptFrame>) => {
       const b = bridge;
@@ -264,6 +269,13 @@ export function OfficeEditor(props: {
         {
           onAnnounced: () => {
             frameAnnounced = true;
+          },
+          onEngineLog: (level, message) => {
+            // Error-level engine logs fire BEFORE a document visibly
+            // breaks; having them in the diagnostics is the early warning.
+            if (level === "error") {
+              diag("engine", message);
+            }
           },
           onLoading: () => diag("office", "the editor is up and waiting for its document"),
           onReady: () => {
@@ -610,12 +622,25 @@ export function OfficeEditor(props: {
       }
     }, 30_000);
 
+    // A change the relay never acknowledged means the stream is dead in a
+    // way the socket has not noticed; a repair is the only way forward,
+    // and it is cheap now that a resync reloads the frame cleanly.
+    const ackWatchdog = window.setInterval(() => {
+      const waited = oldestPendingMs(stats, Date.now());
+      if (waited !== null && waited > 30_000 && collabRef.current === "live") {
+        diag("collab", `a change went ${Math.round(waited / 1000)}s without its ack; repairing`);
+        stats.pendingAcks.clear();
+        resync(false);
+      }
+    }, 10_000);
+
     return () => {
       cancelled = true;
       window.clearTimeout(startupDeadline);
       window.clearTimeout(shieldProbe);
       window.clearInterval(autoSnapshot);
       window.clearInterval(statsPulse);
+      window.clearInterval(ackWatchdog);
       if (stats.chgPosted || stats.ephSent || stats.ephReceivedBySender.size) {
         diag("collab", `closing: ${describeCollabStats(stats)}`);
       }

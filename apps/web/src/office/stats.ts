@@ -63,6 +63,22 @@ export function noteEphReceived(stats: CollabStats, sender: string): void {
   stats.ephReceivedBySender.set(sender, (stats.ephReceivedBySender.get(sender) ?? 0) + 1);
 }
 
+/**
+ * How long the oldest posted-but-unacknowledged change has been waiting,
+ * or null with nothing pending. A healthy relay acks within a round
+ * trip; a change stuck beyond tens of seconds means the stream is dead
+ * in a way the socket has not noticed, and only a repair fixes it.
+ */
+export function oldestPendingMs(stats: CollabStats, now: number): number | null {
+  let oldest: number | null = null;
+  for (const at of stats.pendingAcks.values()) {
+    if (oldest === null || at < oldest) {
+      oldest = at;
+    }
+  }
+  return oldest === null ? null : now - oldest;
+}
+
 export function describeCollabStats(stats: CollabStats): string {
   const l = stats.ackLatency;
   const avg = l.count ? Math.round(l.totalMs / l.count) : 0;

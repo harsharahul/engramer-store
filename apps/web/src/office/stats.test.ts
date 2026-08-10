@@ -6,6 +6,7 @@ import {
   noteEphReceived,
   noteEphSent,
   notePost,
+  oldestPendingMs,
 } from "./stats";
 
 describe("collab stats", () => {
@@ -40,6 +41,18 @@ describe("collab stats", () => {
     expect(s.ephSent).toBe(2);
     expect(s.ephReceivedBySender.get("conn-a")).toBe(2);
     expect(s.ephReceivedBySender.get("conn-b")).toBe(1);
+  });
+
+  it("ages the oldest unacknowledged change", () => {
+    const s = newCollabStats();
+    expect(oldestPendingMs(s, 5000)).toBeNull();
+    notePost(s, 1, 1000);
+    notePost(s, 2, 2000);
+    expect(oldestPendingMs(s, 5000)).toBe(4000);
+    noteAck(s, 1, 2500);
+    expect(oldestPendingMs(s, 5000)).toBe(3000);
+    noteAck(s, 2, 2600);
+    expect(oldestPendingMs(s, 5000)).toBeNull();
   });
 
   it("describes itself in one line", () => {

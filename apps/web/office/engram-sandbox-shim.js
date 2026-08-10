@@ -320,6 +320,35 @@
           }
         } catch (e) {}
         value = api.asc_nativeGetFile();          // a STRING ("DOCY;v5;…"), never a buffer
+      } else if (d.method === 'collabProbe') {
+        // The engine's collaboration internals, for the diagnostics
+        // panel. The frame is an opaque origin, so only this shim can
+        // read them; each field guarded because builds differ.
+        var probe = {};
+        try {
+          var ce = window.AscCommon && window.AscCommon.CollaborativeEditing;
+          if (ce) {
+            probe.globalLock = ce.m_bGlobalLock;
+            probe.fast = ce.Is_Fast ? ce.Is_Fast() : ce.m_bFast;
+            probe.useType = ce.m_nUseType;
+            probe.needUnlock = ce.m_aNeedUnlock ? ce.m_aNeedUnlock.length : null;
+            probe.needUnlock2 = ce.m_aNeedUnlock2 ? ce.m_aNeedUnlock2.length : null;
+          }
+        } catch (e) {}
+        try {
+          var co = api.CoAuthoringApi;
+          if (co) {
+            probe.userId = co._userId;
+            probe.canSave = api.canSave;
+            probe.lockBuffer = co._lockBuffer ? co._lockBuffer.length : null;
+            probe.foreignLocks = [];
+            var locks = co._locks || {};
+            for (var k in locks) {
+              if (locks[k] && locks[k].state === 3) { probe.foreignLocks.push(k); }
+            }
+          }
+        } catch (e) {}
+        value = probe;
       } else { throw new Error('unknown method ' + d.method); }
     } catch (e) { error = e.message; }
     ev.source.postMessage({ t: 'engramEditorRpcResult', id: d.id, value: value, error: error }, '*');
