@@ -31,7 +31,7 @@ import {
 import { categorize, type Analysis } from "./intel/categorize";
 import { extractExif, extractText, isPdf } from "./intel/extract";
 import { ocrEnabled, recognizeImage, recognizePdf, renderPdfPage } from "./intel/ocr";
-import { embedImage, semanticEnabled } from "./intel/semantic";
+import { CLIP_MODEL_VERSION, embedImage, semanticEnabled } from "./intel/semantic";
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import type { Fact, FactEvidence } from "./intel/facts";
 import { encodeIndexPayload } from "./indexblob";
@@ -533,7 +533,7 @@ export async function analyzeFile(
     ...(thumbnail ? { width: thumbnail.width, height: thumbnail.height } : {}),
     ...(thumbnail?.blur ? { blur: thumbnail.blur } : {}),
     ...(text !== undefined ? { hasText: true } : {}),
-    ...(clip ? { hasClip: true } : {}),
+    ...(clip ? { hasClip: true, clipVersion: CLIP_MODEL_VERSION } : {}),
     ...(facts.length > 0 ? { facts } : {}),
   };
   return { meta, analysis, thumbnail, text, clip, clips, evidence };

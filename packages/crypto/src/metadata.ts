@@ -59,6 +59,10 @@ export interface FileMetadata {
   hasText?: boolean;
   /** Marks that the index blob carries a semantic image embedding. */
   hasClip?: boolean;
+  /** Which embedding model made the vector; absent = the first model.
+   * Vectors from different models never compare, so a model upgrade
+   * re-embeds files whose recorded version lags. */
+  clipVersion?: number;
   /** Auto-assigned category (client-side analysis; opaque to the server). */
   category?: string;
   /** Tags, auto-assigned and user-edited alike. */

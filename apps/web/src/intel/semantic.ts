@@ -107,6 +107,17 @@ export async function embedQuery(text: string): Promise<Float32Array | undefined
   }
 }
 
+/**
+ * Which embedding model made a vector. Vectors from different models are
+ * not comparable, and a query is always embedded with the model this
+ * bundle ships, so search must only score same-version vectors. Stored
+ * metadata without the field predates the tag and reads as version 1.
+ * Once shipped, a version's meaning is immutable: bump ONLY when the
+ * model changes, and every device re-embeds what lags.
+ * Version 1 = MobileCLIP-S0.
+ */
+export const CLIP_MODEL_VERSION = 1;
+
 /** Similarity of unit vectors: a plain dot product. */
 export function cosine(a: Float32Array, b: Float32Array): number {
   let sum = 0;

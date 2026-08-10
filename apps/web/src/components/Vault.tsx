@@ -12,7 +12,7 @@ import {
 import { diag } from "../diag";
 import { detailsSubjectId } from "../details";
 import { stepThrough } from "../neighbors";
-import { useStore, type FileEntry, type FolderEntry } from "../store";
+import { clipComparable, useStore, type FileEntry, type FolderEntry } from "../store";
 import { scheduleBackfill } from "../backfill";
 import { api } from "../api";
 import {
@@ -45,7 +45,13 @@ import { reloadForUpdate, watchForUpdate } from "../update";
 import { startWatchSync } from "../watchfolders";
 import { PHOTO_ACCEPT } from "../intel/heic";
 import { ocrEnabled, setOcrEnabled } from "../intel/ocr";
-import { cosine, embedQuery, semanticEnabled, setSemanticEnabled } from "../intel/semantic";
+import {
+  CLIP_MODEL_VERSION,
+  cosine,
+  embedQuery,
+  semanticEnabled,
+  setSemanticEnabled,
+} from "../intel/semantic";
 import { factsEnabled, setFactsEnabled } from "../intel/scan";
 import { entitiesEnabled, setEntitiesEnabled } from "../intel/entities";
 import { DATED_KINDS, soonestDated } from "../intel/facts";
@@ -739,14 +745,14 @@ export function Vault() {
     await store.warmSearchIndex().catch(() => {});
     const files = useStore.getState().files;
     const target = files.get(id);
-    if (!target?.clip) {
+    if (!target?.clip || !clipComparable(target, CLIP_MODEL_VERSION)) {
       showToast("This file has no meaning index yet.");
       return;
     }
     const scored: SearchHit[] = [];
     const targetVectors = target.clips ?? [target.clip];
     for (const file of files.values()) {
-      if (file.id === id || file.trashed || !file.clip) {
+      if (file.id === id || file.trashed || !clipComparable(file, CLIP_MODEL_VERSION)) {
         continue;
       }
       const vectors = file.clips ?? [file.clip];
@@ -894,7 +900,9 @@ export function Vault() {
         }
         const scored: SearchHit[] = [];
         for (const file of store.files.values()) {
-          if (file.trashed || !file.clip) {
+          // Only vectors from the model that embedded the query: a cosine
+          // across models is noise that ranks with confidence.
+          if (file.trashed || !clipComparable(file, CLIP_MODEL_VERSION)) {
             continue;
           }
           // Videos carry several frame vectors; the best one speaks for
