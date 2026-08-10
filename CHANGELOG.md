@@ -12,6 +12,9 @@ All notable changes to Engram Store are documented here, following
   attributed instead of guessed at. Nothing is transmitted or stored.
 
 ### Fixed
+- A content blocker that refuses the editor frame's assets is now named
+  within twenty seconds, with a retry button, instead of leaving the
+  document on a spinner until the startup deadline gives up.
 - Remote cursor positions are coalesced to at most ten frames a second
   instead of one websocket frame per keystroke, which reduces typing
   lag in live sessions on slow links.

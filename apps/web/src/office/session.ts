@@ -60,6 +60,8 @@ export function editorFrameUrl(fileType: FileType): string {
 }
 
 export interface SessionHandlers {
+  /** The frame's one-shot announce arrived; the assets did load. */
+  onAnnounced?(): void;
   /** The editor is up and asking for its document. */
   onLoading(): void;
   /** The document is open and editable. */
@@ -323,6 +325,7 @@ export class EditorSession {
     switch (message.event) {
       case "onAppReady":
         this.announced = true;
+        this.handlers.onAnnounced?.();
         this.maybeStart();
         return;
       case "onDocumentReady":
