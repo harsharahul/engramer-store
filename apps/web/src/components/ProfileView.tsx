@@ -28,6 +28,7 @@ import {
   type VerifyResult,
 } from "../verify";
 import { useStore } from "../store";
+import { runBackfill } from "../backfill";
 import { api, setAuthToken } from "../api";
 import { changePassword } from "../changepassword";
 import { revealRecoveryKey, rotateRecoveryKey } from "../recoverykey";
@@ -158,6 +159,9 @@ export function ProfileView(props: {
           ? `Backed up ${result.done} ${result.done === 1 ? "item" : "items"}.`
           : "Everything is already backed up.",
     );
+    // Backup ships photos with their heavy scanners deferred; catch up
+    // now, while the app is open and the uploads are done.
+    void runBackfill();
   };
   // The same shell crate runs on Macs and iPhones; the words should say
   // which device is talking. WKWebView reports iPhone/iPad in the agent.

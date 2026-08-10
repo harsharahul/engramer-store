@@ -51,6 +51,23 @@ vi.mock("./api", async (importOriginal) => {
   };
 });
 
+vi.mock("./intel/ocr", () => ({
+  ocrEnabled: () => true,
+  recognizeImage: vi.fn(async () => "scanned words"),
+  recognizePdf: vi.fn(async () => undefined),
+  renderPdfPage: vi.fn(async () => null),
+}));
+
+vi.mock("./intel/semantic", () => ({
+  semanticEnabled: () => true,
+  embedImage: vi.fn(async () => new Float32Array(4)),
+}));
+
+vi.mock("./intel/scan", () => ({
+  factsEnabled: () => true,
+  scanForFacts: vi.fn(async () => ({ facts: [], evidence: [], decoded: [] })),
+}));
+
 import { encryptAndUpload, withDeadline, type PreparedFile } from "./transfer";
 
 describe("withDeadline", () => {
@@ -132,6 +149,53 @@ describe("analysis reads a bounded copy, not the original", () => {
 
     // Already small enough: no copy, no second decode, nothing wasted.
     expect(await boundedForReading(800, 600)).toBeNull();
+  });
+});
+
+/**
+ * Backup wants photos on the server fast; text recognition, meaning
+ * embedding and fact scanning can happen any time later, from any signed-in
+ * device. Deferring must leave the per-kind flags unset, because those very
+ * flags are how the backfill sweeps find their work.
+ */
+describe("deferred analysis", () => {
+  it("skips the heavy scanners and leaves their flags unset", async () => {
+    const { recognizeImage } = await import("./intel/ocr");
+    const { embedImage } = await import("./intel/semantic");
+    const { scanForFacts } = await import("./intel/scan");
+    const { analyzeFile } = await import("./transfer");
+    vi.mocked(recognizeImage).mockClear();
+    vi.mocked(embedImage).mockClear();
+    vi.mocked(scanForFacts).mockClear();
+
+    const photo = new File([new Uint8Array([1, 2, 3])], "p.png", { type: "image/png" });
+    const prepared = await analyzeFile(photo, undefined, undefined, { defer: true });
+
+    expect(recognizeImage).not.toHaveBeenCalled();
+    expect(embedImage).not.toHaveBeenCalled();
+    expect(scanForFacts).not.toHaveBeenCalled();
+    expect(prepared.meta.hasText).toBeUndefined();
+    expect(prepared.meta.hasClip).toBeUndefined();
+    expect(prepared.meta.facts).toBeUndefined();
+  });
+
+  it("still runs every scanner when not deferred", async () => {
+    const { recognizeImage } = await import("./intel/ocr");
+    const { embedImage } = await import("./intel/semantic");
+    const { scanForFacts } = await import("./intel/scan");
+    const { analyzeFile } = await import("./transfer");
+    vi.mocked(recognizeImage).mockClear();
+    vi.mocked(embedImage).mockClear();
+    vi.mocked(scanForFacts).mockClear();
+
+    const photo = new File([new Uint8Array([1, 2, 3])], "p.png", { type: "image/png" });
+    const prepared = await analyzeFile(photo);
+
+    expect(recognizeImage).toHaveBeenCalled();
+    expect(embedImage).toHaveBeenCalled();
+    expect(scanForFacts).toHaveBeenCalled();
+    expect(prepared.meta.hasText).toBe(true);
+    expect(prepared.meta.hasClip).toBe(true);
   });
 });
 

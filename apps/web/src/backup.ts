@@ -1,3 +1,4 @@
+import { uploadLanes } from "./analysisslot";
 import {
   nativePhotoFile,
   nativePhotosAuthorize,
@@ -6,6 +7,7 @@ import {
   type NativePhotoAsset,
 } from "./native";
 import { useStore } from "./store";
+import { boundedRun } from "./uploader";
 
 /**
  * Automatic photo backup, foreground pass.
@@ -107,9 +109,11 @@ function keep(asset: NativePhotoAsset, policy: BackupPolicy, since: number): boo
 
 /**
  * Runs one backup pass: everything in the library the vault does not
- * already hold, one photo at a time (an iPhone cannot decode several
- * originals at once). Reports progress; never throws for a single
- * asset's failure, so one unreadable photo does not stop the rest.
+ * already hold, with transfers overlapped the same way the picker path
+ * overlaps them. The memory-hungry half is safe because backupAsset reads
+ * each photo inside the analysis slot, which admits one decode at a time
+ * on a phone. Reports progress; never throws for a single asset's
+ * failure, so one unreadable photo does not stop the rest.
  */
 export async function runBackup(
   policy: BackupPolicy,
@@ -125,9 +129,9 @@ export async function runBackup(
   const progress: BackupProgress = { done: 0, total: pending.length, failed: 0 };
   onProgress?.({ ...progress });
 
-  for (const asset of pending) {
+  await boundedRun(pending, uploadLanes(), async (asset) => {
     if (signal?.aborted) {
-      break;
+      return;
     }
     try {
       const file = await nativePhotoFile(asset.id);
@@ -143,6 +147,6 @@ export async function runBackup(
       progress.failed++;
     }
     onProgress?.({ ...progress });
-  }
+  });
   return progress;
 }

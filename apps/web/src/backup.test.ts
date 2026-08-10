@@ -1,5 +1,48 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { DEFAULT_POLICY, loadPolicy, savePolicy, windowStartMs } from "./backup";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+
+const rig = vi.hoisted(() => ({
+  running: 0,
+  peak: 0,
+  backedUp: [] as string[],
+}));
+
+vi.mock("./native", () => ({
+  nativePhotosAvailable: async () => true,
+  nativePhotosAuthorize: async () => "authorized",
+  nativePhotosList: async () =>
+    Array.from({ length: 6 }, (_, i) => ({
+      id: `asset-${i}`,
+      kind: "photo",
+      screenshot: false,
+      created_ms: 1_754_700_000_000 + i,
+    })),
+  nativePhotoFile: async (id: string) => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return new File([new Uint8Array(8)], `${id}.jpg`, { type: "image/jpeg" });
+  },
+}));
+
+vi.mock("./store", () => ({
+  useStore: {
+    getState: () => ({
+      backedUpSourceIds: () => new Set<string>(),
+      backupAsset: async (_file: File, sourceId: string) => {
+        rig.running++;
+        rig.peak = Math.max(rig.peak, rig.running);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        rig.running--;
+        rig.backedUp.push(sourceId);
+        return sourceId;
+      },
+    }),
+  },
+}));
+
+vi.mock("./analysisslot", () => ({
+  uploadLanes: () => 2,
+}));
+
+import { DEFAULT_POLICY, loadPolicy, runBackup, savePolicy, windowStartMs } from "./backup";
 
 // The policy lives in localStorage; give the node test env one.
 beforeAll(() => {
@@ -14,6 +57,43 @@ beforeAll(() => {
       return backing.size;
     },
   } as Storage;
+});
+
+/**
+ * The wait in a backup pass is the network, and the phone's analysis slot
+ * already guards the memory-hungry half; running the loop one photo at a
+ * time wasted the overlap the picker path has had since 0.39.1.
+ */
+describe("runBackup", () => {
+  it("overlaps photos up to the transfer lanes and reports every step", async () => {
+    rig.running = 0;
+    rig.peak = 0;
+    rig.backedUp.length = 0;
+    const seen: number[] = [];
+    const progress = await runBackup({ ...DEFAULT_POLICY, enabled: true }, (p) =>
+      seen.push(p.done),
+    );
+    expect(progress).toEqual({ done: 6, total: 6, failed: 0 });
+    expect(rig.backedUp).toHaveLength(6);
+    expect(rig.peak).toBe(2);
+    // One initial report, then one per photo, done never decreasing.
+    expect(seen).toHaveLength(7);
+    expect(seen[0]).toBe(0);
+    expect(seen[6]).toBe(6);
+  });
+
+  it("stops picking up new photos once aborted", async () => {
+    rig.running = 0;
+    rig.peak = 0;
+    rig.backedUp.length = 0;
+    const signal = { aborted: false };
+    const progress = await runBackup({ ...DEFAULT_POLICY, enabled: true }, (p) => {
+      if (p.done >= 2) {
+        signal.aborted = true;
+      }
+    }, signal);
+    expect(progress.done).toBeLessThan(6);
+  });
 });
 
 describe("backup policy", () => {

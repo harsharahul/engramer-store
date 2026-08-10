@@ -353,7 +353,7 @@ async function videoThumbnail(file: File): Promise<Thumbnail | null> {
   });
 }
 
-async function makeThumbnail(file: File, mime: string): Promise<Thumbnail | null> {
+export async function makeThumbnail(file: File, mime: string): Promise<Thumbnail | null> {
   if (mime.startsWith("image/")) {
     return imageThumbnail(file);
   }
@@ -385,7 +385,17 @@ export async function analyzeFile(
   file: File,
   signal?: AbortSignal,
   onPhase?: (phase: string) => void,
+  opts?: {
+    /**
+     * Skip the heavy scanners (text recognition, meaning embedding, fact
+     * scanning) and leave their flags unset, so the backfill sweeps find
+     * this file later. Thumbnail, blur and EXIF still happen here: the
+     * grid must look right the moment the upload lands.
+     */
+    defer?: boolean;
+  },
 ): Promise<PreparedFile> {
+  const defer = opts?.defer === true;
   const cancelled = () => {
     if (signal?.aborted) {
       throw new ApiError(UPLOAD_CANCELLED, "upload cancelled");
@@ -408,12 +418,12 @@ export async function analyzeFile(
   // Everything that READS the image works from the bounded copy: the
   // original is decoded once, for the thumbnail, and never again.
   const readable = thumbnail?.readable ?? file;
-  if (text === undefined && mime.startsWith("image/") && ocrEnabled()) {
+  if (!defer && text === undefined && mime.startsWith("image/") && ocrEnabled()) {
     onPhase?.("reading text");
     text = await withDeadline(recognizeImage(readable), ANALYSIS_DEADLINE_MS * 3, signal);
   }
   // A PDF with no text layer is a scan; its pages read like photos.
-  if (text === undefined && isPdf(file.name, file.type) && ocrEnabled()) {
+  if (!defer && text === undefined && isPdf(file.name, file.type) && ocrEnabled()) {
     onPhase?.("reading scanned pages");
     text = await withDeadline(recognizePdf(file), ANALYSIS_DEADLINE_MS * 6, signal);
   }
@@ -423,10 +433,10 @@ export async function analyzeFile(
   // extracted; decoding the video a second time would be wasted work.
   let clip: Float32Array | undefined;
   let clips: Float32Array[] | undefined;
-  if (semanticEnabled() && (mime.startsWith("image/") || mime.startsWith("video/"))) {
+  if (!defer && semanticEnabled() && (mime.startsWith("image/") || mime.startsWith("video/"))) {
     onPhase?.("indexing by meaning");
   }
-  if (semanticEnabled()) {
+  if (!defer && semanticEnabled()) {
     if (mime.startsWith("image/")) {
       clip = await withDeadline(embedImage(readable), 45_000, signal);
     } else if (mime.startsWith("video/") && thumbnail) {
@@ -464,7 +474,7 @@ export async function analyzeFile(
   // same way extraction's already is; the file stores without facts.
   let facts: Fact[] = [];
   let evidence: FactEvidence[] = [];
-  if (factsEnabled()) {
+  if (!defer && factsEnabled()) {
     onPhase?.("reading dates");
     // Bytes worth scanning for a barcode: an image as it is; for a PDF, its
     // first page rendered at recognition width, because a printed pass's
