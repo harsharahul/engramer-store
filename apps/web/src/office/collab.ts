@@ -97,6 +97,11 @@ export class CollabBridge {
     return this.selfIndex;
   }
 
+  /** The cumulative change count fed to the engine; read for diagnostics. */
+  get changes(): number {
+    return this.appliedChanges;
+  }
+
   /** Everything the engine sends "to the server" enters here. */
   onEngineMessage(message: EngineMessage): BridgeEffects {
     const effects = none();
