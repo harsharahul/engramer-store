@@ -30,6 +30,8 @@ import {
 import { useStore } from "../store";
 import { api, setAuthToken } from "../api";
 import { changePassword } from "../changepassword";
+import { revealRecoveryKey, rotateRecoveryKey } from "../recoverykey";
+import { RecoveryKeyModal } from "./RecoveryKeyModal";
 import { formatBytes } from "../format";
 import { ACCENTS, type ThemeMode } from "../theme";
 import {
@@ -110,6 +112,14 @@ export function ProfileView(props: {
   const [pwConfirm, setPwConfirm] = useState("");
   const [pwBusy, setPwBusy] = useState(false);
   const [pwError, setPwError] = useState<string | null>(null);
+  // Recovery-key view/rotate: a password check, then a one-time display.
+  const [recoveryAction, setRecoveryAction] = useState<"view" | "rotate" | null>(null);
+  const [rkPassword, setRkPassword] = useState("");
+  const [rkBusy, setRkBusy] = useState(false);
+  const [rkError, setRkError] = useState<string | null>(null);
+  const [shownRecoveryKey, setShownRecoveryKey] = useState<{ key: string; rotated: boolean } | null>(
+    null,
+  );
   useEffect(() => {
     void handoffSupported().then((supported) => {
       if (supported) {
@@ -401,6 +411,28 @@ export function ProfileView(props: {
     props.onToast("Device unlock is off. Your password unlocks the vault from now on.");
   };
 
+  const submitRecoveryAction = async () => {
+    if (!recoveryAction) {
+      return;
+    }
+    setRkError(null);
+    setRkBusy(true);
+    try {
+      const key =
+        recoveryAction === "view"
+          ? await revealRecoveryKey(rkPassword, { api })
+          : await rotateRecoveryKey(rkPassword, { api });
+      setShownRecoveryKey({ key, rotated: recoveryAction === "rotate" });
+      setRecoveryAction(null);
+      setRkPassword("");
+    } catch {
+      // A wrong password fails locally at the master-key open.
+      setRkError("That password is not correct.");
+    } finally {
+      setRkBusy(false);
+    }
+  };
+
   const submitPasswordChange = async () => {
     if (pwNext.length < 10) {
       setPwError("Use at least 10 characters; this password protects your keys.");
@@ -568,9 +600,31 @@ export function ProfileView(props: {
           <div className="profile-row-main">
             <b>Recovery key</b>
             <div className="profile-row-sub">
-              Shown once at signup. It is the only way back into this account if the password is
-              lost; nobody can reset it for you, by design.
+              The way back into this account if the password is lost. Show it again after a password
+              check, or rotate it: rotating invalidates the old key at once.
             </div>
+          </div>
+          <div className="profile-row-actions">
+            <button
+              className="btn"
+              onClick={() => {
+                setRkError(null);
+                setRkPassword("");
+                setRecoveryAction("view");
+              }}
+            >
+              Show
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                setRkError(null);
+                setRkPassword("");
+                setRecoveryAction("rotate");
+              }}
+            >
+              Rotate
+            </button>
           </div>
         </div>
       </section>
@@ -1157,6 +1211,78 @@ export function ProfileView(props: {
             </form>
           </div>
         </div>
+      )}
+
+      {recoveryAction && (
+        <div
+          className="overlay"
+          onClick={() => {
+            if (!rkBusy) {
+              setRecoveryAction(null);
+            }
+          }}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>{recoveryAction === "view" ? "Show your recovery key" : "Rotate your recovery key"}</h2>
+            <p className="modal-sub">
+              {recoveryAction === "view"
+                ? "Enter your password to see your recovery key again."
+                : "Enter your password to generate a new recovery key. The old one stops working immediately."}
+            </p>
+            <form
+              className="auth-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void submitRecoveryAction();
+              }}
+            >
+              <label htmlFor="rk-password">Password</label>
+              <input
+                id="rk-password"
+                type="password"
+                autoComplete="current-password"
+                autoFocus
+                value={rkPassword}
+                onChange={(e) => setRkPassword(e.target.value)}
+              />
+              {rkError && <div className="error-text">{rkError}</div>}
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={rkBusy}
+                  onClick={() => setRecoveryAction(null)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={rkBusy || !rkPassword}>
+                  {rkBusy ? <span className="spinner" /> : null}
+                  {rkBusy
+                    ? recoveryAction === "view"
+                      ? "Checking"
+                      : "Rotating"
+                    : recoveryAction === "view"
+                      ? "Show recovery key"
+                      : "Rotate recovery key"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {shownRecoveryKey && (
+        <RecoveryKeyModal
+          recoveryKeyHex={shownRecoveryKey.key}
+          title={shownRecoveryKey.rotated ? "Your new recovery key" : "Your recovery key"}
+          sub={
+            shownRecoveryKey.rotated
+              ? "Store this somewhere safe and offline. Your previous recovery key no longer works."
+              : "Store this somewhere safe and offline. This is the only way back into your vault if you forget your password."
+          }
+          confirmLabel="I saved it"
+          onClose={() => setShownRecoveryKey(null)}
+        />
       )}
     </div>
   );

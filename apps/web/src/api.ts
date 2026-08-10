@@ -237,6 +237,20 @@ export const api = {
       body: JSON.stringify({ currentLoginKey, loginKey, kdf, encryptedMasterKey }),
     }),
 
+  rotateRecoveryKey: (
+    currentLoginKey: string,
+    masterKeyEncryptedWithRecoveryKey: SecretBox,
+    recoveryKeyEncryptedWithMasterKey: SecretBox,
+  ) =>
+    request<{ ok: boolean }>("/api/user/recovery-key", {
+      method: "POST",
+      body: JSON.stringify({
+        currentLoginKey,
+        masterKeyEncryptedWithRecoveryKey,
+        recoveryKeyEncryptedWithMasterKey,
+      }),
+    }),
+
   totpSetup: () =>
     request<{ secret: string; otpauthUri: string }>("/api/auth/totp/setup", { method: "POST", body: "{}" }),
 

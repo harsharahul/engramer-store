@@ -547,6 +547,50 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     return sessionResponse(await getUser(user.id));
   });
 
+  /**
+   * Rotates the recovery key from a signed-in session. The current
+   * password is proven, then only the two recovery wraps are re-sealed;
+   * the password wrapping and the keypair are untouched, so the session
+   * and password both survive and the token epoch does not move. The old
+   * recovery key stops working the moment this returns.
+   */
+  app.post("/api/user/recovery-key", auth, async (request, reply) => {
+    const body = z
+      .object({
+        currentLoginKey: base64Key,
+        masterKeyEncryptedWithRecoveryKey: secretBoxSchema,
+        recoveryKeyEncryptedWithMasterKey: secretBoxSchema,
+      })
+      .strict()
+      .parse(request.body);
+    const user = await getUser(request.user.uid);
+    const retryAfter = await gate(request, user.email);
+    if (retryAfter !== null) {
+      return reply.code(429).header("retry-after", retryAfter).send({ error: "too many attempts" });
+    }
+    if (!digestsMatch(loginKeyDigest(body.currentLoginKey), user.login_key_digest)) {
+      await throttle.fail(throttleKey(request, user.email));
+      return reply.code(401).send({ error: "that password is not correct" });
+    }
+    await throttle.succeed(throttleKey(request, user.email));
+    const stored = JSON.parse(user.key_attributes) as KeyAttributes;
+    const merged = mergeKeyAttributes(
+      stored,
+      {
+        ...stored,
+        masterKeyEncryptedWithRecoveryKey: body.masterKeyEncryptedWithRecoveryKey,
+        recoveryKeyEncryptedWithMasterKey: body.recoveryKeyEncryptedWithMasterKey,
+      },
+      ["masterKeyEncryptedWithRecoveryKey", "recoveryKeyEncryptedWithMasterKey"],
+    );
+    await app.db.run(
+      "UPDATE users SET key_attributes = ? WHERE id = ?",
+      JSON.stringify(merged),
+      user.id,
+    );
+    return reply.code(200).send({ ok: true });
+  });
+
   // ----- enrollment (an authenticated session manages its own 2FA) -----
 
   app.post("/api/auth/totp/setup", auth, async (request, reply) => {

@@ -5,6 +5,7 @@ import { activateSession, login, registerAccount, type LoginResult, type Session
 import { beginRecovery, type RecoveryStep, type SetPasswordStep } from "../recovery";
 import { useStore } from "../store";
 import { BrandMark, Wordmark } from "./FileArt";
+import { RecoveryKeyModal } from "./RecoveryKeyModal";
 
 type Mode = "signin" | "signup" | "forgot";
 type RegistrationMode = "open" | "invite" | "closed";
@@ -484,27 +485,14 @@ export function Auth() {
       </div>
 
       {pendingRecovery && (
-        <div className="overlay">
-          <div className="modal">
-            <h2>Your recovery key</h2>
-            <p className="modal-sub">
-              This is the only way back into your vault if you forget your password. Store it
-              somewhere safe and offline. It will not be shown again.
-            </p>
-            <div className="recovery-key">{pendingRecovery.recoveryKeyHex}</div>
-            <div className="modal-actions">
-              <button
-                className="btn"
-                onClick={() => navigator.clipboard.writeText(pendingRecovery.recoveryKeyHex)}
-              >
-                Copy
-              </button>
-              <button className="btn btn-primary" onClick={finishSignup} disabled={busy !== null}>
-                I saved it, open my vault
-              </button>
-            </div>
-          </div>
-        </div>
+        <RecoveryKeyModal
+          recoveryKeyHex={pendingRecovery.recoveryKeyHex}
+          title="Your recovery key"
+          sub="This is the only way back into your vault if you forget your password. Store it somewhere safe and offline. It will not be shown again."
+          confirmLabel="I saved it, open my vault"
+          busy={busy !== null}
+          onClose={finishSignup}
+        />
       )}
     </div>
   );

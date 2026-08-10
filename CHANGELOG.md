@@ -6,6 +6,10 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Added
+- **See or rotate your recovery key** from the profile's security
+  section, each behind a password check. Rotating generates a new
+  recovery key and retires the old one immediately, without touching
+  your password or re-encrypting any data.
 - **Change your vault password** from the profile's security section.
   The current password is verified on your device before anything
   changes, only the password wrapping is re-sealed (your files and
