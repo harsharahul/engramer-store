@@ -3,6 +3,49 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Changed
+- **Saving a live document no longer disturbs the room.** Saving and
+  trimming the collaboration log are now separate operations: a live
+  save writes the current bytes and records exactly which changes they
+  contain, while every participant keeps editing uninterrupted. The log
+  is trimmed only at rare, coordinated checkpoints (as it nears its size
+  ceiling, or when someone saves alone), which everyone crosses together
+  without losing unsent work. Documents opened mid-session replay only
+  the changes the stored bytes do not already contain, removing a class
+  of divergence where the same edit could apply twice.
+- To make each save's record exact, the editor now settles briefly
+  before saving: pending changes are sent, acknowledged, and the
+  document is read in the same instant it is checked for quiet. A save
+  during heavy concurrent activity waits a moment or asks you to retry
+  instead of storing an imprecise result.
+- The relay now asks the room to checkpoint well before its log reaches
+  the size ceiling, while changes still flow, so the previous hard stop
+  at the ceiling is a backstop rather than the norm.
+- Live editing keeps checkpoints in version history, not keystrokes:
+  the periodic automatic saves of a live room no longer create restore
+  points or consume storage quota; checkpoints and ordinary saves still
+  do.
+- Losing a save race in a live room, with every change already
+  delivered, now counts as saved instead of raising a false conflict.
+
+### Fixed
+- **A co-editor's save no longer strands other surfaces on a stale
+  integrity check.** Previews, downloads, the text editor, snapshot
+  shares, and background text-recognition sweeps now refresh the
+  library and retry when a shared file's recorded digest is momentarily
+  behind its content, with paced retries covering the window between a
+  save's bytes and its metadata landing.
+- Restoring an old version is refused while people are editing the
+  document live, and no longer breaks later saves: the version history
+  rows a restore leaves behind are merged instead of colliding.
+- A rotation of a shared file's key now also resets the collaboration
+  log's content marker, so documents open cleanly after a rekey.
+- A read-only collaborator can no longer be elected as the room's
+  automatic saver, which could previously leave a room unable to trim
+  its log.
+
 ## [0.41.1] - 2026-08-10
 
 ### Fixed
