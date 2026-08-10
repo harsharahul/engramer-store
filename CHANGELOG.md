@@ -3,6 +3,43 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.45.0] - 2026-08-10
+
+### Added
+- **The Profile page shows what indexing remains.** A "Library index"
+  card lists, live, how many files still need a thumbnail, a text
+  reading, or a meaning vector, with buttons to run each pass now and a
+  clear "Everything is indexed." when the library is complete. The
+  numbers come from the same logic the background passes use, so what
+  is shown is exactly what will happen.
+- **Photo backup starts itself.** With backup enabled, opening the app
+  or returning to it runs a backup pass automatically (spaced by a
+  cooldown), narrated through the shared progress pill with the current
+  photo's name. Backup previously ran only from the button in Profile.
+- **Background work can be declined and stopped.** A per-device
+  "Fill in automatically" switch turns automatic filling off entirely,
+  for connections where downloading originals is the user's call. A
+  running pass, backup or indexing, stops from the pill or the Profile
+  rows after the file in hand.
+- Product principles are documented in `docs/principles.md`.
+
+### Fixed
+- **Opening the app no longer re-reads the same photos every time.** A
+  text reading that finds nothing is now recorded, so photos without
+  text leave the queue permanently instead of being re-downloaded and
+  re-scanned each session. Existing libraries settle after one final
+  pass.
+- **Search results no longer contradict themselves.** The result count,
+  arrow-key navigation, Enter-to-open, and the listed rows all read the
+  same merged list, so a meaning match is counted and reachable, not
+  stranded under a "0 results" headline.
+- **The folder header fits a phone.** A long folder name truncates to
+  one line and the sort and view controls wrap below it, instead of
+  pushing the grid/list toggle off the screen edge.
+- Several labels were painted in surface colors and invisible in both
+  themes, among them the photo backup option labels; they are legible
+  now.
+
 ## [0.44.0] - 2026-08-10
 
 ### Added
