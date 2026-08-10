@@ -3,6 +3,18 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.41.2] - 2026-08-10
+
+### Fixed
+- **A co-editor's save no longer strands other surfaces on a stale
+  integrity check.** Previews, downloads, the text editor, snapshot
+  shares, and background text-recognition sweeps now refresh the
+  library and retry when a shared file's recorded digest is momentarily
+  behind its content, with paced retries covering the window between a
+  save's bytes and its metadata landing. A live session's log trim also
+  refreshes the library immediately instead of waiting for the next
+  poll.
+
 ## [0.41.1] - 2026-08-10
 
 ### Fixed
