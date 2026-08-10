@@ -253,10 +253,17 @@ export function registerChannelRoutes(app: FastifyInstance): void {
                 "SELECT bytes FROM channel_state WHERE file_id = ?",
                 fileId,
               );
-              if (Number(state?.bytes ?? 0) >= app.config.channelMaxBytes) {
-                app.hub.broadcast(fileId, { t: "please-snapshot" });
-                conn.send({ t: "please-snapshot" });
+              const held = Number(state?.bytes ?? 0);
+              if (held >= app.config.channelMaxBytes) {
+                app.hub.broadcast(fileId, { t: "please-snapshot", reason: "ceiling" });
+                conn.send({ t: "please-snapshot", reason: "ceiling" });
                 return;
+              }
+              // Warn on the slope, not at the cliff: a refused frame exists
+              // nowhere but its sender's engine, so the checkpoint should
+              // happen while posts still land.
+              if (held >= Math.floor(app.config.channelMaxBytes * 0.7)) {
+                app.hub.broadcast(fileId, { t: "please-snapshot", reason: "soft" });
               }
               const seq = await nextChannelSeq(app.db, fileId);
               await app.db.run(

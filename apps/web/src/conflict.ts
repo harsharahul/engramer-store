@@ -26,6 +26,18 @@ export function describeConflict(
   return currentUpdatedAt > openedUpdatedAt ? "stale" : "clean";
 }
 
+/**
+ * Whether losing a save race actually lost anything. In a LIVE room with
+ * every posted frame acknowledged, this client's content sits in the log
+ * and inside the winner's engine, so the winner's committed bytes and the
+ * surviving tail carry it in full; the refusal is bookkeeping, not loss.
+ * A solo save or an unacked frame means content that may exist nowhere
+ * but this engine, and that must surface as a real conflict.
+ */
+export function satisfiedByPeer(state: { live: boolean; pendingAcks: number }): boolean {
+  return state.live && state.pendingAcks === 0;
+}
+
 /** The name a conflicting save lands under when kept as a copy. */
 export function copyName(name: string): string {
   const dot = name.lastIndexOf(".");

@@ -554,8 +554,29 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         if (current.generation !== file.generation || current.uploaded !== file.uploaded) {
           throw new GenerationConflictError();
         }
+        // The channel action settles first, because it decides whether the
+        // displaced generation is history worth keeping. A file that never
+        // hosted a channel has no state row and needs none; only ever
+        // update what a join already created.
+        let lastSeq = 0;
+        if (channel) {
+          const state = await t.get<{ last_seq: number }>(
+            "SELECT last_seq FROM channel_state WHERE file_id = ?",
+            id,
+          );
+          if (state) {
+            lastSeq = Number(state.last_seq);
+          } else {
+            channel = undefined;
+          }
+        }
+        // A live content save runs on the idle tick, every half minute of
+        // a quiet co-editing room; keeping each one would recycle the
+        // whole version history in minutes and burn the owner's quota on
+        // keystroke slices. History keeps checkpoints and ordinary saves.
+        const contentSave = channel !== undefined && !("purge" in channel) && !channel.checkpoint;
         if (replacesContent) {
-          if (keepsVersions) {
+          if (keepsVersions && !contentSave) {
             // Upsert, because a restore moves the generation backward and
             // later saves re-mint numbers whose history rows still exist.
             // Both rows would describe the same blob, so keeping the
@@ -591,67 +612,56 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         await touchCollaborators(t, id, now);
         staleBlobs.push(...(await pruneVersions(t, id, uid)));
         if (channel) {
-          // A file that never hosted a channel has no state row and needs
-          // none; only ever update what a join already created.
-          const state = await t.get<{ last_seq: number }>(
-            "SELECT last_seq FROM channel_state WHERE file_id = ?",
-            id,
-          );
-          if (state) {
-            const lastSeq = Number(state.last_seq);
-            if ("purge" in channel) {
-              await t.run("DELETE FROM channel_messages WHERE file_id = ?", id);
+          if ("purge" in channel) {
+            await t.run("DELETE FROM channel_messages WHERE file_id = ?", id);
+            await t.run(
+              `UPDATE channel_state SET content_generation = ?, content_channel_seq = ?,
+                 snapshot_generation = ?, snapshot_seq = ?, bytes = 0, updated_at = ?
+               WHERE file_id = ?`,
+              nextGen,
+              lastSeq,
+              nextGen,
+              lastSeq,
+              now,
+              id,
+            );
+          } else {
+            // Never past what the channel has actually issued.
+            const bound = Math.min(Math.max(Number(channel.upTo) || 0, 0), lastSeq);
+            contentSeq = bound;
+            if (channel.checkpoint && bound > 0) {
+              await t.run(
+                "DELETE FROM channel_messages WHERE file_id = ? AND seq <= ?",
+                id,
+                bound,
+              );
+              const remaining = await t.get<{ total: number | null }>(
+                "SELECT SUM(bytes) AS total FROM channel_messages WHERE file_id = ?",
+                id,
+              );
               await t.run(
                 `UPDATE channel_state SET content_generation = ?, content_channel_seq = ?,
-                   snapshot_generation = ?, snapshot_seq = ?, bytes = 0, updated_at = ?
+                   snapshot_generation = ?, snapshot_seq = ?, bytes = ?, updated_at = ?
                  WHERE file_id = ?`,
                 nextGen,
-                lastSeq,
+                bound,
                 nextGen,
-                lastSeq,
+                bound,
+                Number(remaining?.total ?? 0),
                 now,
                 id,
               );
+              trimmedTo = bound;
             } else {
-              // Never past what the channel has actually issued.
-              const bound = Math.min(Math.max(Number(channel.upTo) || 0, 0), lastSeq);
-              contentSeq = bound;
-              if (channel.checkpoint && bound > 0) {
-                await t.run(
-                  "DELETE FROM channel_messages WHERE file_id = ? AND seq <= ?",
-                  id,
-                  bound,
-                );
-                const remaining = await t.get<{ total: number | null }>(
-                  "SELECT SUM(bytes) AS total FROM channel_messages WHERE file_id = ?",
-                  id,
-                );
-                await t.run(
-                  `UPDATE channel_state SET content_generation = ?, content_channel_seq = ?,
-                     snapshot_generation = ?, snapshot_seq = ?, bytes = ?, updated_at = ?
-                   WHERE file_id = ?`,
-                  nextGen,
-                  bound,
-                  nextGen,
-                  bound,
-                  Number(remaining?.total ?? 0),
-                  now,
-                  id,
-                );
-                trimmedTo = bound;
-              } else {
-                await t.run(
-                  `UPDATE channel_state SET content_generation = ?, content_channel_seq = ?, updated_at = ?
-                   WHERE file_id = ?`,
-                  nextGen,
-                  bound,
-                  now,
-                  id,
-                );
-              }
+              await t.run(
+                `UPDATE channel_state SET content_generation = ?, content_channel_seq = ?, updated_at = ?
+                 WHERE file_id = ?`,
+                nextGen,
+                bound,
+                now,
+                id,
+              );
             }
-          } else {
-            channel = undefined;
           }
         }
       });

@@ -576,6 +576,16 @@ describe("the log cannot grow without bound", () => {
     expect(acks).toBeLessThan(12); // later ones do not
     expect(frames.some((f) => f.t === "please-snapshot")).toBe(true);
 
+    // The warning came on the slope, while its post still landed: the
+    // soft ask below the cap, the hard refusal at it.
+    const softAsks = frames.filter((f) => f.t === "please-snapshot" && f.reason === "soft");
+    const hardAsks = frames.filter((f) => f.t === "please-snapshot" && f.reason === "ceiling");
+    expect(softAsks.length).toBeGreaterThan(0);
+    expect(hardAsks.length).toBeGreaterThan(0);
+    // With a 2000-byte cap and 500-byte posts, the soft ask fires at 1500
+    // held (over 70%), and that post is still acknowledged: 4 acks.
+    expect(acks).toBe(4);
+
     socket.close();
     await capped.close();
     rmSync(dir, { recursive: true, force: true });
@@ -1193,6 +1203,70 @@ describe("the room knows who may write", () => {
     expect(members.find((m) => m.connId === vWelcome.you)?.role).toBe("viewer");
     a.close();
     v.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+});
+
+/**
+ * A live content save runs on the idle tick, every half minute of a quiet
+ * co-editing room; keeping each one would recycle the whole version
+ * history in minutes and burn the owner's quota on keystroke slices.
+ * History keeps checkpoints and ordinary saves.
+ */
+describe("live content saves stay out of version history", () => {
+  const versionGenerations = async () => {
+    const listed = await app.inject({
+      method: "GET",
+      url: `/api/files/${fileId}/versions`,
+      headers: auth(owner),
+    });
+    return (listed.json().versions as Array<{ generation: number }>).map((v) => v.generation);
+  };
+
+  it("discards the generation a content save displaces", async () => {
+    const a = await connect(owner);
+    await a.next((f) => f.t === "caught-up");
+    const b = await connect(member);
+    await b.next((f) => f.t === "caught-up");
+    a.send({ t: "post", ref: "v1", payload: "content-versioning" });
+    const covered = await a.next((f) => f.t === "ack" && f.ref === "v1");
+
+    const saved = await app.inject({
+      method: "PUT",
+      url: `/api/files/${fileId}/data`,
+      headers: {
+        ...auth(owner),
+        "content-type": "application/octet-stream",
+        "x-collab-snapshot": "1",
+        "x-collab-mode": "content",
+        "x-collab-upto": String(covered.seq),
+      },
+      payload: Buffer.from(encryptBytes(utf8Encode("content, not history"), generateKey())),
+    });
+    expect(saved.statusCode).toBe(200);
+    const displaced = Number(saved.json().generation) - 1;
+    expect(await versionGenerations()).not.toContain(displaced);
+
+    // A checkpoint keeps its displaced generation as a restore point.
+    a.send({ t: "post", ref: "v2", payload: "checkpoint-versioning" });
+    const trimmed = await a.next((f) => f.t === "ack" && f.ref === "v2");
+    const checkpointed = await app.inject({
+      method: "PUT",
+      url: `/api/files/${fileId}/data`,
+      headers: {
+        ...auth(owner),
+        "content-type": "application/octet-stream",
+        "x-collab-snapshot": "1",
+        "x-collab-mode": "checkpoint",
+        "x-collab-upto": String(trimmed.seq),
+      },
+      payload: Buffer.from(encryptBytes(utf8Encode("history again"), generateKey())),
+    });
+    expect(checkpointed.statusCode).toBe(200);
+    expect(await versionGenerations()).toContain(Number(checkpointed.json().generation) - 1);
+
+    a.close();
+    b.close();
     await new Promise((resolve) => setTimeout(resolve, 300));
   });
 });
