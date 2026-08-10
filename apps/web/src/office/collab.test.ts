@@ -352,3 +352,89 @@ describe("participants are people", () => {
     expect(me.username).toBe("member 3");
   });
 });
+
+/**
+ * A joiner must learn which locks the room already holds, or its first
+ * structure edit collides with an invisible lock, its save cycle never
+ * completes, and the engine's only drain for received changes never
+ * runs: the exact wedge the no-reload join experiment caught. Stock
+ * OnlyOffice carries the table in the auth reply; CryptPad replays the
+ * full table via getLock. This bridge does both.
+ */
+describe("the room's held locks reach a joiner", () => {
+  it("carries every held lock in the auth reply", () => {
+    const b = bridge();
+    b.onRemoteFrame({ ch: "file-1", s: "conn-peer", n: 1, k: "lock", d: { idx: 2, block: "para-4" } });
+    const auth = authMessage(b).toEditor.find((m) => m.type === "auth")!;
+    const locks = auth.locks as Array<{ block: string; user: string }>;
+    expect(locks).toHaveLength(1);
+    expect(locks[0]!.block).toBe("para-4");
+    expect(locks[0]!.user).toBe(engineUserId(2));
+  });
+
+  it("replays the full table when the membership changes", () => {
+    const b = bridge();
+    b.onRemoteFrame({ ch: "file-1", s: "conn-peer", n: 1, k: "lock", d: { idx: 2, block: "para-4" } });
+    const effects = b.onMembers([
+      { connId: "conn-self", index: 3 },
+      { connId: "conn-peer", index: 2 },
+      { connId: "conn-new", index: 5 },
+    ]);
+    const table = effects.toEditor.find((m) => m.type === "getLock")!;
+    const locks = table.locks as Record<string, { user: string }>;
+    expect(locks["para-4"]!.user).toBe(engineUserId(2));
+  });
+
+  it("keeps the internal save lock out of both", () => {
+    const b = bridge();
+    // A peer's save lock is bridge bookkeeping, never an engine lock.
+    b.onRemoteFrame({ ch: "file-1", s: "conn-peer", n: 1, k: "lock", d: { idx: 2, block: "__save__" } });
+    const auth = authMessage(b).toEditor.find((m) => m.type === "auth")!;
+    expect(auth.locks as unknown[]).toHaveLength(0);
+    const effects = b.onMembers([
+      { connId: "conn-self", index: 3 },
+      { connId: "conn-new", index: 5 },
+    ]);
+    expect(effects.toEditor.some((m) => m.type === "getLock")).toBe(false);
+  });
+});
+
+/**
+ * The engine straps its caret position to every change batch (the
+ * misleadingly named excelAdditionalInfo carries {UserId, UserShortId,
+ * CursorInfo} for word documents too) and updates foreign carets from
+ * the same field on receipt. Dropping it on delivery froze remote
+ * carets between rare selection changes; a stock server relays it
+ * verbatim and so does this bridge.
+ */
+describe("the caret rides the change batch", () => {
+  it("passes the sender's additional info through to the engine", () => {
+    const b = bridge();
+    const delivered = b.onRemoteFrame({
+      ch: "file-1",
+      s: "conn-peer",
+      n: 1,
+      k: "chg",
+      d: {
+        idx: 2,
+        changes: ["chg-a"],
+        excelAdditionalInfo: '{"UserId":"u22","CursorInfo":"10;AAA="}',
+      },
+    });
+    const save = delivered.toEditor.find((m) => m.type === "saveChanges")!;
+    expect(save.excelAdditionalInfo).toBe('{"UserId":"u22","CursorInfo":"10;AAA="}');
+  });
+
+  it("delivers null when the batch carried none", () => {
+    const b = bridge();
+    const delivered = b.onRemoteFrame({
+      ch: "file-1",
+      s: "conn-peer",
+      n: 1,
+      k: "chg",
+      d: { idx: 2, changes: ["chg-a"] },
+    });
+    const save = delivered.toEditor.find((m) => m.type === "saveChanges")!;
+    expect(save.excelAdditionalInfo).toBeNull();
+  });
+});

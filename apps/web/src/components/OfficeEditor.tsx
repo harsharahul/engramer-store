@@ -37,6 +37,7 @@ import {
   noteEphReceived,
   noteEphSent,
   notePost,
+  noteSkip,
   oldestPendingMs,
   type CollabStats,
 } from "../office/stats";
@@ -230,8 +231,6 @@ export function OfficeEditor(props: {
     let knownCollaborative = false;
     let order: ChannelOrder = newChannelOrder(opened.id);
     let connId = "";
-    /** Whether the engine's auth saw anyone else; solo auth cannot co-edit. */
-    let bridgeCompany = false;
     /** Set once the collab decision reached the session; a welcome after
      * this cannot join the current engine and upgrades via reload. */
     let sessionBegun = false;
@@ -261,15 +260,21 @@ export function OfficeEditor(props: {
     (
       window as unknown as { engramCollabProbe?: () => Promise<unknown> }
     ).engramCollabProbe = () => sessionRef.current?.probe() ?? Promise.resolve(null);
+    // Asks the relay who it would broadcast to; the answer lands in the
+    // diagnostics. A socket that gets acks but is missing from that list
+    // is alive yet outside the room, which no client counter can see.
+    (window as unknown as { engramWho?: () => void }).engramWho = () =>
+      channelRef.current?.who();
 
     // Every reason a received frame does not reach the engine, named once
     // per reason per incarnation in the diagnostics: a frozen receive path
     // is invisible exactly when it matters most.
     const skipDiagnosed = new Set<string>();
     const skippedFrame = (reason: string, seq: number) => {
+      noteSkip(stats, reason);
       if (!skipDiagnosed.has(reason)) {
         skipDiagnosed.add(reason);
-        diag("collab", `frame ${seq} not fed (${reason}); further ${reason} skips unlogged`);
+        diag("collab", `frame ${seq} not fed (${reason}); counting further ${reason} in skips`);
       }
     };
 
@@ -288,6 +293,8 @@ export function OfficeEditor(props: {
       for (const queued of tail.splice(0)) {
         if (queued.seq > feedFloor) {
           feedFrame(queued.frame);
+        } else {
+          skippedFrame("drain-below-floor", queued.seq);
         }
       }
     };
@@ -330,13 +337,80 @@ export function OfficeEditor(props: {
     };
 
     /**
+     * Posts what the engine still holds before a reload would discard
+     * it: frames that reach the log survive any remount and replay into
+     * the next incarnation. Work that cannot reach the log within the
+     * budget is kept in the conflict UI holding the exported bytes,
+     * never silently discarded. Returns "kept" when the conflict UI now
+     * owns the outcome and no reload should follow.
+     */
+    const foldIn = async (deadlineMs: number): Promise<"clean" | "kept"> => {
+      const s = sessionRef.current;
+      if (!s || !engineReady) {
+        return "clean";
+      }
+      const deadline = Date.now() + deadlineMs;
+      for (;;) {
+        if (cancelled) {
+          return "clean";
+        }
+        const flush = await s.flushChanges();
+        const pending = statsRef.current?.pendingAcks.size ?? 0;
+        if (flush.haveChanges !== true && pending === 0) {
+          return "clean";
+        }
+        if (Date.now() > deadline) {
+          if (dirtyRef.current) {
+            diag("collab", "fold-in stalled with unsaved work; keeping the bytes");
+            try {
+              const bin = await s.save();
+              const kept = bin ? await converter.exportDocument(`document.${fileType}`, bin) : null;
+              if (!cancelled) {
+                setConflict({ bytes: kept });
+              }
+            } catch {
+              if (!cancelled) {
+                setConflict({ bytes: null });
+              }
+            }
+            return "kept";
+          }
+          return "clean";
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    };
+
+    /**
+     * A mid-session repair fold: what the engine holds goes to the log
+     * first, so the remount that follows discards nothing. Concurrent
+     * triggers coalesce (a broken order answers resync per frame).
+     */
+    let folding = false;
+    const foldInThenResync = (counted: boolean) => {
+      if (folding || resyncing || cancelled) {
+        return;
+      }
+      folding = true;
+      void (async () => {
+        try {
+          if ((await foldIn(3_000)) === "kept") {
+            return;
+          }
+        } catch {
+          // Fold-in is best effort; the reload still repairs.
+        }
+        resync(counted);
+      })();
+    };
+
+    /**
      * The room crosses a checkpoint together: everyone re-derives from
      * the committed snapshot instead of holding an engine whose change
      * base and digest moved underneath it. Unsent work is flushed through
      * the channel first, because frames above the trim survive and replay
-     * after the reload; work that cannot reach the log within the budget
-     * raises the conflict UI holding the exported bytes, never a silent
-     * discard. Uncounted, because a checkpoint is not a broken stream.
+     * after the reload. Uncounted, because a checkpoint is not a broken
+     * stream.
      */
     let crossing = false;
     const crossCheckpoint = async () => {
@@ -355,40 +429,8 @@ export function OfficeEditor(props: {
       crossing = true;
       diag("collab", "crossing the checkpoint: flushing, then reloading from the snapshot");
       await (saveInFlightRef.current ?? Promise.resolve()).catch(() => {});
-      const s = sessionRef.current;
-      if (s) {
-        const deadline = Date.now() + 5_000;
-        for (;;) {
-          if (cancelled) {
-            return;
-          }
-          const flush = await s.flushChanges();
-          const pending = statsRef.current?.pendingAcks.size ?? 0;
-          if (flush.haveChanges !== true && pending === 0) {
-            break;
-          }
-          if (Date.now() > deadline) {
-            if (dirtyRef.current) {
-              diag("collab", "checkpoint flush stalled with unsaved work; keeping the bytes");
-              try {
-                const bin = await s.save();
-                const kept = bin
-                  ? await converter.exportDocument(`document.${fileType}`, bin)
-                  : null;
-                if (!cancelled) {
-                  setConflict({ bytes: kept });
-                }
-              } catch {
-                if (!cancelled) {
-                  setConflict({ bytes: null });
-                }
-              }
-              return;
-            }
-            break;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 250));
-        }
+      if ((await foldIn(5_000)) === "kept") {
+        return;
       }
       await refreshLibraryOnce();
       resync(false);
@@ -429,6 +471,13 @@ export function OfficeEditor(props: {
             // A door that opened proves the channel is followable again.
             resyncCountRef.current = 0;
             drainTail();
+            // Members may have moved while the engine loaded; hand it the
+            // current room so a join during startup is never lost.
+            const b = bridge;
+            const s = sessionRef.current;
+            if (b && s && latestMembers.length > 0) {
+              s.applyEffects(b.onMembers(latestMembers));
+            }
             setStage("ready");
           },
           onChanged: (modified) => {
@@ -593,7 +642,6 @@ export function OfficeEditor(props: {
                     : null;
                 diag("collab", `welcome: member ${welcome.yourIndex}, ${welcome.members.length} present`);
                 order = newChannelOrder(opened.id);
-                bridgeCompany = welcome.members.length > 1;
                 bridge = new CollabBridge({
                   fileId: opened.id,
                   selfConnId: welcome.you,
@@ -604,6 +652,7 @@ export function OfficeEditor(props: {
                 setPeers(welcome.members.length);
               },
               onLog: (seq, sender, payload) => {
+                stats.logReceivedTotal += 1;
                 // A remount is already on its way; frames that keep
                 // streaming until it lands change nothing it will not
                 // re-derive from the snapshot and the replay.
@@ -629,7 +678,9 @@ export function OfficeEditor(props: {
                     return;
                   }
                   if (verdict === "resync") {
-                    resync();
+                    // Fold the engine's held work into the log first; the
+                    // remount then discards nothing.
+                    foldInThenResync(true);
                     return;
                   }
                   if (verdict === "drop") {
@@ -652,8 +703,9 @@ export function OfficeEditor(props: {
                   }
                 } catch {
                   // A frame that does not open under our key is noise from a
-                  // rotation boundary; the reload path recovers.
-                  resync();
+                  // rotation boundary; the reload path recovers, with the
+                  // engine's held work folded into the log first.
+                  foldInThenResync(true);
                 }
               },
               onCaughtUp: () => {
@@ -665,11 +717,16 @@ export function OfficeEditor(props: {
                 try {
                   const decoded = decryptFrame(payload, opened.key);
                   if (!acceptEphemeral(opened.id, decoded, sender)) {
+                    skippedFrame("eph-refused", 0);
                     return;
                   }
                   const claimedIndex = (decoded.d as { idx?: number } | undefined)?.idx;
                   const realIndex = indexByConn.get(sender);
                   if (claimedIndex !== undefined && realIndex !== undefined && claimedIndex !== realIndex) {
+                    // A cursor wearing the wrong index is spoof-shaped, but
+                    // the common cause is an index table lagging a members
+                    // frame; named so a trailing caret can be attributed.
+                    skippedFrame("eph-index", 0);
                     return;
                   }
                   noteEphReceived(stats, sender);
@@ -677,6 +734,8 @@ export function OfficeEditor(props: {
                   const s = sessionRef.current;
                   if (b && s && engineReady) {
                     s.applyEffects(b.onRemoteFrame(decoded));
+                  } else {
+                    skippedFrame("eph-early", 0);
                   }
                 } catch {
                   // Lossy by design; a bad cursor frame costs nothing.
@@ -685,28 +744,25 @@ export function OfficeEditor(props: {
               onMembers: (members) => {
                 membersHook.current(members);
                 setPeers(members.length);
+                // The bridge's view of the room tracks the truth even
+                // while the engine is still loading; the effects a loading
+                // engine cannot take are re-derived at ready.
                 const b = bridge;
-                const s = sessionRef.current;
-                if (b && s && engineReady) {
-                  s.applyEffects(b.onMembers(members));
-                }
-                // The engine decides single-user or co-editing at auth
-                // time and never revisits it. A session that authed alone
-                // types locally and broadcasts nothing, so the first
-                // person in a room would edit invisibly forever. Company
-                // arriving re-auths through the ordinary reload, with any
-                // unsent local work committed first so nothing is lost.
-                if (b && !bridgeCompany && members.length > 1) {
-                  bridgeCompany = true;
-                  if (dirtyRef.current) {
-                    void savePromiseRef
-                      .current()
-                      .catch(() => {})
-                      .finally(() => resync(false));
-                  } else {
-                    resync(false);
+                if (b) {
+                  const effects = b.onMembers(members);
+                  const s = sessionRef.current;
+                  if (s && engineReady) {
+                    s.applyEffects(effects);
                   }
                 }
+                // Company arrives without reloading anyone: the newcomer
+                // is introduced by the connectState above, and the room's
+                // held-lock table now travels with it and in the joiner's
+                // auth. The first no-reload attempt failed because the
+                // joiner could not see held locks (its save cycle wedged
+                // on an invisible collision, per the stock server's and
+                // CryptPad's own join protocol); with the table restored
+                // this matches what both of them ship.
               },
               onAck: (ref, seq) => {
                 noteAck(stats, ref, Date.now());
@@ -758,6 +814,13 @@ export function OfficeEditor(props: {
                   return;
                 }
                 void crossCheckpoint();
+              },
+              onWho: (you, local) => {
+                diag(
+                  "collab",
+                  `who: me ${you}, room reaches [${local.join(", ")}]` +
+                    (local.includes(you) ? "" : " - THIS SOCKET IS OUTSIDE THE ROOM"),
+                );
               },
               onDead: () => {
                 if (!cancelled) {

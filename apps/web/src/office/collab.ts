@@ -136,6 +136,23 @@ export class CollabBridge {
     return this.appliedChanges;
   }
 
+  /**
+   * Every lock currently held in the room, in the engine's own shape. A
+   * joiner that cannot see the room's held locks collides with them on
+   * its first structure edit, its save cycle never completes, and the
+   * engine's only drain for received changes never runs. The internal
+   * save lock is bridge bookkeeping and never an engine lock.
+   */
+  private lockTable(): Record<string, { user: string; block: string; time: number }> {
+    const table: Record<string, { user: string; block: string; time: number }> = {};
+    for (const [block, holder] of this.locks) {
+      if (block !== SAVE_LOCK) {
+        table[block] = lockEntry(block, holder);
+      }
+    }
+    return table;
+  }
+
   /** Everything the engine sends "to the server" enters here. */
   onEngineMessage(message: EngineMessage): BridgeEffects {
     const effects = none();
@@ -147,7 +164,7 @@ export class CollabBridge {
           result: 1,
           sessionId: "channel",
           participants: participants(this.members),
-          locks: [],
+          locks: Object.values(this.lockTable()),
           changes: [],
           changesIndex: 0,
           indexUser: this.selfIndex,
@@ -316,6 +333,11 @@ export class CollabBridge {
           syncChangesIndex: this.appliedChanges,
           endSaveChanges: true,
           locks: released,
+          // The sender's caret rides its change batch (the misleadingly
+          // named field carries {UserId, UserShortId, CursorInfo} for
+          // word documents too), and the engine moves foreign carets
+          // from it on receipt. Verbatim, as a stock server relays it.
+          excelAdditionalInfo: (data.excelAdditionalInfo as string | null | undefined) ?? null,
         });
         return effects;
       }
@@ -375,6 +397,13 @@ export class CollabBridge {
       participants: participants(members),
       participantsTimestamp: Date.now(),
     });
+    // The full held-lock table rides every membership change (CryptPad's
+    // semantics; idempotent for the engine), so nobody in the room ever
+    // holds a lock a newcomer cannot see.
+    const held = this.lockTable();
+    if (Object.keys(held).length > 0) {
+      effects.toEditor.push({ type: "getLock", locks: held });
+    }
     for (const index of departed) {
       const released = [...this.locks.entries()]
         .filter(([, holder]) => holder === index)
