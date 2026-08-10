@@ -31,9 +31,19 @@ describe("auth", () => {
     expect(auth.result).toBe(1);
     expect(auth.indexUser).toBe(3);
     const participants = auth.participants as Array<Record<string, unknown>>;
-    expect(participants).toHaveLength(2);
-    expect(participants.map((p) => p.indexUser).sort()).toEqual([2, 3]);
+    expect(participants).toHaveLength(3);
+    expect(participants.map((p) => p.indexUser).sort()).toEqual([0, 2, 3]);
     expect(effects.toEditor.some((m) => m.type === "documentOpen")).toBe(true);
+  });
+
+  it("keeps a history keeper in the room so the engine is never alone", () => {
+    // The engine's lock-release machinery only runs while it believes
+    // other editors exist; a phantom at reserved index 0 keeps it on.
+    const auth = authMessage(bridge()).toEditor.find((m) => m.type === "auth")!;
+    const participants = auth.participants as Array<Record<string, unknown>>;
+    const keeper = participants.find((p) => p.indexUser === 0)!;
+    expect(keeper.id).toBe(engineUserId(0));
+    expect(keeper.view).toBe(false);
   });
 });
 
@@ -274,7 +284,11 @@ describe("presence and cursors", () => {
       { connId: "conn-new", index: 5 },
     ]);
     const message = effects.toEditor.find((m) => m.type === "connectState")!;
-    expect((message.participants as unknown[]).length).toBe(3);
+    // Three members plus the history keeper.
+    expect((message.participants as unknown[]).length).toBe(4);
+    expect(
+      (message.participants as Array<{ indexUser: number }>).some((p) => p.indexUser === 0),
+    ).toBe(true);
   });
 });
 
@@ -323,6 +337,9 @@ describe("participants are people", () => {
       members: [{ connId: "conn-self", index: 3 }],
     });
     const auth = b.onEngineMessage({ type: "auth" }).toEditor.find((m) => m.type === "auth")!;
-    expect((auth.participants as Array<{ username: string }>)[0]!.username).toBe("member 3");
+    const me = (auth.participants as Array<{ indexUser: number; username: string }>).find(
+      (p) => p.indexUser === 3,
+    )!;
+    expect(me.username).toBe("member 3");
   });
 });
