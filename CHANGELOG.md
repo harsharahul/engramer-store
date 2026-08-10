@@ -6,6 +6,9 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Fixed
+- Remote cursor positions are coalesced to at most ten frames a second
+  instead of one websocket frame per keystroke, which reduces typing
+  lag in live sessions on slow links.
 - **A collaborative session that repairs itself no longer sticks on
   "Starting the editor".** The editor announces itself exactly once per
   frame load, so a repair that rebuilt the session against the
