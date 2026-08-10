@@ -3,7 +3,7 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## [Unreleased]
+## [0.42.0] - 2026-08-10
 
 ### Changed
 - **Saving a live document no longer disturbs the room.** Saving and
@@ -29,14 +29,29 @@ All notable changes to Engram Store are documented here, following
   do.
 - Losing a save race in a live room, with every change already
   delivered, now counts as saved instead of raising a false conflict.
+- **A save's metadata now commits in the same transaction as its
+  bytes**, so no reader can ever see a new document generation beside
+  an outdated integrity record; older servers transparently fall back
+  to the previous two-step save.
+- File listings now say when a document has collaborators, so the
+  owner of a co-edited document gets the same stale-entry healing on
+  previews, downloads and background sweeps as every other member, and
+  a collaborative open accepts authenticated bytes at or past the
+  generation it knows instead of refusing them while the library
+  catches up.
 
 ### Fixed
-- **A co-editor's save no longer strands other surfaces on a stale
-  integrity check.** Previews, downloads, the text editor, snapshot
-  shares, and background text-recognition sweeps now refresh the
-  library and retry when a shared file's recorded digest is momentarily
-  behind its content, with paced retries covering the window between a
-  save's bytes and its metadata landing.
+- A dropped-and-redialed connection can no longer burn the session's
+  entire repair budget in an instant, and a reconnect that races a slow
+  earlier dial no longer leaves two connections replaying the same
+  history against each other.
+- A room whose change log reached its size ceiling could refuse the
+  very save that would have trimmed it; the trimming save now proceeds,
+  and the configurable ceiling has a floor well above any session's
+  crossing so the regime cannot be configured into existence.
+- A burst of checkpoints can no longer interrupt a member's document
+  open into an endless reload loop or a permanent refusal screen; opens
+  carry a deadline and interrupted opens take a bounded repair path.
 - Restoring an old version is refused while people are editing the
   document live, and no longer breaks later saves: the version history
   rows a restore leaves behind are merged instead of colliding.
@@ -45,6 +60,18 @@ All notable changes to Engram Store are documented here, following
 - A read-only collaborator can no longer be elected as the room's
   automatic saver, which could previously leave a room unable to trim
   its log.
+
+## [0.41.2] - 2026-08-10
+
+### Fixed
+- **A co-editor's save no longer strands other surfaces on a stale
+  integrity check.** Previews, downloads, the text editor, snapshot
+  shares, and background text-recognition sweeps now refresh the
+  library and retry when a shared file's recorded digest is momentarily
+  behind its content, with paced retries covering the window between a
+  save's bytes and its metadata landing. A live session's log trim also
+  refreshes the library immediately instead of waiting for the next
+  poll.
 
 ## [0.41.1] - 2026-08-10
 

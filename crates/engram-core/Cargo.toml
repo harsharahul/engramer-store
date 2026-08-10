@@ -1,6 +1,6 @@
 [package]
 name = "engram-core"
-version = "0.41.1"
+version = "0.42.0"
 edition = "2021"
 description = "The encryption core, byte-compatible with @engramer/crypto"
 license = "AGPL-3.0-only"
