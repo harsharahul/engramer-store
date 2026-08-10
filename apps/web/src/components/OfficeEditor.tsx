@@ -260,6 +260,11 @@ export function OfficeEditor(props: {
     (
       window as unknown as { engramCollabProbe?: () => Promise<unknown> }
     ).engramCollabProbe = () => sessionRef.current?.probe() ?? Promise.resolve(null);
+    // Asks the relay who it would broadcast to; the answer lands in the
+    // diagnostics. A socket that gets acks but is missing from that list
+    // is alive yet outside the room, which no client counter can see.
+    (window as unknown as { engramWho?: () => void }).engramWho = () =>
+      channelRef.current?.who();
 
     // Every reason a received frame does not reach the engine, named once
     // per reason per incarnation in the diagnostics: a frozen receive path
@@ -768,6 +773,13 @@ export function OfficeEditor(props: {
                   return;
                 }
                 void crossCheckpoint();
+              },
+              onWho: (you, local) => {
+                diag(
+                  "collab",
+                  `who: me ${you}, room reaches [${local.join(", ")}]` +
+                    (local.includes(you) ? "" : " - THIS SOCKET IS OUTSIDE THE ROOM"),
+                );
               },
               onDead: () => {
                 if (!cancelled) {
