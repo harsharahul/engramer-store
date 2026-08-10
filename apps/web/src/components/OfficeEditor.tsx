@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore, type FileEntry } from "../store";
 import { api } from "../api";
-import { downloadContent } from "../transfer";
+import { IntegrityError, downloadContent } from "../transfer";
 import { openSharedContent, refreshLibraryOnce } from "../openshared";
 import { barrierDelayMs, barrierVerdict } from "../office/barrier";
 import { reconcile, type ContentMarker } from "../office/content";
@@ -314,10 +314,20 @@ export function OfficeEditor(props: {
      * raises the conflict UI holding the exported bytes, never a silent
      * discard. Uncounted, because a checkpoint is not a broken stream.
      */
+    let crossing = false;
     const crossCheckpoint = async () => {
       if (cancelled) {
         return;
       }
+      // An open or crossing already in flight will land on the newest
+      // committed state by itself; launching another remount under it is
+      // how a burst of checkpoints became an unbounded reload storm.
+      // Refreshing the library is all the in-flight open needs.
+      if (crossing || !engineReady) {
+        void refreshLibraryOnce();
+        return;
+      }
+      crossing = true;
       await (saveInFlightRef.current ?? Promise.resolve()).catch(() => {});
       const s = sessionRef.current;
       if (s) {
@@ -763,6 +773,16 @@ export function OfficeEditor(props: {
         setStage("loading");
       } catch (err) {
         if (!cancelled) {
+          // A collaborative document whose digest keeps moving under the
+          // open (back-to-back checkpoints) deserves the bounded repair
+          // road, not a permanent refusal screen: the next incarnation
+          // downloads the then-current bytes, and the breaker still ends
+          // a truly unfollowable session honestly.
+          if (err instanceof IntegrityError && (bridge || opened.shared)) {
+            diag("collab", "the digest moved under the open; taking the repair road");
+            resync();
+            return;
+          }
           setStage("failed");
           setError(err instanceof Error ? err.message : "could not open this document");
         }
