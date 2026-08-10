@@ -37,6 +37,8 @@ export interface ChannelEvents {
   onPleaseSnapshot(reason?: string): void;
   /** The channel is gone and redialing has been abandoned. */
   onDead(): void;
+  /** The relay's answer to a liveness question: who it would reach. */
+  onWho?(you: string, local: string[]): void;
 }
 
 const MAX_REDIALS = 5;
@@ -45,7 +47,13 @@ export class ChannelClient {
   private socket: WebSocket | null = null;
   private closed = false;
   private redials = 0;
+  /** Highest position RECEIVED (log/caught-up); what a hello may claim. */
   private lastSeq = 0;
+  /** Highest position our own posts were acked at. Kept apart from
+   * lastSeq: an ack proves our frame's position, not that we received
+   * the positions below it, and conflating them let a receive gap be
+   * papered over by the next hello. */
+  private lastAckSeq = 0;
   /** Posts issued while offline wait here and drain in order on reconnect. */
   private outbox: Array<{ ref: number; payload: string }> = [];
 
@@ -69,18 +77,13 @@ export class ChannelClient {
     const socket = new WebSocket(
       `${scheme}://${location.host}/api/collab/${this.fileId}/channel?ticket=${ticket}`,
     );
-    // One live socket, ever. A redial racing a slow earlier dial would
-    // otherwise leave two sockets replaying the same log interleaved,
-    // which reads as counter gaps and burns the repair budget; closing
-    // the loser here and gating every handler below on identity makes
-    // the newest dial the only voice.
-    const superseded = this.socket;
-    this.socket = socket;
-    if (superseded && superseded !== socket) {
-      superseded.onmessage = null;
-      superseded.onclose = null;
-      superseded.close();
-    }
+    // One live socket, ever — but a new dial takes over only once it is
+    // WELCOMED. Replacing the active socket at dial time orphaned a
+    // working connection behind the identity gate whenever a raced
+    // redial stalled: acks kept flowing on the old socket while every
+    // broadcast it carried was ignored. Until promotion the old socket
+    // keeps speaking and the newcomer may deliver nothing but its own
+    // welcome.
     if (this.keepalive === null) {
       this.keepalive = window.setInterval(() => {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
@@ -95,13 +98,25 @@ export class ChannelClient {
       };
       socket.onmessage = (event) => {
         if (this.socket !== socket) {
-          return;
+          const peek = JSON.parse(String(event.data)) as { t: string };
+          if (peek.t !== "welcome") {
+            return;
+          }
         }
         const frame = JSON.parse(String(event.data)) as { t: string; [key: string]: unknown };
         switch (frame.t) {
           case "welcome": {
             welcomed = true;
             this.redials = 0;
+            // Promotion: this dial is the voice now; the socket it
+            // replaces goes quiet and closed.
+            const superseded = this.socket;
+            this.socket = socket;
+            if (superseded && superseded !== socket) {
+              superseded.onmessage = null;
+              superseded.onclose = null;
+              superseded.close();
+            }
             const welcome = frame as unknown as ChannelWelcome & { t: string };
             this.events.onWelcome(welcome);
             for (const queued of this.outbox.splice(0)) {
@@ -125,7 +140,7 @@ export class ChannelClient {
             this.events.onMembers(frame.members as Array<{ connId: string; index: number; name?: string }>);
             return;
           case "ack":
-            this.lastSeq = Math.max(this.lastSeq, Number(frame.seq));
+            this.lastAckSeq = Math.max(this.lastAckSeq, Number(frame.seq));
             this.events.onAck(Number(frame.ref), Number(frame.seq));
             return;
           case "truncated":
@@ -150,17 +165,28 @@ export class ChannelClient {
               typeof frame.reason === "string" ? frame.reason : undefined,
             );
             return;
+          case "who":
+            this.events.onWho?.(
+              String(frame.you),
+              (frame.local as string[] | undefined) ?? [],
+            );
+            return;
           default:
             return;
         }
       };
       socket.onclose = () => {
-        if (this.closed || this.socket !== socket) {
+        if (this.closed) {
           return;
         }
+        // A dial that died before its welcome settles its own promise and
+        // its caller's redial accounting, whether or not it was promoted.
         if (!welcomed) {
           reject(new Error("the channel refused the connection"));
           this.events.onDead();
+          return;
+        }
+        if (this.socket !== socket) {
           return;
         }
         this.redial();
@@ -204,9 +230,18 @@ export class ChannelClient {
     }
   }
 
-  /** The highest channel position this client has seen or been acked. */
+  /** Asks the relay who it would broadcast to; the answer arrives as onWho. */
+  who(): void {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify({ t: "who" }));
+    }
+  }
+
+  /** The highest channel position represented in this client's engine:
+   * everything received plus its own acked posts. The save barrier's
+   * marker reads this; the hello's replay cursor deliberately does not. */
   get lastSeenSeq(): number {
-    return this.lastSeq;
+    return Math.max(this.lastSeq, this.lastAckSeq);
   }
 
   close(): void {

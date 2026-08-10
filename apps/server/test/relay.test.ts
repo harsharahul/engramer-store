@@ -1353,3 +1353,25 @@ describe("metadata rides the save", () => {
     expect(saved.statusCode).toBe(400);
   });
 });
+
+describe("the room answers who it reaches", () => {
+  it("names the asker and every connection it would broadcast to", async () => {
+    const a = await connect(owner);
+    const aWelcome = await a.next((f) => f.t === "welcome");
+    await a.next((f) => f.t === "caught-up");
+    const b = await connect(member);
+    const bWelcome = await b.next((f) => f.t === "welcome");
+    await b.next((f) => f.t === "caught-up");
+
+    a.send({ t: "who" });
+    const who = await a.next((f) => f.t === "who");
+    expect(who.you).toBe(aWelcome.you);
+    const local = who.local as string[];
+    expect(local).toContain(aWelcome.you);
+    expect(local).toContain(bWelcome.you);
+
+    a.close();
+    b.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+});

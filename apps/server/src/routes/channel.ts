@@ -295,6 +295,14 @@ export function registerChannelRoutes(app: FastifyInstance): void {
               conn.send({ t: "ack", ref: frame.ref ?? null, seq });
               return;
             }
+            case "who": {
+              // A liveness diagnostic: which connections THIS process
+              // would broadcast to right now. A socket that gets acks but
+              // no broadcasts is alive yet outside the room, and this is
+              // the only way to see that from a client.
+              conn.send({ t: "who", you: connId, local: app.hub.local(fileId) });
+              return;
+            }
             case "eph": {
               // The ephemeral path skips the ordered log, so it must not
               // become the way around the write gate: a viewer could
