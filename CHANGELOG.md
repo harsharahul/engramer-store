@@ -12,6 +12,10 @@ All notable changes to Engram Store are documented here, following
   attributed instead of guessed at. Nothing is transmitted or stored.
 
 ### Fixed
+- Closing a document with unsaved changes, discarding a text edit, and
+  restoring a file version now ask with in-app dialogs. The previous
+  browser-native confirmations never render in the iOS app, which
+  silently skipped the question and the action with it.
 - A content blocker that refuses the editor frame's assets is now named
   within twenty seconds, with a retry button, instead of leaving the
   document on a spinner until the startup deadline gives up.
