@@ -17,6 +17,7 @@ import {
   type ChannelOrder,
 } from "../office/channel";
 import { electedSnapshotter, shouldAutoSnapshot } from "../office/snapshot";
+import { editorFrameKey } from "../office/reload";
 import { diag } from "../diag";
 import { PeopleGlyph, XGlyph } from "./Icon";
 
@@ -181,6 +182,7 @@ export function OfficeEditor(props: {
           );
           return;
         }
+        diag("collab", `resync ${resyncCountRef.current}: remounting the editor frame`);
         setStage("decrypting");
         setCollab("connecting");
         setReloadNonce((n) => n + 1);
@@ -721,6 +723,12 @@ export function OfficeEditor(props: {
           </div>
         )}
         <iframe
+          // The editor inside announces itself exactly once per frame load,
+          // and only the session listening at that moment can ever start the
+          // engine. A resync builds a new session, so it must get a new
+          // frame: the key ties the frame's identity to the attempt. The
+          // document bytes are re-delivered by the same effect re-run.
+          key={editorFrameKey(fileId, fileType, reloadNonce)}
           ref={frameRef}
           className="office-frame"
           title={file.name}
