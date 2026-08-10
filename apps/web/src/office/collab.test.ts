@@ -276,6 +276,15 @@ describe("presence and cursors", () => {
     expect(effects.eph).toHaveLength(1);
   });
 
+  it("keeps a cursor payload safe from the engine mutating it afterwards", () => {
+    const b = bridge();
+    const cursor = { pos: 12 };
+    const effects = b.onEngineMessage({ type: "cursor", cursor });
+    // The engine reuses and mutates the object it handed over.
+    cursor.pos = 99;
+    expect((effects.eph[0]!.d.cursor as { pos: number }).pos).toBe(12);
+  });
+
   it("turns membership changes into connectState", () => {
     const b = bridge();
     const effects = b.onMembers([
