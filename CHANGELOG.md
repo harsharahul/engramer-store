@@ -3,6 +3,20 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.45.1] - 2026-08-10
+
+### Fixed
+- **Background indexing no longer repeats itself after a bad
+  connection.** Every read and download in a background pass now has a
+  deadline, so a request that never comes back costs seconds instead of
+  stalling the whole pass; what a device has already tried is remembered
+  across app launches, so a file it cannot process stops being
+  downloaded every time the app opens; a run of failures ends the pass
+  rather than working through the library on a connection that is
+  failing; and no automatic pass starts while the device is offline.
+  Running a pass by hand still tries everything, including files the
+  automatic passes gave up on.
+
 ## [0.45.0] - 2026-08-10
 
 ### Added
