@@ -28,6 +28,7 @@ import {
   HANDHELD_AUTO_MAX_BYTES,
   autoBackfillEnabled,
   backfillDelayMs,
+  resetBackfillSession,
   runBackfill,
   scheduleBackfill,
   setAutoBackfillEnabled,
@@ -57,9 +58,10 @@ const session = {
 };
 
 interface SweepCall {
-  skip?: Set<string>;
+  skip?: { has(id: string): boolean; add(id: string): void };
   maxBytes?: number;
   stop?: () => boolean;
+  onOutcome?: (id: string, ok: boolean) => void;
 }
 
 /** Replaces every sweep with a recorder so runs are observable. */
@@ -101,6 +103,82 @@ afterEach(() => {
   knobs.handheld = false;
   localStorage.clear();
   vi.useRealTimers();
+});
+
+/**
+ * A phone on a failing radio is the case that produced the loop: every
+ * file fails, nothing is remembered, and the next app open re-downloads
+ * the same backlog over the same bad connection. An automatic pass has
+ * to notice, stop, and remember.
+ */
+describe("the automatic backfill on a bad network", () => {
+  it("does not start at all while the device reports itself offline", async () => {
+    const calls = install();
+    // The node test environment's navigator has no onLine; give it one
+    // for the length of this test, the way a browser reports it.
+    Object.defineProperty(navigator, "onLine", { value: false, configurable: true });
+    try {
+      expect(await runBackfill()).toBeNull();
+      expect(calls.thumbs).toHaveLength(0);
+    } finally {
+      Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
+    }
+    // Back online, the same pass runs.
+    expect(await runBackfill()).not.toBeNull();
+  });
+
+  it("gives up the pass after a run of failures instead of grinding on", async () => {
+    const calls = install();
+    const attempted: string[] = [];
+    useStore.setState({
+      backfillThumbnails: async (o?: SweepCall) => {
+        calls.thumbs.push(o ?? {});
+        // Ten candidates, every one failing the way a dead connection
+        // fails; the breaker should cut this far short of ten.
+        for (let i = 0; i < 10; i++) {
+          if (o?.stop?.()) {
+            break;
+          }
+          attempted.push(`f${i}`);
+          o?.onOutcome?.(`f${i}`, false);
+        }
+        return 0;
+      },
+    });
+    await runBackfill();
+    expect(attempted.length).toBeLessThanOrEqual(4);
+    // And the later passes never ran: the connection, not the file, was
+    // the problem.
+    expect(calls.ocr).toHaveLength(0);
+    expect(calls.clip).toHaveLength(0);
+  });
+
+  it("remembers failures across passes so the next open skips them", async () => {
+    install();
+    const seen: string[][] = [];
+    useStore.setState({
+      backfillThumbnails: async (o?: SweepCall) => {
+        const round: string[] = [];
+        for (const id of ["a", "b"]) {
+          if (o?.skip?.has(id)) {
+            continue;
+          }
+          round.push(id);
+          o?.onOutcome?.(id, false);
+        }
+        seen.push(round);
+        return 0;
+      },
+    });
+    // Three passes exhaust the retry budget; the fourth finds nothing
+    // left to try, which is what ends the loop on the owner's phone.
+    for (let i = 0; i < 4; i++) {
+      resetBackfillSession();
+      await runBackfill();
+    }
+    expect(seen[0]).toEqual(["a", "b"]);
+    expect(seen[3]).toEqual([]);
+  });
 });
 
 describe("the automatic backfill can be declined and stopped", () => {
@@ -151,16 +229,16 @@ describe("runBackfill", () => {
     const calls = install();
     const first = await runBackfill();
     expect(first).toEqual({ thumbs: 1, text: 2, meaning: 3, facts: 4 });
-    expect(calls.thumbs[0]!.skip).toBeInstanceOf(Set);
     expect(calls.thumbs[0]!.maxBytes).toBeUndefined();
-    expect(calls.ocr[0]!.skip).toBeInstanceOf(Set);
     // Attempts are remembered per pass, not shared between passes.
     expect(calls.thumbs[0]!.skip).not.toBe(calls.ocr[0]!.skip);
 
+    // The same session-long memory rides into the next run: what one
+    // pass attempted, the next one skips.
+    calls.thumbs[0]!.skip!.add("seen-this-session");
     await runBackfill();
-    // The same session-long memory rides into the next run.
-    expect(calls.thumbs[1]!.skip).toBe(calls.thumbs[0]!.skip);
-    expect(calls.facts[1]!.skip).toBe(calls.facts[0]!.skip);
+    expect(calls.thumbs[1]!.skip!.has("seen-this-session")).toBe(true);
+    expect(calls.ocr[1]!.skip!.has("seen-this-session")).toBe(false);
   });
 
   it("leaves a scanner off when its preference is off", async () => {

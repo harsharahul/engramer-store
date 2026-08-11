@@ -33,6 +33,7 @@ import {
   downloadThumbnail,
   encryptAndUpload,
   makeThumbnail,
+  withDeadlineOrThrow,
 } from "./transfer";
 import { openWithFreshEntry } from "./freshen";
 import { recognizeImage, recognizePdf } from "./intel/ocr";
@@ -166,11 +167,37 @@ export interface OcrProgress {
  * be redone after every sync for as long as the tab lives. A hand-invoked
  * sweep passes nothing and keeps its retry-everything behavior.
  */
+/**
+ * What a sweep consults to know it should leave a file alone. A plain
+ * Set satisfies it (one session's memory); the automatic passes hand in
+ * one backed by this device's persisted record, so a file it has given
+ * up on is skipped without the caller having to enumerate candidates.
+ */
+export interface SweepSkip {
+  has(id: string): boolean;
+  add(id: string): void;
+}
+
 export interface SweepOptions {
-  skip?: Set<string>;
+  skip?: SweepSkip;
   /** Consulted between files; true stops the sweep after the file in hand. */
   stop?: () => boolean;
+  /**
+   * Told how each file went. A background pass keeps this across app
+   * opens, so a file this device cannot manage stops being retried, and
+   * a run of failures can end a pass that is fighting a dead connection.
+   */
+  onOutcome?: (id: string, ok: boolean) => void;
 }
+
+/**
+ * How long a background pass waits on one step before calling it failed.
+ * A phone on a failing radio produces requests that never come back, and
+ * a decode can hang on a codec quirk; either would otherwise wedge the
+ * pass and have the next app open start it over.
+ */
+export const SWEEP_DOWNLOAD_MS = 45_000;
+export const SWEEP_READ_MS = 60_000;
 
 /** Aggregate progress for a large transfer; per-file rows would drown the UI. */
 export interface BatchProgress {
@@ -1887,16 +1914,21 @@ export const useStore = create<StoreState>((set, get) => {
       // shared adapter imports this store.
       const bytes = await openWithFreshEntry(
         file,
-        (entry) => downloadAndDecrypt(entry.id, entry.key, entry.digest),
+        (entry) =>
+          downloadAndDecrypt(entry.id, entry.key, entry.digest, { timeoutMs: SWEEP_DOWNLOAD_MS }),
         async () => {
           await get().refresh();
           return get().files.get(id) ?? null;
         },
       );
       const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime });
-      const text = file.mime.startsWith("image/")
-        ? await recognizeImage(blob)
-        : await recognizePdf(blob);
+      // Throwing on a lapse, deliberately: a reading that never came back
+      // must not be recorded as a reading that found nothing.
+      const text = await withDeadlineOrThrow(
+        file.mime.startsWith("image/") ? recognizeImage(blob) : recognizePdf(blob),
+        SWEEP_READ_MS,
+        "text recognition",
+      );
       if (!text) {
         // Record the empty reading, or this file would be re-read on
         // every device, every session, forever.
@@ -1931,11 +1963,16 @@ export const useStore = create<StoreState>((set, get) => {
         set({ ocrProgress: { done: i, total: candidates.length, current: file.name } });
         opts?.skip?.add(file.id);
         try {
-          if (await get().recognizeFile(file.id)) {
+          const ok = await get().recognizeFile(file.id);
+          if (ok) {
             found++;
           }
+          // A reading that found nothing SUCCEEDED: it recorded that
+          // fact, and the file leaves the queue by its own marker.
+          opts?.onOutcome?.(file.id, true);
         } catch {
           // One unreadable image never stops the sweep.
+          opts?.onOutcome?.(file.id, false);
         }
       }
       set({ ocrProgress: null });
@@ -1975,18 +2012,23 @@ export const useStore = create<StoreState>((set, get) => {
           // Whatever is already in memory, else the file's own index blob.
           let text = get().files.get(file.id)?.text;
           if (text === undefined) {
-            const bytes = await api.downloadBlob(file.id, "index");
+            const bytes = await api.downloadBlob(file.id, "index", {
+              timeoutMs: SWEEP_DOWNLOAD_MS,
+            });
             text = decodeIndexPayload(decryptBytes(bytes, file.key)).text;
           }
           if (!text) {
+            opts?.onOutcome?.(file.id, true);
             continue;
           }
           const scanned = await scanForFacts({ name: file.name, mime: file.mime, text });
           if (scanned.facts.length === 0) {
+            opts?.onOutcome?.(file.id, true);
             continue;
           }
           const current = get().files.get(file.id);
           if (!current) {
+            opts?.onOutcome?.(file.id, true);
             continue;
           }
           await uploadBlob(
@@ -2013,8 +2055,10 @@ export const useStore = create<StoreState>((set, get) => {
             ),
           });
           found++;
+          opts?.onOutcome?.(file.id, true);
         } catch {
           // One unreadable file never stops the sweep.
+          opts?.onOutcome?.(file.id, false);
         }
       }
       set({ ocrProgress: null });
@@ -2038,17 +2082,24 @@ export const useStore = create<StoreState>((set, get) => {
       const bytes = isImage
         ? await openWithFreshEntry(
             file,
-            (entry) => downloadAndDecrypt(entry.id, entry.key, entry.digest),
+            (entry) =>
+              downloadAndDecrypt(entry.id, entry.key, entry.digest, {
+                timeoutMs: SWEEP_DOWNLOAD_MS,
+              }),
             async () => {
               await get().refresh();
               return get().files.get(id) ?? null;
             },
           )
-        : await downloadThumbnail(file.id, file.key);
-      const clip = await embedImage(
-        new Blob([bytes.slice().buffer as ArrayBuffer], {
-          type: isImage ? file.mime : "image/jpeg",
-        }),
+        : await downloadThumbnail(file.id, file.key, { timeoutMs: SWEEP_DOWNLOAD_MS });
+      const clip = await withDeadlineOrThrow(
+        embedImage(
+          new Blob([bytes.slice().buffer as ArrayBuffer], {
+            type: isImage ? file.mime : "image/jpeg",
+          }),
+        ),
+        SWEEP_READ_MS,
+        "meaning embedding",
       );
       if (!clip) {
         return false;
@@ -2057,7 +2108,9 @@ export const useStore = create<StoreState>((set, get) => {
       let text = file.text;
       if (text === undefined && file.hasText && !file.inlineText) {
         try {
-          const indexBytes = await api.downloadBlob(file.id, "index");
+          const indexBytes = await api.downloadBlob(file.id, "index", {
+            timeoutMs: SWEEP_DOWNLOAD_MS,
+          });
           text = decodeIndexPayload(decryptBytes(indexBytes, file.key)).text;
         } catch {
           // The embedding still lands; text warms on demand later.
@@ -2094,11 +2147,14 @@ export const useStore = create<StoreState>((set, get) => {
         set({ semanticProgress: { done: i, total: candidates.length, current: file.name } });
         opts?.skip?.add(file.id);
         try {
-          if (await get().embedFile(file.id)) {
+          const ok = await get().embedFile(file.id);
+          if (ok) {
             indexed++;
           }
+          opts?.onOutcome?.(file.id, ok);
         } catch {
           // One unreadable image never stops the sweep.
+          opts?.onOutcome?.(file.id, false);
         }
       }
       set({ semanticProgress: null });
@@ -2123,7 +2179,8 @@ export const useStore = create<StoreState>((set, get) => {
       }
       const bytes = await openWithFreshEntry(
         file,
-        (entry) => downloadAndDecrypt(entry.id, entry.key, entry.digest),
+        (entry) =>
+          downloadAndDecrypt(entry.id, entry.key, entry.digest, { timeoutMs: SWEEP_DOWNLOAD_MS }),
         async () => {
           await get().refresh();
           return get().files.get(id) ?? null;
@@ -2133,8 +2190,12 @@ export const useStore = create<StoreState>((set, get) => {
         type: file.mime,
       });
       // The slot serializes the decode with every other analysis; a phone
-      // holds one decoded original at a time, no matter who asks.
-      const thumbnail = await withAnalysisSlot(() => makeThumbnail(source, file.mime));
+      // holds one decoded original at a time, no matter who asks. The
+      // deadline is what keeps a video that never fires its events from
+      // wedging the pass for the rest of the session.
+      const thumbnail = await withAnalysisSlot(() =>
+        withDeadlineOrThrow(makeThumbnail(source, file.mime), SWEEP_READ_MS, "thumbnail"),
+      );
       if (!thumbnail) {
         return false;
       }
@@ -2175,11 +2236,15 @@ export const useStore = create<StoreState>((set, get) => {
         set({ thumbProgress: { done: i, total: candidates.length, current: file.name } });
         opts?.skip?.add(file.id);
         try {
-          if (await get().backfillThumbnail(file.id)) {
+          const ok = await get().backfillThumbnail(file.id);
+          if (ok) {
             made++;
           }
+          opts?.onOutcome?.(file.id, ok);
         } catch {
-          // One undecodable file never stops the sweep.
+          // One undecodable file never stops the sweep, but it is
+          // remembered, so this device stops paying for it.
+          opts?.onOutcome?.(file.id, false);
         }
       }
       set({ thumbProgress: null });

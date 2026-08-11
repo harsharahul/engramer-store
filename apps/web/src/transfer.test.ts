@@ -203,6 +203,34 @@ describe("deferred analysis", () => {
   });
 });
 
+/**
+ * A sweep must be able to tell "read it, there was nothing" from "the
+ * read never came back". Conflating them would let a stalled phone
+ * stamp a file as read-and-empty, which is a permanent lie about a file
+ * nobody ever managed to read.
+ */
+describe("withDeadlineOrThrow", () => {
+  it("passes a value through, including a legitimate nothing", async () => {
+    const { withDeadlineOrThrow } = await import("./transfer");
+    expect(await withDeadlineOrThrow(Promise.resolve("ok"), 1000, "read")).toBe("ok");
+    expect(await withDeadlineOrThrow(Promise.resolve(undefined), 1000, "read")).toBeUndefined();
+  });
+
+  it("throws when the work outlasts its deadline, naming what stalled", async () => {
+    const { withDeadlineOrThrow, DeadlineError } = await import("./transfer");
+    const never = new Promise<string>(() => {});
+    await expect(withDeadlineOrThrow(never, 20, "thumbnail")).rejects.toBeInstanceOf(DeadlineError);
+    await expect(withDeadlineOrThrow(never, 20, "thumbnail")).rejects.toThrow(/thumbnail/);
+  });
+
+  it("lets the underlying failure through untouched", async () => {
+    const { withDeadlineOrThrow } = await import("./transfer");
+    await expect(
+      withDeadlineOrThrow(Promise.reject(new Error("network gone")), 1000, "download"),
+    ).rejects.toThrow("network gone");
+  });
+});
+
 describe("a reading that finds nothing", () => {
   it("is recorded in metadata so no sweep re-reads the file forever", async () => {
     const { recognizeImage } = await import("./intel/ocr");

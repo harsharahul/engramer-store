@@ -193,6 +193,11 @@ export async function autoBackupPass(now = Date.now()): Promise<BackupProgress |
   if (!store.session || !store.synced || uploading || store.batch) {
     return null;
   }
+  // Nothing to gain from starting an upload pass with no network; the
+  // next foreground brings the device back and tries again.
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return null;
+  }
   autoRunning = true;
   lastAutoPass = now;
   autoAbort = { aborted: false };

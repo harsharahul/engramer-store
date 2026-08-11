@@ -378,8 +378,12 @@ export const api = {
   restoreFile: (id: string) => request<void>(`/api/trash/${id}/restore`, { method: "POST" }),
   deleteForever: (id: string) => request<void>(`/api/trash/${id}`, { method: "DELETE" }),
 
-  downloadBlob: async (id: string, kind: "data" | "thumbnail" | "index"): Promise<Uint8Array> => {
-    const { bytes } = await api.downloadBlobDetailed(id, kind);
+  downloadBlob: async (
+    id: string,
+    kind: "data" | "thumbnail" | "index",
+    opts?: { timeoutMs?: number },
+  ): Promise<Uint8Array> => {
+    const { bytes } = await api.downloadBlobDetailed(id, kind, opts);
     return bytes;
   },
 
@@ -387,22 +391,41 @@ export const api = {
    * The same download, keeping the generation the server names for the
    * bytes, so callers can pair them with the channel's content marker
    * exactly. Null on an older server that does not name one.
+   *
+   * With `timeoutMs`, the request is abandoned if it goes that long
+   * without finishing: a failing radio produces connections that neither
+   * complete nor error, and a background pass awaiting one would hang
+   * until the tab closed. Interactive downloads pass nothing and wait as
+   * long as the person is willing to.
    */
   downloadBlobDetailed: async (
     id: string,
     kind: "data" | "thumbnail" | "index",
+    opts?: { timeoutMs?: number },
   ): Promise<{ bytes: Uint8Array; generation: number | null }> => {
-    const response = await fetch(`/api/files/${id}/${kind}`, {
-      headers: { authorization: `Bearer ${authToken}` },
-    });
-    if (!response.ok) {
-      throw new ApiError(response.status, `download failed (${response.status})`);
+    const controller = opts?.timeoutMs ? new AbortController() : null;
+    const timer =
+      controller && opts?.timeoutMs
+        ? setTimeout(() => controller.abort(), opts.timeoutMs)
+        : null;
+    try {
+      const response = await fetch(`/api/files/${id}/${kind}`, {
+        headers: { authorization: `Bearer ${authToken}` },
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+      if (!response.ok) {
+        throw new ApiError(response.status, `download failed (${response.status})`);
+      }
+      const named = response.headers.get("x-generation");
+      return {
+        bytes: new Uint8Array(await response.arrayBuffer()),
+        generation: named === null ? null : Number(named),
+      };
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
     }
-    const named = response.headers.get("x-generation");
-    return {
-      bytes: new Uint8Array(await response.arrayBuffer()),
-      generation: named === null ? null : Number(named),
-    };
   },
 
   /**

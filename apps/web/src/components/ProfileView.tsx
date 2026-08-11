@@ -36,6 +36,7 @@ import {
   stopBackfill,
 } from "../backfill";
 import { CLIP_MODEL_VERSION } from "../intel/semantic";
+import { SweepMemory, type SweepKind } from "../sweepmemory";
 import { api, setAuthToken } from "../api";
 import { changePassword } from "../changepassword";
 import { revealRecoveryKey, rotateRecoveryKey } from "../recoverykey";
@@ -229,6 +230,17 @@ export function ProfileView(props: {
   // predicates, so these numbers are exactly the remaining work.
   const pending = pendingDerivatives(store.files, CLIP_MODEL_VERSION);
   const [autoFill, setAutoFill] = useState(autoBackfillEnabled);
+  /**
+   * Asking for a pass by hand means "try again", including the files
+   * this device gave up on: the persisted record is what keeps the
+   * automatic passes quiet, and it must never trap a file forever.
+   */
+  const retryEverything = (kind: SweepKind) => {
+    const email = store.session?.email;
+    if (email) {
+      new SweepMemory(email, kind).forgetAll();
+    }
+  };
   // One stop covers a hand-run sweep and the automatic one alike: the
   // button that started the work is the button that ends it.
   const indexStop = useRef(false);
@@ -1201,6 +1213,7 @@ export function ProfileView(props: {
                 return;
               }
               indexStop.current = false;
+              retryEverything("thumbs");
               void store.backfillThumbnails({ stop: indexStopProbe }).then((made) => {
                 props.onToast(
                   made > 0
@@ -1237,6 +1250,7 @@ export function ProfileView(props: {
                 return;
               }
               indexStop.current = false;
+              retryEverything("text");
               void store.recognizeAllImages({ stop: indexStopProbe }).then((found) => {
                 props.onToast(
                   found > 0
@@ -1273,6 +1287,7 @@ export function ProfileView(props: {
                 return;
               }
               indexStop.current = false;
+              retryEverything("meaning");
               void store.embedAllImages({ stop: indexStopProbe }).then((indexed) => {
                 props.onToast(
                   indexed > 0

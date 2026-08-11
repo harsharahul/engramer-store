@@ -3,6 +3,7 @@ import { ocrEnabled } from "./intel/ocr";
 import { factsEnabled } from "./intel/scan";
 import { semanticEnabled } from "./intel/semantic";
 import { useStore } from "./store";
+import { SweepMemory, type SweepKind } from "./sweepmemory";
 
 /**
  * Finishes whatever some other path could not: thumbnails for images that
@@ -53,6 +54,14 @@ export function stopBackfill(): void {
   stopAsked = true;
 }
 
+/**
+ * How many failures in a row end a pass. A file that cannot be processed
+ * is one thing; four in a row is the connection or the device, and
+ * grinding through the rest of the library proves nothing while costing
+ * data and battery on exactly the connection that is already struggling.
+ */
+const BREAKER_FAILURES = 4;
+
 const DESKTOP_DELAY_MS = 3_000;
 const HANDHELD_DELAY_MS = 90_000;
 const HANDHELD_JITTER_MS = 30_000;
@@ -73,10 +82,18 @@ export function backfillDelayMs(
 
 // Session-long memory of what each pass already attempted, kept per pass:
 // a file the thumbnailer failed on may still OCR fine.
-const attemptedThumbs = new Set<string>();
-const attemptedOcr = new Set<string>();
-const attemptedClip = new Set<string>();
-const attemptedFacts = new Set<string>();
+let attemptedThumbs = new Set<string>();
+let attemptedOcr = new Set<string>();
+let attemptedClip = new Set<string>();
+let attemptedFacts = new Set<string>();
+
+/** Forgets this session's attempts; the persisted record still stands. */
+export function resetBackfillSession(): void {
+  attemptedThumbs = new Set();
+  attemptedOcr = new Set();
+  attemptedClip = new Set();
+  attemptedFacts = new Set();
+}
 
 let running = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -105,23 +122,55 @@ export async function runBackfill(): Promise<BackfillResult | null> {
   if (!store.session || !store.synced || uploading) {
     return null;
   }
+  // Offline is not the moment to start downloading originals; the next
+  // sync or foreground brings the device back and schedules another pass.
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return null;
+  }
   running = true;
   stopAsked = false;
-  const stop = () => stopAsked;
+  let consecutiveFailures = 0;
+  const stop = () => stopAsked || consecutiveFailures >= BREAKER_FAILURES;
+  const account = store.session.email;
+
+  /**
+   * One pass's bookkeeping: this device's persisted record decides who
+   * is skipped, every outcome is written back, and a run of failures
+   * trips the breaker for the whole run.
+   */
+  const pass = (kind: SweepKind, session: Set<string>) => {
+    const memory = new SweepMemory(account, kind);
+    return {
+      // Asked per file rather than seeded, so nothing has to enumerate
+      // candidates here: this session's attempts plus whatever this
+      // device has already given up on across earlier opens.
+      skip: {
+        has: (id: string) => session.has(id) || memory.exhausted(id),
+        add: (id: string) => void session.add(id),
+      },
+      stop,
+      onOutcome: (id: string, ok: boolean) => {
+        memory.record(id, ok);
+        session.add(id);
+        consecutiveFailures = ok ? 0 : consecutiveFailures + 1;
+      },
+    };
+  };
+
   try {
     const cap = isHandheld() ? { maxBytes: HANDHELD_AUTO_MAX_BYTES } : {};
-    const thumbs = await store.backfillThumbnails({ skip: attemptedThumbs, stop, ...cap });
+    const thumbs = await store.backfillThumbnails({ ...pass("thumbs", attemptedThumbs), ...cap });
     const text =
-      !stopAsked && ocrEnabled()
-        ? await useStore.getState().recognizeAllImages({ skip: attemptedOcr, stop })
+      !stop() && ocrEnabled()
+        ? await useStore.getState().recognizeAllImages(pass("text", attemptedOcr))
         : 0;
     const meaning =
-      !stopAsked && semanticEnabled()
-        ? await useStore.getState().embedAllImages({ skip: attemptedClip, stop })
+      !stop() && semanticEnabled()
+        ? await useStore.getState().embedAllImages(pass("meaning", attemptedClip))
         : 0;
     const facts =
-      !stopAsked && factsEnabled()
-        ? await useStore.getState().scanLibraryForFacts({ skip: attemptedFacts, stop })
+      !stop() && factsEnabled()
+        ? await useStore.getState().scanLibraryForFacts(pass("facts", attemptedFacts))
         : 0;
     return { thumbs, text, meaning, facts };
   } finally {
