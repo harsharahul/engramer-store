@@ -169,6 +169,37 @@ export function withDeadline<T>(
   });
 }
 
+/** A step that never came back in time. */
+export class DeadlineError extends Error {
+  constructor(what: string, ms: number) {
+    super(`${what} did not finish within ${ms}ms`);
+    this.name = "DeadlineError";
+  }
+}
+
+/**
+ * The deadline for work whose EMPTY RESULT MEANS SOMETHING. A sweep must
+ * distinguish "read it, found nothing" (a fact worth recording) from
+ * "the read never came back" (a failure to retry), so this one throws
+ * where withDeadline would quietly yield nothing. Recording a stall as
+ * an empty reading would be a permanent lie about an unread file.
+ */
+export function withDeadlineOrThrow<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new DeadlineError(what, ms)), ms);
+    void work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
 const THUMB_DEADLINE_MS = 10_000;
 const ANALYSIS_DEADLINE_MS = 20_000;
 
@@ -890,8 +921,9 @@ export async function downloadAndDecrypt(
   fileId: string,
   fileKey: Uint8Array,
   expectedDigest?: string,
+  opts?: { timeoutMs?: number },
 ): Promise<Uint8Array> {
-  const { bytes } = await downloadContent(fileId, fileKey, expectedDigest);
+  const { bytes } = await downloadContent(fileId, fileKey, expectedDigest, opts);
   return bytes;
 }
 
@@ -914,9 +946,11 @@ export async function downloadContent(
   fileId: string,
   fileKey: Uint8Array,
   expectedDigest?: string,
-  opts?: { atLeast?: number | null },
+  opts?: { atLeast?: number | null; timeoutMs?: number },
 ): Promise<{ bytes: Uint8Array; generation: number | null }> {
-  const { bytes: ciphertext, generation } = await api.downloadBlobDetailed(fileId, "data");
+  const { bytes: ciphertext, generation } = await api.downloadBlobDetailed(fileId, "data", {
+    ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+  });
   const bytes = decryptContent(ciphertext, fileKey);
   if (!digestMatches(bytes, expectedDigest)) {
     if (
@@ -956,7 +990,11 @@ export class IntegrityError extends Error {
   }
 }
 
-export async function downloadThumbnail(fileId: string, fileKey: Uint8Array): Promise<Uint8Array> {
-  const ciphertext = await api.downloadBlob(fileId, "thumbnail");
+export async function downloadThumbnail(
+  fileId: string,
+  fileKey: Uint8Array,
+  opts?: { timeoutMs?: number },
+): Promise<Uint8Array> {
+  const ciphertext = await api.downloadBlob(fileId, "thumbnail", opts);
   return decryptContent(ciphertext, fileKey);
 }
