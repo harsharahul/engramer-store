@@ -570,9 +570,12 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     try {
       await app.db.tx(async (t) => {
         const current = (await t.get<
-          Pick<FileRow, "generation" | "size" | "encrypted_meta" | "updated_at" | "uploaded">
+          Pick<
+            FileRow,
+            "generation" | "size" | "encrypted_meta" | "updated_at" | "uploaded" | "thumb_size"
+          >
         >(
-          "SELECT generation, size, encrypted_meta, updated_at, uploaded FROM files WHERE id = ?",
+          "SELECT generation, size, encrypted_meta, updated_at, uploaded, thumb_size FROM files WHERE id = ?",
           id,
         ))!;
         if (current.generation !== file.generation || current.uploaded !== file.uploaded) {
@@ -623,14 +626,24 @@ export function registerStorageRoutes(app: FastifyInstance): void {
             staleBlobs.push(blobKey(id, "data", current.generation));
           }
         }
+        // A thumbnail describes the bytes it was made from; once those are
+        // displaced it is a lie about the file. Zeroing thumb_size is what
+        // turns every device's needsThumb back on, so the ordinary backfill
+        // re-derives the preview from the new content. The stale blob goes
+        // with the other displaced blobs after the commit.
+        if (replacesContent && current.thumb_size > 0) {
+          staleBlobs.push(blobKey(id, "thumb"));
+        }
         const now = Date.now();
         await t.run(
           `UPDATE files SET size = ?, generation = ?, uploaded = 1, content_hash = ?,
-             encrypted_meta = COALESCE(?, encrypted_meta), update_seq = ?, updated_at = ?
+             thumb_size = ?, encrypted_meta = COALESCE(?, encrypted_meta),
+             update_seq = ?, updated_at = ?
            WHERE id = ?`,
           written,
           nextGen,
           contentHash,
+          replacesContent ? 0 : current.thumb_size,
           meta?.metaUpdate ?? null,
           await nextSeq(t, uid),
           now,
@@ -1268,9 +1281,11 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   });
 
   /**
-   * Restore is a pure pointer swap inside one transaction: the displaced
+   * Restore is a pointer swap inside one transaction: the displaced
    * current content becomes a version itself, so restoring is also undoable,
-   * and no blob is written, moved, or removed. The client supplies merged
+   * and no content blob is written, moved, or removed (the stale thumbnail
+   * is the one discard, since it described the displaced bytes). The client
+   * supplies merged
    * metadata (current name and tags, the version's size and search text) so
    * the row stays coherent with the restored bytes.
    */
@@ -1320,8 +1335,11 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       );
       await t.run("DELETE FROM file_versions WHERE file_id = ? AND generation = ?", id, generation);
       const now = Date.now();
+      // The preview described the bytes being displaced, exactly as in a
+      // forward replace; zeroing thumb_size turns needsThumb back on and
+      // the ordinary backfill re-derives it from the restored content.
       await t.run(
-        "UPDATE files SET generation = ?, size = ?, encrypted_meta = ?, update_seq = ?, updated_at = ? WHERE id = ?",
+        "UPDATE files SET generation = ?, size = ?, encrypted_meta = ?, thumb_size = 0, update_seq = ?, updated_at = ? WHERE id = ?",
         generation,
         version.size,
         JSON.stringify(body.encryptedMeta),
@@ -1356,6 +1374,11 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     });
     if (!row) {
       return reply.code(404).send({ error: "version not found" });
+    }
+    // Only after the pointer moved, and best-effort like every other
+    // displaced blob: a leftover is garbage, not corruption.
+    if (file.thumb_size > 0) {
+      await app.blobs.remove(blobKey(id, "thumb")).catch(() => {});
     }
     return fileToDto(row);
   });
