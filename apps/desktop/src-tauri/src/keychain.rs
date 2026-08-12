@@ -1,5 +1,5 @@
-//! Raw keychain items with an explicit accessibility class and, on iOS, a
-//! shared access group.
+//! Raw keychain items with an explicit accessibility class and, for the
+//! records extensions must read, a shared access group.
 //!
 //! The `security-framework` crate's password helpers cannot set
 //! `kSecAttrAccessible`, and an item stored without one defaults to
@@ -7,6 +7,18 @@
 //! encrypted backup. Everything this app persists is
 //! when-unlocked-THIS-DEVICE-only and never synchronizable, so the raw
 //! `SecItem` calls are made here directly, in one reviewed place.
+//!
+//! Two item shapes exist on purpose. Shared items (the extension
+//! handoff) carry the team access group and, on macOS, opt into the
+//! data-protection keychain with `kSecUseDataProtectionKeychain`: the
+//! legacy file-based keychain ignores access groups, so without that
+//! flag a sandboxed extension's read fails as not-found and presents as
+//! "not signed in". Private items (device-unlock secrets) keep the
+//! default shape; on macOS they stay in the legacy keychain, which
+//! keeps existing installs' secrets readable and keeps unsigned dev
+//! builds working (access-group queries need a signed entitlement). On
+//! iOS the two shapes are identical: every item carries the group, and
+//! the whole keychain is data-protection already.
 
 #![cfg(any(target_os = "macos", target_os = "ios"))]
 
@@ -28,21 +40,21 @@ extern "C" {
     static kSecAttrAccessible: *const c_void;
     static kSecAttrAccessibleWhenUnlockedThisDeviceOnly: *const c_void;
     static kSecAttrSynchronizable: *const c_void;
-    #[cfg(target_os = "ios")]
     static kSecAttrAccessGroup: *const c_void;
+    #[cfg(target_os = "macos")]
+    static kSecUseDataProtectionKeychain: *const c_void;
 }
 
 /// The keychain access group shared by the app and its extensions:
-/// `<team id>.<bundle id>`. Only meaningful on iOS; macOS items stay
-/// app-private.
-#[cfg(target_os = "ios")]
+/// `<team id>.<bundle id>`. On iOS every item carries it; on macOS only
+/// the shared items do, inside the data-protection keychain.
 const ACCESS_GROUP: &str = "5MD7MFXN8S.com.harsharahul.engramstore";
 
 fn cf_str(sym: *const c_void) -> CFString {
     unsafe { CFString::wrap_under_get_rule(sym.cast()) }
 }
 
-fn base_pairs(service: &str, account: &str) -> Vec<(CFString, CFType)> {
+fn base_pairs(service: &str, account: &str, shared: bool) -> Vec<(CFString, CFType)> {
     let mut pairs: Vec<(CFString, CFType)> = vec![
         (
             cf_str(unsafe { kSecClass.cast() }),
@@ -58,10 +70,24 @@ fn base_pairs(service: &str, account: &str) -> Vec<(CFString, CFType)> {
         ),
     ];
     #[cfg(target_os = "ios")]
-    pairs.push((
-        cf_str(unsafe { kSecAttrAccessGroup }),
-        CFString::new(ACCESS_GROUP).as_CFType(),
-    ));
+    {
+        let _ = shared;
+        pairs.push((
+            cf_str(unsafe { kSecAttrAccessGroup }),
+            CFString::new(ACCESS_GROUP).as_CFType(),
+        ));
+    }
+    #[cfg(target_os = "macos")]
+    if shared {
+        pairs.push((
+            cf_str(unsafe { kSecAttrAccessGroup }),
+            CFString::new(ACCESS_GROUP).as_CFType(),
+        ));
+        pairs.push((
+            cf_str(unsafe { kSecUseDataProtectionKeychain }),
+            CFBoolean::true_value().as_CFType(),
+        ));
+    }
     pairs
 }
 
@@ -70,9 +96,19 @@ fn as_query(pairs: Vec<(CFString, CFType)>) -> CFDictionary<CFString, CFType> {
 }
 
 pub fn store(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
+    store_impl(service, account, value, false)
+}
+
+/// Store a record extensions must read: shared access group, and on
+/// macOS the data-protection keychain.
+pub fn store_shared(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
+    store_impl(service, account, value, true)
+}
+
+fn store_impl(service: &str, account: &str, value: &[u8], shared: bool) -> Result<(), String> {
     // Replace-then-add keeps this idempotent; an update dance buys nothing.
-    let _ = delete(service, account);
-    let mut pairs = base_pairs(service, account);
+    let _ = delete_impl(service, account, shared);
+    let mut pairs = base_pairs(service, account, shared);
     pairs.push((
         cf_str(unsafe { kSecValueData.cast() }),
         CFData::from_buffer(value).as_CFType(),
@@ -93,7 +129,16 @@ pub fn store(service: &str, account: &str, value: &[u8]) -> Result<(), String> {
 }
 
 pub fn get(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
-    let mut pairs = base_pairs(service, account);
+    get_impl(service, account, false)
+}
+
+/// Read a shared record back through the same shape `store_shared` used.
+pub fn get_shared(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
+    get_impl(service, account, true)
+}
+
+fn get_impl(service: &str, account: &str, shared: bool) -> Result<Option<Vec<u8>>, String> {
+    let mut pairs = base_pairs(service, account, shared);
     pairs.push((
         cf_str(unsafe { kSecReturnData.cast() }),
         CFBoolean::true_value().as_CFType(),
@@ -140,10 +185,14 @@ pub fn read_any(service: &str) -> Result<Option<Vec<u8>>, String> {
             CFBoolean::true_value().as_CFType(),
         ),
     ];
-    #[cfg(target_os = "ios")]
     pairs.push((
         cf_str(unsafe { kSecAttrAccessGroup }),
         CFString::new(ACCESS_GROUP).as_CFType(),
+    ));
+    #[cfg(target_os = "macos")]
+    pairs.push((
+        cf_str(unsafe { kSecUseDataProtectionKeychain }),
+        CFBoolean::true_value().as_CFType(),
     ));
     let mut result: *const c_void = std::ptr::null();
     let status = unsafe {
@@ -163,8 +212,18 @@ pub fn read_any(service: &str) -> Result<Option<Vec<u8>>, String> {
 }
 
 pub fn delete(service: &str, account: &str) -> Result<(), String> {
-    let status =
-        unsafe { SecItemDelete(as_query(base_pairs(service, account)).as_concrete_TypeRef()) };
+    delete_impl(service, account, false)
+}
+
+/// Remove a shared record through the same shape `store_shared` used.
+pub fn delete_shared(service: &str, account: &str) -> Result<(), String> {
+    delete_impl(service, account, true)
+}
+
+fn delete_impl(service: &str, account: &str, shared: bool) -> Result<(), String> {
+    let status = unsafe {
+        SecItemDelete(as_query(base_pairs(service, account, shared)).as_concrete_TypeRef())
+    };
     if status != 0 && status != errSecItemNotFound {
         return Err(format!("keychain delete failed ({status})"));
     }

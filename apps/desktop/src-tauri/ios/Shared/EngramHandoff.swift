@@ -73,6 +73,10 @@ enum EngramHandoff {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccessGroup as String: accessGroup,
+            // No effect on iOS; on macOS this targets the data-protection
+            // keychain the app writes to. The legacy file keychain ignores
+            // access groups, so without it this read is not-found forever.
+            kSecUseDataProtectionKeychain as String: true,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
