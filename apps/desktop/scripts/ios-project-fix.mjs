@@ -182,6 +182,6 @@ for (const target of ["engram-store-desktop_iOS", "EngramShare", "EngramFiles"])
   }
 }
 if (!existsSync(join(tauriDir, "ios", "EngramCore.xcframework"))) {
-  console.log("ios project: note, EngramCore.xcframework not built yet (node scripts/ios-core-build.mjs)");
+  console.log("ios project: note, EngramCore.xcframework not built yet (node scripts/apple-core-build.mjs)");
 }
 console.log("ios project: all targets verified present");
