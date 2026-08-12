@@ -3,6 +3,23 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+- **"Wi-Fi only" now keeps its word.** The backup setting previously
+  could not see the connection type, only online or offline. The native
+  apps now watch the network directly, so automatic backup and
+  background filling hold on cellular, personal hotspots, and Low Data
+  Mode connections, and the Profile page shows "Waiting for Wi-Fi to
+  back up." while they wait. Manual runs are unaffected, and the next
+  return to the app retries. Enforcement applies in the native apps;
+  a plain browser still cannot see the connection type.
+- **Replacing a file's content refreshes its preview.** Saving new
+  bytes over an existing file (for example through the Files app) or
+  restoring an old version now clears the stored thumbnail, and the
+  next indexing pass rebuilds it from the current content. Previously
+  the old picture could show forever.
+
 ## [0.45.1] - 2026-08-10
 
 ### Fixed
