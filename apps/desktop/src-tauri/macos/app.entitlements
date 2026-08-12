@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The host app: deliberately not sandboxed (watch folders reach
+     arbitrary paths), sharing only the keychain group its extensions
+     read the handoff from. $(AppIdentifierPrefix) is substituted by
+     the release script; bare codesign does not expand it. -->
+<plist version="1.0">
+<dict>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.harsharahul.engramstore</string>
+	</array>
+</dict>
+</plist>
