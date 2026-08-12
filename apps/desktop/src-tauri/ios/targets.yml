@@ -1,6 +1,7 @@
 # Extension targets merged into the generated project.yml by
 # ios-project-fix.mjs before xcodegen runs. Source paths are relative to
-# gen/apple, where the merged file lives; ../../ios is this directory.
+# gen/apple, where the merged file lives; ../../ios is this directory,
+# and ../../apple holds the sources the macOS File Provider shares.
 #
 # Info.plist and entitlements are declared as properties here rather than
 # as committed files: xcodegen treats the `path` as an OUTPUT it
@@ -13,7 +14,7 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: ../../ios/ShareExtension
-      - path: ../../ios/Shared
+      - path: ../../apple/Shared
       - path: ../../ios/Generated
     info:
       path: EngramShare/Info.plist
@@ -53,8 +54,8 @@ targets:
     platform: iOS
     deploymentTarget: "16.0"
     sources:
-      - path: ../../ios/FilesProvider
-      - path: ../../ios/Shared
+      - path: ../../apple/FilesProvider
+      - path: ../../apple/Shared
       - path: ../../ios/Generated
     info:
       path: EngramFiles/Info.plist
