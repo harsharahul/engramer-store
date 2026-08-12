@@ -12,7 +12,8 @@
  *
  * Usage:
  *   node scripts/office-assets.mjs           fetch, verify, prune, patch
- *   node scripts/office-assets.mjs --check   verify patch anchors only
+ *   node scripts/office-assets.mjs --check   verify patch and assert anchors only
+ *   node scripts/office-assets.mjs --glue    re-copy our own glue files only
  *   node scripts/office-assets.mjs --clean   remove the derived tree
  */
 import { createHash } from "node:crypto";
@@ -106,6 +107,47 @@ const PATCHES = [
     replace: "function(){try{return!!navigator.serviceWorker}catch(e){return false}}()&&",
   },
 ];
+
+/**
+ * Not patched, only asserted: the vendor behaviors the shim compensates
+ * for. The engine pastes HTML through an iframe it creates, which cannot
+ * work in a sandboxed document because the nested frame lands in its own
+ * opaque origin, and the same handler leaks the long-action counter that
+ * gates every keystroke when a paste dies early. The shim takes the HTML
+ * paste over instead of patching 19MB engine files (a patch would also
+ * force their brotli siblings through a quality-11 recompress on every
+ * build). If an anchor stops matching, upstream changed the paste path
+ * and the takeover must be re-read; it may have become unnecessary.
+ */
+const ASSERTS = [
+  {
+    id: "paste-iframe",
+    files: ["sdkjs/word/sdk-all.js", "sdkjs/cell/sdk-all.js"],
+    find: 'ifr.setAttribute("sandbox","allow-same-origin")',
+  },
+  {
+    id: "paste-counter-leak",
+    files: ["sdkjs/word/sdk-all.js", "sdkjs/cell/sdk-all.js"],
+    find: "if(!_clipboard||!_clipboard.getData)return false;",
+  },
+];
+
+/** Verifies the ASSERTS anchors; never rewrites a byte. */
+async function assertVendor(base) {
+  for (const assert of ASSERTS) {
+    for (const file of assert.files) {
+      const source = await readFile(join(base, file), "utf8");
+      const hits = source.split(assert.find).length - 1;
+      if (hits !== 1) {
+        throw new Error(
+          `assert "${assert.id}" expected exactly 1 anchor in ${file}, found ${hits}. ` +
+            `The upstream paste path changed; re-read the shim's paste takeover before shipping.`,
+        );
+      }
+    }
+    console.log(`asserted  ${assert.id}`);
+  }
+}
 
 async function sha256(path) {
   const hash = createHash("sha256");
@@ -294,7 +336,17 @@ async function main() {
   }
   if (args.has("--check")) {
     await applyPatches(outDir, true);
+    await assertVendor(outDir);
     await verifyCompressedSiblings(outDir);
+    return;
+  }
+  if (args.has("--glue")) {
+    // Re-copies only our own glue (the shim and manifests) into the derived
+    // tree, for iterating on the shim without a full re-vendor.
+    for (const name of await readdir(join(root, "apps/web/office"))) {
+      await execFile("cp", [join(root, "apps/web/office", name), outDir]);
+    }
+    console.log("copied glue into", relative(root, outDir));
     return;
   }
 
@@ -344,6 +396,7 @@ async function main() {
   }
 
   await applyPatches(outDir, false);
+  await assertVendor(outDir);
   await compressLargeAssets(outDir);
   await verifyCompressedSiblings(outDir);
   await rm(staging, { recursive: true, force: true });

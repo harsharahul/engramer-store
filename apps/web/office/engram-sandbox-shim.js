@@ -229,6 +229,317 @@
     }
   }, true);
 
+  // ---------------------------------------------------------------- pasting
+  //
+  // The engine pastes HTML by writing it into an iframe it creates
+  // (CommonIframe_PasteStart), then reading that frame's document back.
+  // Sandbox flags inherit into nested frames, and the sandboxed-origin flag
+  // beats the child's own allow-same-origin, so inside this document that
+  // frame is ANOTHER opaque origin and the read throws. The throw escapes
+  // the engine's paste handler after it has already counted a long action,
+  // and Paste_End(), the only decrement, never runs: nothing is pasted AND
+  // every later keystroke is dropped by handlers that gate on that counter.
+  // The caret keeps blinking, because the blink is a different flag.
+  //
+  // So the HTML path is taken over here: the clipboard is read
+  // synchronously inside the event, the markup is cleaned, and the engine
+  // is fed through its own asc_PasteData, with the same live-element shape
+  // its IE path uses (the paste processor resolves styles through
+  // ownerDocument.defaultView, so the element must be in this document).
+  // The text-only and internal-copy paths end in Paste_End today and stay
+  // with the vendor, byte for byte. The vendor code this compensates for
+  // is asserted, not patched, by scripts/office-assets.mjs; if upstream
+  // changes it, the build stops and this section must be re-read.
+  var NOTICE_UNREADABLE =
+    'This browser did not hand the editor the clipboard. ' +
+    'Nothing was pasted, and the document is still editable.';
+  var NOTICE_IMAGES_ONLY = 'Images cannot be pasted into a document yet. Nothing was inserted.';
+  var NOTICE_IMAGES_STRIPPED =
+    'Pasted, without the pictures. Images cannot be pasted into a document yet.';
+
+  // What the last paste event looked like and who handled it, for the
+  // pasteProbe RPC: one console round trip from the host answers both
+  // "did the clipboard reach the editor" and "is the keyboard still armed".
+  var lastPaste = null;
+
+  function clipboardBase() {
+    var a = window.AscCommon;
+    return a && a.g_clipboardBase && a.g_clipboardBase.Api ? a.g_clipboardBase : null;
+  }
+
+  // '' means the clipboard answered and the type is absent; null means it
+  // would not answer at all. The two are different branches below.
+  function readClipboard(dt, type) {
+    if (!dt || typeof dt.getData !== 'function') { return null; }
+    try {
+      var value = dt.getData(type);
+      return typeof value === 'string' ? value : '';
+    } catch (e) { return null; }
+  }
+
+  function clipboardImages(dt) {
+    var images = [];
+    try {
+      var items = dt && dt.items;
+      for (var i = 0; items && i < items.length; i++) {
+        var item = items[i];
+        if (item && item.kind === 'file' && String(item.type).indexOf('image/') === 0) {
+          var file = item.getAsFile();
+          if (file) { images.push(file); }
+        }
+      }
+    } catch (e) {}
+    return images;
+  }
+
+  function postNotice(kind, message) {
+    try { window.parent.postMessage({ t: 'engramNotice', kind: kind, message: message }, '*'); } catch (e) {}
+  }
+
+  function refocusEditor() {
+    try {
+      var ctx = window.AscCommon && window.AscCommon.g_inputContext;
+      if (ctx && ctx.HtmlArea && ctx.HtmlArea.focus) { ctx.HtmlArea.focus(); }
+    } catch (e) {}
+  }
+
+  var pasteHostElement = null;
+  function pasteHost() {
+    if (!pasteHostElement || !pasteHostElement.parentNode) {
+      pasteHostElement = document.createElement('div');
+      pasteHostElement.id = 'engram_paste_host';
+      pasteHostElement.style.cssText =
+        'position:fixed;left:0;top:-10000px;width:10000px;height:100px;overflow:hidden;z-index:-1000;';
+      document.body.appendChild(pasteHostElement);
+    }
+    return pasteHostElement;
+  }
+
+  // The vendor's own paste frame has scripts disabled; this host element
+  // lives in a script-enabled document, where an inserted handler attribute
+  // would fire. Parse inert (a template's content does not execute), strip
+  // what could run, then mount. Styles are kept: formatting is the point.
+  // A pasted <style> block is live in this document for the synchronous
+  // duration of the engine's read and is cleared in the same task, so
+  // nothing repaints under it.
+  function sanitizeInto(host, html) {
+    var tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    var root = tpl.content;
+    var bad = root.querySelectorAll('script,iframe,frame,object,embed,link');
+    for (var i = 0; i < bad.length; i++) { bad[i].parentNode.removeChild(bad[i]); }
+    var all = root.querySelectorAll('*');
+    for (var j = 0; j < all.length; j++) {
+      var el = all[j];
+      for (var k = el.attributes.length - 1; k >= 0; k--) {
+        var name = el.attributes[k].name;
+        var value = el.attributes[k].value;
+        if (name.slice(0, 2).toLowerCase() === 'on') { el.removeAttribute(name); continue; }
+        if ((name === 'href' || name === 'src' || name === 'xlink:href') &&
+            /^\s*(javascript:|data:text\/html)/i.test(value)) {
+          el.removeAttribute(name);
+        }
+      }
+    }
+    host.appendChild(root);
+  }
+
+  // Word, Excel and PowerPoint announce themselves through a ProgId meta;
+  // the engine's paste processor changes behavior on it (list handling,
+  // table handling), so the takeover keeps the announcement.
+  function pastedFromOf(host) {
+    try {
+      var from = window.AscCommon.c_oClipboardPastedFrom;
+      var metas = host.getElementsByTagName('meta');
+      for (var i = 0; i < metas.length; i++) {
+        if ((metas[i].getAttribute('name') || '') !== 'ProgId') { continue; }
+        var content = metas[i].getAttribute('content') || '';
+        if (content.indexOf('Word') !== -1) { return from.Word; }
+        if (content.indexOf('Excel') !== -1) { return from.Excel; }
+        if (content.indexOf('PowerPoint') !== -1) { return from.PowerPoint; }
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function stripImages(html) { return html.replace(/<img[^>]*>/gi, ''); }
+
+  // The spreadsheet never calls the completion callback from its
+  // cell-edit paste: g_clipboardExcel.pasteData stores the callback, but
+  // the in-cell branches end with g_specialPasteHelper.Paste_Process_End()
+  // alone, which does not touch the counter. Only the grid-mode branch is
+  // callback-wired, which is why the word editor was fine and the
+  // spreadsheet wedged again. Every cell paste branch DOES reach
+  // Paste_Process_End, so for the spreadsheet completion is also taken
+  // from a single-shot wrapper around it: unhook first (re-entrancy),
+  // the engine's own work runs, then finish. Whichever signal comes
+  // first wins; finish is idempotent.
+  function hookCellPasteEnd(finish) {
+    if (!window.editorCell) { return null; }
+    var a = window.AscCommon;
+    var helper = a && a.g_specialPasteHelper;
+    if (!helper || typeof helper.Paste_Process_End !== 'function') { return null; }
+    var original = helper.Paste_Process_End;
+    var unhooked = false;
+    var unhook = function () {
+      if (!unhooked) { unhooked = true; helper.Paste_Process_End = original; }
+    };
+    helper.Paste_Process_End = function () {
+      unhook();
+      var result = original.apply(this, arguments);
+      finish();
+      return result;
+    };
+    return unhook;
+  }
+
+  // One increment, one Paste_End, whatever happens in between. The counter
+  // is checked for "not zero", so releasing it twice would eat a legitimate
+  // long action the same way leaking it eats the keyboard; `done` makes the
+  // release single-shot. The engine finishes asynchronously (fonts, layout)
+  // and reports through the callback argument, exactly like the vendor's
+  // own plugin paste path; the timer is for a build that never calls back,
+  // where a paste that unlocks early beats a document that never types
+  // again.
+  function pasteThrough(run) {
+    var cb = clipboardBase();
+    if (!cb) { return false; }
+    var api = cb.Api;
+    if (api.isLongAction && api.isLongAction()) { return false; }
+    var done = false;
+    var watchdog = null;
+    var cleanup = null;
+    var unhook = null;
+    var finish = function () {
+      if (done) { return; }
+      done = true;
+      if (watchdog) { clearTimeout(watchdog); }
+      if (unhook) { try { unhook(); } catch (e) {} }
+      try { cb.Paste_End(); } catch (e) {}
+      if (cleanup) { try { cleanup(); } catch (e) {} }
+      refocusEditor();
+    };
+    cb.PasteFlag = true;
+    api.incrementCounterLongAction();
+    cb.pastedFrom = null;
+    try {
+      unhook = hookCellPasteEnd(finish);
+      watchdog = setTimeout(finish, 15000);
+      cleanup = run(cb, api, finish);
+      return true;
+    } catch (e) {
+      finish();
+      return false;
+    }
+  }
+
+  function pasteHtml(html, text, images) {
+    return pasteThrough(function (cb, api, finish) {
+      var box = pasteHost();
+      sanitizeInto(box, html);
+      cb.pastedFrom = pastedFromOf(box);
+      try {
+        window.AscCommon.g_specialPasteHelper.specialPasteData.images =
+          images && images.length ? images : null;
+      } catch (e) {}
+      api.asc_PasteData(
+        window.AscCommon.c_oAscClipboardDataFormat.HtmlElement, box, null, text || '', undefined, finish);
+      return function () { box.innerHTML = ''; };
+    });
+  }
+
+  function pasteText(text) {
+    return pasteThrough(function (cb, api, finish) {
+      api.asc_PasteData(
+        window.AscCommon.c_oAscClipboardDataFormat.Text, text, null, undefined, undefined, finish);
+      return null;
+    });
+  }
+
+  function suppress(ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (ev.stopImmediatePropagation) { ev.stopImmediatePropagation(); }
+  }
+
+  // Capture phase on window: the vendor's document.onpaste is a bubble
+  // handler, so every branch below decides before it can run.
+  window.addEventListener('paste', function (ev) {
+    var cb = clipboardBase();
+    if (!cb) { return; }                     // engine not up; nothing to protect yet
+    var dt = ev.clipboardData;
+    var internal = readClipboard(dt, 'text/x-custom');
+    var html = readClipboard(dt, 'text/html');
+    var text = readClipboard(dt, 'text/plain');
+    var record = {
+      at: null,
+      hadClipboardData: !!dt,
+      types: null,
+      htmlLength: html === null ? null : html.length,
+      textLength: text === null ? null : text.length,
+      internal: !!(internal && internal.indexOf('asc_internalData2;') === 0),
+      imageCount: 0,
+      handledBy: 'none',
+      error: null,
+    };
+    try { record.at = new Date().toISOString(); } catch (e) {}
+    try { record.types = dt && dt.types ? Array.prototype.slice.call(dt.types) : null; } catch (e) {}
+    lastPaste = record;
+
+    // The editor's own copy, coming back. That path works and ends in
+    // Paste_End; the vendor keeps it.
+    if (record.internal) { record.handledBy = 'engine'; return; }
+
+    var images = clipboardImages(dt);
+    record.imageCount = images.length;
+
+    // A clipboard that would not answer. The vendor handler would count a
+    // long action and bail without Paste_End, killing the keyboard; it
+    // must never see this event.
+    if (!dt || html === null || text === null) {
+      suppress(ev);
+      record.handledBy = 'shim';
+      record.error = 'clipboard unreadable';
+      postNotice('paste', NOTICE_UNREADABLE);
+      refocusEditor();
+      return;
+    }
+
+    // Nothing the editor can take: an empty clipboard, or image files
+    // alone, which the takeover does not carry yet. Said out loud either
+    // way; the silent version of this is exactly the bug being fixed.
+    if (!html && !text) {
+      suppress(ev);
+      record.handledBy = 'shim';
+      postNotice('paste', images.length ? NOTICE_IMAGES_ONLY : NOTICE_UNREADABLE);
+      refocusEditor();
+      return;
+    }
+
+    // Text only: the vendor's Text branch works and ends in Paste_End.
+    if (!html) { record.handledBy = 'engine'; return; }
+
+    // HTML: the broken path. Taken over.
+    suppress(ev);
+    record.handledBy = 'shim';
+    var stripped = stripImages(html);
+    var hadImages = images.length > 0 || stripped.length !== html.length;
+    var probe = document.createElement('template');
+    probe.innerHTML = stripped;
+    var hasContent = !!(probe.content.textContent && probe.content.textContent.trim());
+    if (!hasContent && !text) {
+      postNotice('paste', hadImages ? NOTICE_IMAGES_ONLY : NOTICE_UNREADABLE);
+      refocusEditor();
+      return;
+    }
+    var ok = hasContent ? pasteHtml(stripped, text, images) : pasteText(text);
+    if (!ok) {
+      record.error = 'engine busy or not constructed';
+      return;
+    }
+    if (hadImages) { postNotice('paste', NOTICE_IMAGES_STRIPPED); }
+  }, true);
+
   // Save shortcut. Focus lives inside this frame while editing, so the app's
   // own keydown listener never sees it; forward the intent outward instead of
   // letting the browser's own save dialog appear.
@@ -292,8 +603,14 @@
         value = true;
       }
       else if (d.method === 'paste') {
-        api.asc_PasteData(window.AscCommon.c_oAscClipboardDataFormat.Text, d.arg);
-        value = true;
+        // The deterministic paste driver: browser gates use it, and it is
+        // where a host-mediated clipboard read would land. Same takeover,
+        // same sanitizing, same counter bracket as the paste event path.
+        var p = d.arg || {};
+        if (typeof p === 'string') { p = { text: p }; }
+        value = p.html
+          ? pasteHtml(stripImages(String(p.html)), String(p.text || ''), null)
+          : pasteText(String(p.text || ''));
       } else if (d.method === 'commit') {
         // Committing on its own, for the moment before a document closes:
         // an open cell holds text the document does not have yet, so nothing
@@ -398,6 +715,23 @@
           }
         } catch (e) {}
         value = probe;
+      } else if (d.method === 'pasteProbe') {
+        // The clipboard state and the last paste seen, for real-browser
+        // verification: one call answers whether the clipboard reached the
+        // editor and whether the input-gating counter is clean.
+        var pasteState = { lastPaste: lastPaste };
+        try {
+          var pcb = clipboardBase();
+          pasteState.IsLongActionCurrent = pcb ? pcb.Api.IsLongActionCurrent : null;
+          pasteState.isLongAction = pcb && pcb.Api.isLongAction ? pcb.Api.isLongAction() === true : null;
+          pasteState.PasteFlag = pcb ? pcb.PasteFlag : null;
+          pasteState.CopyFlag = pcb ? pcb.CopyFlag : null;
+        } catch (e) {}
+        try {
+          pasteState.isSafariMacOs = !!(window.AscCommon && window.AscCommon.AscBrowser &&
+            window.AscCommon.AscBrowser.isSafariMacOs);
+        } catch (e) {}
+        value = pasteState;
       } else { throw new Error('unknown method ' + d.method); }
     } catch (e) { error = e.message; }
     ev.source.postMessage({ t: 'engramEditorRpcResult', id: d.id, value: value, error: error }, '*');
