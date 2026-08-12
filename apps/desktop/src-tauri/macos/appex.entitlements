@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The File Provider extension: always sandboxed, talks to the vault
+     over the network, and reads the handoff record from the shared
+     keychain group. Nothing else; its storage is system-provided, so
+     no file-access entitlements belong here. -->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.harsharahul.engramstore</string>
+	</array>
+</dict>
+</plist>
