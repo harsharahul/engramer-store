@@ -67,6 +67,33 @@ export async function nativeSecretDelete(email: string): Promise<void> {
   await invoke("unlock_secret_delete", { email }).catch(() => {});
 }
 
+// ----- network path (Wi-Fi only enforcement needs the interface type) -----
+
+/** What the shell's network monitor reports about the current path. */
+export interface NativeNetworkStatus {
+  /** False until the monitor has delivered its first update. */
+  known: boolean;
+  online: boolean;
+  wifi: boolean;
+  wired: boolean;
+  cellular: boolean;
+  expensive: boolean;
+  constrained: boolean;
+}
+
+/** The current network path, or null when no shell monitor exists. */
+export async function nativeNetworkStatus(): Promise<NativeNetworkStatus | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  try {
+    return (await invoke("network_status")) as NativeNetworkStatus;
+  } catch {
+    return null;
+  }
+}
+
 // ----- extension handoff (shared keychain; iOS extensions read it) -----
 
 /** True when the shell can persist a handoff record for app extensions. */

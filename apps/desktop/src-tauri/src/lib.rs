@@ -13,6 +13,7 @@ mod handoff;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod keychain;
 mod media;
+mod network;
 mod outbox;
 mod photolib;
 mod photos;
@@ -142,6 +143,7 @@ pub fn run() {
             serverurl::server_url_get,
             serverurl::server_url_set,
             serverurl::server_url_clear,
+            network::network_status,
         ])
         .setup(|app| {
             watched::rebuild_watchers(app.handle());

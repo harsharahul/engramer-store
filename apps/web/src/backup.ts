@@ -1,5 +1,7 @@
 import { uploadLanes } from "./analysisslot";
 import { scheduleBackfill } from "./backfill";
+import { loadPolicy, windowStartMs, type BackupPolicy } from "./backuppolicy";
+import { connectionIsUnmetered } from "./connection";
 import {
   nativePhotoFile,
   nativePhotosAuthorize,
@@ -27,58 +29,7 @@ import { boundedRun } from "./uploader";
  * requests access, and the loop runs only if it was granted.
  */
 
-/** Which slice of the library backup covers, by capture date. */
-export type BackupWindow = "all" | "today" | "30d" | "90d";
-
-export interface BackupPolicy {
-  enabled: boolean;
-  includeVideos: boolean;
-  includeScreenshots: boolean;
-  wifiOnly: boolean;
-  window: BackupWindow;
-  /**
-   * The fixed floor for the "today" window: start of the day the option
-   * was chosen, so the meaning never drifts as days pass.
-   */
-  windowAnchorMs?: number;
-}
-
-export const DEFAULT_POLICY: BackupPolicy = {
-  enabled: false,
-  includeVideos: true,
-  includeScreenshots: true,
-  wifiOnly: true,
-  window: "all",
-};
-
-/** The oldest capture time the policy's window admits. */
-export function windowStartMs(policy: BackupPolicy, now = Date.now()): number {
-  switch (policy.window) {
-    case "today":
-      return policy.windowAnchorMs ?? 0;
-    case "30d":
-      return now - 30 * 86_400_000;
-    case "90d":
-      return now - 90 * 86_400_000;
-    default:
-      return 0;
-  }
-}
-
-const POLICY_KEY = "engram-backup-policy";
-
-export function loadPolicy(): BackupPolicy {
-  try {
-    const raw = localStorage.getItem(POLICY_KEY);
-    return raw ? { ...DEFAULT_POLICY, ...JSON.parse(raw) } : { ...DEFAULT_POLICY };
-  } catch {
-    return { ...DEFAULT_POLICY };
-  }
-}
-
-export function savePolicy(policy: BackupPolicy): void {
-  localStorage.setItem(POLICY_KEY, JSON.stringify(policy));
-}
+export * from "./backuppolicy";
 
 export async function backupAvailable(): Promise<boolean> {
   return nativePhotosAvailable();
@@ -198,6 +149,14 @@ export async function autoBackupPass(now = Date.now()): Promise<BackupProgress |
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
     return null;
   }
+  // The Wi-Fi only knob is a promise, not a suggestion. Skipping happens
+  // before the cooldown is spent, so the next foreground retries; the
+  // hold is shown where the knob lives rather than passing silently.
+  if (policy.wifiOnly && !(await connectionIsUnmetered())) {
+    useStore.setState({ backupHold: "wifi" });
+    return null;
+  }
+  useStore.setState({ backupHold: null });
   autoRunning = true;
   lastAutoPass = now;
   autoAbort = { aborted: false };
