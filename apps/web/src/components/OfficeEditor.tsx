@@ -108,6 +108,11 @@ export function OfficeEditor(props: {
   fileRef.current = file;
   const [stage, setStage] = useState<Stage>("decrypting");
   const [error, setError] = useState<string | null>(null);
+  // A failure the engine swallowed, surfaced by the shim (a paste the
+  // browser refused, pictures left out of a paste). Not `error`: that one
+  // drives the failed stage and the conflict flow, this one is a passing
+  // remark about a document that keeps working.
+  const [notice, setNotice] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -260,6 +265,11 @@ export function OfficeEditor(props: {
     (
       window as unknown as { engramCollabProbe?: () => Promise<unknown> }
     ).engramCollabProbe = () => sessionRef.current?.probe() ?? Promise.resolve(null);
+    // The clipboard counterpart: one console line answers whether a paste
+    // reached the engine and whether the input-gating counter is clean.
+    (
+      window as unknown as { engramPasteProbe?: () => Promise<unknown> }
+    ).engramPasteProbe = () => sessionRef.current?.pasteProbe() ?? Promise.resolve(null);
     // Asks the relay who it would broadcast to; the answer lands in the
     // diagnostics. A socket that gets acks but is missing from that list
     // is alive yet outside the room, which no client counter can see.
@@ -494,6 +504,11 @@ export function OfficeEditor(props: {
             if (name === "save") {
               saveRef.current();
             }
+          },
+          onNotice: (kind, message) => {
+            diag("office", `${kind}: ${message}`);
+            setNotice(message);
+            window.setTimeout(() => setNotice((held) => (held === message ? null : held)), 8000);
           },
           onFailed: (message) => {
             setStage("failed");
@@ -1303,6 +1318,7 @@ export function OfficeEditor(props: {
         )}
         <div className="grow" />
         {error && <span className="error-text">{error}</span>}
+        {notice && !error && !conflict && <span className="error-text">{notice}</span>}
         {conflict ? (
           <>
             <span className="error-text">Someone else saved this document first.</span>

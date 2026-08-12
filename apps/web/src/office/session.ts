@@ -74,6 +74,9 @@ export interface SessionHandlers {
   onChanged(modified: boolean): void;
   /** A shortcut pressed inside the frame, which this page cannot see. */
   onShortcut(name: string): void;
+  /** A failure the engine swallows silently, surfaced by the shim so the
+   * person who caused it hears about it; the document stays usable. */
+  onNotice?(kind: string, message: string): void;
   onFailed(error: string): void;
   /** A durable frame the bridge wants sealed and posted to the channel. */
   onPost?(frame: OutFrame): void;
@@ -368,6 +371,10 @@ export class EditorSession {
     }
     if (data.t === "engramShortcut") {
       this.handlers.onShortcut(String(data.name));
+      return;
+    }
+    if (data.t === "engramNotice") {
+      this.handlers.onNotice?.(String(data.kind ?? ""), String(data.message ?? ""));
     }
   };
 
@@ -426,6 +433,23 @@ export class EditorSession {
   async probe(): Promise<Record<string, unknown>> {
     const value = await this.call("collabProbe");
     return (value ?? {}) as Record<string, unknown>;
+  }
+
+  /** The engine's clipboard state and the last paste the shim observed;
+   * same one-window-in reasoning as probe(). */
+  async pasteProbe(): Promise<Record<string, unknown>> {
+    const value = await this.call("pasteProbe");
+    return (value ?? {}) as Record<string, unknown>;
+  }
+
+  /**
+   * Feeds content to the engine's own paste API through the shim. The
+   * deterministic paste driver: browser gates use it, and it is the
+   * destination for any host-mediated clipboard read.
+   */
+  async paste(payload: { html?: string; text?: string }): Promise<boolean> {
+    const value = await this.call("paste", payload);
+    return value === true;
   }
 
   private editorConfig(): Record<string, unknown> {

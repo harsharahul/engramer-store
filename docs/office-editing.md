@@ -135,8 +135,14 @@ upstream change fails the build loudly rather than silently skipping.
 | `shim` | loads our shim first in each editor document | see below |
 | `service-worker-guard` | makes a service worker probe tolerate a throw | `"serviceWorker" in navigator` is true even when sandboxed, and the next statement throws |
 
+Two vendor behaviors are asserted rather than patched: the anchors of the
+engine's HTML paste path (the paste iframe it creates, and the early return
+that leaks its long-action counter). The shim compensates for both, so if an
+upstream upgrade changes either anchor the build stops and the shim's paste
+section must be re-read; it may have become unnecessary.
+
 The shim itself (`apps/web/office/engram-sandbox-shim.js`) is ours and is the
-only file to re-read on an upstream upgrade. It does four things, each because
+only file to re-read on an upstream upgrade. It does five things, each because
 the editor was not written to run without an origin:
 
 - **Replaces `window.parent`.** The editor reads `window.parent.APP` without
@@ -161,6 +167,17 @@ the editor was not written to run without an origin:
   command for it, and using it rather than reaching for the editor's hidden
   input element is the difference between a document you can type into and a
   caret that quietly swallows every keystroke.
+- **Takes over the HTML paste path.** The engine pastes formatted content by
+  writing it into an iframe it creates and reading that frame's document
+  back. Sandbox flags inherit, so inside this document that frame is another
+  opaque origin and the read throws; the throw escapes after the engine has
+  counted a long action and before the only place it is ever released, which
+  both loses the paste and leaves the document ignoring every keystroke. The
+  shim reads the clipboard synchronously inside the paste event, cleans the
+  markup of anything that could execute, and feeds the engine through its own
+  paste API. The text-only and internal-copy paths work today and stay with
+  the vendor. Pictures in pasted content are not carried yet; the editor
+  says so instead of dropping them quietly.
 
 One more workaround lives there: an opaque origin cannot construct a worker
 from an `http(s)` script URL at all, and the editor builds its spellchecker
@@ -193,6 +210,8 @@ caches rather than a stream of text.
 
 The honest limits: opening is heavier than the lightweight text editor because a
 real engine has to load; very large workbooks are bounded by the converter's
-32-bit address space, and that ceiling is lower on mobile browsers; and the
-original ciphertext is always downloadable unchanged, so a round trip can never
-be the only copy of a document.
+32-bit address space, and that ceiling is lower on mobile browsers; pictures in
+pasted content are not carried into the document yet, and the editor reports
+that rather than dropping them silently; and the original ciphertext is always
+downloadable unchanged, so a round trip can never be the only copy of a
+document.

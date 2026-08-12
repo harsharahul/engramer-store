@@ -3,6 +3,18 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+- **Pasting into a document works, and can no longer freeze it.**
+  Pasting formatted text from Word, Pages, Google Docs or a web page
+  previously inserted nothing and left the document refusing every
+  keystroke until it was closed and reopened. The editor pasted by way
+  of a frame it created, which the document's isolation makes
+  unreachable; the paste now goes straight to the engine. Pictures in
+  pasted content are still left out, and the document says so instead
+  of dropping them quietly.
+
 ## [0.45.1] - 2026-08-10
 
 ### Fixed
