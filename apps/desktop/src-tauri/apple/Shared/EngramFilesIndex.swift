@@ -148,12 +148,19 @@ final class EngramFilesIndex {
         request.setValue("Bearer \(record.token)", forHTTPHeaderField: "authorization")
         var result: SyncPage?
         let done = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: request) { data, response, _ in
+        // The deadlined session, plus a tight ceiling of its own: an
+        // enumeration blocks a Finder listing, and two minutes without a
+        // page is a failed refresh to retry, not a reason to hold the
+        // window. A lapse leaves result unread, so the late callback
+        // races nothing.
+        EngramApi.blockingSession.dataTask(with: request) { data, response, _ in
             defer { done.signal() }
             guard let http = response as? HTTPURLResponse, http.statusCode == 200, let data else { return }
             result = try? JSONDecoder().decode(SyncPage.self, from: data)
         }.resume()
-        done.wait()
+        if done.wait(timeout: .now() + 120) == .timedOut {
+            return nil
+        }
         return result
     }
 
