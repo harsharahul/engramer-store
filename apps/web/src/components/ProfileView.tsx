@@ -990,6 +990,9 @@ export function ProfileView(props: {
                     />
                     Wi-Fi only
                   </label>
+                  {policy.wifiOnly && store.backupHold === "wifi" && (
+                    <div className="profile-row-sub">Waiting for Wi-Fi to back up.</div>
+                  )}
                   <label>
                     <input
                       type="checkbox"

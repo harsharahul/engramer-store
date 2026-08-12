@@ -6,7 +6,19 @@ const rig = vi.hoisted(() => ({
   backedUp: [] as string[],
   batches: [] as ({ done: number; total: number; current: string } | null)[],
   stops: [] as ((() => void) | null | undefined)[],
+  holds: [] as ("wifi" | null)[],
   backfills: 0,
+  // The path the fake network monitor reports; tests flip it to close
+  // the Wi-Fi gate.
+  network: {
+    known: true,
+    online: true,
+    wifi: true,
+    wired: false,
+    cellular: false,
+    expensive: false,
+    constrained: false,
+  },
 }));
 
 vi.mock("./backfill", () => ({
@@ -17,6 +29,7 @@ vi.mock("./backfill", () => ({
 
 vi.mock("./native", () => ({
   nativePhotosAvailable: async () => true,
+  nativeNetworkStatus: async () => ({ ...rig.network }),
   nativePhotosAuthorize: async () => "authorized",
   nativePhotosList: async () =>
     Array.from({ length: 6 }, (_, i) => ({
@@ -57,6 +70,9 @@ vi.mock("./store", () => ({
       }
       if ("batchStop" in patch) {
         rig.stops.push(patch.batchStop);
+      }
+      if ("backupHold" in patch) {
+        rig.holds.push((patch as { backupHold?: "wifi" | null }).backupHold ?? null);
       }
     },
   },
@@ -164,6 +180,24 @@ describe("autoBackupPass", () => {
     savePolicy({ ...DEFAULT_POLICY, enabled: true });
     expect(await autoBackupPass(10_060_000)).toBeNull();
     expect(await autoBackupPass(10_000_000 + 11 * 60_000)).not.toBeNull();
+    localStorage.clear();
+  });
+
+  it("holds on a metered connection, visibly, without spending the cooldown", async () => {
+    savePolicy({ ...DEFAULT_POLICY, enabled: true });
+    rig.holds.length = 0;
+    rig.network = { ...rig.network, wifi: false, cellular: true };
+    try {
+      expect(await autoBackupPass(50_000_000)).toBeNull();
+      expect(rig.holds[rig.holds.length - 1]).toBe("wifi");
+    } finally {
+      rig.network = { ...rig.network, wifi: true, cellular: false };
+    }
+    // The same moment retries clean: the skip burned no cooldown, and
+    // the hold clears when the pass actually runs.
+    const progress = await autoBackupPass(50_000_000);
+    expect(progress?.done).toBe(6);
+    expect(rig.holds[rig.holds.length - 1]).toBeNull();
     localStorage.clear();
   });
 
