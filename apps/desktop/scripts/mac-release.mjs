@@ -113,7 +113,7 @@ const appexBuilder = join(here, "mac-appex-build.mjs");
 let appexPath = null;
 if (existsSync(join(tauriDir, "macos", "targets.yml")) && existsSync(appexBuilder)) {
   run("node", [appexBuilder]);
-  appexPath = join(tauriDir, "target", "mac-appex", "EngramFilesMac.appex");
+  appexPath = join(targetDir, "mac-appex", "EngramFilesMac.appex");
   if (!existsSync(appexPath)) {
     fail("the extension build reported success but left no appex");
   }
