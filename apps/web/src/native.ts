@@ -157,7 +157,21 @@ export async function nativeHandoffClear(email: string): Promise<void> {
   await invoke("handoff_clear", { email }).catch(() => {});
 }
 
-// ----- Files-app provider (iOS; registers the vault as a drive) -----
+// ----- File Provider (the vault as a system drive: Files on iOS, -----
+// ----- the Finder sidebar on macOS)                              -----
+
+/** True when this shell can register the vault as a system drive. */
+export async function nativeFilesProviderAvailable(): Promise<boolean> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return false;
+  }
+  try {
+    return (await invoke("files_provider_available")) === true;
+  } catch {
+    return false;
+  }
+}
 
 export async function nativeFilesProviderEnable(email: string): Promise<void> {
   const invoke = tauriInvoke();
