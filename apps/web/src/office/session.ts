@@ -488,7 +488,10 @@ export class EditorSession {
       title: this.title,
       url: DOCUMENT_URL,
       isForm: false,
-      permissions: { print: true, download: false },
+      // Both false: the vendor's print path cannot open a dialog from the
+      // sandbox and its download path presumes a conversion server. The
+      // host owns both actions and forwards Cmd+P out of the frame.
+      permissions: { print: false, download: false },
     };
   }
 
