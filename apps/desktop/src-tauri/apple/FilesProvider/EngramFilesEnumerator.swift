@@ -84,8 +84,10 @@ final class EngramFilesEnumerator: NSObject, NSFileProviderEnumerator {
             ReconcileState.shared.delivered()
             indexLog.info("reconcile: full set redelivered (\(snapshot.count, privacy: .public) items)")
         }
-        if !updated.isEmpty {
-            observer.didUpdate(updated)
+        // Bounded batches: handing the observer hundreds of items in one
+        // call is what a strict provider host treats as misbehavior.
+        for start in stride(from: 0, to: updated.count, by: 100) {
+            observer.didUpdate(Array(updated[start..<min(start + 100, updated.count)]))
         }
         if !deleted.isEmpty {
             observer.didDeleteItems(withIdentifiers: deleted)

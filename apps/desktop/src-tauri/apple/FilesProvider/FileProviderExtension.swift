@@ -48,16 +48,11 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
 
     func invalidate() {}
 
-    /// The set of locally-materialized items changed; that includes the
-    /// aftermath of downloads the system failed and cleaned up without
-    /// consulting this process. Owe the replica a reconcile.
-    func materializedItemsDidChange(completionHandler: @escaping () -> Void) {
-        ReconcileState.shared.request()
-        if let manager = NSFileProviderManager(for: domain) {
-            manager.signalEnumerator(for: .workingSet) { _ in }
-        }
-        completionHandler()
-    }
+    // Deliberately NOT observing materializedItemsDidChange: reacting to
+    // it with a redelivery perturbs the very set being observed, and the
+    // resulting signal loop is what iOS answers with "syncing paused".
+    // Reconciliation is passive instead: once per fresh process and on a
+    // ten-minute cadence, inside ordinary change enumeration.
 
     func item(
         for identifier: NSFileProviderItemIdentifier,
