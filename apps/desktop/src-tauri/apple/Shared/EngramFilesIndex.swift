@@ -1,4 +1,9 @@
 import Foundation
+import os.log
+
+/// Temporary diagnostic channel for the missing-rows hunt; read with
+/// `log show --predicate 'subsystem == "com.harsharahul.engramstore.files"'`.
+let indexLog = Logger(subsystem: "com.harsharahul.engramstore.files", category: "index")
 
 /// The decrypted listing the provider enumerates: ids, names, tree shape,
 /// per-file keys. Built by pulling the sync feed in pages and opening
@@ -82,7 +87,14 @@ final class EngramFilesIndex {
     }
 
     private static var indexURL: URL? {
-        EngramOutbox.container?.appendingPathComponent("files-index.json")
+        // The app group container when it exists (iOS); the extension's
+        // own container otherwise (macOS ships no app group, and losing
+        // persistence silently meant a full re-sync on every process).
+        if let group = EngramOutbox.container {
+            return group.appendingPathComponent("files-index.json")
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first?.appendingPathComponent("files-index.json")
     }
 
     private struct Persisted: Codable {
@@ -103,6 +115,8 @@ final class EngramFilesIndex {
         guard let url = Self.indexURL,
               let data = try? JSONEncoder().encode(Persisted(cursor: cursor, entries: Array(entries.values)))
         else { return }
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: url, options: [.atomic, .completeFileProtection])
     }
 
@@ -122,7 +136,11 @@ final class EngramFilesIndex {
         var hops = 0
         while hops < 200 {
             hops += 1
-            guard let page = fetchPage(since: cursor, limit: pageLimit) else { break }
+            guard let page = fetchPage(since: cursor, limit: pageLimit) else {
+                indexLog.error("refresh: page fetch failed at cursor \(self.cursor, privacy: .public)")
+                break
+            }
+            indexLog.info("refresh: page seq=\(page.seq, privacy: .public) folders=\(page.folders.count, privacy: .public) files=\(page.files.count, privacy: .public) cursor=\(self.cursor, privacy: .public)")
             for folder in page.folders {
                 changed.append(folder.id)
                 apply(folder: folder)
@@ -195,9 +213,14 @@ final class EngramFilesIndex {
             entries.removeValue(forKey: file.id)
             return
         }
-        guard let key = openKey(file.encryptedKey),
-              let meta = openMeta(file.encryptedMeta, key: key)
-        else { return }
+        guard let key = openKey(file.encryptedKey) else {
+            indexLog.error("apply: key refused for file \(String(file.id.prefix(8)), privacy: .public)")
+            return
+        }
+        guard let meta = openMeta(file.encryptedMeta, key: key) else {
+            indexLog.error("apply: meta refused for file \(String(file.id.prefix(8)), privacy: .public)")
+            return
+        }
         entries[file.id] = IndexEntry(
             id: file.id,
             parentId: file.folderId,

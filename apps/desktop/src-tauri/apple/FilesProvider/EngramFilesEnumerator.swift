@@ -49,6 +49,15 @@ final class EngramFilesEnumerator: NSObject, NSFileProviderEnumerator {
                 deleted.append(NSFileProviderItemIdentifier(rawValue: id))
             }
         }
+        // Items whose fetch failed carry a bumped version; deliver them
+        // regardless of the anchor, or the replica that dropped their
+        // placeholder would never hear about them again.
+        let already = Set(updated.map { $0.itemIdentifier.rawValue })
+        for id in FetchFailures.shared.all() where !already.contains(id) {
+            if let entry = index.entry(id) {
+                updated.append(EngramFilesItem(entry))
+            }
+        }
         if !updated.isEmpty {
             observer.didUpdate(updated)
         }

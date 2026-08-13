@@ -10,10 +10,28 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     private var index: EngramFilesIndex?
     private var record: HandoffRecord?
     private let reconnectLock = NSLock()
+    private let domain: NSFileProviderDomain
 
     required init(domain: NSFileProviderDomain) {
+        self.domain = domain
         super.init()
         reconnectIfNeeded()
+    }
+
+    /// A fetch that exhausted its retries: remember it (the version salt
+    /// makes the item look changed) and ask the system to re-enumerate,
+    /// so the replica that just dropped the placeholder reconciles it
+    /// back instead of hiding the file until the next re-registration.
+    private func noteFailedFetch(_ entry: IndexEntry) {
+        FetchFailures.shared.bump(entry.id)
+        guard let manager = NSFileProviderManager(for: domain) else { return }
+        let containers: [NSFileProviderItemIdentifier] = [
+            .workingSet,
+            entry.parentId.map(NSFileProviderItemIdentifier.init(rawValue:)) ?? .rootContainer,
+        ]
+        for container in containers {
+            manager.signalEnumerator(for: container) { _ in }
+        }
     }
 
     /// This instance can outlive an "open the app to connect" round trip:
@@ -97,11 +115,13 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                     self.downloadAndDecrypt(request, entry: entry, attempt: 2, progress: progress,
                                             completionHandler: completionHandler)
                 } else {
+                    self.noteFailedFetch(entry)
                     completionHandler(nil, nil, NSFileProviderError(.serverUnreachable))
                 }
                 return
             }
             guard let http = response as? HTTPURLResponse else {
+                self.noteFailedFetch(entry)
                 completionHandler(nil, nil, NSFileProviderError(.serverUnreachable))
                 return
             }
@@ -110,6 +130,9 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 return
             }
             guard http.statusCode == 200, let downloaded else {
+                if http.statusCode != 404 {
+                    self.noteFailedFetch(entry)
+                }
                 completionHandler(nil, nil, NSFileProviderError(
                     http.statusCode == 404 ? .noSuchItem : .serverUnreachable))
                 return
