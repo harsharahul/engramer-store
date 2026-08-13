@@ -3,7 +3,7 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## [Unreleased]
+## [0.46.0] - 2026-08-13
 
 ### Added
 - **The Mac app is a Finder drive.** Turning on "Extensions on this
