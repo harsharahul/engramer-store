@@ -47,6 +47,11 @@ targets:
           NSExtensionPointIdentifier: com.apple.fileprovider-nonui
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FileProviderExtension
           NSExtensionFileProviderSupportsEnumeration: true
+          # The system's Download Now and Remove Download context-menu
+          # entries are opt-in through these two keys; without them the
+          # menu simply never appears (learned from Nextcloud's client).
+          NSExtensionFileProviderAllowsContextualMenuDownloadEntry: true
+          NSExtensionFileProviderAllowsUserControlledEviction: true
     dependencies:
       - framework: ../ios/EngramCore.xcframework
         embed: false
