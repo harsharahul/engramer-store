@@ -545,7 +545,12 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         guard let index else {
             throw NSFileProviderError(.notAuthenticated)
         }
-        return EngramFilesEnumerator(index: index, container: containerItemIdentifier)
+        let domain = self.domain
+        return EngramFilesEnumerator(index: index, container: containerItemIdentifier) {
+            // Fresh rows landed after a listing already answered; the
+            // change path delivers them within this signal's round trip.
+            NSFileProviderManager(for: domain)?.signalEnumerator(for: .workingSet) { _ in }
+        }
     }
 }
 

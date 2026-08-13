@@ -74,10 +74,21 @@ struct SyncPage: Decodable {
 }
 
 final class EngramFilesIndex {
-    private(set) var entries: [String: IndexEntry] = [:]
-    private(set) var cursor: Int = 0
+    private var entries: [String: IndexEntry] = [:]
+    private var cursor: Int = 0
     private let record: HandoffRecord
     private let master: Data
+    // Enumerations read while refreshes write, from whatever queues the
+    // provider host uses; one lock guards the state, and the network is
+    // never dialed while holding it.
+    private let stateLock = NSLock()
+    // Refreshes serialize among themselves, and the background variant
+    // is single-flight with a staleness gate so a burst of folder opens
+    // costs one delta pull, not one per window.
+    private let refreshGate = NSLock()
+    private let backgroundQueue = DispatchQueue(label: "com.harsharahul.engramstore.index-refresh")
+    private var backgroundInFlight = false
+    private var lastRefreshEnd = Date.distantPast
 
     init?(record: HandoffRecord) {
         guard let master = record.masterKeyBytes, master.count == 32 else { return nil }
@@ -111,13 +122,33 @@ final class EngramFilesIndex {
         entries = Dictionary(uniqueKeysWithValues: stored.entries.map { ($0.id, $0) })
     }
 
+    private static var saveOutcomeLogged = false
+
     private func save() {
         guard let url = Self.indexURL,
               let data = try? JSONEncoder().encode(Persisted(cursor: cursor, entries: Array(entries.values)))
         else { return }
-        try? FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: url, options: [.atomic, .completeFileProtection])
+        // File protection classes are an iOS concept; asking for one on
+        // macOS is how this write failed silently for a whole day.
+        #if os(macOS)
+            let options: Data.WritingOptions = [.atomic]
+        #else
+            let options: Data.WritingOptions = [.atomic, .completeFileProtection]
+        #endif
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: url, options: options)
+            if !Self.saveOutcomeLogged {
+                Self.saveOutcomeLogged = true
+                indexLog.info("index persisted at \(url.path, privacy: .public)")
+            }
+        } catch {
+            if !Self.saveOutcomeLogged {
+                Self.saveOutcomeLogged = true
+                indexLog.error("index save failed at \(url.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     static func wipe() {
@@ -132,30 +163,66 @@ final class EngramFilesIndex {
     /// completion runs.
     @discardableResult
     func refresh(pageLimit: Int = 500) -> [String] {
+        refreshGate.lock()
+        defer { refreshGate.unlock() }
         var changed: [String] = []
         var hops = 0
         while hops < 200 {
             hops += 1
-            guard let page = fetchPage(since: cursor, limit: pageLimit) else {
-                indexLog.error("refresh: page fetch failed at cursor \(self.cursor, privacy: .public)")
+            let since = withState { self.cursor }
+            guard let page = fetchPage(since: since, limit: pageLimit) else {
+                indexLog.error("refresh: page fetch failed at cursor \(since, privacy: .public)")
                 break
             }
-            indexLog.info("refresh: page seq=\(page.seq, privacy: .public) folders=\(page.folders.count, privacy: .public) files=\(page.files.count, privacy: .public) cursor=\(self.cursor, privacy: .public)")
-            for folder in page.folders {
-                changed.append(folder.id)
-                apply(folder: folder)
+            indexLog.info("refresh: page seq=\(page.seq, privacy: .public) folders=\(page.folders.count, privacy: .public) files=\(page.files.count, privacy: .public) cursor=\(since, privacy: .public)")
+            let done: Bool = withState {
+                for folder in page.folders {
+                    changed.append(folder.id)
+                    self.apply(folder: folder)
+                }
+                for file in page.files {
+                    changed.append(file.id)
+                    self.apply(file: file)
+                }
+                if page.seq <= self.cursor { return true }
+                self.cursor = page.seq
+                return page.folders.isEmpty && page.files.isEmpty
             }
-            for file in page.files {
-                changed.append(file.id)
-                apply(file: file)
-            }
-            if page.seq <= cursor { break }
-            cursor = page.seq
-            if page.folders.isEmpty && page.files.isEmpty { break }
+            if done { break }
         }
-        dedupeNames()
-        save()
+        withState {
+            self.dedupeNames()
+            self.save()
+            self.lastRefreshEnd = Date()
+        }
         return changed
+    }
+
+    /// The off-the-hot-path variant: an enumeration serves what it has
+    /// and asks for freshness here; one flight at a time, and a recent
+    /// refresh answers immediately with nothing.
+    func refreshSoon(staleness: TimeInterval = 15, onChange: @escaping ([String]) -> Void) {
+        let skip: Bool = withState {
+            if self.backgroundInFlight || Date().timeIntervalSince(self.lastRefreshEnd) < staleness {
+                return true
+            }
+            self.backgroundInFlight = true
+            return false
+        }
+        if skip { return }
+        backgroundQueue.async {
+            let changed = self.refresh()
+            self.withState { self.backgroundInFlight = false }
+            if !changed.isEmpty {
+                onChange(changed)
+            }
+        }
+    }
+
+    private func withState<T>(_ body: () -> T) -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return body()
     }
 
     private func fetchPage(since: Int, limit: Int) -> SyncPage? {
@@ -276,10 +343,22 @@ final class EngramFilesIndex {
     }
 
     func children(of parent: String?) -> [IndexEntry] {
-        entries.values.filter { $0.parentId == parent }.sorted { $0.id < $1.id }
+        withState { entries.values.filter { $0.parentId == parent }.sorted { $0.id < $1.id } }
     }
 
     func entry(_ id: String) -> IndexEntry? {
-        entries[id]
+        withState { entries[id] }
+    }
+
+    func entriesSnapshot() -> [IndexEntry] {
+        withState { Array(entries.values) }
+    }
+
+    var isEmpty: Bool {
+        withState { entries.isEmpty }
+    }
+
+    var syncCursor: Int {
+        withState { cursor }
     }
 }
