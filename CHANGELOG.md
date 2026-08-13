@@ -20,6 +20,13 @@ All notable changes to Engram Store are documented here, following
   app leaves the Dock while parked in the tray: closing the window or
   choosing the tray's new "Hide to tray" tucks it away, Open brings it
   back.
+- **Share from Finder.** Right-clicking a file in the drive offers
+  "Copy Share Link": one click puts a working share link on the
+  clipboard, reusing the file's existing open share when one exists.
+  The decryption key travels in the link's fragment, which browsers
+  never send to the server; links appear in and are revocable from the
+  web app's share list like any other. Finder's own "Download Now" and
+  "Remove Download" entries are available on drive files too.
 
 ### Fixed
 - **"Wi-Fi only" now keeps its word.** The backup setting previously

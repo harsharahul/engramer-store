@@ -52,6 +52,14 @@ targets:
           # menu simply never appears (learned from Nextcloud's client).
           NSExtensionFileProviderAllowsContextualMenuDownloadEntry: true
           NSExtensionFileProviderAllowsUserControlledEviction: true
+          # The Finder context-menu action, activation-gated on the
+          # userInfo flag items publish; handled by performAction in
+          # the extension itself, no UI extension involved.
+          NSExtensionFileProviderActions:
+            - NSExtensionFileProviderActionIdentifier: com.harsharahul.engramstore.files.copylink
+              NSExtensionFileProviderActionName: Copy Share Link
+              NSExtensionFileProviderActionActivationRule: >-
+                SUBQUERY ( fileproviderItems, $fileproviderItem, $fileproviderItem.userInfo.canCopyLink == true ).@count > 0
     dependencies:
       - framework: ../ios/EngramCore.xcframework
         embed: false
