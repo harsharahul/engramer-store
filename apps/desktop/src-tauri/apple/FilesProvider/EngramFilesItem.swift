@@ -56,6 +56,14 @@ final class EngramFilesItem: NSObject, NSFileProviderItem {
             // items into a folder works now.
             return [.allowsReading, .allowsContentEnumerating, .allowsAddingSubItems]
         }
-        return [.allowsReading, .allowsWriting, .allowsRenaming, .allowsReparenting, .allowsDeleting]
+        var caps: NSFileProviderItemCapabilities = [
+            .allowsReading, .allowsWriting, .allowsRenaming, .allowsReparenting, .allowsDeleting,
+        ]
+        #if os(macOS)
+            // Without this, Finder hides "Remove Download": the local
+            // copy of a fetched file could never be freed.
+            caps.insert(.allowsEvicting)
+        #endif
+        return caps
     }
 }
