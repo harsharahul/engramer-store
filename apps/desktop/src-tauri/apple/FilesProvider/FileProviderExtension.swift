@@ -10,10 +10,28 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     private var index: EngramFilesIndex?
     private var record: HandoffRecord?
     private let reconnectLock = NSLock()
+    private let domain: NSFileProviderDomain
 
     required init(domain: NSFileProviderDomain) {
+        self.domain = domain
         super.init()
         reconnectIfNeeded()
+    }
+
+    /// A fetch that exhausted its retries: remember it (the version salt
+    /// makes the item look changed) and ask the system to re-enumerate,
+    /// so the replica that just dropped the placeholder reconciles it
+    /// back instead of hiding the file until the next re-registration.
+    private func noteFailedFetch(_ entry: IndexEntry) {
+        FetchFailures.shared.bump(entry.id)
+        guard let manager = NSFileProviderManager(for: domain) else { return }
+        let containers: [NSFileProviderItemIdentifier] = [
+            .workingSet,
+            entry.parentId.map(NSFileProviderItemIdentifier.init(rawValue:)) ?? .rootContainer,
+        ]
+        for container in containers {
+            manager.signalEnumerator(for: container) { _ in }
+        }
     }
 
     /// This instance can outlive an "open the app to connect" round trip:
@@ -29,6 +47,17 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     }
 
     func invalidate() {}
+
+    /// The set of locally-materialized items changed; that includes the
+    /// aftermath of downloads the system failed and cleaned up without
+    /// consulting this process. Owe the replica a reconcile.
+    func materializedItemsDidChange(completionHandler: @escaping () -> Void) {
+        ReconcileState.shared.request()
+        if let manager = NSFileProviderManager(for: domain) {
+            manager.signalEnumerator(for: .workingSet) { _ in }
+        }
+        completionHandler()
+    }
 
     func item(
         for identifier: NSFileProviderItemIdentifier,
@@ -97,11 +126,13 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                     self.downloadAndDecrypt(request, entry: entry, attempt: 2, progress: progress,
                                             completionHandler: completionHandler)
                 } else {
+                    self.noteFailedFetch(entry)
                     completionHandler(nil, nil, NSFileProviderError(.serverUnreachable))
                 }
                 return
             }
             guard let http = response as? HTTPURLResponse else {
+                self.noteFailedFetch(entry)
                 completionHandler(nil, nil, NSFileProviderError(.serverUnreachable))
                 return
             }
@@ -110,6 +141,9 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 return
             }
             guard http.statusCode == 200, let downloaded else {
+                if http.statusCode != 404 {
+                    self.noteFailedFetch(entry)
+                }
                 completionHandler(nil, nil, NSFileProviderError(
                     http.statusCode == 404 ? .noSuchItem : .serverUnreachable))
                 return
@@ -511,7 +545,12 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         guard let index else {
             throw NSFileProviderError(.notAuthenticated)
         }
-        return EngramFilesEnumerator(index: index, container: containerItemIdentifier)
+        let domain = self.domain
+        return EngramFilesEnumerator(index: index, container: containerItemIdentifier) {
+            // Fresh rows landed after a listing already answered; the
+            // change path delivers them within this signal's round trip.
+            NSFileProviderManager(for: domain)?.signalEnumerator(for: .workingSet) { _ in }
+        }
     }
 }
 
@@ -528,3 +567,85 @@ final class RootItem: NSObject, NSFileProviderItem {
         NSFileProviderItemVersion(contentVersion: Data("root".utf8), metadataVersion: Data("root".utf8))
     }
 }
+
+#if os(macOS)
+    import AppKit
+
+    /// The Finder context-menu action: one click puts a working share
+    /// link on the clipboard, the same link the web app's Share dialog
+    /// copies. An existing open, unlimited, unexpiring share is reused;
+    /// only its absence mints a new one, so repeated clicks do not
+    /// multiply tokens. The file key travels in the URL fragment, which
+    /// browsers never send to the server.
+    extension FileProviderExtension: NSFileProviderCustomAction {
+        func performAction(
+            identifier actionIdentifier: NSFileProviderExtensionActionIdentifier,
+            onItemsWithIdentifiers itemIdentifiers: [NSFileProviderItemIdentifier],
+            completionHandler: @escaping (Error?) -> Void
+        ) -> Progress {
+            let progress = Progress(totalUnitCount: 1)
+            reconnectIfNeeded()
+            guard actionIdentifier.rawValue == "com.harsharahul.engramstore.files.copylink",
+                  let record, let index
+            else {
+                completionHandler(NSFileProviderError(.noSuchItem))
+                return progress
+            }
+            let entries = itemIdentifiers.compactMap { index.entry($0.rawValue) }
+                .filter { !$0.isFolder }
+            guard !entries.isEmpty else {
+                completionHandler(NSFileProviderError(.noSuchItem))
+                return progress
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
+                defer { progress.completedUnitCount = 1 }
+                let links = entries.compactMap { Self.shareLink(record: record, entry: $0) }
+                guard links.count == entries.count else {
+                    completionHandler(NSFileProviderError(.serverUnreachable))
+                    return
+                }
+                DispatchQueue.main.async {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(links.joined(separator: "\n"), forType: .string)
+                    completionHandler(nil)
+                }
+            }
+            return progress
+        }
+
+        private struct ShareRowDto: Decodable {
+            let token: String
+            let fileId: String
+            let expiresAt: UInt64?
+            let maxDownloads: UInt64?
+            let protected: Bool
+        }
+        private struct ShareListDto: Decodable { let shares: [ShareRowDto] }
+        private struct CreatedShareDto: Decodable { let token: String }
+
+        private static func shareLink(record: HandoffRecord, entry: IndexEntry) -> String? {
+            var token: String?
+            if let listed = EngramApi.getJson(record: record, path: "/api/shares"),
+               let list = try? JSONDecoder().decode(ShareListDto.self, from: listed) {
+                token = list.shares.first {
+                    $0.fileId == entry.id && !$0.protected
+                        && $0.expiresAt == nil && $0.maxDownloads == nil
+                }?.token
+            }
+            if token == nil,
+               let created = EngramApi.json(
+                   record: record, method: "POST", path: "/api/shares",
+                   payload: ["fileId": entry.id]
+               ) {
+                token = (try? JSONDecoder().decode(CreatedShareDto.self, from: created))?.token
+            }
+            guard let token else { return nil }
+            let key = entry.key.base64EncodedString()
+                .replacingOccurrences(of: "+", with: "-")
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "=", with: "")
+            return "\(record.origin)/s/\(token)#\(key)"
+        }
+    }
+#endif

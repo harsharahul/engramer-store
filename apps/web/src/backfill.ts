@@ -1,4 +1,6 @@
 import { isHandheld } from "./analysisslot";
+import { loadPolicy } from "./backuppolicy";
+import { connectionIsUnmetered } from "./connection";
 import { ocrEnabled } from "./intel/ocr";
 import { factsEnabled } from "./intel/scan";
 import { semanticEnabled } from "./intel/semantic";
@@ -125,6 +127,16 @@ export async function runBackfill(): Promise<BackfillResult | null> {
   // Offline is not the moment to start downloading originals; the next
   // sync or foreground brings the device back and schedules another pass.
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return null;
+  }
+  // The backup policy's Wi-Fi promise covers this downloader too:
+  // originals are exactly the bytes a metered connection should not pay
+  // for. Only while backup is enabled, though: that is where the knob
+  // is visible, and a promise nobody can see or change is not one.
+  // Manual sweeps from the Library index card bypass this on purpose;
+  // asking is consent.
+  const backupPolicy = loadPolicy();
+  if (backupPolicy.enabled && backupPolicy.wifiOnly && !(await connectionIsUnmetered())) {
     return null;
   }
   running = true;

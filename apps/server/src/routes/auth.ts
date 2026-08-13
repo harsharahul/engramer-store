@@ -176,7 +176,13 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   };
 
   /** Lets the client adapt its sign-up form to this server's policy. */
-  app.get("/api/auth/registration", async () => ({ mode: app.config.registration }));
+  app.get("/api/auth/registration", async () => ({
+    mode: app.config.registration,
+    // Where this deployment hosts its Mac app, or null when it offers
+    // none. Deployment configuration, not product code: the web app
+    // links wherever the operator says and hides the row otherwise.
+    macAppUrl: app.config.macAppDmgUrl,
+  }));
 
   app.post("/api/auth/register", async (request, reply) => {
     const body = registerSchema.parse(request.body);

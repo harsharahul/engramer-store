@@ -42,7 +42,7 @@ describe("registration policy and admin surface", () => {
 
   it("advertises the registration mode publicly", async () => {
     const response = await app.inject({ method: "GET", url: "/api/auth/registration" });
-    expect(response.json()).toEqual({ mode: "invite" });
+    expect(response.json()).toEqual({ mode: "invite", macAppUrl: null });
   });
 
   it("lets an operator-declared admin register without an invite, case-insensitively", async () => {

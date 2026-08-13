@@ -96,6 +96,21 @@ afterAll(async () => {
 });
 
 describe("auth", () => {
+  it("names the deployment's Mac app only when one is configured", async () => {
+    const bare = await app.inject({ method: "GET", url: "/api/auth/registration" });
+    expect(bare.json().macAppUrl).toBeNull();
+
+    const offering = await buildApp({
+      dataDir: `${dataDir}-macapp`,
+      webDistDir: null,
+      macAppDmgUrl: "https://downloads.example.com/mac",
+    });
+    const named = await offering.inject({ method: "GET", url: "/api/auth/registration" });
+    expect(named.json().macAppUrl).toBe("https://downloads.example.com/mac");
+    await offering.close();
+    rmSync(`${dataDir}-macapp`, { recursive: true, force: true });
+  });
+
   it("rejects duplicate registration", async () => {
     const keys = generateAccountKeys("another password");
     const response = await app.inject({
