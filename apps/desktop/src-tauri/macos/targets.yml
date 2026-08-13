@@ -43,6 +43,13 @@ targets:
         CFBundleShortVersionString: "0.0.0"
         CFBundleVersion: "0.0.0"
         CFBundleIconFile: drive.icns
+        # What Finder's sidebar actually consults: a symbol name,
+        # resolved against the extension's asset catalog first, then
+        # SF Symbols (learned from Nextcloud's client, whose sidebar
+        # glyph comes exactly this way).
+        CFBundleIcons:
+          CFBundlePrimaryIcon:
+            CFBundleSymbolName: FileProviderDomainSymbol
         NSExtension:
           NSExtensionPointIdentifier: com.apple.fileprovider-nonui
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FileProviderExtension
