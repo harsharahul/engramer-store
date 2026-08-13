@@ -5,6 +5,22 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Added
+- **The Mac app is a Finder drive.** Turning on "Extensions on this
+  device" now shows the vault under Locations in Finder's sidebar,
+  beside iCloud Drive. Files download and decrypt as they are opened,
+  new and edited files encrypt and upload in place, deletions go to the
+  vault's trash, and a conflicting save becomes a "(conflicted copy)"
+  rather than lost work. Changes made on other devices appear within a
+  sync cycle while the app is open. The Mac app ships as a notarized
+  DMG that opens without security ceremony; every network call the
+  drive makes carries a deadline, so a dead connection surfaces as an
+  error instead of a hang. The drive carries the Engram icon in the
+  sidebar, the app icon sits on the standard macOS icon grid, and the
+  app leaves the Dock while parked in the tray: closing the window or
+  choosing the tray's new "Hide to tray" tucks it away, Open brings it
+  back.
+
 ### Fixed
 - **"Wi-Fi only" now keeps its word.** The backup setting previously
   could not see the connection type, only online or offline. The native
