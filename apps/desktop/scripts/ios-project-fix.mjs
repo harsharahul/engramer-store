@@ -86,10 +86,14 @@ if (!spec.includes("- target: EngramShare")) {
 }
 
 // 2 + 3. Version stamp and floor, across everything now in the spec.
+// App Store Connect refuses a second upload with the same build
+// number, so a re-upload of the SAME version names a higher build in
+// the environment: ENGRAM_BUILD_NUMBER=0.46.0.2 ios:bundle.
 const version = JSON.parse(readFileSync(join(tauriDir, "tauri.conf.json"), "utf8")).version;
+const build = (process.env.ENGRAM_BUILD_NUMBER ?? "").trim() || version;
 spec = spec
   .replace(/CFBundleShortVersionString: .*/g, `CFBundleShortVersionString: ${version}`)
-  .replace(/CFBundleVersion: .*/g, `CFBundleVersion: "${version}"`)
+  .replace(/CFBundleVersion: .*/g, `CFBundleVersion: "${build}"`)
   .replace(/iOS: 1[45]\.0/g, "iOS: 16.0");
 // The team applies project-wide so every target signs; generation only
 // carries it when an instance config was present at init time, which a
