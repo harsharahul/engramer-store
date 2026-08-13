@@ -11,12 +11,22 @@ import Foundation
 final class FetchFailures {
     static let shared = FetchFailures()
     private var epochs: [String: Int] = [:]
+    private var total = 0
     private let lock = NSLock()
 
     func bump(_ id: String) {
         lock.lock()
         defer { lock.unlock() }
         epochs[id] = (epochs[id] ?? 0) + 1
+        total += 1
+    }
+
+    /// Monotonic count of every recorded failure; the reconcile trigger
+    /// compares it against the count it last acted on.
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return total
     }
 
     func salt(_ id: String) -> Int {
@@ -32,35 +42,44 @@ final class FetchFailures {
     }
 }
 
-/// When the working set owes the replica a full redelivery. The system
-/// drops placeholders for downloads IT failed internally, without ever
-/// consulting the extension, and a dropped item filtered by the sync
-/// anchor would otherwise stay invisible forever. Redelivering the
-/// whole index is a few hundred metadata rows: cheap insurance that
-/// makes the drive self-correcting against any replica divergence.
+/// When the replica is owed a reconcile, served as ONE sync-anchor
+/// expiry (the system then re-runs the full listing itself; that is
+/// the contract-sanctioned full resync, where pushing items past the
+/// anchor is what a strict host answers with "syncing paused").
+/// Triggers: evidence of a failed fetch on any platform, and on macOS
+/// also once per fresh process and a slow cadence, because macOS's
+/// replica drops placeholders for downloads it fails internally
+/// without ever consulting this process.
 final class ReconcileState {
     static let shared = ReconcileState()
     private let lock = NSLock()
-    private var dueFlag = true // a fresh process reconciles once
-    private var last = Date.distantPast
-    private let cadence: TimeInterval = 600
+    private var reconciledFailureCount = 0
+    #if os(macOS)
+        private var freshProcess = true
+        private var last = Date.distantPast
+        private let cadence: TimeInterval = 600
+    #endif
 
     var due: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return dueFlag || Date().timeIntervalSince(last) > cadence
-    }
-
-    func request() {
-        lock.lock()
-        defer { lock.unlock() }
-        dueFlag = true
+        if FetchFailures.shared.count > reconciledFailureCount {
+            return true
+        }
+        #if os(macOS)
+            return freshProcess || Date().timeIntervalSince(last) > cadence
+        #else
+            return false
+        #endif
     }
 
     func delivered() {
         lock.lock()
         defer { lock.unlock() }
-        dueFlag = false
-        last = Date()
+        reconciledFailureCount = FetchFailures.shared.count
+        #if os(macOS)
+            freshProcess = false
+            last = Date()
+        #endif
     }
 }
