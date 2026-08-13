@@ -6,6 +6,10 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Fixed
+- **Copying out of a document reaches the clipboard.** Copy and cut
+  previously reported success while the browser refused the write;
+  formatted content now lands on the clipboard in every browser, ready
+  to paste into Mail, Notes, or any other app.
 - **Pasting into a document works, and can no longer freeze it.**
   Pasting formatted text from Word, Pages, Google Docs or a web page
   previously inserted nothing and left the document refusing every
