@@ -172,7 +172,10 @@ export const api = {
       body: JSON.stringify({ email, loginKey, keyAttributes, ...(inviteToken ? { inviteToken } : {}) }),
     }),
 
-  registration: () => request<{ mode: "open" | "invite" | "closed" }>("/api/auth/registration"),
+  registration: () =>
+    request<{ mode: "open" | "invite" | "closed"; macAppUrl?: string | null }>(
+      "/api/auth/registration",
+    ),
 
   kdfAttributes: (email: string) =>
     request<{ kdf: KdfParams }>(`/api/auth/attributes?email=${encodeURIComponent(email)}`),

@@ -37,6 +37,10 @@ export interface ServerConfig {
   databaseUrl: string | null;
   /** Who may create accounts: open (default), invite, or closed. */
   registration: "open" | "invite" | "closed";
+  /// Where the Mac app's DMG is hosted, or null when this deployment
+  /// offers none; the download route redirects here and the web app
+  /// shows its download link only when set.
+  macAppDmgUrl: string | null;
   /** Extra browser origins allowed to call the API; empty means same-origin only. */
   corsOrigins: string[];
   /**
@@ -81,6 +85,7 @@ export interface ConfigOverrides {
   channelMaxBytes?: number;
   port?: number;
   webDistDir?: string | null;
+  macAppDmgUrl?: string | null;
 }
 
 export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
@@ -124,6 +129,10 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
         ? overrides.databaseUrl
         : (process.env.ENGRAMER_DATABASE_URL ?? null),
     registration: registrationMode(process.env.ENGRAMER_REGISTRATION),
+    macAppDmgUrl:
+      overrides.macAppDmgUrl !== undefined
+        ? overrides.macAppDmgUrl
+        : (process.env.ENGRAMER_MAC_DMG_URL ?? "").trim() || null,
     trustedProxies: parseTrustedProxies(process.env.ENGRAMER_TRUSTED_PROXIES),
     corsOrigins: (process.env.ENGRAMER_CORS_ORIGINS ?? "")
       .split(",")

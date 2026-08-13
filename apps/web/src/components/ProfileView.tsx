@@ -115,6 +115,9 @@ export function ProfileView(props: {
   // Which system drive this shell registers, named the way its Finder
   // or Files app names it; null while unknown or unavailable.
   const [driveWord, setDriveWord] = useState<"files" | "finder" | null>(null);
+  // Where this deployment hosts its Mac app; the row shows only in a
+  // plain desktop browser, where getting the app is a sensible ask.
+  const [macAppUrl, setMacAppUrl] = useState<string | null>(null);
   const [reconnectNote, setReconnectNote] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [backupOk, setBackupOk] = useState(false);
@@ -146,6 +149,12 @@ export function ProfileView(props: {
         setDriveWord(isHandheld() ? "files" : "finder");
       }
     });
+    if (!nativeShell() && !isHandheld()) {
+      void api
+        .registration()
+        .then((info) => setMacAppUrl(info.macAppUrl ?? null))
+        .catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -883,6 +892,21 @@ export function ProfileView(props: {
             Resync
           </button>
         </div>
+        {macAppUrl !== null && (
+          <div className="profile-row">
+            <div className="profile-row-main">
+              <b>Get the Mac app</b>
+              <div className="profile-row-sub">
+                Your vault as a drive in Finder's sidebar: files fetched as you open them,
+                shared straight from a right-click, everything encrypted on your devices as
+                always. A notarized app; download, drag to Applications, done.
+              </div>
+            </div>
+            <a className="btn" href={macAppUrl}>
+              Download
+            </a>
+          </div>
+        )}
         {handoffOn !== null && (
           <div className="profile-row">
             <div className="profile-row-main">
