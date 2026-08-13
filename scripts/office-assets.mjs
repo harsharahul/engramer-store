@@ -130,6 +130,16 @@ const ASSERTS = [
     files: ["sdkjs/word/sdk-all.js", "sdkjs/cell/sdk-all.js"],
     find: "if(!_clipboard||!_clipboard.getData)return false;",
   },
+  {
+    id: "copy-new-path",
+    files: ["sdkjs/word/sdk-all.js", "sdkjs/cell/sdk-all.js"],
+    find: "isUseNewCopy:function(){if(navigator.clipboard){",
+  },
+  {
+    id: "copy-event-path",
+    files: ["sdkjs/word/sdk-all.js", "sdkjs/cell/sdk-all.js"],
+    find: "document.oncopy=function(e){if(g_clipboardBase.isUseNewCopy()){",
+  },
 ];
 
 /** Verifies the ASSERTS anchors; never rewrites a byte. */
