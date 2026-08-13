@@ -157,6 +157,14 @@ extension EngramApi {
         return result
     }
 
+    /// JSON GET returning the body on 2xx.
+    static func getJson(record: HandoffRecord, path: String) -> Data? {
+        guard let request = request(record, "GET", path),
+              let (status, data) = send(request), (200..<300).contains(status)
+        else { return nil }
+        return data
+    }
+
     /// JSON POST/PATCH returning the decoded body on 2xx.
     static func json(
         record: HandoffRecord,

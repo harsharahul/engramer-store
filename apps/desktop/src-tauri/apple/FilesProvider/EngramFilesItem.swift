@@ -50,6 +50,12 @@ final class EngramFilesItem: NSObject, NSFileProviderItem {
         )
     }
 
+    /// Flags the Finder action activation rules key off; the plist
+    /// predicates can reach userInfo but not arbitrary properties.
+    var userInfo: [AnyHashable: Any]? {
+        ["canCopyLink": !entry.isFolder]
+    }
+
     var capabilities: NSFileProviderItemCapabilities {
         if entry.isFolder {
             // Folder rename/move/delete wait for their own pass; adding
