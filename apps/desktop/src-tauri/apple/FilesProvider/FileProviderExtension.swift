@@ -48,6 +48,17 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
 
     func invalidate() {}
 
+    /// The set of locally-materialized items changed; that includes the
+    /// aftermath of downloads the system failed and cleaned up without
+    /// consulting this process. Owe the replica a reconcile.
+    func materializedItemsDidChange(completionHandler: @escaping () -> Void) {
+        ReconcileState.shared.request()
+        if let manager = NSFileProviderManager(for: domain) {
+            manager.signalEnumerator(for: .workingSet) { _ in }
+        }
+        completionHandler()
+    }
+
     func item(
         for identifier: NSFileProviderItemIdentifier,
         request: NSFileProviderRequest,

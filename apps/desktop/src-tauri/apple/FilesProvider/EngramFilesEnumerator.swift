@@ -52,11 +52,22 @@ final class EngramFilesEnumerator: NSObject, NSFileProviderEnumerator {
         // Items whose fetch failed carry a bumped version; deliver them
         // regardless of the anchor, or the replica that dropped their
         // placeholder would never hear about them again.
-        let already = Set(updated.map { $0.itemIdentifier.rawValue })
+        var already = Set(updated.map { $0.itemIdentifier.rawValue })
         for id in FetchFailures.shared.all() where !already.contains(id) {
             if let entry = index.entry(id) {
                 updated.append(EngramFilesItem(entry))
+                already.insert(id)
             }
+        }
+        // The periodic full redelivery: resurrects anything the system
+        // dropped on its own (it fails offline materializations without
+        // consulting this process, so no hook can see them happen).
+        if container == .workingSet, ReconcileState.shared.due {
+            for entry in index.entries.values where !already.contains(entry.id) {
+                updated.append(EngramFilesItem(entry))
+            }
+            ReconcileState.shared.delivered()
+            indexLog.info("reconcile: full set redelivered (\(self.index.entries.count, privacy: .public) items)")
         }
         if !updated.isEmpty {
             observer.didUpdate(updated)
