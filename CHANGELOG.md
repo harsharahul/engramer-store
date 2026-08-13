@@ -37,6 +37,11 @@ All notable changes to Engram Store are documented here, following
   back up." while they wait. Manual runs are unaffected, and the next
   return to the app retries. Enforcement applies in the native apps;
   a plain browser still cannot see the connection type.
+- **The web app offers the Mac app.** Deployments that host a Mac app
+  DMG can name its download address in configuration, and the Profile
+  page then shows a "Get the Mac app" row to signed-in users on desktop
+  browsers, linking straight to the hosted file. Deployments that
+  offer none show nothing.
 - **Drive folders open instantly.** Listing a folder previously waited
   on a server sync before answering, which read as endless "loading"
   on large folders. Listings now answer immediately from the index and
