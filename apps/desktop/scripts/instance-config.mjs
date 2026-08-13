@@ -54,8 +54,19 @@ for (const window of config.app.windows ?? []) {
 }
 const instance = { build: config.build, app: { windows: config.app.windows } };
 const team = (process.env.APPLE_DEVELOPMENT_TEAM ?? "").trim();
-if (team) {
-  instance.bundle = { iOS: { developmentTeam: team } };
+// A re-upload of the same version needs a higher build number, and the
+// app's CFBundleVersion is Tauri's to write; the extensions get the
+// same value through the project repair, and App Store validation
+// requires the two to agree.
+const buildNumber = (process.env.ENGRAM_BUILD_NUMBER ?? "").trim();
+if (team || buildNumber) {
+  instance.bundle = { iOS: {} };
+  if (team) {
+    instance.bundle.iOS.developmentTeam = team;
+  }
+  if (buildNumber) {
+    instance.bundle.iOS.bundleVersion = buildNumber;
+  }
 }
 writeFileSync(
   join(tauriDir, "tauri.instance.json"),
