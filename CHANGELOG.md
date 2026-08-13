@@ -37,6 +37,11 @@ All notable changes to Engram Store are documented here, following
   back up." while they wait. Manual runs are unaffected, and the next
   return to the app retries. Enforcement applies in the native apps;
   a plain browser still cannot see the connection type.
+- **Drive folders open instantly.** Listing a folder previously waited
+  on a server sync before answering, which read as endless "loading"
+  on large folders. Listings now answer immediately from the index and
+  freshness arrives through the change feed a moment later, so the
+  drive browses at the speed of the app.
 - **A network blip can no longer hide a file from the Mac drive.**
   macOS quietly removes a drive file's local placeholder when its
   download fails and would not show the file again while its version
