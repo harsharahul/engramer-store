@@ -540,13 +540,44 @@
     if (hadImages) { postNotice('paste', NOTICE_IMAGES_STRIPPED); }
   }, true);
 
+  // Copy and cut, routed back to the vendor's own event path.
+  //
+  // isUseNewCopy() returns true whenever navigator.clipboard exists, and
+  // routes every copy through navigator.clipboard.write(). This opaque
+  // origin holds no clipboard-write permission, the write rejects, and
+  // the vendor swallows the rejection: the user copies and nothing lands
+  // on the OS clipboard. The vendor's older event path fills the
+  // ClipboardEvent synchronously inside the gesture, which needs no
+  // permission at all, so copy and cut are handed back to it. The
+  // override waits for the engine and installs once; internal
+  // same-session copies write the same internal format either way, so
+  // paste-back-in is unaffected.
+  function forceEventCopy() {
+    var cb = clipboardBase();
+    if (!cb || cb.__engramEventCopy) { return; }
+    cb.__engramEventCopy = true;
+    cb.isUseNewCopy = function () { return false; };
+  }
+  window.addEventListener('beforecopy', forceEventCopy, true);
+  window.addEventListener('beforecut', forceEventCopy, true);
+  window.addEventListener('copy', forceEventCopy, true);
+  window.addEventListener('cut', forceEventCopy, true);
+
   // Save shortcut. Focus lives inside this frame while editing, so the app's
   // own keydown listener never sees it; forward the intent outward instead of
-  // letting the browser's own save dialog appear.
+  // letting the browser's own save dialog appear. Print rides the same road:
+  // the vendor intercepts Cmd+P and its own print path cannot open a dialog
+  // from this sandbox.
   window.addEventListener('keydown', function (ev) {
-    if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && String(ev.key).toLowerCase() === 's') {
-      ev.preventDefault();
-      try { window.parent.postMessage({ t: 'engramShortcut', name: 'save' }, '*'); } catch (e) {}
+    if ((ev.metaKey || ev.ctrlKey) && !ev.altKey) {
+      var key = String(ev.key).toLowerCase();
+      if (key === 's' || key === 'p') {
+        ev.preventDefault();
+        try {
+          window.parent.postMessage(
+            { t: 'engramShortcut', name: key === 's' ? 'save' : 'print' }, '*');
+        } catch (e) {}
+      }
     }
   }, true);
 
