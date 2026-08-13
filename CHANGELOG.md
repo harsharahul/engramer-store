@@ -37,6 +37,14 @@ All notable changes to Engram Store are documented here, following
   back up." while they wait. Manual runs are unaffected, and the next
   return to the app retries. Enforcement applies in the native apps;
   a plain browser still cannot see the connection type.
+- **A network blip can no longer hide a file from the Mac drive.**
+  macOS quietly removes a drive file's local placeholder when its
+  download fails and would not show the file again while its version
+  stood still. The drive now reconciles itself: the full index is
+  re-delivered when the system's local state changes and periodically,
+  so anything dropped comes back on its own within minutes, with no
+  re-connecting and no data ever at risk (the vault itself was always
+  intact).
 - **Replacing a file's content refreshes its preview.** Saving new
   bytes over an existing file (for example through the Files app) or
   restoring an old version now clears the stored thumbnail, and the

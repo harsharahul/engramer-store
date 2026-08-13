@@ -31,3 +31,36 @@ final class FetchFailures {
         return Array(epochs.keys)
     }
 }
+
+/// When the working set owes the replica a full redelivery. The system
+/// drops placeholders for downloads IT failed internally, without ever
+/// consulting the extension, and a dropped item filtered by the sync
+/// anchor would otherwise stay invisible forever. Redelivering the
+/// whole index is a few hundred metadata rows: cheap insurance that
+/// makes the drive self-correcting against any replica divergence.
+final class ReconcileState {
+    static let shared = ReconcileState()
+    private let lock = NSLock()
+    private var dueFlag = true // a fresh process reconciles once
+    private var last = Date.distantPast
+    private let cadence: TimeInterval = 600
+
+    var due: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return dueFlag || Date().timeIntervalSince(last) > cadence
+    }
+
+    func request() {
+        lock.lock()
+        defer { lock.unlock() }
+        dueFlag = true
+    }
+
+    func delivered() {
+        lock.lock()
+        defer { lock.unlock() }
+        dueFlag = false
+        last = Date()
+    }
+}
