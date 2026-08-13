@@ -29,12 +29,17 @@ targets:
       - path: ../apple/FilesProvider
       - path: ../apple/Shared
       - path: ../ios/Generated
+      # Finder shows the extension's own icon beside the drive in the
+      # sidebar; without one it falls back to a plain folder.
+      - path: ../icons/drive.icns
+        buildPhase: resources
     info:
       path: gen-mac/EngramFilesMac-Info.plist
       properties:
         CFBundleDisplayName: Engram Store
         CFBundleShortVersionString: "0.0.0"
         CFBundleVersion: "0.0.0"
+        CFBundleIconFile: drive.icns
         NSExtension:
           NSExtensionPointIdentifier: com.apple.fileprovider-nonui
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FileProviderExtension
