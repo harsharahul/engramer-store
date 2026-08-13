@@ -1,5 +1,5 @@
 import { scheduleBackfill } from "./backfill";
-import { nativeOutboxDrain } from "./native";
+import { nativeFilesProviderSignal, nativeOutboxDrain } from "./native";
 import { useStore } from "./store";
 
 /**
@@ -37,7 +37,17 @@ export function installAutoSync(): void {
     inFlight = true;
     void (async () => {
       await nativeOutboxDrain();
+      // An empty delta leaves the maps untouched, so a changed reference
+      // IS the "something arrived" signal.
+      const filesBefore = useStore.getState().files;
+      const foldersBefore = useStore.getState().folders;
       await useStore.getState().refresh();
+      const after = useStore.getState();
+      if (after.session && (after.files !== filesBefore || after.folders !== foldersBefore)) {
+        // The system drive shows the change within this poll cycle
+        // instead of whenever Finder or Files next asks on its own.
+        await nativeFilesProviderSignal(after.session.email);
+      }
       // Sync may have brought files that arrived without derivatives
       // (Files-app ingest, a deferred backup from the phone); whoever is
       // open picks the work up after the device's own delay.

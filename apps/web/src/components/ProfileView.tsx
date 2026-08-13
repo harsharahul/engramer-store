@@ -52,12 +52,14 @@ import {
 } from "../unlock";
 import {
   nativeShell,
+  nativeFilesProviderAvailable,
   nativeUnlockAvailable,
   pickFolder,
   watchedAdd,
   watchedFolders,
   watchedRemove,
 } from "../native";
+import { isHandheld } from "../analysisslot";
 import {
   folderName,
   setWatchMode,
@@ -110,6 +112,12 @@ export function ProfileView(props: {
   const [shell] = useState(() => nativeShell());
   // null hides the row entirely (no shared keychain on this platform).
   const [handoffOn, setHandoffOn] = useState<boolean | null>(null);
+  // Which system drive this shell registers, named the way its Finder
+  // or Files app names it; null while unknown or unavailable.
+  const [driveWord, setDriveWord] = useState<"files" | "finder" | null>(null);
+  // Where this deployment hosts its Mac app; the row shows only in a
+  // plain desktop browser, where getting the app is a sensible ask.
+  const [macAppUrl, setMacAppUrl] = useState<string | null>(null);
   const [reconnectNote, setReconnectNote] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [backupOk, setBackupOk] = useState(false);
@@ -136,6 +144,17 @@ export function ProfileView(props: {
       }
     });
     void backupAvailable().then(setBackupOk);
+    void nativeFilesProviderAvailable().then((ok) => {
+      if (ok) {
+        setDriveWord(isHandheld() ? "files" : "finder");
+      }
+    });
+    if (!nativeShell() && !isHandheld()) {
+      void api
+        .registration()
+        .then((info) => setMacAppUrl(info.macAppUrl ?? null))
+        .catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -873,14 +892,33 @@ export function ProfileView(props: {
             Resync
           </button>
         </div>
+        {macAppUrl !== null && (
+          <div className="profile-row">
+            <div className="profile-row-main">
+              <b>Get the Mac app</b>
+              <div className="profile-row-sub">
+                Your vault as a drive in Finder's sidebar: files fetched as you open them,
+                shared straight from a right-click, everything encrypted on your devices as
+                always. A notarized app; download, drag to Applications, done.
+              </div>
+            </div>
+            <a className="btn" href={macAppUrl}>
+              Download
+            </a>
+          </div>
+        )}
         {handoffOn !== null && (
           <div className="profile-row">
             <div className="profile-row-main">
               <b>Extensions on this device</b>
               <div className="profile-row-sub">
-                Turns on sharing into the vault from any app, and shows your vault in the Files
-                app as a drive. Your vault key is stored behind the device passcode, on this
-                device only, never in iCloud. It stays through a lock; signing out removes it.
+                {driveWord === "finder"
+                  ? "Shows your vault as a drive in Finder's sidebar, with files fetched as " +
+                    "you open them. "
+                  : "Turns on sharing into the vault from any app, and shows your vault in " +
+                    "the Files app as a drive. "}
+                Your vault key is stored behind the device passcode, on this device only, never
+                in iCloud. It stays through a lock; signing out removes it.
               </div>
             </div>
             <button
@@ -915,8 +953,11 @@ export function ProfileView(props: {
               <b>Extension connection</b>
               <div className="profile-row-sub">
                 {reconnectNote ??
-                  "Rewrites the stored key and checks it reads back the way the Share sheet " +
-                    "and the Files app ask for it."}
+                  (driveWord === "finder"
+                    ? "Rewrites the stored key and checks it reads back the way the Finder " +
+                      "drive asks for it."
+                    : "Rewrites the stored key and checks it reads back the way the Share " +
+                      "sheet and the Files app ask for it.")}
               </div>
             </div>
             <button
@@ -990,6 +1031,9 @@ export function ProfileView(props: {
                     />
                     Wi-Fi only
                   </label>
+                  {policy.wifiOnly && store.backupHold === "wifi" && (
+                    <div className="profile-row-sub">Waiting for Wi-Fi to back up.</div>
+                  )}
                   <label>
                     <input
                       type="checkbox"

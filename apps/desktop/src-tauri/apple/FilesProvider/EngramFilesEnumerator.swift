@@ -7,16 +7,30 @@ import FileProvider
 final class EngramFilesEnumerator: NSObject, NSFileProviderEnumerator {
     private let index: EngramFilesIndex
     private let container: NSFileProviderItemIdentifier
+    private let onFreshData: () -> Void
 
-    init(index: EngramFilesIndex, container: NSFileProviderItemIdentifier) {
+    init(
+        index: EngramFilesIndex,
+        container: NSFileProviderItemIdentifier,
+        onFreshData: @escaping () -> Void = {}
+    ) {
         self.index = index
         self.container = container
+        self.onFreshData = onFreshData
     }
 
     func invalidate() {}
 
     func enumerateItems(for observer: NSFileProviderEnumerationObserver, startingAt page: NSFileProviderPage) {
-        index.refresh()
+        // A listing answers at memory speed from whatever the index
+        // holds; freshness arrives through the change path a moment
+        // later. Only an EMPTY index (first run of a process that could
+        // not load a persisted one) is worth blocking a window for.
+        if index.isEmpty {
+            index.refresh()
+        } else {
+            index.refreshSoon { [onFreshData] _ in onFreshData() }
+        }
         let parent: String?
         switch container {
         case .rootContainer, .workingSet:
@@ -28,7 +42,7 @@ final class EngramFilesEnumerator: NSObject, NSFileProviderEnumerator {
             // The working set: what Files shows in Recents and searches.
             // Everything in a read-only vault index is cheap enough to
             // offer; the system trims for itself.
-            observer.didEnumerate(index.entries.values.map(EngramFilesItem.init))
+            observer.didEnumerate(index.entriesSnapshot().map(EngramFilesItem.init))
         } else {
             observer.didEnumerate(index.children(of: parent).map(EngramFilesItem.init))
         }
@@ -49,6 +63,27 @@ final class EngramFilesEnumerator: NSObject, NSFileProviderEnumerator {
                 deleted.append(NSFileProviderItemIdentifier(rawValue: id))
             }
         }
+        // Items whose fetch failed carry a bumped version; deliver them
+        // regardless of the anchor, or the replica that dropped their
+        // placeholder would never hear about them again.
+        var already = Set(updated.map { $0.itemIdentifier.rawValue })
+        for id in FetchFailures.shared.all() where !already.contains(id) {
+            if let entry = index.entry(id) {
+                updated.append(EngramFilesItem(entry))
+                already.insert(id)
+            }
+        }
+        // The periodic full redelivery: resurrects anything the system
+        // dropped on its own (it fails offline materializations without
+        // consulting this process, so no hook can see them happen).
+        if container == .workingSet, ReconcileState.shared.due {
+            let snapshot = index.entriesSnapshot()
+            for entry in snapshot where !already.contains(entry.id) {
+                updated.append(EngramFilesItem(entry))
+            }
+            ReconcileState.shared.delivered()
+            indexLog.info("reconcile: full set redelivered (\(snapshot.count, privacy: .public) items)")
+        }
         if !updated.isEmpty {
             observer.didUpdate(updated)
         }
@@ -63,6 +98,6 @@ final class EngramFilesEnumerator: NSObject, NSFileProviderEnumerator {
     }
 
     private var currentAnchor: NSFileProviderSyncAnchor {
-        NSFileProviderSyncAnchor(Data("\(index.cursor)".utf8))
+        NSFileProviderSyncAnchor(Data("\(index.syncCursor)".utf8))
     }
 }

@@ -4,13 +4,14 @@
  * bindings, packaged the way Xcode expects a binary dependency shared by
  * the app and its extensions.
  *
- * Steps: cargo staticlib for device and simulator, UniFFI Swift bindings
- * from the built library, a module map, then xcodebuild assembles the
- * xcframework. Output lands in src-tauri/ios/ (gitignored; rebuilt on
- * demand). The generated Swift file is copied beside it for the Xcode
- * target to compile.
+ * Steps: cargo staticlib for iOS device, iOS simulator and macOS, UniFFI
+ * Swift bindings from the built library, a module map, then xcodebuild
+ * assembles the xcframework with one slice per platform. Output lands in
+ * src-tauri/ios/ (gitignored; rebuilt on demand; the macOS extension
+ * target references the same path). The generated Swift file is copied
+ * beside it for the Xcode targets to compile.
  *
- * Run from apps/desktop:  node scripts/ios-core-build.mjs
+ * Run from apps/desktop:  node scripts/apple-core-build.mjs
  */
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -26,14 +27,24 @@ const staging = join(iosDir, ".core-build");
 const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: "inherit" });
 const libPath = (triple) => join(repo, "target", triple, "release", "libengram_ffi.a");
 
-// The device gets one arch; the simulator slice is universal so it links
-// on both Apple-silicon and Intel Macs (the simulator archive builds both
-// arm64 and x86_64, and a slice missing either fails the extension link).
+// The device gets one arch; the simulator and macOS slices are universal
+// so they link on both Apple-silicon and Intel Macs (a slice missing
+// either arch fails the extension link).
 const deviceTriple = "aarch64-apple-ios";
 const simTriples = ["aarch64-apple-ios-sim", "x86_64-apple-ios"];
+const macTriples = ["aarch64-apple-darwin", "x86_64-apple-darwin"];
 
 for (const triple of [deviceTriple, ...simTriples]) {
   run("cargo", ["build", "-p", "engram-ffi", "--release", "--target", triple], repo);
+}
+// The macOS builds pin the deployment floor, matching the appex target;
+// a slice built newer than the app's floor loads nowhere older.
+for (const triple of macTriples) {
+  execFileSync("cargo", ["build", "-p", "engram-ffi", "--release", "--target", triple], {
+    cwd: repo,
+    stdio: "inherit",
+    env: { ...process.env, MACOSX_DEPLOYMENT_TARGET: "14.0" },
+  });
 }
 
 rmSync(staging, { recursive: true, force: true });
@@ -50,15 +61,18 @@ run(
   repo,
 );
 
-// lipo the two simulator arches into one fat static library.
+// lipo the paired arches into one fat static library per platform.
 const simFat = join(staging, "libengram_ffi-sim.a");
 run("lipo", ["-create", ...simTriples.map(libPath), "-output", simFat]);
+const macFat = join(staging, "libengram_ffi-macos.a");
+run("lipo", ["-create", ...macTriples.map(libPath), "-output", macFat]);
 
 // One headers directory per slice: the FFI header plus a module map that
 // names the module the generated Swift expects to import.
 const slices = [
   { lib: libPath(deviceTriple), name: "device" },
   { lib: simFat, name: "simulator" },
+  { lib: macFat, name: "macos" },
 ];
 const args = ["-create-xcframework"];
 for (const { lib, name } of slices) {

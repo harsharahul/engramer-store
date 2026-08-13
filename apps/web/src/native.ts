@@ -67,6 +67,33 @@ export async function nativeSecretDelete(email: string): Promise<void> {
   await invoke("unlock_secret_delete", { email }).catch(() => {});
 }
 
+// ----- network path (Wi-Fi only enforcement needs the interface type) -----
+
+/** What the shell's network monitor reports about the current path. */
+export interface NativeNetworkStatus {
+  /** False until the monitor has delivered its first update. */
+  known: boolean;
+  online: boolean;
+  wifi: boolean;
+  wired: boolean;
+  cellular: boolean;
+  expensive: boolean;
+  constrained: boolean;
+}
+
+/** The current network path, or null when no shell monitor exists. */
+export async function nativeNetworkStatus(): Promise<NativeNetworkStatus | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  try {
+    return (await invoke("network_status")) as NativeNetworkStatus;
+  } catch {
+    return null;
+  }
+}
+
 // ----- extension handoff (shared keychain; iOS extensions read it) -----
 
 /** True when the shell can persist a handoff record for app extensions. */
@@ -130,7 +157,21 @@ export async function nativeHandoffClear(email: string): Promise<void> {
   await invoke("handoff_clear", { email }).catch(() => {});
 }
 
-// ----- Files-app provider (iOS; registers the vault as a drive) -----
+// ----- File Provider (the vault as a system drive: Files on iOS, -----
+// ----- the Finder sidebar on macOS)                              -----
+
+/** True when this shell can register the vault as a system drive. */
+export async function nativeFilesProviderAvailable(): Promise<boolean> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return false;
+  }
+  try {
+    return (await invoke("files_provider_available")) === true;
+  } catch {
+    return false;
+  }
+}
 
 export async function nativeFilesProviderEnable(email: string): Promise<void> {
   const invoke = tauriInvoke();

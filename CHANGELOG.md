@@ -5,11 +5,30 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Added
+- **The Mac app is a Finder drive.** Turning on "Extensions on this
+  device" now shows the vault under Locations in Finder's sidebar,
+  beside iCloud Drive. Files download and decrypt as they are opened,
+  new and edited files encrypt and upload in place, deletions go to the
+  vault's trash, and a conflicting save becomes a "(conflicted copy)"
+  rather than lost work. Changes made on other devices appear within a
+  sync cycle while the app is open. The Mac app ships as a notarized
+  DMG that opens without security ceremony; every network call the
+  drive makes carries a deadline, so a dead connection surfaces as an
+  error instead of a hang. The drive carries the Engram icon in the
+  sidebar, the app icon sits on the standard macOS icon grid, and the
+  app leaves the Dock while parked in the tray: closing the window or
+  choosing the tray's new "Hide to tray" tucks it away, Open brings it
+  back.
+- **Share from Finder.** Right-clicking a file in the drive offers
+  "Copy Share Link": one click puts a working share link on the
+  clipboard, reusing the file's existing open share when one exists.
+  The decryption key travels in the link's fragment, which browsers
+  never send to the server; links appear in and are revocable from the
+  web app's share list like any other. Finder's own "Download Now" and
+  "Remove Download" entries are available on drive files too.
+
 ### Fixed
-- **Copying out of a document reaches the clipboard.** Copy and cut
-  previously reported success while the browser refused the write;
-  formatted content now lands on the clipboard in every browser, ready
-  to paste into Mail, Notes, or any other app.
 - **Pasting into a document works, and can no longer freeze it.**
   Pasting formatted text from Word, Pages, Google Docs or a web page
   previously inserted nothing and left the document refusing every
@@ -18,6 +37,41 @@ All notable changes to Engram Store are documented here, following
   unreachable; the paste now goes straight to the engine. Pictures in
   pasted content are still left out, and the document says so instead
   of dropping them quietly.
+- **Copying out of a document reaches the clipboard.** Copy and cut
+  previously reported success while the browser refused the write;
+  formatted content now lands on the clipboard in every browser, ready
+  to paste into Mail, Notes, or any other app.
+- **"Wi-Fi only" now keeps its word.** The backup setting previously
+  could not see the connection type, only online or offline. The native
+  apps now watch the network directly, so automatic backup and
+  background filling hold on cellular, personal hotspots, and Low Data
+  Mode connections, and the Profile page shows "Waiting for Wi-Fi to
+  back up." while they wait. Manual runs are unaffected, and the next
+  return to the app retries. Enforcement applies in the native apps;
+  a plain browser still cannot see the connection type.
+- **The web app offers the Mac app.** Deployments that host a Mac app
+  DMG can name its download address in configuration, and the Profile
+  page then shows a "Get the Mac app" row to signed-in users on desktop
+  browsers, linking straight to the hosted file. Deployments that
+  offer none show nothing.
+- **Drive folders open instantly.** Listing a folder previously waited
+  on a server sync before answering, which read as endless "loading"
+  on large folders. Listings now answer immediately from the index and
+  freshness arrives through the change feed a moment later, so the
+  drive browses at the speed of the app.
+- **A network blip can no longer hide a file from the Mac drive.**
+  macOS quietly removes a drive file's local placeholder when its
+  download fails and would not show the file again while its version
+  stood still. The drive now reconciles itself: the full index is
+  re-delivered when the system's local state changes and periodically,
+  so anything dropped comes back on its own within minutes, with no
+  re-connecting and no data ever at risk (the vault itself was always
+  intact).
+- **Replacing a file's content refreshes its preview.** Saving new
+  bytes over an existing file (for example through the Files app) or
+  restoring an old version now clears the stored thumbnail, and the
+  next indexing pass rebuilds it from the current content. Previously
+  the old picture could show forever.
 
 ## [0.45.1] - 2026-08-10
 

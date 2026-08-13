@@ -1,0 +1,79 @@
+# The macOS File Provider extension as a standalone xcodegen project,
+# built by mac-appex-build.mjs into the cargo target directory and
+# embedded into the app by mac-release.mjs.
+#
+# Deliberate differences from the iOS twin (ios/targets.yml):
+# - No app group and no NSExtensionFileProviderDocumentGroup: on macOS
+#   the extension's storage is system-provided and the keychain is the
+#   only cross-process channel.
+# - No entitlements here: the appex is built unsigned and signed exactly
+#   once, by mac-release.mjs with macos/appex.entitlements, so there is
+#   one authority and nothing to drift.
+# - Info.plist and version numbers are generated artifacts; the build
+#   script stamps the real version after xcodegen runs.
+#
+# Path frame, learned the hard way: xcodegen WRITES generated files
+# (info) relative to this spec but makes the PROJECT reference paths
+# relative to the project's own location. The frames only agree when
+# the project is generated INTO this directory, so the build script
+# does exactly that; the .xcodeproj and gen-mac/ are gitignored.
+name: EngramMacExtensions
+options:
+  createIntermediateGroups: true
+targets:
+  EngramFilesMac:
+    type: app-extension
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: ../apple/FilesProvider
+      - path: ../apple/Shared
+      - path: ../ios/Generated
+      # Finder shows the extension's own icon beside the drive in the
+      # sidebar; without one it falls back to a plain folder. Both icon
+      # mechanisms are served: the classic icns resource and the asset
+      # catalog, since which one the sidebar consults varies by macOS.
+      - path: ../icons/drive.icns
+        buildPhase: resources
+      - path: DriveIcon.xcassets
+    info:
+      path: gen-mac/EngramFilesMac-Info.plist
+      properties:
+        CFBundleDisplayName: Engram Store
+        CFBundleShortVersionString: "0.0.0"
+        CFBundleVersion: "0.0.0"
+        CFBundleIconFile: drive.icns
+        # What Finder's sidebar actually consults: a symbol name,
+        # resolved against the extension's asset catalog first, then
+        # SF Symbols (learned from Nextcloud's client, whose sidebar
+        # glyph comes exactly this way).
+        CFBundleIcons:
+          CFBundlePrimaryIcon:
+            CFBundleSymbolName: FileProviderDomainSymbol
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.fileprovider-nonui
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).FileProviderExtension
+          NSExtensionFileProviderSupportsEnumeration: true
+          # The system's Download Now and Remove Download context-menu
+          # entries are opt-in through these two keys; without them the
+          # menu simply never appears (learned from Nextcloud's client).
+          NSExtensionFileProviderAllowsContextualMenuDownloadEntry: true
+          NSExtensionFileProviderAllowsUserControlledEviction: true
+          # The Finder context-menu action, activation-gated on the
+          # userInfo flag items publish; handled by performAction in
+          # the extension itself, no UI extension involved.
+          NSExtensionFileProviderActions:
+            - NSExtensionFileProviderActionIdentifier: com.harsharahul.engramstore.files.copylink
+              NSExtensionFileProviderActionName: Copy Share Link
+              NSExtensionFileProviderActionActivationRule: >-
+                SUBQUERY ( fileproviderItems, $fileproviderItem, $fileproviderItem.userInfo.canCopyLink == true ).@count > 0
+    dependencies:
+      - framework: ../ios/EngramCore.xcframework
+        embed: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.harsharahul.engramstore.files
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: "NO"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

@@ -226,6 +226,8 @@ interface StoreState {
   batch: BatchProgress | null;
   /** Stops whatever the batch pill is narrating; set by the pass that owns it. */
   batchStop: (() => void) | null;
+  /** Why automatic backup is holding, shown beside the knob that caused it. */
+  backupHold: "wifi" | null;
   /** Search-index warm-up progress; null when idle or complete. */
   indexWarm: { done: number; total: number } | null;
 
@@ -845,6 +847,7 @@ export const useStore = create<StoreState>((set, get) => {
     thumbProgress: null,
     batch: null,
     batchStop: null,
+    backupHold: null,
     indexWarm: null,
 
     // A failed first sync must never strand the user on a spinner: the

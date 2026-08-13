@@ -392,3 +392,60 @@ describe("legacy compatibility", () => {
     expect(await currentContent(doc)).toEqual(utf8Encode("ancient bytes"));
   });
 });
+
+describe("replacing content invalidates the thumbnail", () => {
+  async function putThumb(doc: Doc, bytes: string, expected = 200) {
+    const response = await app.inject({
+      method: "PUT",
+      url: `/api/files/${doc.id}/thumbnail`,
+      headers: { ...authHeader(), "content-type": "application/octet-stream" },
+      payload: Buffer.from(encryptBytes(utf8Encode(bytes), doc.fileKey)),
+    });
+    expect(response.statusCode).toBe(expected);
+  }
+
+  async function thumbStatus(doc: Doc): Promise<number> {
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/files/${doc.id}/thumbnail`,
+      headers: authHeader(),
+    });
+    return response.statusCode;
+  }
+
+  it("a data replace clears the preview so any device re-derives it", async () => {
+    const doc = await createFile("photo.jpg", utf8Encode("original image bytes"));
+    await putThumb(doc, "preview of the original");
+    expect(await thumbStatus(doc)).toBe(200);
+
+    // The preview described bytes that are no longer the file; keeping it
+    // would show the old picture forever, since needsThumb keys off
+    // thumbSize and would never re-run.
+    await putContent(doc.id, doc.fileKey, utf8Encode("replacement image bytes"), 200);
+    expect(await thumbStatus(doc)).toBe(404);
+
+    const sync = await app.inject({
+      method: "GET",
+      url: "/api/sync?since=0",
+      headers: authHeader(),
+    });
+    expect(sync.statusCode).toBe(200);
+    const row = (sync.json().files as Array<{ id: string; thumbSize: number }>).find(
+      (f) => f.id === doc.id,
+    );
+    expect(row?.thumbSize).toBe(0);
+  });
+
+  it("a version restore is a replace too", async () => {
+    const doc = await createFile("scan.png", utf8Encode("first scan"));
+    await putContent(doc.id, doc.fileKey, utf8Encode("rescanned bytes"), 200);
+    await putThumb(doc, "preview of the rescan");
+    expect(await thumbStatus(doc)).toBe(200);
+
+    // The single replace displaced exactly one generation: the original.
+    const [original] = await listVersions(doc.id);
+    await restore(doc.id, original!.generation, meta("scan.png", original!.size, doc.fileKey));
+    expect(await currentContent(doc)).toEqual(utf8Encode("first scan"));
+    expect(await thumbStatus(doc)).toBe(404);
+  });
+});

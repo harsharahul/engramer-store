@@ -13,6 +13,7 @@ mod handoff;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod keychain;
 mod media;
+mod network;
 mod outbox;
 mod photolib;
 mod photos;
@@ -33,10 +34,26 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 #[cfg(desktop)]
 fn show_main(app: &tauri::AppHandle) {
+    // Regular first: an accessory app owns no menu bar, and the window
+    // needs one for the standard Edit shortcuts to reach the web view.
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+/// Parks the app in the tray: window hidden, and on macOS the Dock icon
+/// goes too, the way the other drives on this machine behave. The tray
+/// stays; Open undoes all of it.
+#[cfg(desktop)]
+fn hide_main(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 }
 
 /// The tray menu, the desktop app's resting state. iOS has no tray; there
@@ -45,6 +62,7 @@ fn show_main(app: &tauri::AppHandle) {
 fn install_tray(app: &tauri::App) -> tauri::Result<()> {
     let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
     let open_item = MenuItem::with_id(app, "open", "Open Engram Store", true, None::<&str>)?;
+    let hide_item = MenuItem::with_id(app, "hide", "Hide to tray", true, None::<&str>)?;
     let refresh_item = MenuItem::with_id(app, "refresh", "Refresh", true, None::<&str>)?;
     let autostart_item = CheckMenuItem::with_id(
         app,
@@ -59,6 +77,7 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
         app,
         &[
             &open_item,
+            &hide_item,
             &refresh_item,
             &PredefinedMenuItem::separator(app)?,
             &autostart_item,
@@ -66,13 +85,18 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
             &quit_item,
         ],
     )?;
+    // A template glyph, not the app tile: the menu bar tints template
+    // icons to match light and dark, the way every neighbor up there
+    // behaves; a full-color tile reads as a sore thumb.
+    let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
     TrayIconBuilder::with_id("main-tray")
-        .icon(app.default_window_icon().expect("bundled icon").clone())
-        .icon_as_template(false)
+        .icon(tray_icon)
+        .icon_as_template(true)
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "open" => show_main(app),
+            "hide" => hide_main(app),
             "refresh" => {
                 // Reload picks up a freshly deployed frontend and clears
                 // any in-page state without losing the session.
@@ -142,6 +166,7 @@ pub fn run() {
             serverurl::server_url_get,
             serverurl::server_url_set,
             serverurl::server_url_clear,
+            network::network_status,
         ])
         .setup(|app| {
             watched::rebuild_watchers(app.handle());
@@ -160,7 +185,7 @@ pub fn run() {
             #[cfg(desktop)]
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
+                hide_main(&window.app_handle());
             }
             // Rotation can hand the scroll view a fresh inset; re-assert.
             #[cfg(target_os = "ios")]

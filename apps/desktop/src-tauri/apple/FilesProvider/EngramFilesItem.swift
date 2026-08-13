@@ -44,10 +44,20 @@ final class EngramFilesItem: NSObject, NSFileProviderItem {
     }
 
     var itemVersion: NSFileProviderItemVersion {
-        NSFileProviderItemVersion(
+        // A failed fetch bumps the salt, which makes the replica treat
+        // the item as changed and reconcile it; see FetchFailures.
+        let salt = FetchFailures.shared.salt(entry.id)
+        let meta = salt == 0 ? "\(entry.updateSeq)" : "\(entry.updateSeq)~\(salt)"
+        return NSFileProviderItemVersion(
             contentVersion: Data("\(entry.generation ?? 0)".utf8),
-            metadataVersion: Data("\(entry.updateSeq)".utf8)
+            metadataVersion: Data(meta.utf8)
         )
+    }
+
+    /// Flags the Finder action activation rules key off; the plist
+    /// predicates can reach userInfo but not arbitrary properties.
+    var userInfo: [AnyHashable: Any]? {
+        ["canCopyLink": !entry.isFolder]
     }
 
     var capabilities: NSFileProviderItemCapabilities {
@@ -56,6 +66,14 @@ final class EngramFilesItem: NSObject, NSFileProviderItem {
             // items into a folder works now.
             return [.allowsReading, .allowsContentEnumerating, .allowsAddingSubItems]
         }
-        return [.allowsReading, .allowsWriting, .allowsRenaming, .allowsReparenting, .allowsDeleting]
+        var caps: NSFileProviderItemCapabilities = [
+            .allowsReading, .allowsWriting, .allowsRenaming, .allowsReparenting, .allowsDeleting,
+        ]
+        #if os(macOS)
+            // Without this, Finder hides "Remove Download": the local
+            // copy of a fetched file could never be freed.
+            caps.insert(.allowsEvicting)
+        #endif
+        return caps
     }
 }

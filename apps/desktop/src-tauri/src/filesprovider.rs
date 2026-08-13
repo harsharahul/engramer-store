@@ -9,33 +9,33 @@
 //! linked here rather than through the Xcode project's framework list, to
 //! keep the generated project untouched.
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 #[link(name = "FileProvider", kind = "framework")]
 extern "C" {}
 
 /// A stable, opaque domain id: base64url of BLAKE2b-256 of the email, so
 /// the address never lands in a system-visible path. The display name is
 /// the visible part.
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 fn domain_identifier(email: &str) -> String {
     engram_core::b64::to_b64url(&engram_core::backend::generichash(32, email.as_bytes()))
 }
 
 #[tauri::command]
 pub async fn files_provider_available() -> bool {
-    cfg!(target_os = "ios")
+    cfg!(any(target_os = "macos", target_os = "ios"))
 }
 
 #[tauri::command]
 pub async fn files_provider_enable(email: String) -> Result<(), String> {
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         return apple::add_domain(&domain_identifier(&email), "Engram Store");
     }
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     {
         let _ = email;
-        Err("File Provider is iOS only".into())
+        Err("no File Provider on this platform".into())
     }
 }
 
@@ -45,11 +45,11 @@ pub async fn files_provider_enable(email: String) -> Result<(), String> {
 /// app has reconnected it.
 #[tauri::command]
 pub async fn files_provider_signal(email: String) -> Result<(), String> {
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         return apple::signal_domain(&domain_identifier(&email));
     }
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     {
         let _ = email;
         Ok(())
@@ -58,23 +58,23 @@ pub async fn files_provider_signal(email: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn files_provider_disable(email: String) -> Result<(), String> {
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         return apple::remove_domain(&domain_identifier(&email));
     }
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     {
         let _ = email;
         Ok(())
     }
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 mod apple {
     use block2::RcBlock;
     use objc2::rc::Retained;
     use objc2::runtime::{AnyClass, AnyObject, NSObject};
-    use objc2::{msg_send, ClassType};
+    use objc2::msg_send;
     use objc2_foundation::NSString;
     use std::sync::mpsc;
 
@@ -117,7 +117,9 @@ mod apple {
         } else {
             let _: () = msg_send![manager, removeDomain: domain, completionHandler: &*handler];
         }
-        match rx.recv() {
+        // Bounded like every other wait on an automatic path: a
+        // completion that never fires must not hold the async runtime.
+        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
             Ok(None) => Ok(()),
             Ok(Some(message)) => Err(message),
             Err(_) => Err("File Provider call did not complete".into()),
@@ -185,7 +187,7 @@ mod apple {
                     signalEnumeratorForContainerItemIdentifier: container,
                     completionHandler: &*handler,
                 ];
-                match rx.recv() {
+                match rx.recv_timeout(std::time::Duration::from_secs(30)) {
                     Ok(None) => {}
                     Ok(Some(message)) => errors.push(message),
                     Err(_) => errors.push("signal did not complete".into()),

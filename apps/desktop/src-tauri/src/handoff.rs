@@ -21,7 +21,9 @@ pub fn handoff_available() -> bool {
 pub async fn handoff_store(email: String, payload: String) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
-        return spawn_blocking(move || crate::keychain::store(SERVICE, &email, payload.as_bytes()))
+        return spawn_blocking(move || {
+            crate::keychain::store_shared(SERVICE, &email, payload.as_bytes())
+        })
             .await
             .map_err(|e| e.to_string())?;
     }
@@ -36,7 +38,7 @@ pub async fn handoff_store(email: String, payload: String) -> Result<(), String>
 pub async fn handoff_get(email: String) -> Result<Option<String>, String> {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
-        let found = spawn_blocking(move || crate::keychain::get(SERVICE, &email))
+        let found = spawn_blocking(move || crate::keychain::get_shared(SERVICE, &email))
             .await
             .map_err(|e| e.to_string())??;
         return match found {
@@ -75,7 +77,7 @@ pub async fn handoff_probe() -> Result<Option<usize>, String> {
 pub async fn handoff_clear(email: String) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
-        return spawn_blocking(move || crate::keychain::delete(SERVICE, &email))
+        return spawn_blocking(move || crate::keychain::delete_shared(SERVICE, &email))
             .await
             .map_err(|e| e.to_string())?;
     }

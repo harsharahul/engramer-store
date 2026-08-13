@@ -34,7 +34,7 @@ enum EngramApi {
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("Bearer \(record.token)", forHTTPHeaderField: "authorization")
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        blockingSession.dataTask(with: request) { data, response, error in
             if let error {
                 completion(.failure(error))
                 return
@@ -71,8 +71,12 @@ enum EngramApi {
 
 // MARK: - Synchronous write surface for the File Provider.
 // Provider callbacks run on background queues and expect the work done
-// when the completion fires, so these block on a semaphore; the system
-// grants providers the time.
+// when the completion fires, so these block on a semaphore. Every block
+// is bounded twice over: the session fails a request that goes twenty
+// seconds without bytes and caps any transfer at an hour, and the wait
+// itself has a ceiling in case no callback ever fires. An unbounded
+// wait here wedges fileproviderd's whole domain; this project has
+// already paid once for undeadlined network calls on automatic paths.
 
 /// What a content upload came back as; the provider maps refusals to
 /// conflict copies rather than data loss.
@@ -88,6 +92,24 @@ extension EngramApi {
     /// network blip costs one part rather than the whole file.
     static let partsThreshold: UInt64 = 64 * 1024 * 1024
     private static let partSize: UInt64 = 8 * 1024 * 1024
+
+    /// The session behind every blocking call: no bytes for twenty
+    /// seconds fails the request (the accepted-then-silent connection
+    /// only a timeout can catch), an hour caps any single transfer, and
+    /// connectivity is never waited for; offline must answer now, as an
+    /// error the provider can surface, not as a quiet hang.
+    static let blockingSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 3600
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }()
+
+    /// Ceiling on the semaphore itself, above the session's own limits:
+    /// if no callback ever fires, the wait still ends. On a lapse the
+    /// result is not read, so the late callback races nothing.
+    private static let waitCeiling: TimeInterval = 3660
 
     private static func request(
         _ record: HandoffRecord,
@@ -110,25 +132,37 @@ extension EngramApi {
     private static func send(_ request: URLRequest) -> (Int, Data)? {
         var result: (Int, Data)?
         let done = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: request) { data, response, _ in
+        blockingSession.dataTask(with: request) { data, response, _ in
             defer { done.signal() }
             guard let http = response as? HTTPURLResponse else { return }
             result = (http.statusCode, data ?? Data())
         }.resume()
-        done.wait()
+        if done.wait(timeout: .now() + waitCeiling) == .timedOut {
+            return nil
+        }
         return result
     }
 
     private static func sendFile(_ request: URLRequest, from file: URL) -> (Int, Data)? {
         var result: (Int, Data)?
         let done = DispatchSemaphore(value: 0)
-        URLSession.shared.uploadTask(with: request, fromFile: file) { data, response, _ in
+        blockingSession.uploadTask(with: request, fromFile: file) { data, response, _ in
             defer { done.signal() }
             guard let http = response as? HTTPURLResponse else { return }
             result = (http.statusCode, data ?? Data())
         }.resume()
-        done.wait()
+        if done.wait(timeout: .now() + waitCeiling) == .timedOut {
+            return nil
+        }
         return result
+    }
+
+    /// JSON GET returning the body on 2xx.
+    static func getJson(record: HandoffRecord, path: String) -> Data? {
+        guard let request = request(record, "GET", path),
+              let (status, data) = send(request), (200..<300).contains(status)
+        else { return nil }
+        return data
     }
 
     /// JSON POST/PATCH returning the decoded body on 2xx.
