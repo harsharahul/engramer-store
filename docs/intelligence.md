@@ -85,6 +85,12 @@ policy would reject a CDN fetch even if one were attempted. Embeddings ride in
 the same encrypted index blob as extracted text, and videos contribute several
 sampled frames so any scene matches, not only the poster.
 
+A licensing note: MobileCLIP is Apple's model, distributed under Apple's own
+license rather than an open-source one. That license permits redistributing
+the model, and its text ships beside the weights in the container image, but
+it is worth knowing that this one component of the image is not open source.
+See [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md).
+
 ## Dates and reference numbers in documents
 
 Opt-in, off by default. When it is on, an upload is read for the things a

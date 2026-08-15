@@ -54,7 +54,8 @@ conversion engine. The landscape, as of 2026:
   fully in the browser, so the fidelity ceiling is LibreOffice itself, but it
   loads on the order of a gigabyte and is single-user today. Promising to watch,
   too heavy to ship as the default editor now.
-- **SuperDoc (the shipped editor).** A ProseMirror-based editor that parses
+- **SuperDoc (the first editor shipped here, since replaced by the OnlyOffice
+  engine below).** A ProseMirror-based editor that parses
   OOXML directly into its schema and exports .docx in the browser, keeping
   styles, tables, images, headers and footers, comments, and tracked changes.
   AGPL-3.0 (matching this project), with import and export both genuinely

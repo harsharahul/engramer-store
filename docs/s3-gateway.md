@@ -2,8 +2,9 @@
 
 This document describes how Engram Store can speak the S3 protocol, so that any
 S3 client (aws-cli, rclone, s3fs, Cyberduck, mountpoint, backup tools, other
-services) can read and write data, with buckets presented as folders. It is a
-design, not yet implemented.
+services) can read and write data, with buckets presented as folders. The
+first step has shipped: the local bridge's read path runs as `apps/bridge`.
+The write path and the hosted gateway remain design.
 
 ## The constraint, stated first
 

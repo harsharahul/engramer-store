@@ -9,12 +9,15 @@ The cryptographic design follows the model proven by [Ente](https://ente.io/arch
 ```
 engramer-store/
   packages/crypto/   Shared E2EE core (libsodium). Used by the web client and by server tests.
-  apps/server/       Zero-knowledge API server. Fastify, SQLite metadata, on-disk blob store.
+  apps/server/       Zero-knowledge API server. Fastify, SQLite or PostgreSQL metadata, pluggable blob stores.
   apps/web/          Web client. React + Vite. All encryption and decryption happens here.
+  apps/desktop/      Tauri 2 shell for the Mac and iPhone apps, with the Files/Finder provider extensions.
+  apps/bridge/       Local zero-knowledge S3 endpoint over the vault.
+  crates/            Rust mirror of the crypto core plus Swift bindings, for the Apple extensions.
   docs/              Architecture and security documentation.
 ```
 
-Everything is TypeScript. A single language keeps the crypto core in one package, tested once, and consumed identically by the browser client and by the server's integration tests, which exercise the real encryption path against the real API.
+The core is TypeScript. A single language keeps the crypto core in one package, tested once, and consumed identically by the browser client and by the server's integration tests, which exercise the real encryption path against the real API. The Apple extensions cannot run TypeScript, so they consume a Rust mirror of the crypto core kept byte-compatible by committed cross-language test vectors that CI regenerates from both sides.
 
 ### Approaches considered
 
@@ -53,7 +56,7 @@ recoveryKey (random 32 B) <── secretbox ── masterKey (and vice versa)
 - The master key is random, encrypted with the KEK, and stored on the server as ciphertext. Password changes re-wrap the master key without re-encrypting any data.
 - The login key is a one-way BLAKE2b subkey of the KEK. The server stores only a BLAKE2b digest of the login key, so the server can verify authentication but can never recover the KEK or master key.
 - The recovery key is random, shown to the user exactly once at signup. Master key and recovery key are each stored encrypted with the other, enabling password reset without data loss.
-- Each account has an X25519 key pair for future account-to-account sharing. The private key is stored encrypted with the master key.
+- Each account has an X25519 key pair, used by account-to-account sharing and file requests to seal keys to a recipient. The private key is stored encrypted with the master key.
 
 ### File encryption
 
@@ -82,6 +85,8 @@ A share link contains a server-side token and the file key in the URL fragment: 
 Fastify 5, better-sqlite3 for metadata, content blobs on the local filesystem under `data/blobs/`. The server is deliberately dumb: it authenticates, enforces quotas, stores ciphertext, and answers delta-sync queries.
 
 ### API surface
+
+The core routes are below. Features added since carry their own route families, documented with the feature: version history and integrity ([storage.md](storage.md)), sharing with people, invitations (`/c/<token>`) and file requests (`/r/<token>`) ([sharing.md](sharing.md)), live collaboration (`/api/collab`, [collaboration.md](collaboration.md)), and two-factor and admin routes ([auth.md](auth.md)).
 
 ```
 POST /api/auth/register        create account with key attributes

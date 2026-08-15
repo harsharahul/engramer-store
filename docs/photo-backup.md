@@ -1,7 +1,7 @@
 # Automatic photo backup: design
 
-Status: designed, not yet built. This document fixes the decisions the
-implementation must honor.
+Status: shipped in the iPhone app. This document fixes the decisions the
+implementation honors.
 
 ## What it does
 
