@@ -65,10 +65,21 @@ unset means exactly the previous behavior.
 |---|---|
 | `ENGRAMER_BLOB_CACHE_BYTES` | Local hot tier for derived blobs, with this disk budget |
 | `ENGRAMER_BLOB_CACHE_DIR` | Hot-tier location, when it should live on separate fast storage |
+| `ENGRAMER_CONTENT_CACHE_MAX_BYTES` | Also cache content blobs at or under this size, so repeat document opens are local |
 | `ENGRAMER_S3_MAX_TPS` | Cap on request starts per second toward the object store |
 | `ENGRAMER_S3_MAX_CONCURRENT` | Cap on in-flight requests toward the object store |
 | `ENGRAMER_S3_DERIVED_BUCKET` | Separate destination for thumbnails and search indexes |
 | `ENGRAMER_S3_DERIVED_*` | Endpoint, region, credentials, path style, and budget for it |
+| `ENGRAMER_DERIVED_BACKEND=fs` | Derived blobs on the server's own disk instead of a second bucket (`ENGRAMER_DERIVED_DIR` overrides the location) |
+| `ENGRAMER_S3_CHECKSUMS` | `when-required` for non-AWS S3 implementations; see [backends.md](backends.md) |
+| `ENGRAMER_S3_CREATE_BUCKET` | `false` when the host denies bucket creation |
+| `ENGRAMER_S3_KEY_LAYOUT` | `sharded` for directory-shaped backends; choose before the first upload |
+| `ENGRAMER_MEDIA_WINDOW_BYTES` | Media cache window size, when measurements call for tuning |
+| `ENGRAMER_BOOKEND_HEAD_BYTES` / `ENGRAMER_BOOKEND_TAIL_BYTES` | Hot head and tail copy sizes for seekable media |
+
+Consumer cloud storage as the backing store, including the rclone bridge
+that reaches providers without an S3 API, is covered in
+[backends.md](backends.md).
 
 **Hot tier**: thumbnails and search-index blobs dominate request counts (a
 grid paint or a search warm touches hundreds of them) while being a tiny

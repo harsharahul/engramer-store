@@ -24,6 +24,11 @@ export interface S3Config {
   /** Optional request budget; 0 or absent means unlimited. */
   maxTps?: number;
   maxConcurrent?: number;
+  /** SDK checksum posture; "when-required" keeps streaming bodies plain
+   * for third-party servers that refuse aws-chunked framing. */
+  checksums?: "when-supported" | "when-required";
+  /** Whether init() may create a missing bucket. */
+  createBucket?: boolean;
 }
 
 /**
@@ -43,6 +48,16 @@ export class S3BlobStore implements BlobStore {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,
       },
+      // "when-required" keeps a streaming body a plain sized body. The
+      // default rewrites it into aws-chunked framing with checksum
+      // trailers and drops Content-Length, which strict third-party
+      // servers refuse with 411, failing every part upload.
+      ...(config.checksums === "when-required"
+        ? {
+            requestChecksumCalculation: "WHEN_REQUIRED",
+            responseChecksumValidation: "WHEN_REQUIRED",
+          }
+        : {}),
     });
     // Budget lives at the client so every HTTP attempt pays it, multipart
     // parts and SDK retries included; see budget.ts.
@@ -52,12 +67,35 @@ export class S3BlobStore implements BlobStore {
     });
   }
 
-  /** Creates the bucket on first run so self-hosting stays one-command. */
+  /** Creates the bucket on first run so self-hosting stays one-command.
+   * Hosts that hand out a fixed bucket deny CreateBucket; there the
+   * bucket must already exist, and a missing one is said plainly.
+   *
+   * An unreachable endpoint is retried briefly rather than failed: in the
+   * sidecar topology the object store is a container starting beside this
+   * one, and nothing guarantees it binds its port first. An error that
+   * carries an HTTP status came from a live server and acts immediately. */
   async init(): Promise<void> {
-    try {
-      await this.client.send(new HeadBucketCommand({ Bucket: this.config.bucket }));
-    } catch {
-      await this.client.send(new CreateBucketCommand({ Bucket: this.config.bucket }));
+    const deadline = Date.now() + 15_000;
+    for (;;) {
+      try {
+        await this.client.send(new HeadBucketCommand({ Bucket: this.config.bucket }));
+        return;
+      } catch (err) {
+        const status = (err as { $metadata?: { httpStatusCode?: number } }).$metadata
+          ?.httpStatusCode;
+        if (status === undefined && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          continue;
+        }
+        if (this.config.createBucket === false) {
+          throw new Error(
+            `bucket "${this.config.bucket}" is not reachable and ENGRAMER_S3_CREATE_BUCKET is off: ${(err as Error).message}`,
+          );
+        }
+        await this.client.send(new CreateBucketCommand({ Bucket: this.config.bucket }));
+        return;
+      }
     }
   }
 

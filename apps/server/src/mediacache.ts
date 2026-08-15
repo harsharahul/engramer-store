@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { BlobRange, BlobStore, PartReceipt } from "./blobs.js";
+import { inBackground } from "./budget.js";
 
 /**
  * Disk cache for content blobs in aligned ciphertext windows, in front of a
@@ -112,7 +113,9 @@ export class MediaWindowCache implements BlobStore {
     if (running) {
       return running;
     }
-    const task = (async () => {
+    // Background lane: fills warm the next reader, never the current one,
+    // so they must yield budget to reads someone is waiting on.
+    const task = inBackground(async () => {
       if (this.fillsActive >= MediaWindowCache.FILLS_MAX) {
         return false; // shed load instead of queueing a fill storm
       }
@@ -144,7 +147,7 @@ export class MediaWindowCache implements BlobStore {
         this.fillsActive--;
         this.inflight.delete(name);
       }
-    })();
+    });
     this.inflight.set(name, task);
     return task;
   }

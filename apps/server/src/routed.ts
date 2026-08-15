@@ -1,5 +1,6 @@
 import { Readable } from "node:stream";
-import type { BlobRange, BlobStore, PartReceipt } from "./blobs.js";
+import { BlobNotFoundError, type BlobRange, type BlobStore, type PartReceipt } from "./blobs.js";
+import { inBackground } from "./budget.js";
 import { bufferUpTo } from "./streams.js";
 
 /**
@@ -73,7 +74,9 @@ export class RoutedBlobStore implements BlobStore {
       return;
     }
     this.healing.add(key);
-    void (async () => {
+    // Background lane: a bookend copy must never queue ahead of a read
+    // someone is waiting on.
+    void inBackground(async () => {
       try {
         const headEnd = Math.min(this.headBytes, totalBytes) - 1;
         const head = await this.primary.get(key, { start: 0, end: headEnd });
@@ -88,7 +91,7 @@ export class RoutedBlobStore implements BlobStore {
       } finally {
         this.healing.delete(key);
       }
-    })();
+    });
   }
 
   async get(key: string, range?: BlobRange, totalBytes?: number): Promise<Readable> {
@@ -206,14 +209,19 @@ export class RoutedBlobStore implements BlobStore {
   }
 }
 
-/** Recognizes the S3 family of not-found errors without importing the SDK. */
+/** Recognizes a not-found from any backend: the store-agnostic error, or
+ * the S3 family of shapes, matched without importing the SDK. */
 function isMissingBlob(err: unknown): boolean {
+  if (err instanceof BlobNotFoundError) {
+    return true;
+  }
   const shaped = err as {
     name?: string;
     Code?: string;
     $metadata?: { httpStatusCode?: number };
   };
   return (
+    shaped?.name === "BlobNotFoundError" ||
     shaped?.name === "NoSuchKey" ||
     shaped?.name === "NotFound" ||
     shaped?.Code === "NoSuchKey" ||

@@ -1,0 +1,88 @@
+# Engram Store on a consumer cloud, through an rclone sidecar.
+#
+#   1. Create an access token with your provider (Drime: Settings, then
+#      Developer; pCloud: run `rclone authorize pcloud` once on any desktop).
+#   2. Copy .env.example to .env and fill in the token.
+#   3. docker compose -f compose.rclone.yml --profile drime up -d
+#      (or --profile pcloud)
+#
+# The sidecar translates the S3 protocol to your provider; the app encrypts
+# everything before it gets here, so the provider only ever holds ciphertext.
+# Derived data (thumbnails, search indexes) stays on the local volume, where
+# a grid scroll never pays a provider round trip.
+#
+# Providers with a real S3 API (FileLu S5, MinIO, Cloudflare R2) need no
+# sidecar: use the plain compose.yml and set ENGRAMER_S3_* directly.
+
+x-engramer: &engramer
+  image: ghcr.io/harsharahul/engramer-store:latest
+  build: .
+  ports:
+    - "3080:3080"
+  volumes:
+    - engramer-data:/data
+  environment: &engramer-env
+    ENGRAMER_QUOTA_BYTES: "${ENGRAMER_QUOTA_BYTES:-107374182400}"
+    # The sidecar serves the provider's engram-store folder; directories
+    # inside it are the buckets, so everything lands under
+    # engram-store/blobs in your provider account.
+    ENGRAMER_S3_BUCKET: blobs
+    ENGRAMER_S3_ENDPOINT: http://rclone:8333
+    ENGRAMER_S3_ACCESS_KEY: "${ENGRAM_GATEWAY_KEY:?generate with: openssl rand -hex 16}"
+    ENGRAMER_S3_SECRET_KEY: "${ENGRAM_GATEWAY_SECRET:?generate with: openssl rand -hex 32}"
+    # rclone's S3 server refuses the SDK's default aws-chunked bodies.
+    ENGRAMER_S3_CHECKSUMS: when-required
+    # Cloud drives are directory-shaped; a flat namespace makes every
+    # listing cost seconds at scale. Choose before the first upload.
+    ENGRAMER_S3_KEY_LAYOUT: sharded
+    # Thumbnails and search indexes on the local volume, not the provider.
+    ENGRAMER_DERIVED_BACKEND: fs
+    # Local tiers that keep repeat reads off the provider entirely.
+    ENGRAMER_BLOB_CACHE_BYTES: "2147483648"
+    ENGRAMER_CONTENT_CACHE_MAX_BYTES: "16777216"
+    ENGRAMER_MEDIA_CACHE_BYTES: "2147483648"
+  restart: unless-stopped
+
+# The sidecar publishes no ports: it speaks plain HTTP with static
+# credentials and is reachable only from the compose network.
+x-rclone: &rclone
+  image: rclone/rclone:latest
+  command: >
+    serve s3 remote:engram-store
+    --addr :8333
+    --auth-key "${ENGRAM_GATEWAY_KEY},${ENGRAM_GATEWAY_SECRET}"
+    --dir-cache-time 24h
+    --vfs-cache-mode off
+  restart: unless-stopped
+
+services:
+  engramer-drime:
+    <<: *engramer
+    profiles: ["drime"]
+    depends_on:
+      - rclone-drime
+
+  rclone-drime:
+    <<: *rclone
+    container_name: rclone-drime
+    profiles: ["drime"]
+    environment:
+      RCLONE_CONFIG_REMOTE_TYPE: drime
+      RCLONE_CONFIG_REMOTE_ACCESS_TOKEN: "${DRIME_TOKEN:?create one under Settings, Developer}"
+
+  engramer-pcloud:
+    <<: *engramer
+    profiles: ["pcloud"]
+    depends_on:
+      - rclone-pcloud
+
+  rclone-pcloud:
+    <<: *rclone
+    container_name: rclone-pcloud
+    profiles: ["pcloud"]
+    environment:
+      RCLONE_CONFIG_REMOTE_TYPE: pcloud
+      RCLONE_CONFIG_REMOTE_TOKEN: "${PCLOUD_TOKEN:?paste the JSON from: rclone authorize pcloud}"
+
+volumes:
+  engramer-data:

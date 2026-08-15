@@ -1,7 +1,7 @@
-import { createReadStream, createWriteStream, existsSync, unlinkSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { readdir, rename, unlink } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
@@ -29,6 +29,19 @@ export function blobKey(fileId: string, kind: BlobKind, generation = 0): string 
 export class BlobTooLargeError extends Error {
   constructor() {
     super("blob exceeds the allowed size");
+  }
+}
+
+/**
+ * The store-agnostic "no such blob". Tiered stores decide fallback and
+ * healing by catching this from get(), so every backend must reject a
+ * missing key at get() time with this error (or an S3-shaped one), never
+ * hand back a stream that errors mid-read.
+ */
+export class BlobNotFoundError extends Error {
+  constructor(key: string) {
+    super(`no blob at ${key}`);
+    this.name = "BlobNotFoundError";
   }
 }
 
@@ -115,6 +128,9 @@ export class FsBlobStore implements BlobStore {
 
   async put(key: string, source: Readable, maxBytes: number): Promise<number> {
     const destination = this.path(key);
+    // Sharded layouts nest keys in subdirectories; the temp file shares
+    // the destination's directory so the rename stays atomic.
+    mkdirSync(dirname(destination), { recursive: true });
     const tmp = `${destination}.upload-${process.pid}-${Date.now()}`;
     const limiter = byteLimiter(maxBytes);
     try {
@@ -128,6 +144,11 @@ export class FsBlobStore implements BlobStore {
   }
 
   async get(key: string, range?: BlobRange): Promise<Readable> {
+    // Refuse a missing key here, where callers decide fallback; a stream
+    // that errors ENOENT on first read arrives after that decision point.
+    if (!existsSync(this.path(key))) {
+      throw new BlobNotFoundError(key);
+    }
     return range
       ? createReadStream(this.path(key), { start: range.start, end: range.end })
       : createReadStream(this.path(key));
@@ -155,6 +176,7 @@ export class FsBlobStore implements BlobStore {
     length: number,
   ): Promise<PartReceipt> {
     const destination = this.partPath(key, handle, partNo);
+    mkdirSync(dirname(destination), { recursive: true });
     const tmp = `${destination}.upload-${process.pid}-${Date.now()}`;
     const limiter = byteLimiter(length);
     try {
@@ -176,6 +198,7 @@ export class FsBlobStore implements BlobStore {
     parts: { partNo: number; etag?: string }[],
   ): Promise<void> {
     const destination = this.path(key);
+    mkdirSync(dirname(destination), { recursive: true });
     const tmp = `${destination}.upload-${process.pid}-${Date.now()}`;
     const ordered = [...parts].sort((a, b) => a.partNo - b.partNo);
     try {
@@ -199,11 +222,14 @@ export class FsBlobStore implements BlobStore {
   }
 
   async abortParts(key: string, handle: string): Promise<void> {
-    const prefix = `${key}.parts-${handle}.`;
-    const names = await readdir(this.dir).catch(() => [] as string[]);
+    // Scan the key's own directory: under a sharded layout the parts live
+    // beside their destination, not at the store root.
+    const dir = dirname(this.path(key));
+    const prefix = `${key.split("/").pop()}.parts-${handle}.`;
+    const names = await readdir(dir).catch(() => [] as string[]);
     for (const name of names) {
       if (name.startsWith(prefix)) {
-        await unlink(this.path(name)).catch(() => {});
+        await unlink(join(dir, name)).catch(() => {});
       }
     }
   }

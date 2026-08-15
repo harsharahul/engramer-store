@@ -93,7 +93,7 @@ Configuration via environment variables:
 | `ENGRAMER_S3_BUCKET` | unset | Store blobs in an S3-compatible bucket instead of local disk |
 | `ENGRAMER_PUBLIC_ORIGINS` | unset | Origins browsers reach this server on, when a proxy rewrites the Host header (Word and Excel editing needs this) |
 
-Run it behind TLS in production; the login key must only ever travel over HTTPS. Storage architecture, the S3-compatible backend, and backup recipes are covered in [docs/storage.md](docs/storage.md). A design for exposing an S3 API lives in [docs/s3-gateway.md](docs/s3-gateway.md), and the reasoning behind the document editor is in [docs/editing.md](docs/editing.md).
+Run it behind TLS in production; the login key must only ever travel over HTTPS. Storage architecture, the S3-compatible backend, and backup recipes are covered in [docs/storage.md](docs/storage.md). Consumer cloud storage (Drime, pCloud, FileLu, and anything rclone reaches) as the backing store is covered in [docs/backends.md](docs/backends.md), with ready compose recipes in `compose.rclone.yml`. A design for exposing an S3 API lives in [docs/s3-gateway.md](docs/s3-gateway.md), and the reasoning behind the document editor is in [docs/editing.md](docs/editing.md).
 
 ## Development
 

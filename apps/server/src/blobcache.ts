@@ -6,40 +6,57 @@ import type { BlobRange, BlobStore, PartReceipt } from "./blobs.js";
 import { bufferUpTo } from "./streams.js";
 
 /**
- * Read-through disk cache in front of a remote blob store, for the small
- * derived blobs (thumbnails and search indexes) that dominate request counts:
- * a grid paint or a search warm touches hundreds of them, and against a
- * rate-limited object store every avoided round trip matters.
+ * Read-through disk cache in front of a remote blob store, for two blob
+ * classes with different coherence stories:
  *
- * Content blobs pass straight through untouched. Derived blobs are the one
- * blob class overwritten in place, so coherence is by invalidation: put and
- * remove drop the cache entry and the next read re-fills it, which can never
- * serve stale bytes. The cache directory is disposable state: entries are
- * written via temp file + atomic rename (never servable half-written), and a
- * startup rescan rebuilds the index, evicting down to budget by mtime.
- * Single-process by design, like the SQLite database next to it.
+ * Derived blobs (thumbnails and search indexes) dominate request counts: a
+ * grid paint or a search warm touches hundreds of them, and against a
+ * rate-limited object store every avoided round trip matters. They are the
+ * one blob class overwritten in place, so coherence is by invalidation: put
+ * and remove drop the cache entry and the next read re-fills it, which can
+ * never serve stale bytes.
+ *
+ * Content blobs, opt-in by a per-entry size cap, are the other class: on a
+ * slow primary every repeat document open costs seconds without a local
+ * copy. They are append-only across generations, so a cached entry cannot
+ * be overwritten upstream; the one edge is a retried first upload
+ * re-putting generation zero, which put() covers by dropping the entry
+ * there too. Ranged reads always bypass, so media streaming never touches
+ * this cache.
+ *
+ * The cache directory is disposable state: entries are written via temp
+ * file + atomic rename (never servable half-written), and a startup rescan
+ * rebuilds the index, evicting down to budget by mtime. Single-process by
+ * design, like the SQLite database next to it.
  */
 export class DiskCachedBlobStore implements BlobStore {
-  /** Keys eligible for caching: derived blobs with our uuid naming. */
-  private static readonly CACHEABLE = /^[A-Za-z0-9-]+\.(thumb|idx)$/;
+  /** Derived blobs with our uuid naming, overwritten in place upstream. */
+  private static readonly DERIVED = /^[A-Za-z0-9-]+\.(thumb|idx)$/;
+  /** Content blobs: a bare id or an explicit generation, append-only. */
+  private static readonly CONTENT = /^[A-Za-z0-9-]+(\.g\d+)?$/;
 
   /** Insertion order is recency order: a touch re-inserts at the tail. */
   private readonly index = new Map<string, number>();
   private totalBytes = 0;
   private readonly perEntryCap: number;
+  private readonly cacheDerived: boolean;
+  private readonly contentMaxBytes: number;
 
   constructor(
     private readonly backing: BlobStore,
     private readonly dir: string,
     private readonly maxBytes: number,
+    opts?: { cacheDerived?: boolean; contentMaxBytes?: number },
   ) {
     // A single entry may not squeeze everything else out of a small budget.
     this.perEntryCap = Math.min(4 * 1024 * 1024, Math.floor(maxBytes / 2));
+    this.cacheDerived = opts?.cacheDerived ?? true;
+    this.contentMaxBytes = opts?.contentMaxBytes ?? 0;
     mkdirSync(dir, { recursive: true });
     const found: Array<{ key: string; size: number; mtime: number }> = [];
     for (const name of readdirSync(dir)) {
-      if (!DiskCachedBlobStore.CACHEABLE.test(name)) {
-        continue; // leftover temp files and strangers are not index material
+      if (!this.derivedClass(name) && !this.contentClass(name)) {
+        continue; // leftover temp files, strangers, and disabled classes
       }
       try {
         const stat = statSync(join(dir, name));
@@ -56,8 +73,16 @@ export class DiskCachedBlobStore implements BlobStore {
     this.evict();
   }
 
+  private derivedClass(key: string): boolean {
+    return this.cacheDerived && DiskCachedBlobStore.DERIVED.test(key);
+  }
+
+  private contentClass(key: string): boolean {
+    return this.contentMaxBytes > 0 && DiskCachedBlobStore.CONTENT.test(key);
+  }
+
   private cacheable(key: string): boolean {
-    return DiskCachedBlobStore.CACHEABLE.test(key);
+    return this.derivedClass(key) || this.contentClass(key);
   }
 
   private path(key: string): string {
@@ -112,7 +137,8 @@ export class DiskCachedBlobStore implements BlobStore {
 
   async get(key: string, range?: BlobRange, totalBytes?: number): Promise<Readable> {
     if (range) {
-      // Ranged reads never involve the cache; content blobs are not cached.
+      // Ranged reads never involve the cache; media streaming stays a
+      // pass-through even when content caching is on.
       return this.backing.get(key, range, totalBytes);
     }
     if (!this.cacheable(key)) {
@@ -126,9 +152,10 @@ export class DiskCachedBlobStore implements BlobStore {
       return createReadStream(this.path(key));
     }
     const source = await this.backing.get(key);
-    // Derived blobs are small; buffer up to the cap so the bytes can be both
-    // served and admitted. Past the cap, serve straight through, no admission.
-    const result = await bufferUpTo(source, this.perEntryCap);
+    // Buffer up to the class's cap so the bytes can be both served and
+    // admitted. Past the cap, serve straight through, no admission.
+    const cap = this.contentClass(key) ? this.contentMaxBytes : this.perEntryCap;
+    const result = await bufferUpTo(source, cap);
     if (result.kind === "stream") {
       return result.stream;
     }

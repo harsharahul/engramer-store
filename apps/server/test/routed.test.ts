@@ -1,9 +1,15 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
-import { byteLimiter, type BlobRange, type BlobStore, type PartReceipt } from "../src/blobs.js";
+import {
+  byteLimiter,
+  FsBlobStore,
+  type BlobRange,
+  type BlobStore,
+  type PartReceipt,
+} from "../src/blobs.js";
 import { loadConfig } from "../src/config.js";
 import { RoutedBlobStore } from "../src/routed.js";
 
@@ -312,6 +318,34 @@ describe("content bookends", () => {
   });
 });
 
+describe("filesystem derived backend", () => {
+  const FS_GEOMETRY = { headBytes: 8, tailBytes: 16 };
+  const FS_SIZE = 40;
+
+  it("serves, heals, and bookends through a real filesystem derived store", async () => {
+    const primary = new FakeStore();
+    const dir = mkdtempSync(join(tmpdir(), "derived-fs-"));
+    try {
+      const derived = new FsBlobStore(dir);
+      const routed = new RoutedBlobStore(primary, derived, FS_GEOMETRY);
+      await put(routed, "file-9.thumb", Buffer.from("thumbnail"));
+      expect(await drain(await routed.get("file-9.thumb"))).toEqual(Buffer.from("thumbnail"));
+      // A pre-split derived blob still in primary must heal through the
+      // filesystem store's miss, which is what BlobNotFoundError carries.
+      primary.blobs.set("file-8.thumb", Buffer.from("old-thumb"));
+      expect(await drain(await routed.get("file-8.thumb"))).toEqual(Buffer.from("old-thumb"));
+      await until(() => existsSync(join(dir, "file-8.thumb")));
+      const blob = patterned(FS_SIZE);
+      await put(routed, "movie-9", blob, true);
+      await until(
+        () => existsSync(join(dir, "movie-9.bhead")) && existsSync(join(dir, "movie-9.btail")),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("derived S3 settings", () => {
   const ENV = [
     "ENGRAMER_S3_BUCKET",
@@ -319,8 +353,13 @@ describe("derived S3 settings", () => {
     "ENGRAMER_S3_ACCESS_KEY",
     "ENGRAMER_S3_SECRET_KEY",
     "ENGRAMER_S3_MAX_TPS",
+    "ENGRAMER_S3_CHECKSUMS",
+    "ENGRAMER_S3_CREATE_BUCKET",
+    "ENGRAMER_S3_KEY_LAYOUT",
     "ENGRAMER_S3_DERIVED_BUCKET",
     "ENGRAMER_S3_DERIVED_ENDPOINT",
+    "ENGRAMER_DERIVED_BACKEND",
+    "ENGRAMER_DERIVED_DIR",
     "ENGRAMER_JWT_SECRET",
   ];
 
@@ -349,6 +388,134 @@ describe("derived S3 settings", () => {
       // the derived store must not inherit it.
       expect(config.s3!.maxTps).toBe(20);
       expect(config.s3Derived!.maxTps).toBe(0);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("passes the checksum mode and bucket-creation policy through to the store", () => {
+    process.env.ENGRAMER_S3_BUCKET = "main";
+    process.env.ENGRAMER_S3_ACCESS_KEY = "ak";
+    process.env.ENGRAMER_S3_SECRET_KEY = "sk";
+    process.env.ENGRAMER_S3_CHECKSUMS = "when-required";
+    process.env.ENGRAMER_S3_CREATE_BUCKET = "false";
+    const dataDir = mkdtempSync(join(tmpdir(), "engramer-config-"));
+    try {
+      const config = loadConfig({ dataDir });
+      expect(config.s3!.checksums).toBe("when-required");
+      expect(config.s3!.createBucket).toBe(false);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps SDK-default checksums and bucket creation when nothing is set", () => {
+    process.env.ENGRAMER_S3_BUCKET = "main";
+    process.env.ENGRAMER_S3_ACCESS_KEY = "ak";
+    process.env.ENGRAMER_S3_SECRET_KEY = "sk";
+    const dataDir = mkdtempSync(join(tmpdir(), "engramer-config-"));
+    try {
+      const config = loadConfig({ dataDir });
+      expect(config.s3!.checksums).toBe("when-supported");
+      expect(config.s3!.createBucket).toBe(true);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads the tier geometry knobs, defaulting to the compiled sizes", () => {
+    process.env.ENGRAMER_S3_BUCKET = "main";
+    process.env.ENGRAMER_S3_ACCESS_KEY = "ak";
+    process.env.ENGRAMER_S3_SECRET_KEY = "sk";
+    const dataDir = mkdtempSync(join(tmpdir(), "engramer-config-"));
+    try {
+      const defaults = loadConfig({ dataDir });
+      expect(defaults.mediaWindowBytes).toBe(32 * 1024 * 1024);
+      expect(defaults.bookendHeadBytes).toBe(32 * 1024 * 1024);
+      expect(defaults.bookendTailBytes).toBe(64 * 1024 * 1024);
+      process.env.ENGRAMER_MEDIA_WINDOW_BYTES = String(8 * 1024 * 1024);
+      process.env.ENGRAMER_BOOKEND_HEAD_BYTES = String(16 * 1024 * 1024);
+      process.env.ENGRAMER_BOOKEND_TAIL_BYTES = String(48 * 1024 * 1024);
+      const tuned = loadConfig({ dataDir });
+      expect(tuned.mediaWindowBytes).toBe(8 * 1024 * 1024);
+      expect(tuned.bookendHeadBytes).toBe(16 * 1024 * 1024);
+      expect(tuned.bookendTailBytes).toBe(48 * 1024 * 1024);
+    } finally {
+      delete process.env.ENGRAMER_MEDIA_WINDOW_BYTES;
+      delete process.env.ENGRAMER_BOOKEND_HEAD_BYTES;
+      delete process.env.ENGRAMER_BOOKEND_TAIL_BYTES;
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads the key layout, defaulting flat and refusing the unknown", () => {
+    process.env.ENGRAMER_S3_BUCKET = "main";
+    process.env.ENGRAMER_S3_ACCESS_KEY = "ak";
+    process.env.ENGRAMER_S3_SECRET_KEY = "sk";
+    const dataDir = mkdtempSync(join(tmpdir(), "engramer-config-"));
+    try {
+      expect(loadConfig({ dataDir }).s3!.keyLayout).toBe("flat");
+      process.env.ENGRAMER_S3_KEY_LAYOUT = "sharded";
+      expect(loadConfig({ dataDir }).s3!.keyLayout).toBe("sharded");
+      process.env.ENGRAMER_S3_KEY_LAYOUT = "nested";
+      expect(() => loadConfig({ dataDir })).toThrow(/ENGRAMER_S3_KEY_LAYOUT/);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an unknown checksum mode", () => {
+    process.env.ENGRAMER_S3_BUCKET = "main";
+    process.env.ENGRAMER_S3_ACCESS_KEY = "ak";
+    process.env.ENGRAMER_S3_SECRET_KEY = "sk";
+    process.env.ENGRAMER_S3_CHECKSUMS = "sometimes";
+    const dataDir = mkdtempSync(join(tmpdir(), "engramer-config-"));
+    try {
+      expect(() => loadConfig({ dataDir })).toThrow(/ENGRAMER_S3_CHECKSUMS/);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("selects a filesystem derived destination with its own directory", () => {
+    process.env.ENGRAMER_S3_BUCKET = "main";
+    process.env.ENGRAMER_S3_ACCESS_KEY = "ak";
+    process.env.ENGRAMER_S3_SECRET_KEY = "sk";
+    process.env.ENGRAMER_DERIVED_BACKEND = "fs";
+    process.env.ENGRAMER_DERIVED_DIR = "/tmp/engram-derived-test";
+    const dataDir = mkdtempSync(join(tmpdir(), "engramer-config-"));
+    try {
+      const config = loadConfig({ dataDir });
+      expect(config.derivedFsDir).toBe("/tmp/engram-derived-test");
+      expect(config.s3Derived).toBeNull();
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("defaults the filesystem derived directory into the data dir", () => {
+    process.env.ENGRAMER_S3_BUCKET = "main";
+    process.env.ENGRAMER_S3_ACCESS_KEY = "ak";
+    process.env.ENGRAMER_S3_SECRET_KEY = "sk";
+    process.env.ENGRAMER_DERIVED_BACKEND = "fs";
+    const dataDir = mkdtempSync(join(tmpdir(), "engramer-config-"));
+    try {
+      const config = loadConfig({ dataDir });
+      expect(config.derivedFsDir).toBe(join(dataDir, "derived"));
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses two derived destinations at once", () => {
+    process.env.ENGRAMER_S3_BUCKET = "main";
+    process.env.ENGRAMER_S3_ACCESS_KEY = "ak";
+    process.env.ENGRAMER_S3_SECRET_KEY = "sk";
+    process.env.ENGRAMER_DERIVED_BACKEND = "fs";
+    process.env.ENGRAMER_S3_DERIVED_BUCKET = "derived";
+    const dataDir = mkdtempSync(join(tmpdir(), "engramer-config-"));
+    try {
+      expect(() => loadConfig({ dataDir })).toThrow(/derived/);
     } finally {
       rmSync(dataDir, { recursive: true, force: true });
     }

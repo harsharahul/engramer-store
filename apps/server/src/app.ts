@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
@@ -13,6 +13,7 @@ import { DiskCachedBlobStore } from "./blobcache.js";
 import { MediaWindowCache } from "./mediacache.js";
 import { RoutedBlobStore } from "./routed.js";
 import { S3BlobStore } from "./s3.js";
+import { ShardedKeyStore } from "./sharded.js";
 import { openDatabase, type Db } from "./db.js";
 import { PostgresDb } from "./pgdb.js";
 import { registerAdminRoutes } from "./routes/admin.js";
@@ -79,28 +80,56 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
 
   let blobs: BlobStore;
   if (config.s3) {
-    const primary = new S3BlobStore(config.s3);
-    await primary.init();
+    const s3Primary = new S3BlobStore(config.s3);
+    await s3Primary.init();
+    // Sharding is a key mapping over the bucket, applied directly around
+    // the S3 client so every derived suffix shards with its blob.
+    const primary: BlobStore =
+      config.s3.keyLayout === "sharded" ? new ShardedKeyStore(s3Primary) : s3Primary;
     let store: BlobStore = primary;
+    let derivedIsLocal = false;
     // Opt-in split: derived blobs on their own backend (fast, unmetered)
     // while originals stay on the primary (cheap, possibly rate-limited).
-    if (config.s3Derived) {
-      const derived = new S3BlobStore(config.s3Derived);
-      await derived.init();
-      store = new RoutedBlobStore(primary, derived);
+    // The derived side is either a second object store or the server's
+    // own disk; on disk, every derived read is already local.
+    if (config.derivedFsDir) {
+      mkdirSync(config.derivedFsDir, { recursive: true });
+      store = new RoutedBlobStore(primary, new FsBlobStore(config.derivedFsDir), {
+        headBytes: config.bookendHeadBytes,
+        tailBytes: config.bookendTailBytes,
+      });
+      derivedIsLocal = true;
+    } else if (config.s3Derived) {
+      const s3Derived = new S3BlobStore(config.s3Derived);
+      await s3Derived.init();
+      store = new RoutedBlobStore(
+        primary,
+        config.s3Derived.keyLayout === "sharded" ? new ShardedKeyStore(s3Derived) : s3Derived,
+        { headBytes: config.bookendHeadBytes, tailBytes: config.bookendTailBytes },
+      );
     }
-    // Opt-in hot tier: derived blobs (thumbnails, search indexes) served
-    // from local disk instead of a round trip per request. Pointless over
-    // the local filesystem store, so it only ever wraps S3.
-    blobs =
-      config.blobCacheBytes > 0
-        ? new DiskCachedBlobStore(store, config.blobCacheDir, config.blobCacheBytes)
-        : store;
+    // Opt-in hot tier: derived blobs served from local disk instead of a
+    // round trip per request, and, by its own knob, small content blobs
+    // too. With the derived split already on local disk only the content
+    // class is worth caching, so derived caching switches off there.
+    const wantCache =
+      config.blobCacheBytes > 0 && (!derivedIsLocal || config.contentCacheMaxBytes > 0);
+    blobs = wantCache
+      ? new DiskCachedBlobStore(store, config.blobCacheDir, config.blobCacheBytes, {
+          cacheDerived: !derivedIsLocal,
+          contentMaxBytes: config.contentCacheMaxBytes,
+        })
+      : store;
     // Opt-in content tier: media windows cached on local disk, so range
     // cycling, replays, and just-uploaded playback stop reaching the
     // backing store. Outermost so it fronts everything below.
     if (config.mediaCacheBytes > 0) {
-      blobs = new MediaWindowCache(blobs, config.mediaCacheDir, config.mediaCacheBytes);
+      blobs = new MediaWindowCache(
+        blobs,
+        config.mediaCacheDir,
+        config.mediaCacheBytes,
+        config.mediaWindowBytes,
+      );
     }
   } else {
     blobs = new FsBlobStore(config.blobDir);

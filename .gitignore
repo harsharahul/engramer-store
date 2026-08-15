@@ -5,6 +5,7 @@ coverage/
 .DS_Store
 .env
 .env.*
+!.env.example
 
 # Server runtime state
 data/

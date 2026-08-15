@@ -70,3 +70,51 @@ describe("semaphore", () => {
     semaphore.release();
   });
 });
+
+/**
+ * Two lanes, one budget: background work (bookend copies, window fills,
+ * heals) may only spend budget no interactive caller is waiting for.
+ * Without this, one backfill sweep against a rate-limited provider
+ * starves every grid scroll and playback start behind it.
+ */
+describe("priority lanes", () => {
+  it("grants queued interactive takes before earlier background ones", async () => {
+    const bucket = new TokenBucket(50); // 20ms per slot
+    const order: string[] = [];
+    await bucket.take(); // spend the immediate slot so the rest queue
+    const background = ["b1", "b2", "b3"].map((name) =>
+      bucket.take("background").then(() => order.push(name)),
+    );
+    const interactive = bucket.take("interactive").then(() => order.push("i1"));
+    await Promise.all([...background, interactive]);
+    expect(order[0]).toBe("i1");
+  });
+
+  it("hands freed semaphore slots to interactive waiters first", async () => {
+    const semaphore = new Semaphore(1);
+    const order: string[] = [];
+    await semaphore.acquire();
+    const background = semaphore.acquire("background").then(() => {
+      order.push("b1");
+      semaphore.release();
+    });
+    const interactive = semaphore.acquire("interactive").then(() => {
+      order.push("i1");
+      semaphore.release();
+    });
+    semaphore.release();
+    await Promise.all([background, interactive]);
+    expect(order).toEqual(["i1", "b1"]);
+  });
+
+  it("background work carries its lane through the async context", async () => {
+    const { inBackground, currentLane } = await import("../src/budget.js");
+    expect(currentLane()).toBe("interactive");
+    await inBackground(async () => {
+      expect(currentLane()).toBe("background");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(currentLane()).toBe("background");
+    });
+    expect(currentLane()).toBe("interactive");
+  });
+});

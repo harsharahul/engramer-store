@@ -219,3 +219,108 @@ describe("disk cached blob store", () => {
     }
   });
 });
+
+/**
+ * Content blobs are the other cacheable class, opt-in by a per-entry size
+ * cap. They are append-only across generations, so a cached entry can
+ * never be overwritten upstream; the one edge is a retried first upload
+ * re-putting generation zero, which put() covers by dropping both
+ * classes. On a slow primary this cache is what turns every repeat
+ * document open from seconds into a local read.
+ */
+describe("content caching", () => {
+  it("serves a repeat document read locally when enabled", async () => {
+    const dir = tempDir();
+    try {
+      const backing = new CountingStore();
+      const cache = new DiskCachedBlobStore(backing, dir, 1024 * 1024, {
+        contentMaxBytes: 1024,
+      });
+      const bytes = Buffer.from("document ciphertext");
+      await put(cache, "aaaa-doc", bytes);
+      expect(await drain(await cache.get("aaaa-doc"))).toEqual(bytes);
+      expect(backing.gets).toBe(1);
+      expect(await drain(await cache.get("aaaa-doc"))).toEqual(bytes);
+      expect(backing.gets).toBe(1);
+      await put(cache, "aaaa-doc.g2", bytes);
+      expect(await drain(await cache.get("aaaa-doc.g2"))).toEqual(bytes);
+      expect(await drain(await cache.get("aaaa-doc.g2"))).toEqual(bytes);
+      expect(backing.gets).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("streams oversized content through without admitting it", async () => {
+    const dir = tempDir();
+    try {
+      const backing = new CountingStore();
+      const cache = new DiskCachedBlobStore(backing, dir, 1024 * 1024, {
+        contentMaxBytes: 8,
+      });
+      const bytes = Buffer.from("far larger than the eight byte cap");
+      await put(cache, "bbbb-doc", bytes);
+      expect(await drain(await cache.get("bbbb-doc"))).toEqual(bytes);
+      expect(await drain(await cache.get("bbbb-doc"))).toEqual(bytes);
+      expect(backing.gets).toBe(2);
+      expect(readdirSync(dir)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a removed document cannot be served from the cache", async () => {
+    const dir = tempDir();
+    try {
+      const backing = new CountingStore();
+      const cache = new DiskCachedBlobStore(backing, dir, 1024 * 1024, {
+        contentMaxBytes: 1024,
+      });
+      const bytes = Buffer.from("deleted later");
+      await put(cache, "cccc-doc", bytes);
+      await cache.get("cccc-doc");
+      await cache.remove("cccc-doc");
+      await expect(cache.get("cccc-doc")).rejects.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a retried first upload replaces what the cache held", async () => {
+    const dir = tempDir();
+    try {
+      const backing = new CountingStore();
+      const cache = new DiskCachedBlobStore(backing, dir, 1024 * 1024, {
+        contentMaxBytes: 1024,
+      });
+      await put(cache, "dddd-doc", Buffer.from("first attempt"));
+      await cache.get("dddd-doc");
+      await put(cache, "dddd-doc", Buffer.from("second attempt"));
+      expect(await drain(await cache.get("dddd-doc"))).toEqual(Buffer.from("second attempt"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("can cache content while leaving derived blobs untouched", async () => {
+    const dir = tempDir();
+    try {
+      const backing = new CountingStore();
+      const cache = new DiskCachedBlobStore(backing, dir, 1024 * 1024, {
+        cacheDerived: false,
+        contentMaxBytes: 1024,
+      });
+      const bytes = Buffer.from("either kind of ciphertext");
+      await put(cache, "eeee-doc.thumb", bytes);
+      await cache.get("eeee-doc.thumb");
+      await cache.get("eeee-doc.thumb");
+      expect(backing.gets).toBe(2);
+      await put(cache, "eeee-doc", bytes);
+      await cache.get("eeee-doc");
+      await cache.get("eeee-doc");
+      expect(backing.gets).toBe(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
