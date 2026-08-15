@@ -51,6 +51,21 @@ const RELEASES = {
 };
 
 /**
+ * Served alongside the assets so every deployment carries the upstream
+ * license notice; the upstream archives ship no license file of their own.
+ */
+const NOTICE = `These editor assets derive from ONLYOFFICE Docs (sdkjs, web-apps) and the
+x2t document converter, both (c) Ascensio System SIA and licensed under the
+GNU AGPL v3.0 (gnu.org/licenses/agpl-3.0.html). They are obtained as prebuilt
+releases from github.com/cryptpad/onlyoffice-editor and
+github.com/cryptpad/onlyoffice-x2t-wasm at the pinned tags recorded in
+scripts/office-assets.mjs, pruned to the Word and Excel engines, and modified
+by the patch set recorded in the same script. Complete corresponding source:
+the upstream repositories above plus github.com/harsharahul/engramer-store
+for the patches and integration glue.
+`;
+
+/**
  * Only these subtrees are served. The upstream build carries PowerPoint, PDF
  * and Visio engines, per-locale help (the single largest directory), spelling
  * dictionaries and IE shims, none of which a Word or Excel editor loads.
@@ -397,6 +412,8 @@ async function main() {
 
   console.log("unpacking x2t");
   await execFile("unzip", ["-qo", x2tZip, "-d", join(outDir, "x2t")], { maxBuffer: 1 << 28 });
+
+  await writeFile(join(outDir, "NOTICE.txt"), NOTICE);
 
   // Our own glue (the sandbox shim and the editor's asset manifests) is
   // tracked in the repo; the derived tree only ever holds copies, so editing
