@@ -187,7 +187,7 @@ describe("MediaWindowCache", () => {
     const backing = new CountingStore();
     const blob = patterned(WINDOW * 4 + 9);
     const { cache, dir } = makeCache(backing);
-    await cache.put("file-5", Readable.from(blob), blob.length);
+    await cache.put("file-5", Readable.from(blob), blob.length, true);
     await cache.quiet();
     expect(windowFiles(dir)).toBe(2);
     backing.gets = 0;
@@ -206,13 +206,35 @@ describe("MediaWindowCache", () => {
     const handle = await cache.beginParts("file-6");
     await cache.putPart("file-6", handle, 1, Readable.from(half), half.length);
     await cache.putPart("file-6", handle, 2, Readable.from(rest), rest.length);
-    await cache.completeParts("file-6", handle, [{ partNo: 1 }, { partNo: 2 }]);
+    await cache.completeParts("file-6", handle, [{ partNo: 1 }, { partNo: 2 }], true);
     await cache.quiet();
     expect(windowFiles(dir)).toBe(2);
     backing.gets = 0;
     const tail = await read(await cache.get("file-6", { start: WINDOW, end: WINDOW * 2 - 1 }));
     expect(tail).toEqual(rest);
     expect(backing.gets).toBe(0);
+  });
+
+  it("does not warm windows for a non-seekable upload", async () => {
+    const backing = new CountingStore();
+    const blob = patterned(WINDOW * 4 + 9);
+    const { cache, dir } = makeCache(backing);
+    await cache.put("doc-1", Readable.from(blob), blob.length, false);
+    await cache.quiet();
+    expect(windowFiles(dir)).toBe(0);
+  });
+
+  it("does not warm windows when a non-seekable part upload completes", async () => {
+    const backing = new CountingStore();
+    const half = patterned(WINDOW * 2).subarray(0, WINDOW);
+    const rest = patterned(WINDOW * 2).subarray(WINDOW);
+    const { cache, dir } = makeCache(backing);
+    const handle = await cache.beginParts("doc-2");
+    await cache.putPart("doc-2", handle, 1, Readable.from(half), half.length);
+    await cache.putPart("doc-2", handle, 2, Readable.from(rest), rest.length);
+    await cache.completeParts("doc-2", handle, [{ partNo: 1 }, { partNo: 2 }], false);
+    await cache.quiet();
+    expect(windowFiles(dir)).toBe(0);
   });
 
   it("remove drops the blob's windows but nobody else's", async () => {

@@ -37,6 +37,9 @@ const createFileSchema = z.object({
   folderId: z.string().nullable().optional(),
   encryptedKey: secretBoxSchema,
   encryptedMeta: secretBoxSchema,
+  /** Ciphertext layout supports ranged reads. A storage hint that gates
+   * eager tier work; never echoed back, never consulted for decryption. */
+  seekable: z.boolean().optional(),
 });
 
 const patchFileSchema = z.object({
@@ -271,13 +274,14 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     const id = randomUUID();
     const seq = await nextSeq(app.db, uid);
     await app.db.run(
-      `INSERT INTO files (id, user_id, folder_id, encrypted_key, encrypted_meta, update_seq, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO files (id, user_id, folder_id, encrypted_key, encrypted_meta, seekable, update_seq, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       uid,
       body.folderId ?? null,
       JSON.stringify(body.encryptedKey),
       JSON.stringify(body.encryptedMeta),
+      body.seekable ? 1 : 0,
       seq,
       now,
       now,
@@ -384,7 +388,12 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       }),
     );
     try {
-      written = await app.blobs.put(targetKey, counted, maxBytes);
+      written = await app.blobs.put(
+        targetKey,
+        counted,
+        maxBytes,
+        kind === "data" ? file.seekable === 1 : undefined,
+      );
     } catch (err) {
       if (err instanceof BlobTooLargeError) {
         return reply.code(413).send({ error: "storage quota exceeded" });
@@ -981,6 +990,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       row.blob_key,
       row.handle,
       parts.map((p) => ({ partNo: Number(p.part_no), etag: p.etag ?? undefined })),
+      file.seekable === 1,
     );
     const nextGen = file.uploaded === 1 ? file.generation + 1 : file.generation;
     // A blob assembled from parts was never in one stream to hash, so it has

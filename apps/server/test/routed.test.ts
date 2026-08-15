@@ -95,8 +95,8 @@ async function drain(stream: Readable): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-const put = (store: BlobStore, key: string, bytes: Buffer) =>
-  store.put(key, Readable.from(bytes), 1024 * 1024);
+const put = (store: BlobStore, key: string, bytes: Buffer, seekable?: boolean) =>
+  store.put(key, Readable.from(bytes), 1024 * 1024, seekable);
 
 async function until(check: () => boolean, ms = 2000): Promise<void> {
   const deadline = Date.now() + ms;
@@ -122,13 +122,13 @@ describe("routed blob store", () => {
     const derived = new FakeStore();
     const routed = new RoutedBlobStore(primary, derived);
 
-    await put(routed, "file-1", Buffer.from("content"));
-    await put(routed, "file-1.g2", Buffer.from("version"));
+    await put(routed, "file-1", Buffer.from("content"), true);
+    await put(routed, "file-1.g2", Buffer.from("version"), true);
     await put(routed, "file-1.thumb", Buffer.from("thumb"));
     await put(routed, "file-1.idx", Buffer.from("index"));
 
     expect([...primary.blobs.keys()].sort()).toEqual(["file-1", "file-1.g2"]);
-    // Content puts also leave hot bookend copies on the derived backend.
+    // Seekable content puts also leave hot bookend copies on the derived backend.
     await until(() => derived.blobs.has("file-1.bhead") && derived.blobs.has("file-1.g2.bhead"));
     expect([...derived.blobs.keys()].sort()).toEqual([
       "file-1.bhead",
@@ -200,7 +200,7 @@ describe("content bookends", () => {
     const derived = new FakeStore();
     const routed = new RoutedBlobStore(primary, derived, GEOMETRY);
     const blob = patterned(SIZE);
-    await put(routed, "movie", blob);
+    await put(routed, "movie", blob, true);
     await until(() => derived.blobs.has("movie.bhead") && derived.blobs.has("movie.btail"));
     return { primary, derived, routed, blob };
   }
@@ -259,7 +259,7 @@ describe("content bookends", () => {
     const handle = await routed.beginParts("parted");
     await routed.putPart("parted", handle, 1, Readable.from(blob.subarray(0, 24)), 24);
     await routed.putPart("parted", handle, 2, Readable.from(blob.subarray(24)), 16);
-    await routed.completeParts("parted", handle, [{ partNo: 1 }, { partNo: 2 }]);
+    await routed.completeParts("parted", handle, [{ partNo: 1 }, { partNo: 2 }], true);
     await until(() => derived.blobs.has("parted.bhead") && derived.blobs.has("parted.btail"));
     expect(derived.blobs.get("parted.bhead")).toEqual(blob.subarray(0, 8));
     expect(derived.blobs.get("parted.btail")).toEqual(blob.subarray(SIZE - 16));
@@ -271,6 +271,44 @@ describe("content bookends", () => {
     expect(primary.blobs.has("movie")).toBe(false);
     expect(derived.blobs.has("movie.bhead")).toBe(false);
     expect(derived.blobs.has("movie.btail")).toBe(false);
+  });
+
+  it("a non-seekable content put leaves no bookends", async () => {
+    const primary = new FakeStore();
+    const derived = new FakeStore();
+    const routed = new RoutedBlobStore(primary, derived, GEOMETRY);
+    await put(routed, "document", patterned(SIZE));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(primary.blobs.has("document")).toBe(true);
+    expect(derived.blobs.size).toBe(0);
+  });
+
+  it("a non-seekable part upload leaves no bookends", async () => {
+    const primary = new FakeStore();
+    const derived = new FakeStore();
+    const routed = new RoutedBlobStore(primary, derived, GEOMETRY);
+    const blob = patterned(SIZE);
+    const handle = await routed.beginParts("report");
+    await routed.putPart("report", handle, 1, Readable.from(blob.subarray(0, 24)), 24);
+    await routed.putPart("report", handle, 2, Readable.from(blob.subarray(24)), 16);
+    await routed.completeParts("report", handle, [{ partNo: 1 }, { partNo: 2 }]);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(primary.blobs.has("report")).toBe(true);
+    expect(derived.blobs.size).toBe(0);
+  });
+
+  it("a legacy blob with no flag anywhere still heals bookends on a ranged read", async () => {
+    const primary = new FakeStore();
+    const derived = new FakeStore();
+    const routed = new RoutedBlobStore(primary, derived, GEOMETRY);
+    const blob = patterned(SIZE);
+    primary.blobs.set("pre-flag-movie", blob);
+    expect(await drain(await routed.get("pre-flag-movie", { start: 0, end: 7 }, SIZE))).toEqual(
+      blob.subarray(0, 8),
+    );
+    await until(
+      () => derived.blobs.has("pre-flag-movie.bhead") && derived.blobs.has("pre-flag-movie.btail"),
+    );
   });
 });
 

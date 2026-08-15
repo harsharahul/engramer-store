@@ -46,3 +46,46 @@ describe("downloadBlobDetailed under a stalled connection", () => {
     }
   });
 });
+
+/**
+ * The seekable flag tells the server which uploads are in the
+ * random-access ciphertext format, so it spends eager tier work (hot
+ * bookends, window warming) only where a ranged read can follow. It is a
+ * hint about the ciphertext container: the client never reads it back,
+ * and decryption identifies the format from the blob header alone.
+ */
+describe("createFile seekable hint", () => {
+  const sealed = { ciphertext: "x", nonce: "y" };
+
+  function captureBody(): { calls: Array<Record<string, unknown>> } {
+    const seen: { calls: Array<Record<string, unknown>> } = { calls: [] };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        seen.calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(JSON.stringify({ id: "f1" }), { status: 201 });
+      }),
+    );
+    return seen;
+  }
+
+  it("sends the flag for seekable content", async () => {
+    const seen = captureBody();
+    try {
+      await api.createFile(null, sealed, sealed, true);
+      expect(seen.calls[0]?.seekable).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("omits the flag entirely for ordinary content", async () => {
+    const seen = captureBody();
+    try {
+      await api.createFile(null, sealed, sealed);
+      expect(seen.calls[0]).not.toHaveProperty("seekable");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

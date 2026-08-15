@@ -206,9 +206,14 @@ export class MediaWindowCache implements BlobStore {
     return Readable.from(serve());
   }
 
-  async put(key: string, source: Readable, maxBytes: number): Promise<number> {
-    const written = await this.backing.put(key, source, maxBytes);
-    this.warm(key, written);
+  async put(key: string, source: Readable, maxBytes: number, seekable?: boolean): Promise<number> {
+    const written = await this.backing.put(key, source, maxBytes, seekable);
+    // Warming is eager work, spent only where a ranged read can follow; a
+    // non-seekable blob is always fetched whole and would only evict real
+    // media windows. Demand-driven fills in get() stay open to every blob.
+    if (seekable) {
+      this.warm(key, written);
+    }
     return written;
   }
 
@@ -265,11 +270,12 @@ export class MediaWindowCache implements BlobStore {
     key: string,
     handle: string,
     parts: { partNo: number; etag?: string }[],
+    seekable?: boolean,
   ): Promise<void> {
-    await this.backing.completeParts(key, handle, parts);
+    await this.backing.completeParts(key, handle, parts, seekable);
     const session = this.partBytes.get(`${key}:${handle}`);
     this.partBytes.delete(`${key}:${handle}`);
-    if (session) {
+    if (session && seekable) {
       let total = 0;
       for (const part of parts) {
         total += session.get(part.partNo) ?? 0;

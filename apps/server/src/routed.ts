@@ -48,12 +48,18 @@ export class RoutedBlobStore implements BlobStore {
     return RoutedBlobStore.DERIVED.test(key);
   }
 
-  async put(key: string, source: Readable, maxBytes: number): Promise<number> {
+  async put(key: string, source: Readable, maxBytes: number, seekable?: boolean): Promise<number> {
     if (this.isDerived(key)) {
       return this.derived.put(key, source, maxBytes);
     }
     const written = await this.primary.put(key, source, maxBytes);
-    this.copyBookends(key, written);
+    // Eager copies only for content that can be range-read; everything else
+    // is fetched whole, so its bookends would be bytes nobody can reach.
+    // Blobs from before the flag existed still get theirs through the
+    // demand-driven heal in get().
+    if (seekable) {
+      this.copyBookends(key, written);
+    }
     return written;
   }
 
@@ -176,11 +182,16 @@ export class RoutedBlobStore implements BlobStore {
     return receipt;
   }
 
-  async completeParts(key: string, handle: string, parts: { partNo: number; etag?: string }[]): Promise<void> {
+  async completeParts(
+    key: string,
+    handle: string,
+    parts: { partNo: number; etag?: string }[],
+    seekable?: boolean,
+  ): Promise<void> {
     await this.backendFor(key).completeParts(key, handle, parts);
     const session = this.partBytes.get(`${key}:${handle}`);
     this.partBytes.delete(`${key}:${handle}`);
-    if (session && !this.isDerived(key)) {
+    if (session && seekable && !this.isDerived(key)) {
       let total = 0;
       for (const part of parts) {
         total += session.get(part.partNo) ?? 0;

@@ -823,7 +823,7 @@ export async function encryptAndUpload(
   const fileKey = generateKey();
   const encryptedMeta = encryptFileMetadata(prepared.meta, fileKey);
   const encryptedKey = secretBoxSeal(fileKey, masterKey);
-  const dto = await api.createFile(folderId, encryptedKey, encryptedMeta);
+  const dto = await api.createFile(folderId, encryptedKey, encryptedMeta, isMediaFile(file));
 
   const totalCiphertext = contentCiphertextSize(file);
   let digest: string;

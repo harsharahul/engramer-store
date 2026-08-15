@@ -61,6 +61,8 @@ export interface FileRow {
   generation: number;
   /** Advances when the file key is rotated after a collaborator is revoked. */
   key_epoch: number;
+  /** 1 when the ciphertext layout supports ranged reads; a storage hint. */
+  seekable: number;
   uploaded: number;
   trashed: number;
   deleted: number;
@@ -198,6 +200,11 @@ export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; type: str
   { table: "shares", column: "wrapped_key", type: "TEXT" },
   // Advances when the file key is rotated after a collaborator is revoked.
   { table: "files", column: "key_epoch", type: "BIGINT NOT NULL DEFAULT 0" },
+  // Whether the content blob's ciphertext layout supports ranged reads,
+  // declared by the client at create time. A storage hint only: it gates
+  // eager tier work (bookend copies, window warming) and is never sent
+  // back to clients, so it can never become a decryption input.
+  { table: "files", column: "seekable", type: "BIGINT NOT NULL DEFAULT 0" },
   // Advances on a credential change; tokens minted before it stop working.
   { table: "users", column: "token_epoch", type: "BIGINT NOT NULL DEFAULT 0" },
   // Which generation the stored bytes are, and the channel position those

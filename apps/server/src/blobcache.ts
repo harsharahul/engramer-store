@@ -136,8 +136,8 @@ export class DiskCachedBlobStore implements BlobStore {
     return Readable.from(result.bytes);
   }
 
-  async put(key: string, source: Readable, maxBytes: number): Promise<number> {
-    const written = await this.backing.put(key, source, maxBytes);
+  async put(key: string, source: Readable, maxBytes: number, seekable?: boolean): Promise<number> {
+    const written = await this.backing.put(key, source, maxBytes, seekable);
     if (this.cacheable(key)) {
       await this.drop(key); // overwritten in place upstream; never serve the old bytes
     }
@@ -168,8 +168,13 @@ export class DiskCachedBlobStore implements BlobStore {
     return this.backing.putPart(key, handle, partNo, source, length);
   }
 
-  completeParts(key: string, handle: string, parts: { partNo: number; etag?: string }[]): Promise<void> {
-    return this.backing.completeParts(key, handle, parts);
+  completeParts(
+    key: string,
+    handle: string,
+    parts: { partNo: number; etag?: string }[],
+    seekable?: boolean,
+  ): Promise<void> {
+    return this.backing.completeParts(key, handle, parts, seekable);
   }
 
   abortParts(key: string, handle: string): Promise<void> {

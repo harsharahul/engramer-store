@@ -428,3 +428,65 @@ describe("isolation between accounts", () => {
     expect(response.statusCode).toBe(404);
   });
 });
+
+describe("seekable content hint", () => {
+  async function createWith(payloadExtra: Record<string, unknown>): Promise<string> {
+    const fileKey = generateKey();
+    const meta = encryptFileMetadata(
+      { name: "clip.mp4", mime: "video/mp4", size: 8, mtime: Date.now() },
+      fileKey,
+    );
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/files",
+      headers: authHeader(),
+      payload: {
+        folderId: null,
+        encryptedKey: secretBoxSeal(fileKey, account.masterKey),
+        encryptedMeta: meta,
+        ...payloadExtra,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    return created.json().id as string;
+  }
+
+  async function putDataAndCapture(id: string): Promise<boolean | undefined> {
+    const original = app.blobs.put.bind(app.blobs);
+    let seen: boolean | undefined;
+    app.blobs.put = async (key, source, maxBytes, seekable) => {
+      seen = seekable;
+      return original(key, source, maxBytes, seekable);
+    };
+    try {
+      const uploaded = await app.inject({
+        method: "PUT",
+        url: `/api/files/${id}/data`,
+        headers: { ...authHeader(), "content-type": "application/octet-stream" },
+        payload: Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]),
+      });
+      expect(uploaded.statusCode).toBe(200);
+    } finally {
+      app.blobs.put = original;
+    }
+    return seen;
+  }
+
+  it("threads a create-time seekable flag into the content blob write", async () => {
+    const id = await createWith({ seekable: true });
+    expect(await putDataAndCapture(id)).toBe(true);
+  });
+
+  it("content is not seekable unless the client said so at create", async () => {
+    const id = await createWith({});
+    expect(await putDataAndCapture(id)).toBeFalsy();
+  });
+
+  it("never exposes the flag back to clients", async () => {
+    const id = await createWith({ seekable: true });
+    const listed = await app.inject({ method: "GET", url: "/api/sync?since=0", headers: authHeader() });
+    const row = (listed.json().files as Array<Record<string, unknown>>).find((f) => f.id === id);
+    expect(row).toBeDefined();
+    expect(row).not.toHaveProperty("seekable");
+  });
+});

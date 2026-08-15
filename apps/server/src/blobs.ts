@@ -50,8 +50,14 @@ export interface BlobRange {
  * and still land as one ordinary blob under the final key.
  */
 export interface BlobStore {
-  /** Streams a blob in, enforcing maxBytes; resolves to the byte count. */
-  put(key: string, source: Readable, maxBytes: number): Promise<number>;
+  /** Streams a blob in, enforcing maxBytes; resolves to the byte count.
+   * `seekable` marks content whose ciphertext layout supports ranged
+   * reads; tiered stores spend eager work (bookend copies, window
+   * warming) only on such blobs, since a non-seekable blob is always
+   * fetched whole and an eager copy of it can never be read. The flag is
+   * a storage hint only: absent means "spend nothing eagerly", and
+   * demand-driven paths stay available to every blob regardless. */
+  put(key: string, source: Readable, maxBytes: number, seekable?: boolean): Promise<number>;
   /** Streams a blob out, optionally only the given inclusive byte range.
    * Callers that know the blob's total size pass it along; tiered stores
    * use it to serve tail ranges from hot copies without a lookup. */
@@ -68,8 +74,14 @@ export interface BlobStore {
     source: Readable,
     length: number,
   ): Promise<PartReceipt>;
-  /** Assembles the session's parts into the final blob at the key. */
-  completeParts(key: string, handle: string, parts: { partNo: number; etag?: string }[]): Promise<void>;
+  /** Assembles the session's parts into the final blob at the key.
+   * `seekable` carries the same hint as put(). */
+  completeParts(
+    key: string,
+    handle: string,
+    parts: { partNo: number; etag?: string }[],
+    seekable?: boolean,
+  ): Promise<void>;
   /** Discards a session's parts; safe to call on unknown handles. */
   abortParts(key: string, handle: string): Promise<void>;
 }

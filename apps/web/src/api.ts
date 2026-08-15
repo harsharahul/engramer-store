@@ -366,10 +366,23 @@ export const api = {
 
   deleteFolder: (id: string) => request<void>(`/api/folders/${id}`, { method: "DELETE" }),
 
-  createFile: (folderId: string | null, encryptedKey: SecretBox, encryptedMeta: SecretBox) =>
+  createFile: (
+    folderId: string | null,
+    encryptedKey: SecretBox,
+    encryptedMeta: SecretBox,
+    seekable?: boolean,
+  ) =>
     request<FileDto>("/api/files", {
       method: "POST",
-      body: JSON.stringify({ folderId, encryptedKey, encryptedMeta }),
+      // The flag marks random-access ciphertext so the server can place hot
+      // copies where seeks will land. A hint only: decryption identifies the
+      // format from the blob header, never from anything the server holds.
+      body: JSON.stringify({
+        folderId,
+        encryptedKey,
+        encryptedMeta,
+        ...(seekable ? { seekable: true } : {}),
+      }),
     }),
 
   patchFile: (
