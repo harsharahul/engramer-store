@@ -193,7 +193,7 @@ describe("trusted proxy attribution", () => {
   });
 
   it("accepts an allowlist of addresses and ranges", () => {
-    const proxies = "10.42.0.0/16,192.168.7.0/24,127.0.0.1";
+    const proxies = "10.0.0.0/8,172.16.0.0/12,127.0.0.1";
     expect(trustFor(proxies)).toBe(proxies);
   });
 });

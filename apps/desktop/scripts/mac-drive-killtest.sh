@@ -6,6 +6,7 @@
 # are never echoed; a stat miss re-resolves by size.
 set -u
 DRIVE="$HOME/Library/CloudStorage/EngramStore-EngramStore"
+HOST="${ENGRAM_HOST:?set ENGRAM_HOST to the deployment hostname, e.g. vault.example.com}"
 WIFI_DEV=$(networksetup -listallhardwareports | awk '/Wi-Fi/{getline; print $2}')
 WIFI_SVC="Wi-Fi"
 NC_PID=""
@@ -76,7 +77,7 @@ networksetup -setairportpower "$WIFI_DEV" on
 
 # --- Recovery: patient, with retries ---
 for i in $(seq 1 30); do
-  ping -c1 -t2 store.harsharahul.com >/dev/null 2>&1 && break
+  ping -c1 -t2 "$HOST" >/dev/null 2>&1 && break
   sleep 2
 done
 GOT=0

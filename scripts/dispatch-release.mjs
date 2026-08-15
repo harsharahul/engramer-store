@@ -2,12 +2,13 @@
 /**
  * Dispatches the deployment pipeline's Release workflow for a version.
  *
- *   node scripts/dispatch-release.mjs 0.46.0
+ *   ENGRAM_GITEA_HOST=git.example.com ENGRAM_DEPLOY_REPO=you/deploy \
+ *     node scripts/dispatch-release.mjs 0.46.0
  *
- * The Gitea host and repository come from the environment or the
- * defaults below; the credential comes from git's own credential
- * helper for that host, the same one pushes use, and is never printed.
- * The workflow refuses to run without a version input by design.
+ * The Gitea host and repository come from the environment; the
+ * credential comes from git's own credential helper for that host,
+ * the same one pushes use, and is never printed. The workflow
+ * refuses to run without a version input by design.
  */
 import { execFileSync } from "node:child_process";
 
@@ -16,8 +17,12 @@ if (!/^\d+\.\d+\.\d+$/.test(version)) {
   console.error("usage: dispatch-release.mjs <version, e.g. 0.46.0>");
   process.exit(1);
 }
-const host = process.env.ENGRAM_GITEA_HOST ?? "gitea.harsharahul.com";
-const repo = process.env.ENGRAM_DEPLOY_REPO ?? "harsharahul/engram-store-deploy";
+const host = process.env.ENGRAM_GITEA_HOST;
+const repo = process.env.ENGRAM_DEPLOY_REPO;
+if (!host || !repo) {
+  console.error("set ENGRAM_GITEA_HOST and ENGRAM_DEPLOY_REPO to your deployment pipeline");
+  process.exit(1);
+}
 
 const fill = execFileSync("git", ["credential", "fill"], {
   input: `protocol=https\nhost=${host}\n\n`,

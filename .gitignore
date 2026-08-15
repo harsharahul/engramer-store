@@ -18,6 +18,9 @@ PLAN.md
 # Playwright MCP artifacts
 .playwright-mcp/
 
+# Assistant/session state, never tracked
+.claude/
+
 # Tauri build output
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
