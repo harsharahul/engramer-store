@@ -38,6 +38,7 @@ Cloud storage should not require trusting the storage provider. Engram Store app
 - **Installable app.** The web client is a PWA: add it to your iPhone home screen or your Mac Dock and it runs standalone with its own icon. Paste a screenshot anywhere in the app to store it encrypted. There is also a native desktop shell; what runs where is in [docs/native-apps.md](docs/native-apps.md).
 - **Local S3 bridge.** A self-hostable, zero-knowledge S3 endpoint (`apps/bridge`) lets any S3 tool (rclone, s3fs, the AWS SDK) browse and download your encrypted vault, with folders as buckets, while the server still holds only ciphertext. See [docs/s3-gateway.md](docs/s3-gateway.md).
 - **Storage tiering that works on ciphertext.** Originals and derived blobs can live on different object stores with opposite economics: request-heavy small blobs on a fast store, byte-heavy content on cheap or rate-limited storage. When the split is on, every file leaves hot copies of its opening and closing bytes on the fast store, so playback starts and the container indexes media players read first never wait on the slow one; the copies write themselves for new uploads and self-heal for old files, with no migration step. The server also keeps a bounded on-disk cache of aligned ciphertext windows, warmed by uploads themselves, so a file plays back smoothly the moment it finishes uploading and repeat viewing costs the backing store nothing. Per-backend request budgets pace a throttled store below its limit instead of tripping it. All of this operates on opaque ciphertext; the server never decrypts anything to place it.
+- **Bring your own cloud storage.** The vault can keep its ciphertext on storage you already pay for. Providers with an S3 API (FileLu S5, MinIO, Cloudflare R2 and the rest) connect directly; most others, including Drime, pCloud, Dropbox and Google Drive, connect through a bundled rclone gateway profile configured with one token in an `.env` file. Because every byte is encrypted before upload, the provider only ever holds unreadable blobs under meaningless names. Thumbnails, search indexes, and the opening and closing bytes of every video stay on the server's own disk, and small documents are cached locally after their first read, so browsing, search, and playback feel local while the provider supplies the durable bytes; if the provider is down or throttled, everything already local keeps working. See [docs/backends.md](docs/backends.md).
 - **Quotas and delta sync.** Per-user storage quotas enforced during streaming upload, and a sequence-number sync protocol so clients converge in one round trip.
 
 ## What the server can and cannot see
@@ -56,6 +57,17 @@ docker run -d --name engramer -p 3080:3080 -v engramer-data:/data \
 ```
 
 Or with Compose: `docker compose up -d` (see [compose.yml](compose.yml)). All state lives in the `/data` volume.
+
+### On cloud storage you already pay for
+
+Point the vault at Drime, pCloud, or any other provider rclone reaches:
+
+```bash
+cp .env.example .env       # paste your provider token; the file explains each line
+docker compose -f compose.rclone.yml --profile drime up -d
+```
+
+Create a token with your provider (Drime: Settings, then Developer), fill in `.env`, start the profile, and open port 3080. Providers with a real S3 API, such as FileLu S5, skip the gateway entirely: set `ENGRAMER_S3_*` and use the plain compose file. What appears in your provider account is a single folder of encrypted blobs; recipes, provider notes, and the reasoning are in [docs/backends.md](docs/backends.md).
 
 ### From source
 
@@ -91,6 +103,8 @@ Configuration via environment variables:
 | `ENGRAMER_MAX_BLOB_BYTES` | `21474836480` | Hard cap for a single upload |
 | `ENGRAMER_WEB_DIST` | auto-detected | Path to a built web client to serve |
 | `ENGRAMER_S3_BUCKET` | unset | Store blobs in an S3-compatible bucket instead of local disk |
+| `ENGRAMER_DERIVED_BACKEND` | unset | `fs` keeps thumbnails and search indexes on local disk while content lives on a remote store |
+| `ENGRAMER_CONTENT_CACHE_MAX_BYTES` | unset | Cache content blobs at or under this size on local disk, so repeat document opens are instant |
 | `ENGRAMER_PUBLIC_ORIGINS` | unset | Origins browsers reach this server on, when a proxy rewrites the Host header (Word and Excel editing needs this) |
 
 Run it behind TLS in production; the login key must only ever travel over HTTPS. Storage architecture, the S3-compatible backend, and backup recipes are covered in [docs/storage.md](docs/storage.md). Consumer cloud storage (Drime, pCloud, FileLu, and anything rclone reaches) as the backing store is covered in [docs/backends.md](docs/backends.md), with ready compose recipes in `compose.rclone.yml`. A design for exposing an S3 API lives in [docs/s3-gateway.md](docs/s3-gateway.md), and the reasoning behind the document editor is in [docs/editing.md](docs/editing.md).
@@ -113,7 +127,7 @@ apps/server/       Zero-knowledge API: Fastify, SQLite metadata, on-disk blobs
 apps/web/          Web client: React, all crypto in the browser
 ```
 
-The integration tests drive the real API with the real crypto package, including a check that blobs on disk contain no plaintext. CI runs the suites on Node 22 and 24, audits production dependencies, and builds the container image; pushes to `main` and version tags publish a multi-architecture image to `ghcr.io`.
+The integration tests drive the real API with the real crypto package, including a check that blobs on disk contain no plaintext, and an end-to-end suite that runs against a real `rclone serve s3` gateway asserting byte equality on every transfer shape. CI runs the suites on Node 22 and 24, audits production dependencies, and builds the container image; publishing a release pushes a multi-architecture image to `ghcr.io`.
 
 ## Security
 
