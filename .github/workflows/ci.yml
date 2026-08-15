@@ -1,15 +1,22 @@
 name: CI
 
-# Runs when a release is published, or on demand. Day-to-day verification
-# runs locally and in the project's own pipeline; hosted minutes are saved
-# for the moments a published release needs an independent check.
+# Pull requests run the test matrix, the Rust core checks, and an image
+# smoke test. Pushes to main and published releases additionally build and
+# push the multi-architecture image to ghcr.io.
 on:
+  pull_request:
+  push:
+    branches: [main]
   release:
     types: [published]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -87,7 +94,7 @@ jobs:
   ios-core:
     name: iOS core cross-build
     runs-on: macos-15
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -117,10 +124,10 @@ jobs:
           sudo docker image prune -af
           df -h /
       - uses: docker/setup-qemu-action@v4
-        if: github.event_name == 'push' # arm64 emulation only needed for the multi-arch push
+        if: github.event_name != 'pull_request' # arm64 emulation only needed for the multi-arch push
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GitHub Container Registry
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -136,8 +143,9 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
-      - name: Build and push multi-arch (main and tags only)
-        if: github.event_name == 'push'
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+      - name: Build and push multi-arch (main and releases only)
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v7
         with:
           context: .
