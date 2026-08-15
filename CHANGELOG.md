@@ -3,6 +3,45 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.47.0] - 2026-08-15
+
+### Added
+- **Bring your own cloud storage.** The vault can keep its encrypted
+  content on storage you already pay for. Providers with an S3 API
+  (FileLu S5, MinIO, Cloudflare R2 and others) connect directly; most
+  others, including Drime, pCloud, Dropbox and Google Drive, connect
+  through a bundled rclone gateway profile configured with one token in
+  an `.env` file (`compose.rclone.yml`). The provider only ever holds
+  unreadable blobs under meaningless names. See `docs/backends.md`.
+- **Local tiers that keep a remote store fast.** Thumbnails and search
+  indexes can live on the server's own disk while content sits remote
+  (`ENGRAMER_DERIVED_BACKEND=fs`); everything there regrows on its own
+  if lost. Small documents are kept locally after their first read
+  (`ENGRAMER_CONTENT_CACHE_MAX_BYTES`), so repeat opens are immediate.
+  When the provider is down or throttled, browsing, search, thumbnails,
+  playback starts, and recently opened documents keep working.
+- **Compatibility settings for third-party S3 services.**
+  `ENGRAMER_S3_CHECKSUMS=when-required` keeps streaming uploads plainly
+  sized for strict servers, `ENGRAMER_S3_CREATE_BUCKET=false` supports
+  hosts that hand out a fixed bucket, and `ENGRAMER_S3_KEY_LAYOUT=sharded`
+  spreads keys across directories for directory-shaped backends. Media
+  cache window and hot-copy sizes are now tunable, and a bench script
+  (`apps/server/bench/backend-bench.ts`) measures any backend so those
+  settings can come from numbers.
+- **Background work yields to people.** Requests toward a rate-limited
+  backing store now run in two lanes: cache fills, hot-copy writes, and
+  healing spend only budget no interactive request is waiting for.
+
+### Changed
+- Eager hot copies of a file's opening and closing bytes are made only
+  for media that can actually be read by range; other files are fetched
+  whole, so their copies could never be used. Existing media still gains
+  its copies on first playback.
+- A missing blob is now reported the same way by every storage backend,
+  so fallback and self-healing behave identically on local disk and S3.
+- Server startup waits briefly for a storage endpoint that is still
+  coming up, instead of failing when a gateway container starts second.
+
 ## [0.46.0] - 2026-08-13
 
 ### Added
