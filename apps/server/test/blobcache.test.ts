@@ -120,8 +120,8 @@ describe("disk cached blob store", () => {
       const cache = new DiskCachedBlobStore(backing, dir, 1024 * 1024);
       const bytes = Buffer.from("file content ciphertext");
       await put(cache, "0f0f0f0f-file", bytes);
-      await cache.get("0f0f0f0f-file");
-      await cache.get("0f0f0f0f-file");
+      await drain(await cache.get("0f0f0f0f-file"));
+      await drain(await cache.get("0f0f0f0f-file"));
       expect(backing.gets).toBe(2);
       expect(readdirSync(dir)).toEqual([]);
     } finally {
@@ -135,7 +135,7 @@ describe("disk cached blob store", () => {
       const backing = new CountingStore();
       const cache = new DiskCachedBlobStore(backing, dir, 1024 * 1024);
       await put(cache, "file-1.idx", Buffer.from("old index"));
-      await cache.get("file-1.idx"); // warm the cache
+      await drain(await cache.get("file-1.idx")); // warm the cache
       const fresh = Buffer.from("new index");
       await put(cache, "file-1.idx", fresh);
       expect(await drain(await cache.get("file-1.idx"))).toEqual(fresh);
@@ -150,7 +150,7 @@ describe("disk cached blob store", () => {
       const backing = new CountingStore();
       const cache = new DiskCachedBlobStore(backing, dir, 1024 * 1024);
       await put(cache, "file-1.thumb", Buffer.from("bytes"));
-      await cache.get("file-1.thumb");
+      await drain(await cache.get("file-1.thumb"));
       await cache.remove("file-1.thumb");
       expect(readdirSync(dir)).toEqual([]);
       await expect(cache.get("file-1.thumb")).rejects.toThrow("missing blob");
@@ -168,10 +168,10 @@ describe("disk cached blob store", () => {
       await put(cache, "a.thumb", bytes);
       await put(cache, "b.thumb", bytes);
       await put(cache, "c.thumb", bytes);
-      await cache.get("a.thumb");
-      await cache.get("b.thumb");
-      await cache.get("a.thumb"); // a is now most recently used
-      await cache.get("c.thumb"); // 300 bytes cached > 250: b (LRU) evicted
+      await drain(await cache.get("a.thumb"));
+      await drain(await cache.get("b.thumb"));
+      await drain(await cache.get("a.thumb")); // a is now most recently used
+      await drain(await cache.get("c.thumb")); // 300 bytes cached > 250: b (LRU) evicted
       // Eviction unlinks lazily (evicted bytes are never stale, so the file
       // removal does not need to block the read); wait for it to land.
       for (let i = 0; i < 50 && readdirSync(dir).length > 2; i++) {
@@ -278,7 +278,7 @@ describe("content caching", () => {
       });
       const bytes = Buffer.from("deleted later");
       await put(cache, "cccc-doc", bytes);
-      await cache.get("cccc-doc");
+      await drain(await cache.get("cccc-doc"));
       await cache.remove("cccc-doc");
       await expect(cache.get("cccc-doc")).rejects.toThrow();
     } finally {
@@ -294,7 +294,7 @@ describe("content caching", () => {
         contentMaxBytes: 1024,
       });
       await put(cache, "dddd-doc", Buffer.from("first attempt"));
-      await cache.get("dddd-doc");
+      await drain(await cache.get("dddd-doc"));
       await put(cache, "dddd-doc", Buffer.from("second attempt"));
       expect(await drain(await cache.get("dddd-doc"))).toEqual(Buffer.from("second attempt"));
     } finally {
@@ -312,12 +312,12 @@ describe("content caching", () => {
       });
       const bytes = Buffer.from("either kind of ciphertext");
       await put(cache, "eeee-doc.thumb", bytes);
-      await cache.get("eeee-doc.thumb");
-      await cache.get("eeee-doc.thumb");
+      await drain(await cache.get("eeee-doc.thumb"));
+      await drain(await cache.get("eeee-doc.thumb"));
       expect(backing.gets).toBe(2);
       await put(cache, "eeee-doc", bytes);
-      await cache.get("eeee-doc");
-      await cache.get("eeee-doc");
+      await drain(await cache.get("eeee-doc"));
+      await drain(await cache.get("eeee-doc"));
       expect(backing.gets).toBe(3);
     } finally {
       rmSync(dir, { recursive: true, force: true });
