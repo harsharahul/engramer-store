@@ -5,14 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Engram Store</title>
 <style>
+  /* Dark-first, like the app this page hands off to. */
   :root {
-    --bg: #f6f8fb; --card: #ffffff; --fg: #1c2430; --muted: #5b6675;
-    --accent: #3b82f6; --accent-press: #2f6fd6; --edge: #dbe2ea; --error: #b3261e;
+    --bg: #0a0e17; --card: #10182a; --edge: #1d2942; --fg: #eef2f8;
+    --muted: #8b97ab; --accent: #3b82f6; --accent-press: #5b96f2;
+    --store: #8aa9f5; --cyan: #22d3ee; --error: #ff8f88;
+    --field: #0d1424;
   }
-  @media (prefers-color-scheme: dark) {
+  @media (prefers-color-scheme: light) {
     :root {
-      --bg: #0c1320; --card: #131c2c; --fg: #e8edf4; --muted: #93a0b1;
-      --accent: #3b82f6; --accent-press: #5b96f2; --edge: #24324a; --error: #ff8f88;
+      --bg: #f6f8fb; --card: #ffffff; --edge: #dfe5ee; --fg: #17202e;
+      --muted: #5b6675; --accent: #3b82f6; --accent-press: #2f6fd6;
+      --store: #2563eb; --cyan: #22d3ee; --error: #b3261e;
+      --field: #f1f4f9;
     }
   }
   * { box-sizing: border-box; }
@@ -22,59 +27,69 @@
     font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  .card { width: min(400px, calc(100vw - 48px)); background: var(--card);
-    border: 1px solid var(--edge); border-radius: 16px; padding: 32px 28px 28px; }
-  .lockup { display: block; height: 42px; margin: 0 0 20px -6px; }
-  .lockup.dark { display: none; }
-  @media (prefers-color-scheme: dark) {
-    .lockup.light { display: none; }
-    .lockup.dark { display: block; }
-  }
-  h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 6px; }
-  p.hint { color: var(--muted); margin: 0 0 18px; }
-  label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+  main { width: min(420px, calc(100vw - 48px)); text-align: center; padding: 32px 0; }
+  .tile { width: 76px; height: 76px; display: block; margin: 0 auto 22px; }
+  .wordmark { font-size: 38px; letter-spacing: -0.02em; line-height: 1; margin: 0 0 14px; }
+  .wordmark .engram { font-weight: 700; }
+  .wordmark .store { font-weight: 300; color: var(--store); }
+  .wordmark .dot { display: inline-block; width: 9px; height: 9px; margin-left: 8px;
+    border-radius: 50%; background: var(--cyan); vertical-align: 14px; }
+  .tagline { font-size: 12px; font-weight: 600; letter-spacing: 0.38em; color: var(--muted);
+    text-transform: uppercase; margin: 0 0 34px; }
+  .card { background: var(--card); border: 1px solid var(--edge); border-radius: 18px;
+    padding: 26px 24px; text-align: left; }
+  h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 6px; }
+  p.hint { color: var(--muted); margin: 0 0 18px; font-size: 14px; }
+  label { display: block; font-size: 12px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
   input {
-    width: 100%; height: 40px; padding: 0 12px; font-size: 15px; color: var(--fg);
-    background: var(--bg); border: 1px solid var(--edge); border-radius: 10px; outline: none;
+    width: 100%; height: 44px; padding: 0 14px; font-size: 15px; color: var(--fg);
+    background: var(--field); border: 1px solid var(--edge); border-radius: 12px; outline: none;
   }
-  input:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+  input::placeholder { color: var(--muted); }
+  input:focus-visible { border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
   button {
-    margin-top: 14px; width: 100%; height: 40px; border: 0; border-radius: 10px;
+    margin-top: 14px; width: 100%; height: 44px; border: 0; border-radius: 12px;
     background: var(--accent); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
   }
   button:active { background: var(--accent-press); }
   button[disabled] { opacity: 0.6; cursor: default; }
   .error { color: var(--error); font-size: 14px; margin: 12px 0 0; min-height: 1em; }
-  .connecting { display: none; text-align: center; }
+  .connecting { display: none; padding: 10px 0; }
   .connecting .spin {
     width: 26px; height: 26px; margin: 6px auto 14px; border-radius: 50%;
     border: 3px solid var(--edge); border-top-color: var(--accent); animation: r 0.9s linear infinite;
   }
   @keyframes r { to { transform: rotate(360deg); } }
-  .connecting p { color: var(--muted); margin: 0; overflow-wrap: anywhere; }
-  .fineprint { margin-top: 18px; font-size: 12.5px; color: var(--muted); }
+  .connecting p { color: var(--muted); margin: 0; overflow-wrap: anywhere; text-align: center; }
+  .fineprint { margin-top: 22px; font-size: 12.5px; color: var(--muted); text-align: center; }
 </style>
 </head>
 <body>
-  <main class="card">
-    <img class="lockup light" src="lockup-ocean.svg" alt="Engram Store" />
-    <img class="lockup dark" src="lockup-mono-white.svg" alt="Engram Store" />
+  <main>
+    <img class="tile" src="icon.svg" alt="" />
+    <p class="wordmark"><span class="engram">engram</span> <span class="store">store</span><span class="dot"></span></p>
+    <p class="tagline">Private &middot; Encrypted &middot; Yours</p>
 
-    <section id="form">
-      <h1>Connect to your server</h1>
-      <p class="hint">This app is a shell around a vault you host. Enter your deployment's address to begin.</p>
-      <label for="server">Server address</label>
-      <input id="server" type="text" inputmode="url" autocapitalize="off" autocorrect="off"
-             spellcheck="false" placeholder="https://vault.example.com" autofocus />
-      <button id="connect">Connect</button>
-      <p class="error" id="error"></p>
-      <p class="fineprint">Servers must use https; plain http is supported for localhost only.</p>
-    </section>
+    <div class="card">
+      <section id="form">
+        <h1>Connect to your server</h1>
+        <p class="hint">This app is a shell around a vault you host. Enter your deployment's address to begin.</p>
+        <label for="server">Server address</label>
+        <input id="server" type="text" inputmode="url" autocapitalize="off" autocorrect="off"
+               spellcheck="false" placeholder="https://vault.example.com" autofocus />
+        <button id="connect">Connect</button>
+        <p class="error" id="error"></p>
+      </section>
 
-    <section class="connecting" id="connecting">
-      <div class="spin"></div>
-      <p id="connecting-to">Connecting&hellip;</p>
-    </section>
+      <section class="connecting" id="connecting">
+        <div class="spin"></div>
+        <p id="connecting-to">Connecting&hellip;</p>
+      </section>
+    </div>
+
+    <p class="fineprint">Servers must use https; plain http is supported for localhost only.</p>
   </main>
 
 <script>
