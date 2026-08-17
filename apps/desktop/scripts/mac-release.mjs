@@ -17,6 +17,10 @@
  *   ENGRAM_MAC_APP_PROFILE=~/secrets/engram-mac/engram-mac-app.provisionprofile \
  *   pnpm --filter @engramer/desktop mac:release
  *
+ * Passing --generic instead of ENGRAM_APP_URL bakes no server at all:
+ * the first run asks for one. That is the build the public release page
+ * carries; a baked build belongs to one deployment.
+ *
  * Optional: APPLE_DEVELOPMENT_TEAM (else parsed from the identity),
  * ENGRAM_MAC_FILES_PROFILE (the extension's profile, once the macOS
  * extension target exists), APPLE_NOTARY_PROFILE (default
@@ -58,9 +62,15 @@ const expand = (p) => (p ? p.replace(/^~(?=\/)/, homedir()) : p);
 
 // ----- preflight: everything named before anything is built -----
 
+const generic =
+  process.argv.includes("--generic") || (process.env.ENGRAM_GENERIC ?? "").trim() === "1";
 const appUrl = (process.env.ENGRAM_APP_URL ?? "").trim();
-if (!appUrl.startsWith("https://")) {
-  fail("set ENGRAM_APP_URL=https://your-vault; a localhost bake is a blank screen");
+if (generic) {
+  if (appUrl) {
+    fail("--generic bakes no server; unset ENGRAM_APP_URL (a build serves one deployment or any, never both)");
+  }
+} else if (!appUrl.startsWith("https://")) {
+  fail("set ENGRAM_APP_URL=https://your-vault (or pass --generic); a localhost bake is a blank screen");
 }
 const identity = (process.env.APPLE_SIGNING_IDENTITY ?? "").trim();
 if (!identity.includes("Developer ID Application")) {
@@ -125,6 +135,9 @@ if (existsSync(join(tauriDir, "macos", "targets.yml")) && existsSync(appexBuilde
 // two signing authorities is how a step gets skipped silently.
 const buildEnv = { ...process.env };
 delete buildEnv.APPLE_SIGNING_IDENTITY;
+if (generic) {
+  buildEnv.ENGRAM_GENERIC = "1";
+}
 run("node", [join(here, "instance-config.mjs")], { env: buildEnv });
 run("pnpm", ["exec", "tauri", "build", "--config", "src-tauri/tauri.instance.json", "--bundles", "app"], {
   env: buildEnv,
@@ -232,3 +245,9 @@ run("xcrun", ["stapler", "validate", dmgPath]);
 run("spctl", ["-a", "-vvv", "-t", "exec", appPath]);
 run("shasum", ["-a", "256", dmgPath]);
 console.log(`mac-release: done: ${dmgPath}`);
+if (generic) {
+  console.log(
+    `mac-release: generic build; to publish it on the release page:\n` +
+      `  gh release upload v${version} "${dmgPath}"`,
+  );
+}
