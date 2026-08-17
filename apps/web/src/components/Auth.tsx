@@ -449,8 +449,10 @@ export function Auth() {
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  void nativeServerUrlSet(serverDraft).catch(() =>
-                    setServerError("That address did not look like an http(s) server."),
+                  void nativeServerUrlSet(serverDraft).catch((err) =>
+                    setServerError(
+                      err ? String(err) : "That address did not look like an http(s) server.",
+                    ),
                   );
                   // On success the shell navigates this window away; only a
                   // failure leaves anything to show.

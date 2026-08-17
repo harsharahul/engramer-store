@@ -39,23 +39,33 @@ fn parse_input(raw: &str) -> Result<url::Url, String> {
     } else {
         format!("https://{trimmed}")
     };
-    let parsed = url::Url::parse(&candidate).map_err(|_| "not a valid URL".to_string())?;
+    let mut parsed = url::Url::parse(&candidate).map_err(|_| "not a valid URL".to_string())?;
+    // A bare loopback address assumes http, not https: that is the one
+    // place plain http is supported, and assuming https there would
+    // refuse the very servers the hint says are fine.
+    if !trimmed.contains("://") && is_loopback(&parsed) {
+        parsed =
+            url::Url::parse(&format!("http://{trimmed}")).map_err(|_| "not a valid URL".to_string())?;
+    }
     match parsed.scheme() {
         "https" => Ok(parsed),
         "http" => {
-            let local = match parsed.host() {
-                Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
-                Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-                Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-                None => false,
-            };
-            if local {
+            if is_loopback(&parsed) {
                 Ok(parsed)
             } else {
                 Err("plain http is only supported for localhost; use https".to_string())
             }
         }
         _ => Err("the server address must be http(s)".to_string()),
+    }
+}
+
+fn is_loopback(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
     }
 }
 
@@ -323,6 +333,23 @@ mod tests {
         let refused = parse_input("http://vault.example.com").unwrap_err();
         assert!(refused.contains("https"), "{refused}");
         assert!(parse_input("http://192.168.1.20:3080").is_err());
+    }
+
+    #[test]
+    fn a_bare_loopback_address_assumes_http() {
+        assert_eq!(
+            parse_input("localhost:3080").unwrap().origin().ascii_serialization(),
+            "http://localhost:3080"
+        );
+        assert_eq!(
+            parse_input("127.0.0.1:5173").unwrap().origin().ascii_serialization(),
+            "http://127.0.0.1:5173"
+        );
+        // An explicit https on loopback is honored as typed.
+        assert_eq!(
+            parse_input("https://localhost:3080").unwrap().origin().ascii_serialization(),
+            "https://localhost:3080"
+        );
     }
 
     #[test]
