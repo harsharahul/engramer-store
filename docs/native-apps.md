@@ -32,6 +32,29 @@ Deployments that host a DMG can advertise it by setting
 `ENGRAMER_MAC_DMG_URL`; the Profile page then shows a "Get the Mac app" row
 to signed-in desktop users. Deployments that offer none show nothing.
 
+## Download the Mac app
+
+The [releases page](https://github.com/harsharahul/engramer-store/releases)
+carries a generic, notarized DMG: no server is baked in, and the first
+launch asks for your deployment's address instead. Once connected it
+behaves exactly like a build made for that server, and the sign-in screen's
+server control switches deployments later; switching confirms first, then
+removes the previous server's drive and unlock enrollment from the device.
+
+The generic app reaches servers over https (plain http is supported for
+localhost only). A deployment on a plain-http LAN address builds its own
+app instead, per the section below, or uses the web client. Deployments
+can also point `ENGRAMER_MAC_DMG_URL` at the release asset, so their own
+Profile page offers the same download.
+
+A generic build is produced by the release script with no baked address:
+
+```bash
+APPLE_SIGNING_IDENTITY="Developer ID Application: Name (TEAMID)" \
+ENGRAM_MAC_APP_PROFILE=~/secrets/engram-mac/engram-mac-app.provisionprofile \
+pnpm --filter @engramer/desktop mac:release -- --generic
+```
+
 ## The iPhone app
 
 With extensions turned on, the vault appears as a drive in the Files app and
