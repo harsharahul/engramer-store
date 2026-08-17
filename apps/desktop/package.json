@@ -11,6 +11,7 @@
     "ios:dev": "node scripts/instance-config.mjs && node scripts/apple-core-build.mjs && env -u FORCE_COLOR tauri ios dev --config src-tauri/tauri.instance.json",
     "ios:bundle": "node -e \"if (!process.env.ENGRAM_APP_URL) { console.error('ios:bundle refuses to bake localhost into a store build; set ENGRAM_APP_URL=https://your-vault'); process.exit(1); }\" && node scripts/instance-config.mjs && node scripts/apple-core-build.mjs && node scripts/ios-project-fix.mjs && env -u FORCE_COLOR tauri ios build --config src-tauri/tauri.instance.json --export-method app-store-connect",
     "mac:release": "node scripts/mac-release.mjs",
+    "test": "node --test scripts/*.test.mjs",
     "tauri": "tauri"
   },
   "devDependencies": {

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Engram Store</title>
+<style>
+  :root {
+    --bg: #f6f8fb; --card: #ffffff; --fg: #1c2430; --muted: #5b6675;
+    --accent: #3b82f6; --accent-press: #2f6fd6; --edge: #dbe2ea; --error: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0c1320; --card: #131c2c; --fg: #e8edf4; --muted: #93a0b1;
+      --accent: #3b82f6; --accent-press: #5b96f2; --edge: #24324a; --error: #ff8f88;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; display: grid; place-items: center; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .card { width: min(400px, calc(100vw - 48px)); background: var(--card);
+    border: 1px solid var(--edge); border-radius: 16px; padding: 32px 28px 28px; }
+  .lockup { display: block; height: 42px; margin: 0 0 20px -6px; }
+  .lockup.dark { display: none; }
+  @media (prefers-color-scheme: dark) {
+    .lockup.light { display: none; }
+    .lockup.dark { display: block; }
+  }
+  h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 6px; }
+  p.hint { color: var(--muted); margin: 0 0 18px; }
+  label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+  input {
+    width: 100%; height: 40px; padding: 0 12px; font-size: 15px; color: var(--fg);
+    background: var(--bg); border: 1px solid var(--edge); border-radius: 10px; outline: none;
+  }
+  input:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+  button {
+    margin-top: 14px; width: 100%; height: 40px; border: 0; border-radius: 10px;
+    background: var(--accent); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  button:active { background: var(--accent-press); }
+  button[disabled] { opacity: 0.6; cursor: default; }
+  .error { color: var(--error); font-size: 14px; margin: 12px 0 0; min-height: 1em; }
+  .connecting { display: none; text-align: center; }
+  .connecting .spin {
+    width: 26px; height: 26px; margin: 6px auto 14px; border-radius: 50%;
+    border: 3px solid var(--edge); border-top-color: var(--accent); animation: r 0.9s linear infinite;
+  }
+  @keyframes r { to { transform: rotate(360deg); } }
+  .connecting p { color: var(--muted); margin: 0; overflow-wrap: anywhere; }
+  .fineprint { margin-top: 18px; font-size: 12.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+  <main class="card">
+    <img class="lockup light" src="lockup-ocean.svg" alt="Engram Store" />
+    <img class="lockup dark" src="lockup-mono-white.svg" alt="Engram Store" />
+
+    <section id="form">
+      <h1>Connect to your server</h1>
+      <p class="hint">This app is a shell around a vault you host. Enter your deployment's address to begin.</p>
+      <label for="server">Server address</label>
+      <input id="server" type="text" inputmode="url" autocapitalize="off" autocorrect="off"
+             spellcheck="false" placeholder="https://vault.example.com" autofocus />
+      <button id="connect">Connect</button>
+      <p class="error" id="error"></p>
+      <p class="fineprint">Servers must use https; plain http is supported for localhost only.</p>
+    </section>
+
+    <section class="connecting" id="connecting">
+      <div class="spin"></div>
+      <p id="connecting-to">Connecting&hellip;</p>
+    </section>
+  </main>
+
+<script>
+  const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+  const form = document.getElementById("form");
+  const connecting = document.getElementById("connecting");
+  const connectingTo = document.getElementById("connecting-to");
+  const input = document.getElementById("server");
+  const button = document.getElementById("connect");
+  const errorEl = document.getElementById("error");
+
+  function showForm(prefill, error) {
+    connecting.style.display = "none";
+    form.style.display = "block";
+    if (prefill) input.value = prefill;
+    errorEl.textContent = error || "";
+    button.disabled = false;
+    input.focus();
+  }
+  function showConnecting(origin) {
+    form.style.display = "none";
+    connecting.style.display = "block";
+    connectingTo.textContent = "Connecting to " + origin + "…";
+  }
+
+  async function connect() {
+    const value = input.value.trim();
+    if (!value) { errorEl.textContent = "Enter your server address."; return; }
+    button.disabled = true;
+    errorEl.textContent = "";
+    showConnecting(value);
+    try {
+      // On success the shell navigates this window away; only a failure returns.
+      await invoke("server_url_set", { url: value });
+    } catch (e) {
+      showForm(value, String(e));
+    }
+  }
+
+  button.addEventListener("click", connect);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") connect(); });
+
+  (async () => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("error")) {
+      showForm(params.get("origin") || "", params.get("error"));
+      return;
+    }
+    try {
+      const stored = invoke ? await invoke("server_url_get") : null;
+      if (stored) {
+        // The shell is probing this address at startup and will either
+        // navigate there or reload this page with the error.
+        showConnecting(stored);
+        return;
+      }
+    } catch (_) { /* fall through to the form */ }
+    showForm("", "");
+  })();
+</script>
+</body>
+</html>

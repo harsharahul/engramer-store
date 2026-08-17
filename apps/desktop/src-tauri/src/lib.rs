@@ -170,6 +170,11 @@ pub fn run() {
         ])
         .setup(|app| {
             watched::rebuild_watchers(app.handle());
+            // The window's first URL is "home": the bundled picker in a
+            // generic build, the baked deployment otherwise. Clearing the
+            // server override returns to it.
+            let home = app.get_webview_window("main").and_then(|w| w.url().ok());
+            app.manage(serverurl::HomeUrl(home));
             serverurl::apply_stored(app.handle());
             #[cfg(target_os = "ios")]
             if let Some(window) = app.get_webview_window("main") {
