@@ -533,6 +533,11 @@ export function ProfileView(props: {
             {store.isAdmin ? "Administrator · " : ""}
             End-to-end encrypted vault
           </div>
+          {shell && (
+            <div className="profile-sub">
+              Server: <b>{location.host}</b> · sign out to switch
+            </div>
+          )}
         </div>
         <div className="profile-head-actions">
           {unlockState === "on" && (

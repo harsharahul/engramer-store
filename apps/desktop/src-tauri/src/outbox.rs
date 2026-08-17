@@ -27,6 +27,15 @@ pub async fn outbox_drain() -> Result<DrainReport, String> {
     }
 }
 
+/// Drops every staged share-sheet upload; part of a server switch, where
+/// blobs sealed for the previous vault must never reach the next one.
+pub fn clear_staging() {
+    #[cfg(target_os = "ios")]
+    if let Some(dir) = apple::group_outbox_dir() {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 #[cfg(target_os = "ios")]
 mod apple {
     use super::DrainReport;
@@ -43,7 +52,7 @@ mod apple {
         token: String,
     }
 
-    fn group_outbox_dir() -> Option<PathBuf> {
+    pub(super) fn group_outbox_dir() -> Option<PathBuf> {
         unsafe {
             let class = AnyClass::get(c"NSFileManager")?;
             let manager: *mut AnyObject = msg_send![class, defaultManager];

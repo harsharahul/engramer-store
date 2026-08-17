@@ -96,6 +96,70 @@ fn probe_health(origin: &str) -> Result<String, String> {
     }
 }
 
+/// The origin the main window is actually on; the unlock items are scoped
+/// by it. The local picker page has an opaque origin that serializes as
+/// "null", which is fine: nothing on it touches secrets.
+pub fn current_origin(app: &AppHandle) -> String {
+    app.get_webview_window("main")
+        .and_then(|window| window.url().ok())
+        .map(|url| url.origin().ascii_serialization())
+        .unwrap_or_else(|| "null".to_string())
+}
+
+/// What a server switch must tear down first: the extension record and
+/// everything hanging off it. `None` when there is no record or it
+/// already belongs to the target origin.
+fn switch_teardown_needed(record: &[u8], new_origin: &str) -> Option<(String, String)> {
+    let value: serde_json::Value = serde_json::from_slice(record).ok()?;
+    let origin = value.get("origin")?.as_str()?.to_string();
+    let email = value.get("email")?.as_str()?.to_string();
+    (origin != new_origin).then_some((origin, email))
+}
+
+/// A switch removes real things from this device, so it says which, and
+/// asks, before anything happens.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+async fn confirm_switch(app: &AppHandle, new_origin: &str, old_origin: &str) -> Result<(), String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+    let message = format!(
+        "Switch this app to {}?\n\nThe drive and extension access for {} will be removed from this device. Files on that server are not affected.",
+        host_of(new_origin),
+        host_of(old_origin)
+    );
+    let dialog = app
+        .dialog()
+        .message(message)
+        .title("Switch server")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Switch".to_string(),
+            "Cancel".to_string(),
+        ));
+    let confirmed = tauri::async_runtime::spawn_blocking(move || dialog.blocking_show())
+        .await
+        .map_err(|err| err.to_string())?;
+    if confirmed {
+        Ok(())
+    } else {
+        Err("kept the current server".to_string())
+    }
+}
+
+/// Best effort, ordered so a crash midway leaves honest state: the
+/// extension key goes first (a keyless drive says "not signed in" rather
+/// than serving the old vault), then the drive itself, then the
+/// in-process registries and staged uploads.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+async fn teardown_previous(app: &AppHandle, email: String) {
+    let record_email = email.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        crate::keychain::delete_shared(crate::handoff::SERVICE, &record_email)
+    })
+    .await;
+    let _ = crate::filesprovider::files_provider_disable(email).await;
+    crate::media::clear_all(app);
+    let _ = tauri::async_runtime::spawn_blocking(crate::outbox::clear_staging).await;
+}
+
 fn navigate_main(app: &AppHandle, url: url::Url) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
@@ -182,6 +246,24 @@ pub async fn server_url_set(app: AppHandle, url: String) -> Result<(), String> {
     let final_origin = tauri::async_runtime::spawn_blocking(move || probe_health(&origin))
         .await
         .map_err(|err| err.to_string())??;
+    // Pointing at a different vault than the one the extensions hold a
+    // key for is a real switch: confirm it, then take the old server's
+    // presence off this device before the new one is written.
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        let record = tauri::async_runtime::spawn_blocking(|| {
+            crate::keychain::read_any(crate::handoff::SERVICE)
+        })
+        .await
+        .map_err(|err| err.to_string())?
+        .unwrap_or_default();
+        if let Some(bytes) = record {
+            if let Some((old_origin, old_email)) = switch_teardown_needed(&bytes, &final_origin) {
+                confirm_switch(&app, &final_origin, &old_origin).await?;
+                teardown_previous(&app, old_email).await;
+            }
+        }
+    }
     let path = store_path(&app)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
@@ -241,6 +323,22 @@ mod tests {
         let refused = parse_input("http://vault.example.com").unwrap_err();
         assert!(refused.contains("https"), "{refused}");
         assert!(parse_input("http://192.168.1.20:3080").is_err());
+    }
+
+    #[test]
+    fn a_switch_is_only_a_switch_when_the_origin_changes() {
+        let record = br#"{"v":1,"email":"a@example.com","origin":"https://one.example.com"}"#;
+        assert_eq!(
+            switch_teardown_needed(record, "https://two.example.com"),
+            Some(("https://one.example.com".into(), "a@example.com".into()))
+        );
+        assert_eq!(switch_teardown_needed(record, "https://one.example.com"), None);
+    }
+
+    #[test]
+    fn an_unreadable_record_never_triggers_teardown() {
+        assert_eq!(switch_teardown_needed(b"not json", "https://x.example.com"), None);
+        assert_eq!(switch_teardown_needed(br#"{"v":1}"#, "https://x.example.com"), None);
     }
 
     #[test]
