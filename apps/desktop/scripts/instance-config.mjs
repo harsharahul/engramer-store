@@ -20,12 +20,14 @@
  * origin call the shell's unlock commands, which is what makes Touch ID
  * work.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tauriDir = join(here, "..", "src-tauri");
+// Tests point the outputs elsewhere; a build always writes the real ones.
+const outDir = (process.env.ENGRAM_INSTANCE_DIR ?? "").trim() || tauriDir;
 
 // Derived from the committed configuration rather than restating it, so the
 // window keeps its size, title and everything else it is given there.
@@ -34,7 +36,16 @@ const config = JSON.parse(readFileSync(join(tauriDir, "tauri.conf.json"), "utf8"
 // Both files are written every time, including when nothing is set: the
 // build always passes them, and a stale one from an earlier build pointing
 // somewhere else would be worse than none.
+// A generic build bakes no server at all: the window opens a bundled page
+// that asks for one, and the runtime override does the rest. It is opt-in,
+// never inferred from a missing ENGRAM_APP_URL, because the dev flow relies
+// on the localhost fallback and a silent fallback once shipped a blank app.
+const generic = (process.env.ENGRAM_GENERIC ?? "").trim() === "1";
 const raw = (process.env.ENGRAM_APP_URL ?? "").trim().replace(/\/+$/, "");
+if (generic && raw) {
+  console.error("instance: ENGRAM_GENERIC=1 and ENGRAM_APP_URL are mutually exclusive; a generic build bakes no server");
+  process.exit(1);
+}
 let origin = config.app.windows?.[0]?.url ?? "http://localhost:3080";
 if (raw) {
   try {
@@ -48,9 +59,16 @@ if (raw) {
     process.exit(1);
   }
 }
-config.build.frontendDist = origin;
-for (const window of config.app.windows ?? []) {
-  window.url = origin;
+if (generic) {
+  config.build.frontendDist = "../picker";
+  for (const window of config.app.windows ?? []) {
+    window.url = "index.html";
+  }
+} else {
+  config.build.frontendDist = origin;
+  for (const window of config.app.windows ?? []) {
+    window.url = origin;
+  }
 }
 const instance = { build: config.build, app: { windows: config.app.windows } };
 const team = (process.env.APPLE_DEVELOPMENT_TEAM ?? "").trim();
@@ -69,7 +87,7 @@ if (team || buildNumber) {
   }
 }
 writeFileSync(
-  join(tauriDir, "tauri.instance.json"),
+  join(outDir, "tauri.instance.json"),
   `${JSON.stringify(instance, null, 2)}\n`,
 );
 
@@ -80,13 +98,18 @@ capability.description = "The deployment this build belongs to, named at build t
 // repoint the shell at a different vault, and a vault the owner chose to
 // sign into already holds their ciphertext, so granting it the shell's
 // commands adds no trust it does not have. Plain http stays pinned to the
-// baked (dev) origin.
-capability.remote = { urls: [origin, "https://**"] };
+// baked (dev) origin; a generic build has no baked origin to pin.
+capability.remote = { urls: generic ? ["https://**"] : [origin, "https://**"] };
+mkdirSync(join(outDir, "capabilities"), { recursive: true });
 writeFileSync(
-  join(tauriDir, "capabilities", "instance.json"),
+  join(outDir, "capabilities", "instance.json"),
   `${JSON.stringify(capability, null, 2)}\n`,
 );
 
 console.log(
-  raw ? `instance: building against ${origin}` : `instance: no ENGRAM_APP_URL set, using ${origin}`,
+  generic
+    ? "instance: generic build, the first run asks for the server"
+    : raw
+      ? `instance: building against ${origin}`
+      : `instance: no ENGRAM_APP_URL set, using ${origin}`,
 );
