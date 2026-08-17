@@ -3,6 +3,46 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.48.0] - 2026-08-16
+
+### Added
+- **The Mac app is a public download.** The releases page now carries a
+  generic, notarized DMG. No server is baked in: the first launch asks
+  for your deployment's address, and the app then behaves exactly like
+  a build made for that server. Deployments can point
+  `ENGRAMER_MAC_DMG_URL` at the release asset so their own Profile page
+  offers the same download. See `docs/native-apps.md`.
+- **A server address is checked before it is trusted.** The picker
+  accepts what a person actually types: a bare hostname assumes https,
+  a bare localhost assumes http, and a pasted URL is reduced to its
+  origin. The address must answer as an Engram Store server before it
+  is stored, redirects settle on the final origin, and a refusal says
+  what actually happened, from "could not reach" to "answered, but it
+  does not look like an Engram Store server". Plain http stays reserved
+  for localhost, because the shell's native features only extend to
+  https origins and would otherwise go silently missing.
+- **Switching servers is an orderly move.** Pointing the app at a
+  different vault asks first, in a native dialog that names both
+  servers, then removes the previous server's drive, extension key, and
+  staged uploads from this device before the new address is written.
+  Device-unlock secrets are now kept per server as well as per account,
+  so the same email on two vaults can never hand one server the other's
+  secret. The Profile page shows which server the app is on.
+- **The source is public.** Engram Store is on GitHub under
+  AGPL-3.0-only, with third-party notices, a contributor code of
+  conduct, and CI that runs the full test matrix on every pull request
+  and publishes the container image from main and releases.
+
+### Changed
+- The README and design docs caught up with the shipped product: the
+  apps page covers the Finder drive and the iPhone app, and the
+  environment table lists the registration, database, and collaboration
+  knobs.
+
+### Fixed
+- The login screen's server picker no longer replaces every failure
+  with one generic message; it shows the shell's actual reason.
+
 ## [0.47.0] - 2026-08-15
 
 ### Added
