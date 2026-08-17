@@ -22,6 +22,18 @@ pub async fn handoff_store(email: String, payload: String) -> Result<(), String>
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         return spawn_blocking(move || {
+            // One record, ever: the extensions read "the record" with no
+            // account, so a different account's leftover must not survive
+            // a new sign-in as a second, ambiguous item.
+            if let Ok(Some(existing)) = crate::keychain::read_any(SERVICE) {
+                if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&existing) {
+                    if let Some(prior) = value.get("email").and_then(|v| v.as_str()) {
+                        if prior != email {
+                            let _ = crate::keychain::delete_shared(SERVICE, prior);
+                        }
+                    }
+                }
+            }
             crate::keychain::store_shared(SERVICE, &email, payload.as_bytes())
         })
             .await

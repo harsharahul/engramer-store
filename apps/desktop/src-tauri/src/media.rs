@@ -123,6 +123,14 @@ pub fn media_clear(state: State<MediaState>) {
     state.sources.lock().expect("media state").clear();
 }
 
+/// The same revocation from Rust, for the server switch.
+pub fn clear_all(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(state) = app.try_state::<MediaState>() {
+        state.sources.lock().expect("media state").clear();
+    }
+}
+
 fn parse_range(header: Option<&str>, size: u64) -> Option<(u64, u64)> {
     let header = header?.trim();
     let rest = header.strip_prefix("bytes=")?;
