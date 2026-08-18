@@ -18,7 +18,9 @@ x-engramer: &engramer
   image: ghcr.io/harsharahul/engramer-store:latest
   build: .
   ports:
-    - "3080:3080"
+    # LAN deployments answer on every interface; behind a reverse proxy set
+    # ENGRAM_BIND=127.0.0.1 in .env so nothing can reach the app around it.
+    - "${ENGRAM_BIND:-0.0.0.0}:3080:3080"
   volumes:
     - engramer-data:/data
   environment: &engramer-env
@@ -82,13 +84,19 @@ services:
     <<: *rclone
     container_name: rclone-drime
     profiles: ["drime"]
+    networks:
+      default:
+        # The app reaches its gateway as plain "rclone" no matter which
+        # provider profile is active; the profiles are mutually exclusive,
+        # so the alias never collides.
+        aliases: [rclone]
     environment:
       RCLONE_CONFIG_REMOTE_TYPE: drime
       # Objects above 1M take Drime's chunked path, which lands on their
       # storage tier directly; the sub-cutoff path travels through their
       # application API and is several times slower per object.
       RCLONE_DRIME_UPLOAD_CUTOFF: 1M
-      RCLONE_CONFIG_REMOTE_ACCESS_TOKEN: "${DRIME_TOKEN:?create one under Settings, Developer}"
+      RCLONE_CONFIG_REMOTE_ACCESS_TOKEN: "${DRIME_TOKEN:-}" # create one under Settings, Developer
 
   engramer-pcloud:
     <<: *engramer
@@ -100,9 +108,40 @@ services:
     <<: *rclone
     container_name: rclone-pcloud
     profiles: ["pcloud"]
+    networks:
+      default:
+        aliases: [rclone]
     environment:
       RCLONE_CONFIG_REMOTE_TYPE: pcloud
-      RCLONE_CONFIG_REMOTE_TOKEN: "${PCLOUD_TOKEN:?paste the JSON from: rclone authorize pcloud}"
+      RCLONE_CONFIG_REMOTE_TOKEN: "${PCLOUD_TOKEN:-}" # paste the JSON from: rclone authorize pcloud
+
+  # Any backend rclone supports, configured the way rclone itself is
+  # configured. The named profiles above are conveniences for providers
+  # whose whole credential is one token; every other backend, including
+  # the OAuth ones, is a `rclone config` run away:
+  #
+  #   rclone config    # on any machine; name the remote "remote"
+  #   cp ~/.config/rclone/rclone.conf ./rclone.conf
+  #   docker compose -f compose.rclone.yml --profile custom up -d
+  #
+  # Mounted writable on purpose: OAuth backends refresh their tokens into
+  # the config file.
+  engramer-custom:
+    <<: *engramer
+    profiles: ["custom"]
+    depends_on:
+      - rclone-custom
+
+  rclone-custom:
+    <<: *rclone
+    container_name: rclone-custom
+    profiles: ["custom"]
+    networks:
+      default:
+        aliases: [rclone]
+    volumes:
+      - rclone-spool:/spool
+      - ./rclone.conf:/config/rclone/rclone.conf
 
 volumes:
   engramer-data:
