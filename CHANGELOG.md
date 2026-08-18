@@ -3,6 +3,41 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.49.0] - 2026-08-18
+
+### Added
+- **Uploads finish at disk speed on remote storage.** The rclone gateway
+  now spools writes to a bounded local volume and delivers them to the
+  provider in the background, retrying until they land and resuming
+  pending uploads across restarts. Photo uploads that waited seven to
+  ten seconds on provider ingest now finalize in about a second.
+  Objects above one megabyte take Drime's chunked path, which lands on
+  its storage tier directly.
+- **A setup skill for AI agents.** `skills/setup/SKILL.md` is a guided
+  installer any agent harness can follow: it interviews for the right
+  deployment shape, from a two-minute local vault to a public server on
+  consumer cloud storage, and verifies the result before calling it
+  done. The README points agents at it.
+- **Any rclone backend as the backing store.** A `custom` gateway
+  profile mounts an ordinary `rclone.conf`, reaching every provider
+  rclone supports, including OAuth ones such as Dropbox, Google Drive,
+  OneDrive and Box. Providers like Drime and pCloud remain streamlined
+  for getting started: one token in `.env` and a profile flag.
+
+### Fixed
+- **The ML runtimes no longer re-download every session.** The onnx
+  runtime, tesseract cores, barcode reader and entity-extractor runtime
+  (tens of megabytes) now live under versioned immutable paths, and the
+  service worker keeps them in Cache Storage. Safari-based clients,
+  including the iPhone and Mac apps, previously re-fetched and
+  re-compiled them before the first upload of every session.
+- **The gateway recipe boots as shipped.** The app's gateway endpoint
+  hostname was never defined by any service, so the documented
+  quickstart failed on a clean host; each sidecar now carries the
+  shared alias. Provider tokens are only required by the profile that
+  uses them, and a new `ENGRAM_BIND` setting lets reverse-proxy
+  deployments keep the app on loopback.
+
 ## [0.48.0] - 2026-08-16
 
 ### Added
