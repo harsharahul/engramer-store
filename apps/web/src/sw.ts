@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import { cleanupOutdatedCaches, createHandlerBoundToURL, precacheAndRoute } from "workbox-precaching";
 import { NavigationRoute, registerRoute } from "workbox-routing";
+import { RUNTIME_CACHE, isCurrentRuntimeAsset, isRuntimeAssetPath } from "./runtimeassets";
 import { clientsClaim } from "workbox-core";
 import {
   ready,
@@ -469,10 +470,81 @@ async function serveMedia(request: Request, fileId: string): Promise<Response> {
   return legacyResponse(fileId, entry);
 }
 
+/**
+ * Cache-first for the ML runtimes: Safari's HTTP cache refuses to retain
+ * entries this large, so Cache Storage is what makes the second upload
+ * session skip a tens-of-megabytes download and wasm recompile. Paths are
+ * versioned, so an entry can never be stale; activate evicts the previous
+ * version's files after an upgrade.
+ */
+async function serveRuntimeAsset(request: Request): Promise<Response> {
+  const cache = await caches.open(RUNTIME_CACHE);
+  const hit = await cache.match(request, { ignoreSearch: true });
+  if (hit) {
+    return hit;
+  }
+  const response = await fetch(request);
+  if (response.ok) {
+    void cache.put(request, response.clone()).catch(() => {});
+  }
+  return response;
+}
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(RUNTIME_CACHE);
+      for (const request of await cache.keys()) {
+        if (!isCurrentRuntimeAsset(new URL(request.url).pathname)) {
+          await cache.delete(request);
+        }
+      }
+    })(),
+  );
+});
+
+self.addEventListener("message", (event) => {
+  const data = event.data as { type?: string; urls?: string[] } | undefined;
+  if (!data || data.type !== "warm-runtimes" || !Array.isArray(data.urls)) {
+    return;
+  }
+  const urls = data.urls;
+  // Best-effort background prefetch of what the enabled features will
+  // load, so the first upload of a session starts warm.
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(RUNTIME_CACHE);
+      for (const url of urls) {
+        if (!isCurrentRuntimeAsset(new URL(url, self.location.origin).pathname)) {
+          continue; // never let a page populate arbitrary cache entries
+        }
+        if (await cache.match(url)) {
+          continue;
+        }
+        try {
+          const response = await fetch(url);
+          if (response.ok) {
+            await cache.put(url, response);
+          }
+        } catch {
+          // Warmth is optional; the fetch path fills the cache on use.
+        }
+      }
+    })(),
+  );
+});
+
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (url.origin === self.location.origin && url.pathname.startsWith("/media/")) {
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+  if (url.pathname.startsWith("/media/")) {
     const fileId = url.pathname.slice("/media/".length);
     event.respondWith(serveMedia(event.request, fileId));
+    return;
+  }
+  if (event.request.method === "GET" && isRuntimeAssetPath(url.pathname)) {
+    event.respondWith(serveRuntimeAsset(event.request));
   }
 });

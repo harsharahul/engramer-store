@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { extname, join } from "node:path";
+import { extname, join, relative, sep } from "node:path";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
@@ -386,7 +386,21 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
       }
       return reply.send(createReadStream(compressed));
     });
-    await app.register(fastifyStatic, { root: config.webDistDir });
+    await app.register(fastifyStatic, {
+      root: config.webDistDir,
+      // The ML runtimes (onnx wasm, tesseract cores, barcode reader) are
+      // tens of megabytes under versioned paths; the default max-age=0
+      // makes Safari refuse to keep entries that large, so every upload
+      // session re-downloads and re-compiles them. Versioned paths are
+      // immutable by construction, and the language data file only ever
+      // changes by being renamed.
+      setHeaders: (reply: FastifyReply, filepath: string) => {
+        const rel = relative(config.webDistDir!, filepath).split(sep).join("/");
+        if (/^(ort|ocr|zxing|gliner-ort)\//.test(rel)) {
+          reply.header("cache-control", "public, max-age=31536000, immutable");
+        }
+      },
+    });
     // Single-page app: unknown non-API paths fall through to the client router.
     app.setNotFoundHandler((request, reply) => {
       if (request.url.startsWith("/api/")) {

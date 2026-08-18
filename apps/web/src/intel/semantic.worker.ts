@@ -19,9 +19,10 @@ const MODEL = "Xenova/mobileclip_s0";
 env.allowRemoteModels = false;
 env.allowLocalModels = true;
 env.localModelPath = "/models/";
-// The ONNX runtime must load from this origin, never a CDN.
+// The ONNX runtime must load from this origin, never a CDN. The versioned
+// base lets the server mark the multi-megabyte wasm immutable.
 if (env.backends.onnx.wasm) {
-  env.backends.onnx.wasm.wasmPaths = "/ort/";
+  env.backends.onnx.wasm.wasmPaths = __ORT_BASE__;
 }
 
 let loading: Promise<{
