@@ -3,6 +3,7 @@
 **Self-hostable cloud storage that is end-to-end encrypted, and still smart.**
 
 [![CI](https://github.com/harsharahul/engramer-store/actions/workflows/ci.yml/badge.svg)](https://github.com/harsharahul/engramer-store/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/harsharahul/engramer-store)](https://github.com/harsharahul/engramer-store/releases/latest)
 [![Docker](https://img.shields.io/badge/ghcr.io-engramer--store-2496ed?logo=docker&logoColor=white)](https://github.com/harsharahul/engramer-store/pkgs/container/engramer-store)
 [![Node 22+](https://img.shields.io/badge/node-22%2B-brightgreen)](package.json)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
