@@ -76,7 +76,10 @@ Or with Compose: `docker compose up -d` (see [compose.yml](compose.yml)). All st
 
 ### On cloud storage you already pay for
 
-Point the vault at Drime, pCloud, or any other provider rclone reaches:
+The vault can keep its encrypted bytes on any provider rclone reaches.
+Some, Drime and pCloud for example, are already streamlined for getting
+started: one token in `.env` and a profile flag. Every other provider
+works through the `custom` profile with an ordinary `rclone.conf`.
 
 ```bash
 cp .env.example .env       # paste your provider token; the file explains each line
