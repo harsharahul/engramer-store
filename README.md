@@ -57,6 +57,14 @@ The server can never see: file contents, file names, folder names, thumbnails, e
 
 ## Quickstart
 
+**Setting up with an AI agent?** Point it at
+[skills/setup/SKILL.md](skills/setup/SKILL.md) and ask it to set up Engram
+Store. The skill is a guided installer for any agent that can run shell
+commands: it interviews for the right deployment shape, from a two-minute
+local vault to a public server on consumer cloud storage, and verifies the
+result before calling it done. It works loaded as a skill or simply pasted
+into context.
+
 ### Docker
 
 ```bash

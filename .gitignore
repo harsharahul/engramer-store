@@ -6,6 +6,8 @@ coverage/
 .env
 .env.*
 !.env.example
+# Holds the provider credential for the custom gateway profile
+rclone.conf
 
 # Server runtime state
 data/
