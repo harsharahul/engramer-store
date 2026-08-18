@@ -24,13 +24,21 @@ remote that supports plain file operations.
 
 ## Quick start on a consumer cloud
 
-Using Drime as the example; the pCloud profile differs only in the token.
+Any provider rclone reaches can back the vault. Some are already
+streamlined for getting started, Drime and pCloud for example: their
+whole credential is one token in `.env` and a profile flag. Using Drime
+here; pCloud differs only in the token.
 
 1. Create an API token with your provider. Drime: Settings, then Developer.
 2. `cp .env.example .env`, paste the token, and generate the internal
    gateway credentials with the two `openssl` lines in the file.
 3. `docker compose -f compose.rclone.yml --profile drime up -d`, then open
    `http://your-host:3080` and create the first account.
+
+Every other provider, including the OAuth ones (Dropbox, Google Drive,
+OneDrive, Box), uses the `custom` profile: run `rclone config` on any
+machine, name the remote `remote`, copy the resulting `rclone.conf` next
+to the compose file, and start with `--profile custom`.
 
 What appears in your provider account is a single folder of opaque
 ciphertext under meaningless names. Do not rename or reorganize anything in
