@@ -45,6 +45,15 @@ x-engramer: &engramer
 
 # The sidecar publishes no ports: it speaks plain HTTP with static
 # credentials and is reachable only from the compose network.
+#
+# Writes spool to the local volume and drain to the provider in the
+# background (--vfs-cache-mode writes): an upload is acknowledged once it
+# is durably on this machine's disk, and rclone keeps retrying delivery,
+# resuming pending uploads across restarts. Without the spool, every
+# upload waits out the provider's own write latency, which for app-tier
+# providers is seconds per file. The honest trade: losing this volume
+# before a file drains loses that file, so the spool belongs on the same
+# disk you already trust with the metadata database.
 x-rclone: &rclone
   image: rclone/rclone:latest
   command: >
@@ -52,7 +61,14 @@ x-rclone: &rclone
     --addr :8333
     --auth-key "${ENGRAM_GATEWAY_KEY},${ENGRAM_GATEWAY_SECRET}"
     --dir-cache-time 24h
-    --vfs-cache-mode off
+    --vfs-cache-mode writes
+    --cache-dir /spool
+    --vfs-write-back 2s
+    --vfs-cache-max-size 20G
+    --vfs-cache-min-free-space 2G
+    --transfers 8
+  volumes:
+    - rclone-spool:/spool
   restart: unless-stopped
 
 services:
@@ -68,6 +84,10 @@ services:
     profiles: ["drime"]
     environment:
       RCLONE_CONFIG_REMOTE_TYPE: drime
+      # Objects above 1M take Drime's chunked path, which lands on their
+      # storage tier directly; the sub-cutoff path travels through their
+      # application API and is several times slower per object.
+      RCLONE_DRIME_UPLOAD_CUTOFF: 1M
       RCLONE_CONFIG_REMOTE_ACCESS_TOKEN: "${DRIME_TOKEN:?create one under Settings, Developer}"
 
   engramer-pcloud:
@@ -86,3 +106,4 @@ services:
 
 volumes:
   engramer-data:
+  rclone-spool:

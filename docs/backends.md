@@ -55,6 +55,16 @@ The recipes in `compose.rclone.yml` set all three.
 A consumer cloud is seconds away per request. The deployment stays fast by
 keeping request-heavy data local and shaping what remains:
 
+- **A local write spool** (`--vfs-cache-mode writes` in the gateway, on by
+  default in the recipe). An upload is acknowledged once it is durably on
+  the server's disk; the gateway drains it to the provider in the
+  background and keeps retrying, resuming pending uploads across restarts.
+  Without it, every upload waits out the provider's own write latency,
+  which for providers that ingest through an application API is seconds
+  per file. The trade, stated plainly: between acknowledgment and drain,
+  the only copy is the server's disk, so the spool volume deserves the
+  same care as the metadata database. Bound it with
+  `--vfs-cache-max-size`; the recipe uses 20G.
 - **Derived data on local disk** (`ENGRAMER_DERIVED_BACKEND=fs`).
   Thumbnails and search indexes are request-heavy and byte-light; a grid
   paint touches hundreds. On the local volume they cost nothing. Everything
@@ -87,7 +97,16 @@ content reads fail, and the client surfaces that as a sync error.
   keys. The ciphertext sits with the provider, and the derived tier
   regrows itself.
 - An rclone sidecar restart aborts uploads in flight; the client notices
-  and the upload retries. Nothing stored is affected.
+  and the upload retries. Files already spooled are safe: the gateway
+  re-uploads pending spool entries when it comes back.
+- If a reverse proxy or WAF fronts the deployment, two settings decide
+  whether uploads work at all: HTTP/3 must be off unless the proxy's
+  QUIC stack demonstrably handles multi-megabyte request bodies (several
+  do not, and the failure is a silent stream reset that clients report
+  as a network error), and any request-body inspection limit must either
+  exceed the largest upload part or fail open. Encrypted uploads are
+  indistinguishable from random bytes, so body inspection buys nothing
+  here anyway.
 - Provider terms of service are your responsibility; some providers
   restrict API-only usage patterns.
 
