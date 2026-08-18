@@ -40,7 +40,7 @@ async function getReader(): Promise<Reader> {
       reader.prepareZXingModule({
         overrides: {
           locateFile: (path: string, prefix: string) =>
-            path.endsWith(".wasm") ? `/zxing/${path}` : `${prefix}${path}`,
+            path.endsWith(".wasm") ? `${__ZXING_BASE__}${path}` : `${prefix}${path}`,
         },
         fireImmediately: false,
       });

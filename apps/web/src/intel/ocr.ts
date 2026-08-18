@@ -38,8 +38,10 @@ async function getWorker(): Promise<Worker> {
     workerPromise = (async () => {
       const { createWorker, OEM } = await import("tesseract.js");
       return createWorker("eng", OEM.LSTM_ONLY, {
-        workerPath: "/ocr/worker.min.js",
-        corePath: "/ocr",
+        // Versioned base so the server can serve these as immutable; the
+        // language data keeps its stable unversioned home in public/ocr.
+        workerPath: `${__OCR_BASE__}worker.min.js`,
+        corePath: __OCR_BASE__.replace(/\/$/, ""),
         langPath: "/ocr",
         gzip: true,
       });

@@ -26,7 +26,7 @@ async function load(): Promise<Gliner> {
     onnxSettings: {
       modelPath: `/models/${MODEL}/onnx/model_quantized.onnx`,
       executionProvider: "wasm",
-      wasmPaths: "/gliner-ort/",
+      wasmPaths: __GLINER_ORT_BASE__,
     },
     transformersSettings: { allowLocalModels: true, useBrowserCache: true },
     maxWidth: 12,

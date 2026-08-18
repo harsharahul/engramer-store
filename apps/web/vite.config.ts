@@ -14,6 +14,23 @@ const require = createRequire(import.meta.url);
  */
 const version: string = require("./package.json").version;
 
+/** Walks up from a module file to its package's declared version. Stub
+ * package.json files (type markers in dist folders) are skipped. */
+function packageVersion(fromFile: string): string {
+  let dir = dirname(fromFile);
+  for (let i = 0; i < 6; i++) {
+    const manifest = join(dir, "package.json");
+    if (existsSync(manifest)) {
+      const parsed = require(manifest) as { version?: string };
+      if (parsed.version) {
+        return parsed.version;
+      }
+    }
+    dir = dirname(dir);
+  }
+  throw new Error(`no package version found above ${fromFile}`);
+}
+
 /**
  * Serves the OCR runtime (tesseract worker + wasm cores) under /ocr with
  * stable, unhashed names: the wasm.js loaders resolve their .wasm siblings by
@@ -23,6 +40,15 @@ const version: string = require("./package.json").version;
 function ocrAssets(): Plugin {
   const workerDir = dirname(require.resolve("tesseract.js/dist/worker.min.js"));
   const coreDir = dirname(require.resolve("tesseract.js-core/package.json"));
+  // The runtime version in the path is what lets the server mark these
+  // multi-megabyte files immutable: an upgrade changes the path instead of
+  // the bytes behind it, so a cached old runtime can never pair with new
+  // application code. Both packages contribute, so both version the path.
+  const ocrVersion = [
+    packageVersion(join(workerDir, "worker.min.js")),
+    (require(join(coreDir, "package.json")) as { version: string }).version,
+  ].join("-");
+  const ocrBase = `/ocr/${ocrVersion}/`;
   const cores = [
     "tesseract-core-relaxedsimd-lstm", // preferred by current Chromium
     "tesseract-core-simd-lstm",
@@ -39,6 +65,9 @@ function ocrAssets(): Plugin {
   let isBuild = false;
   return {
     name: "engram-ocr-assets",
+    config() {
+      return { define: { __OCR_BASE__: JSON.stringify(ocrBase) } };
+    },
     configResolved(config) {
       outDir = config.build.outDir;
       // Vitest also loads this config, with a placeholder outDir; only a real
@@ -49,7 +78,7 @@ function ocrAssets(): Plugin {
       if (!isBuild) {
         return;
       }
-      const target = join(outDir, "ocr");
+      const target = join(outDir, "ocr", ocrVersion);
       mkdirSync(target, { recursive: true });
       for (const file of files) {
         if (existsSync(file.from)) {
@@ -61,7 +90,7 @@ function ocrAssets(): Plugin {
       server.middlewares.use((req, res, next) => {
         // Dev-only: Vite tags dynamic imports with ?import, so match the path.
         const path = (req.url ?? "").split("?")[0];
-        const hit = files.find((f) => path === `/ocr/${f.name}`);
+        const hit = files.find((f) => path === `${ocrBase}${f.name}`);
         if (!hit) {
           return next();
         }
@@ -85,6 +114,8 @@ function ortAssets(): Plugin {
   const transformersEntry = require.resolve("@huggingface/transformers");
   const ortEntry = require.resolve("onnxruntime-web", { paths: [dirname(transformersEntry)] });
   const ortDist = dirname(ortEntry);
+  const ortVersion = packageVersion(ortEntry);
+  const ortBase = `/ort/${ortVersion}/`;
   const names = [
     "ort-wasm-simd-threaded.asyncify.mjs",
     "ort-wasm-simd-threaded.asyncify.wasm",
@@ -96,6 +127,9 @@ function ortAssets(): Plugin {
   let isBuild = false;
   return {
     name: "engram-ort-assets",
+    config() {
+      return { define: { __ORT_BASE__: JSON.stringify(ortBase) } };
+    },
     configResolved(config) {
       outDir = config.build.outDir;
       isBuild = config.command === "build" && !process.env.VITEST;
@@ -104,7 +138,7 @@ function ortAssets(): Plugin {
       if (!isBuild) {
         return;
       }
-      const target = join(outDir, "ort");
+      const target = join(outDir, "ort", ortVersion);
       mkdirSync(target, { recursive: true });
       for (const file of files) {
         if (existsSync(file.from)) {
@@ -116,7 +150,7 @@ function ortAssets(): Plugin {
       server.middlewares.use((req, res, next) => {
         // Dev-only: Vite tags dynamic imports with ?import, so match the path.
         const path = (req.url ?? "").split("?")[0];
-        const hit = files.find((f) => path === `/ort/${f.name}`);
+        const hit = files.find((f) => path === `${ortBase}${f.name}`);
         if (!hit) {
           return next();
         }
@@ -139,6 +173,8 @@ function zxingAssets(): Plugin {
   // Exports maps hide the package root, so resolve the entry and walk to the
   // wasm that sits beside the bundled readers.
   const readerEntry = require.resolve("zxing-wasm/reader");
+  const zxingVersion = packageVersion(readerEntry);
+  const zxingBase = `/zxing/${zxingVersion}/`;
   const files = [
     {
       from: join(dirname(readerEntry), "..", "..", "reader", "zxing_reader.wasm"),
@@ -149,6 +185,9 @@ function zxingAssets(): Plugin {
   let isBuild = false;
   return {
     name: "engram-zxing-assets",
+    config() {
+      return { define: { __ZXING_BASE__: JSON.stringify(zxingBase) } };
+    },
     configResolved(config) {
       outDir = config.build.outDir;
       isBuild = config.command === "build" && !process.env.VITEST;
@@ -157,7 +196,7 @@ function zxingAssets(): Plugin {
       if (!isBuild) {
         return;
       }
-      const target = join(outDir, "zxing");
+      const target = join(outDir, "zxing", zxingVersion);
       mkdirSync(target, { recursive: true });
       for (const file of files) {
         if (existsSync(file.from)) {
@@ -168,7 +207,7 @@ function zxingAssets(): Plugin {
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const path = (req.url ?? "").split("?")[0];
-        const hit = files.find((f) => path === `/zxing/${f.name}`);
+        const hit = files.find((f) => path === `${zxingBase}${f.name}`);
         if (!hit) {
           return next();
         }
@@ -189,6 +228,8 @@ function glinerAssets(): Plugin {
   const glinerEntry = require.resolve("gliner");
   const ortEntry = require.resolve("onnxruntime-web", { paths: [dirname(glinerEntry)] });
   const ortDist = dirname(ortEntry);
+  const glinerVersion = packageVersion(ortEntry);
+  const glinerBase = `/gliner-ort/${glinerVersion}/`;
   const names = [
     "ort-wasm-simd-threaded.mjs",
     "ort-wasm-simd-threaded.wasm",
@@ -200,6 +241,9 @@ function glinerAssets(): Plugin {
   let isBuild = false;
   return {
     name: "engram-gliner-assets",
+    config() {
+      return { define: { __GLINER_ORT_BASE__: JSON.stringify(glinerBase) } };
+    },
     configResolved(config) {
       outDir = config.build.outDir;
       isBuild = config.command === "build" && !process.env.VITEST;
@@ -208,7 +252,7 @@ function glinerAssets(): Plugin {
       if (!isBuild) {
         return;
       }
-      const target = join(outDir, "gliner-ort");
+      const target = join(outDir, "gliner-ort", glinerVersion);
       mkdirSync(target, { recursive: true });
       for (const file of files) {
         if (existsSync(file.from)) {
@@ -219,7 +263,7 @@ function glinerAssets(): Plugin {
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const path = (req.url ?? "").split("?")[0];
-        const hit = files.find((f) => path === `/gliner-ort/${f.name}`);
+        const hit = files.find((f) => path === `${glinerBase}${f.name}`);
         if (!hit) {
           return next();
         }
@@ -365,6 +409,8 @@ export default defineConfig({
           "ocr/**",
           "models/**",
           "ort/**",
+          "zxing/**",
+          "gliner-ort/**",
           "office/**",
           "version.json",
           "**/heic-decode-*.js",
