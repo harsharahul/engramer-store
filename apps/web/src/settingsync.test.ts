@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { generateKey, ready } from "@engramer/crypto";
+import { generateKey, ready, secretBoxOpen } from "@engramer/crypto";
 
 const rig = vi.hoisted(() => ({
   remote: { blob: null as string | null, updatedAt: 0 },
@@ -85,12 +85,22 @@ describe("settings snapshot and apply", () => {
 });
 
 describe("pull and push", () => {
-  it("seeds an account that has no settings yet from this device", async () => {
+  it("seeds an account that has no settings yet from this device, sealed", async () => {
+    const key = generateKey();
     setOcrEnabled(true);
-    await pullSettings(account, generateKey());
+    await pullSettings(account, key);
     expect(rig.puts).toHaveLength(1);
-    // Sealed, not readable: the server holds ciphertext.
-    expect(rig.puts[0]).not.toContain("ocr");
+    // Sealed, not readable: the blob is exactly a nonce and ciphertext
+    // (checking for absent plaintext substrings instead was a flake:
+    // random base64 eventually spells any three letters), it opens only
+    // under the right key, and what it opens to is the settings.
+    const box = JSON.parse(rig.puts[0]!) as { nonce: string; ciphertext: string };
+    expect(Object.keys(box).sort()).toEqual(["ciphertext", "nonce"]);
+    expect(() => secretBoxOpen(box, generateKey())).toThrow();
+    const opened = JSON.parse(
+      new TextDecoder().decode(secretBoxOpen(box, key)),
+    ) as SyncedSettings;
+    expect(opened.ocr).toBe(true);
   });
 
   it("applies a newer remote blob and remembers how far it read", async () => {
