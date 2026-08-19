@@ -886,6 +886,21 @@ async function uploadInParts(
   }
 }
 
+/** The content digest of any upload source, read in bounded windows; the
+ * same digest an upload stores in metadata, so the two can be compared. */
+export async function sourceDigest(file: UploadSource): Promise<string> {
+  const digester = createDigester();
+  for (let offset = 0; offset < file.size; offset += STREAM_CHUNK_SIZE) {
+    const slice = file.slice(offset, Math.min(offset + STREAM_CHUNK_SIZE, file.size));
+    const window = new Uint8Array(await slice.arrayBuffer());
+    if (window.length !== slice.size) {
+      throw new Error(`read ${window.length} bytes of a ${slice.size} byte slice`);
+    }
+    digester.update(window);
+  }
+  return digester.final();
+}
+
 /** Encrypts a prepared file and uploads content plus thumbnail. */
 export async function encryptAndUpload(
   file: UploadSource,
