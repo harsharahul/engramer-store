@@ -26,6 +26,7 @@ commands.allow = [
     "picked_file_stat",
     "picked_file_read_range",
     "picked_file_delete",
+    "picked_sweep",
     "watched_file_stat",
     "watched_file_read_range",
     "native_unlock_available",

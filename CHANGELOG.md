@@ -6,6 +6,14 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Added
+- **Interrupted uploads continue where they stopped.** A large photo or
+  video upload the app was killed in the middle of no longer starts
+  over: the next open offers Resume and Discard in the upload tray, and
+  resuming sends only the parts that never reached the server, byte for
+  byte what the interrupted run would have sent. While an upload is
+  incomplete, the device keeps a record of it - session, finished parts,
+  and the file key sealed under the master key - removed the moment the
+  upload finishes either way.
 - **Settings follow the account.** Image reading, meaning search, date
   scanning, entity extraction, automatic fill-in, and the backup knobs
   now travel with the account as one blob sealed on the device with the

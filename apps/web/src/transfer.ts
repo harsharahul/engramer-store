@@ -760,6 +760,38 @@ export function contentCiphertextSize(file: UploadSource): number {
   return isMediaFile(file) ? chunkedCiphertextSize(file.size) : streamCiphertextSize(file.size);
 }
 
+/** Whether an interrupted upload of this file could continue: it must
+ * ride the parts path, in the chunked format that seals by position. */
+export function resumableUpload(file: UploadSource): boolean {
+  return isMediaFile(file) && contentCiphertextSize(file) > PART_THRESHOLD;
+}
+
+/** One part's place in an upload: which chunks it carries, and whether
+ * its bytes reached the server. What a resume record is made of. */
+export interface ResumePart {
+  no: number;
+  firstChunk: number;
+  chunks: number;
+  done: boolean;
+}
+
+/** Where an upload reports the facts a resume would need. Everything is
+ * called as it happens, so a record is current at any kill. */
+export interface UploadJournal {
+  begin(info: { fileId: string; session: string; header: Uint8Array; fileKey: Uint8Array }): void;
+  part(part: ResumePart): void;
+  finish(): void;
+}
+
+/** A killed upload, as its journal last described it. */
+export interface UploadResumeState {
+  fileId: string;
+  session: string;
+  header: Uint8Array;
+  fileKey: Uint8Array;
+  parts: ResumePart[];
+}
+
 async function uploadInParts(
   file: UploadSource,
   fileId: string,
@@ -769,20 +801,53 @@ async function uploadInParts(
   // Digested in the same pass that encrypts, so a file too large to hold at
   // once is never read twice.
   digester: Digester,
+  journal?: UploadJournal,
+  resume?: UploadResumeState,
 ): Promise<number> {
   const total = contentCiphertextSize(file);
-  const { session } = await beginPartUpload(fileId, total);
+  const session = resume ? resume.session : (await beginPartUpload(fileId, total)).session;
   try {
     const encryptor = isMediaFile(file)
-      ? new ChunkedEncryptor(fileKey, file.size)
+      ? new ChunkedEncryptor(fileKey, file.size, resume?.header)
       : new StreamEncryptor(fileKey);
+    if (resume && !(encryptor instanceof ChunkedEncryptor)) {
+      // The sequential stream cipher cannot be re-entered mid-stream;
+      // only the chunked media format seals by position.
+      throw new Error("only chunked media uploads can resume");
+    }
+    journal?.begin({ fileId, session, header: encryptor.header, fileKey });
     const chunkCount = Math.max(1, Math.ceil(file.size / STREAM_CHUNK_SIZE));
-    let pieces: Uint8Array[] = [encryptor.header];
-    let pieceBytes = encryptor.header.length;
+    // Recorded parts replay with their exact spans (part boundaries were
+    // sized adaptively, so they cannot be re-derived); new parts continue
+    // after the highest recorded number. Records list chunks from zero,
+    // contiguously, because encryption is sequential.
+    const recorded = (resume?.parts ?? []).slice().sort((a, b) => a.firstChunk - b.firstChunk);
+    // The MAC each sealed chunk carries; what makes ciphertext bigger
+    // than plaintext, header aside.
+    const perChunkOverhead =
+      encryptor instanceof ChunkedEncryptor
+        ? (total - encryptor.header.length - file.size) / chunkCount
+        : 0;
+    const sealedSpanBytes = (part: ResumePart) => {
+      const plainStart = part.firstChunk * STREAM_CHUNK_SIZE;
+      const plainEnd = Math.min((part.firstChunk + part.chunks) * STREAM_CHUNK_SIZE, file.size);
+      const chunkBytes = plainEnd - plainStart + part.chunks * perChunkOverhead;
+      return part.no === 1 ? chunkBytes + encryptor.header.length : chunkBytes;
+    };
+    // The format header opens the first part's body. A resume record
+    // with parts already knows where it went; a record killed before any
+    // part launched starts over exactly like a fresh run.
+    const headerOpensFirstBody = !resume || recorded.length === 0;
+    let pieces: Uint8Array[] = headerOpensFirstBody ? [encryptor.header] : [];
+    let pieceBytes = headerOpensFirstBody ? encryptor.header.length : 0;
     let chunksInPart = 0;
     let chunksPerPart = CHUNKS_PER_PART;
-    let partNo = 0;
-    let settled = 0;
+    let partNo = recorded.reduce((highest, part) => Math.max(highest, part.no), 0);
+    // Bytes already on the server count as settled from the start, so a
+    // resumed bar begins where the killed upload left off.
+    let settled = recorded.filter((p) => p.done).reduce((n, p) => n + sealedSpanBytes(p), 0);
+    let planIndex = 0;
+    let currentPlan: ResumePart | null = null;
     // Encryption stays strictly sequential (the stream cipher demands it);
     // finished part bodies overlap on the network so latency does not
     // serialize with crypto. Parts land by number, so order is free.
@@ -796,7 +861,7 @@ async function uploadInParts(
       }
       onProgress((settled + moving) / total);
     };
-    const launch = (no: number, body: Uint8Array) => {
+    const launch = (no: number, body: Uint8Array, span: ResumePart) => {
       const started = Date.now();
       const task = sendPartWithRetry(
         fileId,
@@ -811,6 +876,7 @@ async function uploadInParts(
       )
         .then(() => {
           settled += body.length;
+          journal?.part({ ...span, done: true });
           // Size the next parts to the pace just measured: a slow or
           // retried part shrinks the window, a quick one restores it.
           const elapsed = Date.now() - started;
@@ -842,6 +908,17 @@ async function uploadInParts(
       if (signal?.aborted) {
         throw new ApiError(UPLOAD_CANCELLED, "upload cancelled");
       }
+      if (!currentPlan && planIndex < recorded.length && recorded[planIndex]!.firstChunk === i) {
+        currentPlan = recorded[planIndex]!;
+        planIndex++;
+        chunksInPart = 0;
+        if (!currentPlan.done && currentPlan.no === 1 && resume) {
+          // The first part's body carries the format header; a replay of
+          // it must, too.
+          pieces.push(encryptor.header);
+          pieceBytes += encryptor.header.length;
+        }
+      }
       const start = i * STREAM_CHUNK_SIZE;
       const slice = file.slice(start, Math.min(start + STREAM_CHUNK_SIZE, file.size));
       const plainChunk = new Uint8Array(await slice.arrayBuffer());
@@ -849,25 +926,50 @@ async function uploadInParts(
         throw new Error(`read ${plainChunk.length} bytes of a ${slice.size} byte slice`);
       }
       digester.update(plainChunk);
-      const sealed =
-        encryptor instanceof ChunkedEncryptor
-          ? encryptor.seal(i, plainChunk)
-          : encryptor.push(plainChunk, i === chunkCount - 1);
-      pieces.push(sealed);
-      pieceBytes += sealed.length;
+      if (!currentPlan?.done) {
+        const sealed =
+          encryptor instanceof ChunkedEncryptor
+            ? encryptor.seal(i, plainChunk)
+            : encryptor.push(plainChunk, i === chunkCount - 1);
+        pieces.push(sealed);
+        pieceBytes += sealed.length;
+      }
       chunksInPart += 1;
-      if (chunksInPart >= chunksPerPart || i === chunkCount - 1) {
-        const body = new Uint8Array(pieceBytes);
-        let offset = 0;
-        for (const piece of pieces) {
-          body.set(piece, offset);
-          offset += piece.length;
+      const boundary = currentPlan
+        ? chunksInPart >= currentPlan.chunks
+        : chunksInPart >= chunksPerPart || i === chunkCount - 1;
+      if (boundary) {
+        if (currentPlan) {
+          if (!currentPlan.done) {
+            const body = new Uint8Array(pieceBytes);
+            let offset = 0;
+            for (const piece of pieces) {
+              body.set(piece, offset);
+              offset += piece.length;
+            }
+            launch(currentPlan.no, body, currentPlan);
+          }
+          currentPlan = null;
+        } else {
+          const body = new Uint8Array(pieceBytes);
+          let offset = 0;
+          for (const piece of pieces) {
+            body.set(piece, offset);
+            offset += piece.length;
+          }
+          partNo += 1;
+          const span: ResumePart = {
+            no: partNo,
+            firstChunk: i - chunksInPart + 1,
+            chunks: chunksInPart,
+            done: false,
+          };
+          journal?.part(span);
+          launch(partNo, body, span);
         }
         pieces = [];
         pieceBytes = 0;
         chunksInPart = 0;
-        partNo += 1;
-        launch(partNo, body);
         while (inFlight.size >= PARTS_IN_FLIGHT) {
           await Promise.race(inFlight.values());
         }
@@ -909,18 +1011,41 @@ export async function encryptAndUpload(
   prepared: PreparedFile,
   onProgress: (fraction: number) => void,
   signal?: AbortSignal,
+  opts?: {
+    /** Facts a resume record needs, reported as they happen. */
+    journal?: UploadJournal;
+    /** A killed upload to continue: its row, session, key and parts. */
+    resume?: UploadResumeState;
+  },
 ): Promise<UploadResult> {
-  const fileKey = generateKey();
+  const fileKey = opts?.resume?.fileKey ?? generateKey();
   const encryptedMeta = encryptFileMetadata(prepared.meta, fileKey);
-  const encryptedKey = secretBoxSeal(fileKey, masterKey);
-  const dto = await api.createFile(folderId, encryptedKey, encryptedMeta, isMediaFile(file));
+  const fileId = opts?.resume
+    ? opts.resume.fileId
+    : (
+        await api.createFile(
+          folderId,
+          secretBoxSeal(fileKey, masterKey),
+          encryptedMeta,
+          isMediaFile(file),
+        )
+      ).id;
 
   const totalCiphertext = contentCiphertextSize(file);
   let digest: string;
   try {
     if (totalCiphertext > PART_THRESHOLD) {
       const digester = createDigester();
-      await uploadInParts(file, dto.id, fileKey, onProgress, signal, digester);
+      await uploadInParts(
+        file,
+        fileId,
+        fileKey,
+        onProgress,
+        signal,
+        digester,
+        opts?.journal,
+        opts?.resume,
+      );
       digest = digester.final();
     } else {
       const plaintext = new Uint8Array(await file.arrayBuffer());
@@ -937,7 +1062,7 @@ export async function encryptAndUpload(
       const ciphertext = isMediaFile(file)
         ? chunkedEncrypt(plaintext, fileKey)
         : encryptBytes(plaintext, fileKey);
-      const written = await uploadBlob(dto.id, "data", ciphertext, onProgress, signal);
+      const written = await uploadBlob(fileId, "data", ciphertext, onProgress, signal);
       // An upload is not complete because it returned; it is complete when
       // what the server holds is the size of what was sent.
       if (written !== null && written !== ciphertext.length) {
@@ -949,9 +1074,11 @@ export async function encryptAndUpload(
   } catch (err) {
     // A file whose content never landed must not linger as an empty row;
     // best-effort removal, since the error itself still needs surfacing.
+    // A surfaced error also ends the resume story: the row is going away.
+    opts?.journal?.finish();
     void api
-      .trashFile(dto.id)
-      .then(() => api.deleteForever(dto.id))
+      .trashFile(fileId)
+      .then(() => api.deleteForever(fileId))
       .catch(() => {});
     throw err;
   }
@@ -960,19 +1087,22 @@ export async function encryptAndUpload(
   // the digest describes the bytes that actually landed. The thumbnail and
   // the search index depend on nothing here and here on nothing, so all
   // three travel together rather than paying three round trips in series.
+  // The content is on the server; whatever happens to the trimmings, the
+  // resume record has served its purpose.
+  opts?.journal?.finish();
   const withDigest = { ...prepared.meta, digest };
   const [stamped] = await Promise.all([
-    api.patchFile(dto.id, {
+    api.patchFile(fileId, {
       encryptedMeta: encryptFileMetadata(withDigest, fileKey),
     }),
     prepared.thumbnail
-      ? uploadBlob(dto.id, "thumbnail", encryptBytes(prepared.thumbnail.bytes, fileKey), undefined, signal)
+      ? uploadBlob(fileId, "thumbnail", encryptBytes(prepared.thumbnail.bytes, fileKey), undefined, signal)
       : null,
     prepared.text !== undefined || prepared.clip
       ? // Search signals travel as their own encrypted blob, keeping sync
         // rows small: text and the semantic embedding share one envelope.
         uploadBlob(
-          dto.id,
+          fileId,
           "index",
           encryptBytes(
             encodeIndexPayload({

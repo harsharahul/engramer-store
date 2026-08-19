@@ -26,6 +26,7 @@ import {
   StreamEncryptor,
   streamCiphertextSize,
   CHUNKED_CHUNK_SIZE,
+  ChunkedEncryptor,
   chunkedEncrypt,
   chunkedDecrypt,
   chunkedCiphertextSize,
@@ -433,6 +434,37 @@ describe("chunked media format", () => {
       const opened = chunkedDecrypt(sealed, key);
       expect(Buffer.from(opened).equals(Buffer.from(plain))).toBe(true);
     }
+  });
+
+  /**
+   * Resuming an interrupted upload must reproduce the exact bytes the
+   * finished parts already carried, which means the same header: the
+   * salt in it binds every chunk nonce. An encryptor rebuilt from a
+   * stored header is the whole mechanism.
+   */
+  it("rebuilt from a stored header, seals byte-identical chunks", () => {
+    const key = generateKey();
+    const plain = makePlain(Math.floor(1.5 * CHUNKED_CHUNK_SIZE));
+    const first = new ChunkedEncryptor(key, plain.length);
+    const again = new ChunkedEncryptor(key, plain.length, first.header);
+    expect(Buffer.from(again.header).equals(Buffer.from(first.header))).toBe(true);
+    const chunk = plain.subarray(0, CHUNKED_CHUNK_SIZE);
+    expect(
+      Buffer.from(again.seal(0, chunk)).equals(Buffer.from(first.seal(0, chunk))),
+    ).toBe(true);
+    // Two fresh encryptors never share a header: the salt is the point.
+    expect(
+      Buffer.from(new ChunkedEncryptor(key, plain.length).header).equals(
+        Buffer.from(first.header),
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses a stored header that describes a different file", () => {
+    const key = generateKey();
+    const first = new ChunkedEncryptor(key, 100);
+    expect(() => new ChunkedEncryptor(key, 200, first.header)).toThrow(/byte/);
+    expect(() => new ChunkedEncryptor(key, 100, new Uint8Array(5))).toThrow();
   });
 
   it("is detectable against the sequential stream format", () => {

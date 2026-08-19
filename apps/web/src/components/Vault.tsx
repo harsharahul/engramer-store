@@ -1087,6 +1087,10 @@ export function Vault() {
       const live = useStore.getState().session;
       return live ? { email: live.email, masterKey: live.masterKey } : null;
     });
+    // Interrupted uploads wait for exactly this moment: signed in, synced,
+    // the shell reachable. Whatever cannot continue is cleaned up, and the
+    // staging directory is swept around what can.
+    void useStore.getState().scanResumableUploads();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.serverSynced]);
 

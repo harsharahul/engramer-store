@@ -3,10 +3,13 @@ import { XGlyph } from "./Icon";
 
 export function UploadTray() {
   const uploads = useStore((s) => s.uploads);
+  const pendingResumes = useStore((s) => s.pendingResumes);
+  const resumeUpload = useStore((s) => s.resumeUpload);
+  const discardResume = useStore((s) => s.discardResume);
   const clear = useStore((s) => s.clearFinishedUploads);
   const cancel = useStore((s) => s.cancelUploads);
 
-  if (uploads.length === 0) {
+  if (uploads.length === 0 && pendingResumes.length === 0) {
     return null;
   }
   const active = uploads.filter(
@@ -19,7 +22,9 @@ export function UploadTray() {
         <span>
           {active.length > 0
             ? `Encrypting and uploading ${active.length} file${active.length > 1 ? "s" : ""}`
-            : "Uploads finished"}
+            : pendingResumes.length > 0
+              ? "Interrupted uploads"
+              : "Uploads finished"}
         </span>
         {active.length > 0 && (
           <button className="tray-cancel" onClick={cancel}>
@@ -31,6 +36,24 @@ export function UploadTray() {
         </button>
       </header>
       <ul>
+        {pendingResumes.map((record) => (
+          // An upload the app was killed in the middle of; its bytes are
+          // still staged, so continuing costs only what never landed.
+          <li key={record.fileId}>
+            <div className="upload-name">
+              <span>{record.name}</span>
+              <span className="upload-state">interrupted</span>
+            </div>
+            <div className="upload-name">
+              <button className="btn" onClick={() => void resumeUpload(record.fileId)}>
+                Resume
+              </button>
+              <button className="btn btn-ghost" onClick={() => void discardResume(record.fileId)}>
+                Discard
+              </button>
+            </div>
+          </li>
+        ))}
         {uploads.map((upload) => (
           <li key={upload.id}>
             <div className="upload-name">
