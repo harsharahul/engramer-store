@@ -503,3 +503,63 @@ pub async fn pick_photos_with_ids(app: tauri::AppHandle) -> Result<Vec<PickedIte
         Err("the native photo picker is only available on iOS".to_string())
     }
 }
+
+/// A poster frame for a staged or watched video, as bounded JPEG bytes.
+///
+/// The page used to capture posters by pointing a media element at the
+/// picked:// protocol and drawing a frame to a canvas; on iOS that path
+/// can refuse the load or taint the canvas, and either way the video
+/// uploads with no thumbnail. AVFoundation reads the file directly, so
+/// none of the browser's cross-origin rules apply.
+#[tauri::command]
+pub async fn video_poster(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let canonical =
+        staged_path(&path).or_else(|_| crate::watched::watched_path(&app, &path))?;
+    #[cfg(target_os = "ios")]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            poster_jpeg(&canonical).map(tauri::ipc::Response::new)
+        })
+        .await
+        .map_err(|err| err.to_string())?
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = canonical;
+        Err("native posters are only generated on iOS".to_string())
+    }
+}
+
+#[cfg(target_os = "ios")]
+fn poster_jpeg(path: &std::path::Path) -> Result<Vec<u8>, String> {
+    use objc2::AnyThread;
+    use objc2_av_foundation::{AVAsset, AVAssetImageGenerator};
+    use objc2_core_foundation::CGSize;
+    use objc2_core_media::CMTime;
+    use objc2_foundation::{NSString, NSURL};
+    use objc2_ui_kit::{UIImage, UIImageJPEGRepresentation};
+    unsafe {
+        let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+        let asset = AVAsset::assetWithURL(&url);
+        let generator =
+            AVAssetImageGenerator::initWithAsset(AVAssetImageGenerator::alloc(), &asset);
+        generator.setAppliesPreferredTrackTransform(true);
+        generator.setMaximumSize(CGSize {
+            width: 1280.0,
+            height: 1280.0,
+        });
+        // Half a second in: past a fade-from-black opening frame, well
+        // before any clip's end.
+        let time = CMTime::new(1, 2);
+        let image = generator
+            .copyCGImageAtTime_actualTime_error(time, std::ptr::null_mut())
+            .map_err(|err| err.localizedDescription().to_string())?;
+        let ui = UIImage::imageWithCGImage(&image);
+        let data = UIImageJPEGRepresentation(&ui, 0.85)
+            .ok_or_else(|| "the frame did not encode".to_string())?;
+        Ok(data.to_vec())
+    }
+}

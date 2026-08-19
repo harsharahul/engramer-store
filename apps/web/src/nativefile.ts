@@ -165,6 +165,17 @@ export class NativePickedFile implements UploadSource {
     return new TextDecoder().decode(await this.readSpan(0, this.size));
   }
 
+  /** A poster frame from the shell (AVFoundation reads the staged file
+   * directly, outside the browser's cross-origin rules); null wherever
+   * the shell cannot make one, and the caller's capture path remains. */
+  async poster(): Promise<Uint8Array | null> {
+    try {
+      return fileBytes(await this.invoke("video_poster", { path: this.path }));
+    } catch {
+      return null;
+    }
+  }
+
   /** Removes a staged file on disk; safe to call more than once, and a
    * no-op for watched files, which are never this code's to delete. */
   async dispose(): Promise<void> {
