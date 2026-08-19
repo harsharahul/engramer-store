@@ -7,7 +7,7 @@ import { nativeShell } from "../native";
 import { swipeStep } from "../neighbors";
 import { fileKind, formatBytes } from "../format";
 import { displayableImage } from "../intel/heic";
-import { triggerDownload } from "../download";
+import { saveDecryptedFile } from "../download";
 import { ZoomableImage } from "./ZoomableImage";
 import { IDENTITY, zoomAt, type Box, type ZoomState } from "../zoom";
 import {
@@ -265,6 +265,9 @@ function DocxBody(props: { bytes: Uint8Array; name: string }) {
 export function Preview(props: {
   file: FileEntry;
   onClose: () => void;
+  /** Where a saved-to-Files sentence or a failure goes; the preview has
+   * no toast surface of its own. */
+  onToast?: (message: string) => void;
   onShare: () => void;
   onRename: () => void;
   onDetails: () => void;
@@ -468,13 +471,19 @@ export function Preview(props: {
   }, [props]);
 
   const download = async () => {
-    const bytes = await openSharedContent(file, (entry) =>
-      downloadAndDecrypt(entry.id, entry.key, entry.digest),
-    );
-    triggerDownload(
-      new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime }),
-      file.name,
-    );
+    // One shared path: the shell streams large files natively to the
+    // Files app, the browser keeps its anchor, and a failed integrity
+    // check still hands the bytes over rather than nothing.
+    try {
+      const saved = await saveDecryptedFile(file);
+      if (saved) {
+        props.onToast?.(saved);
+      }
+    } catch (err) {
+      props.onToast?.(
+        err instanceof Error && err.message ? `Download failed: ${err.message}` : "Download failed.",
+      );
+    }
   };
 
   return (
