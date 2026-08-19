@@ -54,7 +54,7 @@ that break byte transport rather than merely erroring:
 |---|---|
 | `ENGRAMER_S3_CHECKSUMS` | `when-required` keeps streaming request bodies plainly sized. The SDK default rewrites them into `aws-chunked` framing with checksum trailers, which strict servers, including `rclone serve s3`, refuse with 411. Set `when-required` for any non-AWS backend. |
 | `ENGRAMER_S3_CREATE_BUCKET` | `false` for hosts that hand out a fixed bucket and deny CreateBucket; the bucket must then already exist. |
-| `ENGRAMER_S3_KEY_LAYOUT` | `sharded` fans keys into two directory levels. Cloud drives are directory shaped, and a large library in one folder makes listings cost seconds. Choose before the first upload; layouts are not migrated. |
+| `ENGRAMER_S3_KEY_LAYOUT` | `sharded` fans keys into two directory levels. Leave it `flat` for gateway-backed providers: where creating a directory costs an application-API round trip, a sharded layout pays that on nearly every upload (measured at seconds per new shard), while listings of one large folder are rare and cached. `sharded` suits true S3 services, where prefixes are free. Choose before the first upload; layouts are not migrated. |
 
 The recipes in `compose.rclone.yml` set all three.
 

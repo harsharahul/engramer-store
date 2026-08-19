@@ -82,9 +82,13 @@ ENGRAMER_CONTENT_CACHE_MAX_BYTES: "16777216"
 `when-required` matters: the AWS SDK's default checksum mode rewrites
 streaming bodies into aws-chunked framing that strict third-party servers
 refuse with 411, which breaks every part upload. If the provider hands
-out a fixed bucket, add `ENGRAMER_S3_CREATE_BUCKET: "false"`. If the
-provider is remote/metered, also set `ENGRAMER_S3_KEY_LAYOUT: sharded`
-**before the first upload** (layouts are never migrated).
+out a fixed bucket, add `ENGRAMER_S3_CREATE_BUCKET: "false"`. Leave the
+key layout flat unless the backend is a true S3 service: `sharded` fans
+keys into directories, and on providers where creating a directory costs
+an application-API round trip, that taxes nearly every upload by seconds
+(measured: a fresh shard pair cost 7.8 s on one provider; the same PUT
+flat cost 11 ms). Layouts are never migrated, so decide before the first
+upload.
 
 **Consumer cloud**: use `compose.rclone.yml`, which already carries every
 setting above plus a local write spool. Three profiles:
@@ -254,6 +258,7 @@ browsers is good. The rules that decide whether the deployment works:
 | Uploads fail as "network error" only for multi-MB files, everything else fine | HTTP/3 at the proxy | disable h3 |
 | Uploads 403 or the whole IP gets blocked mid-batch | WAF inspecting encrypted bodies | exempt upload paths, raise inspection caps |
 | Photo uploads finalize in ~10 s | no write spool, provider app-tier ingest | the shipped gateway config spools; check `--vfs-cache-mode writes` survived any edits |
+| Every upload's data PUT takes ~5-8 s, everything else fast | sharded key layout paying provider directory creation per new shard | use the flat layout on gateway-backed providers |
 | First uploads each session wait on a huge download | ML runtimes not cached (old build) | upgrade; verify gate 8 |
 | Registration open despite "locked down" | typo fails open | verify gate 3, always |
 | Fast LAN, slow from outside | comparison across different network paths | measure upstream bandwidth before blaming the stack |
