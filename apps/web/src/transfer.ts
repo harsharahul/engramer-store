@@ -458,6 +458,9 @@ export interface UploadSource {
   text(): Promise<string>;
   /** Range-served URL for media elements, when the source is not a Blob. */
   readonly mediaUrl?: string;
+  /** The photo-library asset this came from, when the picker said; the
+   * upload stamps it so the backup ledger recognizes the file. */
+  readonly sourceId?: string;
   dispose?(): Promise<void>;
 }
 

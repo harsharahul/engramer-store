@@ -19,8 +19,10 @@ import {
   watchedFileRead,
   watchedFolders,
   watchedScan,
+  watchedStreamedFile,
   type WatchedFile,
 } from "./native";
+import type { UploadSource } from "./transfer";
 import type { TreeFile } from "./uploader";
 import { diag } from "./diag";
 
@@ -57,7 +59,9 @@ export function folderName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-/** v1 reads whole files through the shell bridge; keep that bounded. */
+/** What may be held in memory at once: an old shell's whole-file read, or
+ * a non-media file materialized for analysis. Streamed media has no cap;
+ * it never leaves disk in more than 4 MiB windows. */
 const MAX_WATCH_FILE_BYTES = 1_536 * 1024 * 1024;
 
 let started = false;
@@ -127,8 +131,7 @@ async function drain(): Promise<void> {
     (file) =>
       !inFlight.has(file.path) &&
       !alreadyInLibrary(file, useStore.getState().files.values()) &&
-      file.size > 0 &&
-      file.size <= MAX_WATCH_FILE_BYTES,
+      file.size > 0,
   );
   if (fresh.length === 0) {
     if (batch.length > 0) {
@@ -143,24 +146,52 @@ async function drain(): Promise<void> {
     const items: TreeFile[] = [];
     for (const file of fresh) {
       try {
-        const bytes = await watchedFileRead(file.path);
-        // The size the scan reported and the bytes actually read must agree.
-        // They did not, for months, and nothing noticed: every upload was a
-        // stringified byte array. A file that fails this is left for the next
-        // scan rather than stored wrong.
-        if (bytes.byteLength !== file.size) {
-          diag(
-            "watch",
-            `skipped ${file.name}: read ${bytes.byteLength} bytes but the file is ${file.size}`,
-          );
-          inFlight.delete(file.path);
-          continue;
+        // A streaming shell hands over a handle and the upload reads
+        // bounded windows from disk; media of any size stays off the heap.
+        // Everything else materializes for analysis, so the size cap still
+        // guards it, as it guards the old whole-read path entirely.
+        let source: UploadSource | null = await watchedStreamedFile(file);
+        if (source) {
+          if (source.size !== file.size) {
+            diag(
+              "watch",
+              `skipped ${file.name}: the scan saw ${file.size} bytes but the file is ${source.size}`,
+            );
+            inFlight.delete(file.path);
+            continue;
+          }
+          const media = source.type.startsWith("video/") || source.type.startsWith("audio/");
+          if (!media && source.size > MAX_WATCH_FILE_BYTES) {
+            diag("watch", `skipped ${file.name}: larger than this shell can analyze`);
+            inFlight.delete(file.path);
+            continue;
+          }
+        } else {
+          if (file.size > MAX_WATCH_FILE_BYTES) {
+            diag("watch", `skipped ${file.name}: larger than this shell can read whole`);
+            inFlight.delete(file.path);
+            continue;
+          }
+          const bytes = await watchedFileRead(file.path);
+          // The size the scan reported and the bytes actually read must agree.
+          // They did not, for months, and nothing noticed: every upload was a
+          // stringified byte array. A file that fails this is left for the next
+          // scan rather than stored wrong.
+          if (bytes.byteLength !== file.size) {
+            diag(
+              "watch",
+              `skipped ${file.name}: read ${bytes.byteLength} bytes but the file is ${file.size}`,
+            );
+            inFlight.delete(file.path);
+            continue;
+          }
+          source = new File([bytes.slice().buffer as ArrayBuffer], file.name, {
+            lastModified: file.mtime,
+          });
         }
         const destination = destinationFor(file, roots, watchMode);
         items.push({
-          file: new File([bytes.slice().buffer as ArrayBuffer], file.name, {
-            lastModified: file.mtime,
-          }),
+          file: source,
           path: destination.path,
           tags: destination.tags,
         });

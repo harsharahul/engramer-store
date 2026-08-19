@@ -111,6 +111,48 @@ describe("NativePickedFile", () => {
   });
 });
 
+/**
+ * The macOS watch-folder path had the identical whole-read defect, capped
+ * only by a size limit whose comment admitted the shortcut. The same
+ * handle covers it with a different command family: watched files are the
+ * person's own documents, so nothing ever deletes them, and their media
+ * URL rides the watched route of the same protocol.
+ */
+describe("NativePickedFile watched family", () => {
+  it("reads through the watched commands and never deletes", async () => {
+    const bytes = sourceBytes(64);
+    const calls: { cmd: string; args: Record<string, unknown> }[] = [];
+    const invoke = async (cmd: string, args?: Record<string, unknown>) => {
+      calls.push({ cmd, args: args ?? {} });
+      if (cmd === "watched_file_read_range") {
+        return bytes.slice(args?.offset as number, (args?.offset as number) + (args?.length as number));
+      }
+      throw new Error(`unexpected command ${cmd}`);
+    };
+    const file = new NativePickedFile(
+      invoke,
+      "/Users/me/Watched/clip.mov",
+      { name: "clip.mov", type: "video/quicktime", size: 64, lastModified: 1 },
+      { family: "watched" },
+    );
+    expect(new Uint8Array(await file.slice(0, 8).arrayBuffer())).toEqual(bytes.slice(0, 8));
+    await file.dispose();
+    expect(calls.map((c) => c.cmd)).toEqual(["watched_file_read_range"]);
+  });
+
+  it("serves media through the watched route with the full path escaped", () => {
+    const file = new NativePickedFile(
+      async () => new Uint8Array(),
+      "/Users/me/My Films/clip one.mov",
+      { name: "clip one.mov", type: "video/quicktime", size: 8, lastModified: 1 },
+      { family: "watched" },
+    );
+    expect(file.mediaUrl).toBe(
+      "picked://localhost/watched?p=%2FUsers%2Fme%2FMy%20Films%2Fclip%20one.mov",
+    );
+  });
+});
+
 describe("materializeForAnalysis", () => {
   it("turns an image handle into a real File and cleans up its staging", async () => {
     const bytes = sourceBytes(1024);

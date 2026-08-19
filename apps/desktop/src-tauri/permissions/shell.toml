@@ -20,7 +20,14 @@ extension handoff record.
 """
 commands.allow = [
     "pick_photos",
+    "pick_photos_with_ids",
     "picked_file_read",
+    "picked_probe",
+    "picked_file_stat",
+    "picked_file_read_range",
+    "picked_file_delete",
+    "watched_file_stat",
+    "watched_file_read_range",
     "native_unlock_available",
     "unlock_secret_store",
     "unlock_secret_get",

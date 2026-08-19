@@ -5,8 +5,10 @@
  * here is built for that shape.
  */
 
+import type { UploadSource } from "./transfer";
+
 export interface TreeFile {
-  file: File;
+  file: UploadSource;
   /** Folder path relative to the drop root, e.g. ["photos", "2026"]. */
   path: string[];
   /**

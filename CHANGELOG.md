@@ -5,7 +5,22 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Added
+- **The shell serves picked and watched files in bounded ranges.** New
+  commands stat, read 4 MiB windows of, and clean up the picker's staged
+  files, and a `picked://` protocol serves them (and watched-folder
+  files) to media elements by byte range, the way playback already
+  streams vault content. The photo picker also reports which library
+  asset each item came from, so hand-picked photos carry the same
+  identity the automatic backup keys on and stop double-uploading. Mac
+  watch folders ride the same ranged reads: large media streams from
+  disk instead of being read whole.
+
 ### Fixed
+- **Photo backup reaches originals stored in iCloud.** Exporting an
+  asset whose original had been offloaded by "Optimize iPhone Storage"
+  failed unconditionally; the export now allows the download, governed
+  by the same Wi-Fi-only knob as the upload traffic itself.
 - **Large photo and video uploads no longer crash the iOS app.** Files
   chosen through the native "Photos and videos" picker were read whole
   across the app-to-page bridge, holding several times the file's size in

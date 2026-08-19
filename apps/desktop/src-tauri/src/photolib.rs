@@ -198,9 +198,16 @@ mod apple {
                 let message = error.as_ref().map(|e| e.localizedDescription().to_string());
                 let _ = tx.send(message);
             });
+            // Network access ON: with "Optimize iPhone Storage" most
+            // originals live in iCloud, and the default (off) made every
+            // one of them fail here forever - the backup pass re-listed
+            // the whole library on every run. The pass-level Wi-Fi knob
+            // already governs when any of this traffic happens.
+            let options = objc2_photos::PHAssetResourceRequestOptions::new();
+            options.setNetworkAccessAllowed(true);
             PHAssetResourceManager::defaultManager()
                 .writeDataForAssetResource_toFile_options_completionHandler(
-                    &chosen, &url, None, &handler,
+                    &chosen, &url, Some(&options), &handler,
                 );
             match rx.recv() {
                 Ok(None) => Ok(path.to_string_lossy().to_string()),

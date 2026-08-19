@@ -38,7 +38,7 @@ block2 = "0.6"
 # The photo picker is iOS-only: it is the one route that hands over a photo's
 # original bytes instead of a JPEG iOS transcoded on the way out.
 [target.'cfg(target_os = "ios")'.dependencies]
-objc2-photos-ui = { version = "0.3", features = ["PHPicker", "block2"] }
+objc2-photos-ui = { version = "0.3", features = ["PHPicker", "block2", "objc2-photos"] }
 objc2-photos = { version = "0.3", features = [
     "PHAsset",
     "PHFetchResult",

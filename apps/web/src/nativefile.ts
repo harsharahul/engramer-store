@@ -75,31 +75,52 @@ export function mimeFromName(name: string): string {
   return known[ext] ?? "";
 }
 
+/**
+ * Which shell command family serves this handle. "picked" is the picker's
+ * staging directory: read by basename, deleted when the upload settles.
+ * "watched" is the person's own watched folders: read by full path
+ * through the same protocol's watched route, and NEVER deleted; those
+ * files are theirs, an upload only looks.
+ */
+type SourceFamily = "picked" | "watched";
+
 export class NativePickedFile implements UploadSource {
   readonly name: string;
   readonly type: string;
   readonly size: number;
   readonly lastModified: number;
   readonly mediaUrl: string;
+  /** The library asset this came from, when the picker said. */
+  readonly sourceId?: string;
+  private readonly family: SourceFamily;
   private disposed = false;
 
   constructor(
     private readonly invoke: ShellInvoke,
     private readonly path: string,
     meta: { name: string; type: string; size: number; lastModified: number },
+    opts?: { family?: SourceFamily; sourceId?: string },
   ) {
     this.name = meta.name;
     this.type = meta.type;
     this.size = meta.size;
     this.lastModified = meta.lastModified;
-    const basename = this.path.split("/").pop() || this.name;
-    this.mediaUrl = `picked://localhost/${encodeURIComponent(basename)}`;
+    this.family = opts?.family ?? "picked";
+    if (opts?.sourceId !== undefined) {
+      this.sourceId = opts.sourceId;
+    }
+    if (this.family === "watched") {
+      this.mediaUrl = `picked://localhost/watched?p=${encodeURIComponent(this.path)}`;
+    } else {
+      const basename = this.path.split("/").pop() || this.name;
+      this.mediaUrl = `picked://localhost/${encodeURIComponent(basename)}`;
+    }
   }
 
   private async read(offset: number, length: number): Promise<Uint8Array> {
-    const bytes = fileBytes(
-      await this.invoke("picked_file_read_range", { path: this.path, offset, length }),
-    );
+    const command =
+      this.family === "watched" ? "watched_file_read_range" : "picked_file_read_range";
+    const bytes = fileBytes(await this.invoke(command, { path: this.path, offset, length }));
     // The size came from a stat, the bytes from a read: two sources, so
     // they can disagree, and when they do the stored file would be wrong.
     if (bytes.length !== length) {
@@ -141,9 +162,10 @@ export class NativePickedFile implements UploadSource {
     return new TextDecoder().decode(await this.readSpan(0, this.size));
   }
 
-  /** Removes the staged file on disk; safe to call more than once. */
+  /** Removes a staged file on disk; safe to call more than once, and a
+   * no-op for watched files, which are never this code's to delete. */
   async dispose(): Promise<void> {
-    if (this.disposed) {
+    if (this.disposed || this.family === "watched") {
       return;
     }
     this.disposed = true;

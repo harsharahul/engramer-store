@@ -1102,6 +1102,11 @@ export const useStore = create<StoreState>((set, get) => {
             return analyzeFile(local, cancel.signal, (phase) => update({ detail: phase }));
           });
           update({ detail: "encrypting" });
+          if (file.sourceId) {
+            // The picker said which library asset this is; the stamp is
+            // what keeps the automatic backup from uploading it again.
+            prepared.meta.sourceId = file.sourceId;
+          }
           // Root uploads are auto-filed into a category folder; uploads into a
           // folder the user picked stay where the user put them.
           const destination =
@@ -1196,8 +1201,14 @@ export const useStore = create<StoreState>((set, get) => {
         }
         const current = get().batch;
         set({ batch: current ? { ...current, current: item.file.name } : null });
+        // Same discipline as the flat path: native sources stay handles
+        // until the slot admits them, and videos stay handles throughout.
+        let local: UploadSource = item.file;
         try {
-          const analyzed = await withAnalysisSlot(() => analyzeFile(item.file, cancel.signal));
+          const analyzed = await withAnalysisSlot(async () => {
+            local = await materializeForAnalysis(item.file);
+            return analyzeFile(local, cancel.signal);
+          });
           // Caller-supplied tags join the analysis rather than replace it, so
           // a watched file keeps its category and gains its origin.
           const prepared = item.tags?.length
@@ -1214,7 +1225,7 @@ export const useStore = create<StoreState>((set, get) => {
               ? (folderIds.get(pathKey(item.path)) ?? baseFolderId)
               : (baseFolderId ?? (await ensureCategoryFolder(prepared.analysis.category)));
           const result = await withRetry(() =>
-            encryptAndUpload(item.file, destination, key, prepared, () => {}, cancel.signal),
+            encryptAndUpload(local, destination, key, prepared, () => {}, cancel.signal),
           );
           applyFile(result.dto);
           if (revealItems.length < 3) {
@@ -1236,6 +1247,10 @@ export const useStore = create<StoreState>((set, get) => {
           if (after) {
             set({ batch: { ...after, failed: after.failed + 1 } });
           }
+        } finally {
+          // Settled either way; a staged native source can go. Watched
+          // sources make this a no-op: those files are the person's own.
+          void local.dispose?.();
         }
       });
 
