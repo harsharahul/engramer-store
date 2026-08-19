@@ -9,6 +9,7 @@ import {
   nativePhotosAuthorize,
   nativePhotosAvailable,
   nativePhotosList,
+  pickedStreamingAvailable,
   type NativePhotoAsset,
 } from "./native";
 import { useStore } from "./store";
@@ -102,7 +103,17 @@ export async function runBackup(
     ledger.absorb(store.files.values());
     const memory = new SweepMemory(account, "backup");
     const since = windowStartMs(policy);
-    const assets = (await nativePhotosList()).filter((a) => keep(a, policy, since));
+    let assets = (await nativePhotosList()).filter((a) => keep(a, policy, since));
+    // A shell that can only read files whole must not read videos at all:
+    // that is the memory kill. They wait for the updated shell, and the
+    // wait is shown beside the knob, not burned as failed attempts.
+    const heldVideos = (await pickedStreamingAvailable())
+      ? 0
+      : assets.filter((a) => a.kind === "video").length;
+    if (heldVideos > 0) {
+      assets = assets.filter((a) => a.kind !== "video");
+    }
+    useStore.setState({ backupHold: heldVideos > 0 ? "shell-videos" : null });
     const fresh = assets.filter((a) => !ledger.has(a.id));
     const pending = fresh.filter((a) => !memory.exhausted(a.id));
 

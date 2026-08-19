@@ -39,6 +39,7 @@ import { computeBlur } from "./intel/blur";
 import { decodeImageBitmap, normalizeImageMime } from "./intel/heic";
 import { isHandheld } from "./analysisslot";
 import { diag } from "./diag";
+import { mimeFromName } from "./nativefile";
 
 const THUMB_SIZE = 512;
 
@@ -240,13 +241,35 @@ function seekTo(video: HTMLVideoElement, at: number): Promise<void> {
 const MEANING_FRAMES = 5;
 
 /**
+ * A URL a media element can decode this source from. A Blob gets an
+ * object URL; a native source carries its own range-served protocol URL,
+ * which loads cross-origin, so the element must ask for CORS or every
+ * canvas capture taints. A source with neither cannot feed a decoder.
+ */
+export function mediaHandle(
+  file: UploadSource,
+): { url: string; remote: boolean; revoke: () => void } | null {
+  if (file.mediaUrl) {
+    return { url: file.mediaUrl, remote: true, revoke: () => {} };
+  }
+  if (file instanceof Blob) {
+    const url = URL.createObjectURL(file);
+    return { url, remote: false, revoke: () => URL.revokeObjectURL(url) };
+  }
+  return null;
+}
+
+/**
  * Frames spread across a video's timeline, so meaning search can match any
  * scene rather than only the poster. Short or duration-less clips yield
  * nothing extra; the poster alone already covers them.
  */
-async function sampleVideoFrames(file: File): Promise<Blob[]> {
+async function sampleVideoFrames(file: UploadSource): Promise<Blob[]> {
+  const handle = mediaHandle(file);
+  if (!handle) {
+    return [];
+  }
   return new Promise((resolve) => {
-    const url = URL.createObjectURL(file);
     const video = document.createElement("video");
     const frames: Blob[] = [];
     let settled = false;
@@ -255,7 +278,7 @@ async function sampleVideoFrames(file: File): Promise<Blob[]> {
         return;
       }
       settled = true;
-      URL.revokeObjectURL(url);
+      handle.revoke();
       video.removeAttribute("src");
       video.load();
       resolve(frames);
@@ -265,7 +288,10 @@ async function sampleVideoFrames(file: File): Promise<Blob[]> {
     video.preload = "metadata";
     video.setAttribute("playsinline", "");
     video.setAttribute("muted", "");
-    video.src = url;
+    if (handle.remote) {
+      video.crossOrigin = "anonymous";
+    }
+    video.src = handle.url;
     const timer = setTimeout(finish, 45_000);
     video.onerror = () => {
       clearTimeout(timer);
@@ -278,13 +304,18 @@ async function sampleVideoFrames(file: File): Promise<Blob[]> {
           clearTimeout(timer);
           return finish();
         }
-        for (let i = 0; i < MEANING_FRAMES && !settled; i++) {
-          await seekTo(video, duration * ((i + 0.5) / MEANING_FRAMES));
-          await awaitPresentedFrame(video);
-          const blob = await drawScaled(video, video.videoWidth, video.videoHeight);
-          if (blob) {
-            frames.push(blob);
+        try {
+          for (let i = 0; i < MEANING_FRAMES && !settled; i++) {
+            await seekTo(video, duration * ((i + 0.5) / MEANING_FRAMES));
+            await awaitPresentedFrame(video);
+            const blob = await drawScaled(video, video.videoWidth, video.videoHeight);
+            if (blob) {
+              frames.push(blob);
+            }
           }
+        } catch {
+          // A tainted canvas (the protocol answered without CORS) throws
+          // on capture; whatever frames made it through still count.
         }
         clearTimeout(timer);
         finish();
@@ -293,9 +324,12 @@ async function sampleVideoFrames(file: File): Promise<Blob[]> {
   });
 }
 
-async function videoThumbnail(file: File): Promise<Thumbnail | null> {
+async function videoThumbnail(file: UploadSource): Promise<Thumbnail | null> {
+  const handle = mediaHandle(file);
+  if (!handle) {
+    return null;
+  }
   return new Promise((resolve) => {
-    const url = URL.createObjectURL(file);
     const video = document.createElement("video");
     let settled = false;
     const finish = (result: Thumbnail | null) => {
@@ -303,7 +337,7 @@ async function videoThumbnail(file: File): Promise<Thumbnail | null> {
         return;
       }
       settled = true;
-      URL.revokeObjectURL(url);
+      handle.revoke();
       video.removeAttribute("src");
       video.load();
       resolve(result);
@@ -316,7 +350,10 @@ async function videoThumbnail(file: File): Promise<Thumbnail | null> {
     video.preload = "metadata";
     video.setAttribute("playsinline", "");
     video.setAttribute("muted", "");
-    video.src = url;
+    if (handle.remote) {
+      video.crossOrigin = "anonymous";
+    }
+    video.src = handle.url;
     // Mean luminance of a coarse sample; enough to tell a fade-from-black
     // opening frame from a real one.
     const frameLuminance = () => {
@@ -348,29 +385,35 @@ async function videoThumbnail(file: File): Promise<Thumbnail | null> {
       if (settled) {
         return;
       }
-      // A pitch-black poster helps nobody; one seek deeper into the clip
-      // rescues footage that fades in from black.
-      if (
-        !retriedBlack &&
-        Number.isFinite(video.duration) &&
-        video.duration > 2 &&
-        frameLuminance() < 8
-      ) {
-        retriedBlack = true;
-        video.currentTime = Math.min(video.duration / 2, 3);
-        return;
+      try {
+        // A pitch-black poster helps nobody; one seek deeper into the clip
+        // rescues footage that fades in from black.
+        if (
+          !retriedBlack &&
+          Number.isFinite(video.duration) &&
+          video.duration > 2 &&
+          frameLuminance() < 8
+        ) {
+          retriedBlack = true;
+          video.currentTime = Math.min(video.duration / 2, 3);
+          return;
+        }
+        const blob = await drawScaled(video, videoWidth, videoHeight);
+        const blur = computeBlur(video, videoWidth, videoHeight);
+        if (!blob) {
+          return finish(null);
+        }
+        finish({
+          bytes: new Uint8Array(await blob.arrayBuffer()),
+          width: videoWidth,
+          height: videoHeight,
+          blur,
+        });
+      } catch {
+        // A tainted canvas throws on capture; no thumbnail is the honest
+        // fast answer, not a stall until the deadline.
+        finish(null);
       }
-      const blob = await drawScaled(video, videoWidth, videoHeight);
-      const blur = computeBlur(video, videoWidth, videoHeight);
-      if (!blob) {
-        return finish(null);
-      }
-      finish({
-        bytes: new Uint8Array(await blob.arrayBuffer()),
-        width: videoWidth,
-        height: videoHeight,
-        blur,
-      });
     };
     video.onloadedmetadata = () => {
       // Seeking a hair into the clip avoids a black opening frame; some
@@ -384,14 +427,38 @@ async function videoThumbnail(file: File): Promise<Thumbnail | null> {
   });
 }
 
-export async function makeThumbnail(file: File, mime: string): Promise<Thumbnail | null> {
+export async function makeThumbnail(file: UploadSource, mime: string): Promise<Thumbnail | null> {
   if (mime.startsWith("image/")) {
-    return imageThumbnail(file);
+    // Image decoding takes a Blob (createImageBitmap has no URL form);
+    // native image sources are materialized before analysis, so anything
+    // else here has no way to a thumbnail.
+    return file instanceof File ? imageThumbnail(file) : null;
   }
   if (mime.startsWith("video/")) {
     return videoThumbnail(file);
   }
   return null;
+}
+
+/**
+ * What the upload pipeline needs from a file: identity, a size, and
+ * bounded reads. A browser `File` satisfies it as-is. A native source
+ * (the shell's photo picker, an exported library asset) satisfies it with
+ * ranged reads over the bridge, so a large video is never resident in
+ * memory; such a source carries a `mediaUrl` for the decoders that want a
+ * URL rather than bytes, and a `dispose` for its staged file on disk.
+ */
+export interface UploadSource {
+  readonly name: string;
+  readonly type: string;
+  readonly size: number;
+  readonly lastModified: number;
+  slice(start?: number, end?: number): { readonly size: number; arrayBuffer(): Promise<ArrayBuffer> };
+  arrayBuffer(): Promise<ArrayBuffer>;
+  text(): Promise<string>;
+  /** Range-served URL for media elements, when the source is not a Blob. */
+  readonly mediaUrl?: string;
+  dispose?(): Promise<void>;
 }
 
 export interface PreparedFile {
@@ -413,7 +480,7 @@ export interface PreparedFile {
  * Everything computed here ships only inside encrypted metadata.
  */
 export async function analyzeFile(
-  file: File,
+  file: UploadSource,
   signal?: AbortSignal,
   onPhase?: (phase: string) => void,
   opts?: {
@@ -448,15 +515,17 @@ export async function analyzeFile(
   // text sharpens categorization (a photographed invoice files as a receipt).
   // Everything that READS the image works from the bounded copy: the
   // original is decoded once, for the thumbnail, and never again.
-  const readable = thumbnail?.readable ?? file;
+  // Readers below take Blobs; image sources are materialized before
+  // analysis, so a non-Blob here is a video and every reader is gated off.
+  const readable = thumbnail?.readable ?? (file instanceof File ? file : null);
   let ocrRan = false;
-  if (!defer && text === undefined && mime.startsWith("image/") && ocrEnabled()) {
+  if (!defer && text === undefined && mime.startsWith("image/") && readable && ocrEnabled()) {
     onPhase?.("reading text");
     ocrRan = true;
     text = await withDeadline(recognizeImage(readable), ANALYSIS_DEADLINE_MS * 3, signal);
   }
   // A PDF with no text layer is a scan; its pages read like photos.
-  if (!defer && text === undefined && isPdf(file.name, file.type) && ocrEnabled()) {
+  if (!defer && text === undefined && isPdf(file.name, file.type) && file instanceof Blob && ocrEnabled()) {
     onPhase?.("reading scanned pages");
     ocrRan = true;
     text = await withDeadline(recognizePdf(file), ANALYSIS_DEADLINE_MS * 6, signal);
@@ -471,7 +540,7 @@ export async function analyzeFile(
     onPhase?.("indexing by meaning");
   }
   if (!defer && semanticEnabled()) {
-    if (mime.startsWith("image/")) {
+    if (mime.startsWith("image/") && readable) {
       clip = await withDeadline(embedImage(readable), 45_000, signal);
     } else if (mime.startsWith("video/") && thumbnail) {
       clip = await withDeadline(
@@ -515,7 +584,7 @@ export async function analyzeFile(
     // code needs more resolution than the thumbnail carries.
     const barcodeSource = mime.startsWith("image/")
       ? readable
-      : isPdf(file.name, file.type)
+      : isPdf(file.name, file.type) && file instanceof Blob
         ? await withDeadline(renderPdfPage(file), ANALYSIS_DEADLINE_MS, signal).catch(() => null)
         : null;
     // Saved confirmations carry schema.org reservation data in their markup,
@@ -676,17 +745,20 @@ async function sendPartWithRetry(
  * The assembled server-side blob is byte-identical to a single-request
  * upload of the same file.
  */
-function isMediaFile(file: File): boolean {
-  return file.type.startsWith("video/") || file.type.startsWith("audio/");
+function isMediaFile(file: UploadSource): boolean {
+  // Native sources carry no type when the name's extension is unknown;
+  // the name still decides, or a picked video would lose seeking.
+  const type = file.type || mimeFromName(file.name);
+  return type.startsWith("video/") || type.startsWith("audio/");
 }
 
 /** Media uses the random-access chunked format so playback can seek. */
-export function contentCiphertextSize(file: File): number {
+export function contentCiphertextSize(file: UploadSource): number {
   return isMediaFile(file) ? chunkedCiphertextSize(file.size) : streamCiphertextSize(file.size);
 }
 
 async function uploadInParts(
-  file: File,
+  file: UploadSource,
   fileId: string,
   fileKey: Uint8Array,
   onProgress: (fraction: number) => void,
@@ -813,7 +885,7 @@ async function uploadInParts(
 
 /** Encrypts a prepared file and uploads content plus thumbnail. */
 export async function encryptAndUpload(
-  file: File,
+  file: UploadSource,
   folderId: string | null,
   masterKey: Uint8Array,
   prepared: PreparedFile,

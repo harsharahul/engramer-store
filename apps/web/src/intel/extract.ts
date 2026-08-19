@@ -1,4 +1,5 @@
 import type { ExifSignals } from "./categorize";
+import type { UploadSource } from "../transfer";
 
 const TEXT_READ_LIMIT = 512 * 1024;
 const TEXT_STORE_LIMIT = 100_000;
@@ -7,7 +8,7 @@ const PDF_PAGE_LIMIT = 40;
 const TEXTUAL_EXTENSIONS =
   /\.(txt|md|markdown|org|json|yaml|yml|toml|csv|tsv|log|ts|tsx|js|jsx|py|go|rs|java|c|h|cpp|rb|sh|css|html|xml|sql)$/i;
 
-function isTextual(file: File): boolean {
+function isTextual(file: { name: string; type: string }): boolean {
   return file.type.startsWith("text/") || TEXTUAL_EXTENSIONS.test(file.name);
 }
 
@@ -38,7 +39,7 @@ function isPptx(name: string, mime: string): boolean {
   );
 }
 
-function isOffice(file: File): boolean {
+function isOffice(file: { name: string; type: string }): boolean {
   return (
     isDocx(file.name, file.type) || isXlsx(file.name, file.type) || isPptx(file.name, file.type)
   );
@@ -51,7 +52,7 @@ function isOffice(file: File): boolean {
  * the shared-strings table and the slides without any renderer involved.
  * Everything lazy-loaded so the viewer never pays for it upfront.
  */
-export async function extractText(file: File): Promise<string | undefined> {
+export async function extractText(file: UploadSource): Promise<string | undefined> {
   try {
     if (isTextual(file) && file.size <= TEXT_READ_LIMIT) {
       const text = await file.text();
@@ -85,7 +86,7 @@ function xmlToText(xml: string, paragraphEnd: RegExp): string {
     .trim();
 }
 
-async function extractOfficeText(file: File): Promise<string | undefined> {
+async function extractOfficeText(file: UploadSource): Promise<string | undefined> {
   const { unzipSync, strFromU8 } = await import("fflate");
   const wanted = (path: string) =>
     path === "word/document.xml" ||
@@ -114,7 +115,7 @@ async function extractOfficeText(file: File): Promise<string | undefined> {
   return text || undefined;
 }
 
-async function extractPdfText(file: File): Promise<string | undefined> {
+async function extractPdfText(file: UploadSource): Promise<string | undefined> {
   const pdfjs = await import("pdfjs-dist");
   const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
   pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -143,8 +144,10 @@ async function extractPdfText(file: File): Promise<string | undefined> {
 }
 
 /** EXIF capture time and camera make, extracted locally with exifr. */
-export async function extractExif(file: File): Promise<ExifSignals | undefined> {
-  if (!file.type.startsWith("image/")) {
+export async function extractExif(file: UploadSource): Promise<ExifSignals | undefined> {
+  // exifr wants a Blob; a non-Blob source is a video and carries no EXIF
+  // worth this reader anyway.
+  if (!file.type.startsWith("image/") || !(file instanceof Blob)) {
     return undefined;
   }
   try {

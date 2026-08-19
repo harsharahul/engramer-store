@@ -7,9 +7,20 @@ const rig = vi.hoisted(() => ({
   fileNames: [] as string[],
   batches: [] as ({ done: number; total: number; current: string } | null)[],
   stops: [] as ((() => void) | null | undefined)[],
-  holds: [] as ("wifi" | null)[],
+  holds: [] as ("wifi" | "shell-videos" | null)[],
   backfills: 0,
   serverSynced: true,
+  // Whether the fake shell can serve picked files in bounded windows.
+  streaming: true,
+  // Extra library entries beyond the six images every test gets.
+  extraAssets: [] as {
+    id: string;
+    kind: string;
+    filename: string;
+    screenshot: boolean;
+    created_ms: number;
+    mtime_ms: number;
+  }[],
   // Asset ids whose export the fake shell refuses.
   exportFail: new Set<string>(),
   // The synced library as the ledger sees it.
@@ -37,8 +48,9 @@ vi.mock("./native", () => ({
   nativePhotosAvailable: async () => true,
   nativeNetworkStatus: async () => ({ ...rig.network }),
   nativePhotosAuthorize: async () => "authorized",
-  nativePhotosList: async () =>
-    Array.from({ length: 6 }, (_, i) => ({
+  pickedStreamingAvailable: async () => rig.streaming,
+  nativePhotosList: async () => [
+    ...Array.from({ length: 6 }, (_, i) => ({
       id: `asset-${i}`,
       kind: "image",
       filename: `IMG_${i}.HEIC`,
@@ -46,6 +58,8 @@ vi.mock("./native", () => ({
       created_ms: 1_754_700_000_000 + i,
       mtime_ms: 1_754_700_000_000 + i,
     })),
+    ...rig.extraAssets,
+  ],
   nativePhotoFile: async (id: string, name?: string) => {
     if (rig.exportFail.has(id)) {
       throw new Error("export failed");
@@ -91,7 +105,9 @@ vi.mock("./store", () => ({
         rig.stops.push(patch.batchStop);
       }
       if ("backupHold" in patch) {
-        rig.holds.push((patch as { backupHold?: "wifi" | null }).backupHold ?? null);
+        rig.holds.push(
+          (patch as { backupHold?: "wifi" | "shell-videos" | null }).backupHold ?? null,
+        );
       }
     },
   },
@@ -137,6 +153,8 @@ beforeEach(() => {
   rig.backedUp.length = 0;
   rig.fileNames.length = 0;
   rig.serverSynced = true;
+  rig.streaming = true;
+  rig.extraAssets = [];
   rig.exportFail.clear();
   rig.files = new Map();
 });
@@ -343,6 +361,33 @@ describe("backup dedupe and failure memory", () => {
     expect(await autoBackupPass(200_000_000)).toBeNull();
     rig.serverSynced = true;
     expect(await autoBackupPass(200_000_000)).not.toBeNull();
+  });
+
+  it("holds videos back, visibly, when the shell can only read files whole", async () => {
+    // Reading a video whole through the bridge is the memory kill; until
+    // the shell can stream, videos wait, and the wait is shown, not
+    // burned as failed attempts.
+    rig.streaming = false;
+    rig.extraAssets = [
+      {
+        id: "vid-1",
+        kind: "video",
+        filename: "IMG_9.MOV",
+        screenshot: false,
+        created_ms: 1_754_700_000_100,
+        mtime_ms: 1_754_700_000_100,
+      },
+    ];
+    const held = await runBackup({ ...DEFAULT_POLICY, enabled: true, includeVideos: true });
+    expect(held?.total).toBe(6);
+    expect(rig.backedUp).not.toContain("vid-1");
+    expect(rig.holds[rig.holds.length - 1]).toBe("shell-videos");
+
+    rig.streaming = true;
+    const caughtUp = await runBackup({ ...DEFAULT_POLICY, enabled: true, includeVideos: true });
+    expect(caughtUp?.done).toBe(1);
+    expect(rig.backedUp).toContain("vid-1");
+    expect(rig.holds[rig.holds.length - 1]).toBeNull();
   });
 
   it("starts exactly one pass when foreground events double-fire", async () => {

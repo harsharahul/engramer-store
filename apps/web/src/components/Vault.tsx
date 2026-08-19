@@ -41,6 +41,7 @@ import {
   unlockDeclined,
 } from "../unlock";
 import { nativeShell, nativeUnlockAvailable, pickPhotos } from "../native";
+import type { UploadSource } from "../transfer";
 import { APP_VERSION } from "../version";
 import { reloadForUpdate, watchForUpdate } from "../update";
 import { startWatchSync } from "../watchfolders";
@@ -620,7 +621,7 @@ export function Vault() {
   };
 
   const uploadTo = useCallback(
-    (files: File[]) => {
+    (files: UploadSource[]) => {
       if (files.length > 0) {
         void store.uploadFiles(files, currentFolderId);
       }
