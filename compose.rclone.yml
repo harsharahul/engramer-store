@@ -34,9 +34,10 @@ x-engramer: &engramer
     ENGRAMER_S3_SECRET_KEY: "${ENGRAM_GATEWAY_SECRET:?generate with: openssl rand -hex 32}"
     # rclone's S3 server refuses the SDK's default aws-chunked bodies.
     ENGRAMER_S3_CHECKSUMS: when-required
-    # Cloud drives are directory-shaped; a flat namespace makes every
-    # listing cost seconds at scale. Choose before the first upload.
-    ENGRAMER_S3_KEY_LAYOUT: sharded
+    # Keys stay flat on purpose: on providers that ingest through an
+    # application API, creating a directory costs seconds, and a sharded
+    # layout pays that on nearly every upload. Listings of one large
+    # folder are rare and served by the gateway's directory cache.
     # Thumbnails and search indexes on the local volume, not the provider.
     ENGRAMER_DERIVED_BACKEND: fs
     # Local tiers that keep repeat reads off the provider entirely.
@@ -63,6 +64,9 @@ x-rclone: &rclone
     --addr :8333
     --auth-key "${ENGRAM_GATEWAY_KEY},${ENGRAM_GATEWAY_SECRET}"
     --dir-cache-time 24h
+    --vfs-refresh
+    --no-modtime
+    --no-checksum
     --vfs-cache-mode writes
     --cache-dir /spool
     --vfs-write-back 2s
