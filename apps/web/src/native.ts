@@ -378,16 +378,26 @@ export async function watchedFileRead(path: string): Promise<Uint8Array> {
   return fileBytes(await invoke("watched_file_read", { path }));
 }
 
+/** A file key the way shell commands take it: base64 over the raw bytes. */
+function keyB64(key: Uint8Array): string {
+  let raw = "";
+  for (let i = 0; i < key.length; i += 0x8000) {
+    raw += String.fromCharCode(...key.subarray(i, i + 0x8000));
+  }
+  return btoa(raw);
+}
+
 /**
- * Saves one vault file through the shell: ciphertext streams to disk,
- * the file-to-file decryptor verifies the digest in-pass, and the result
- * lands in Documents/Downloads, which the Files app shows. Returns the
- * name it landed under; null on a shell without the command, so the
- * caller keeps its in-page path. A shell that HAS the command but fails
- * throws: the in-page path holds whole files in memory, and retrying a
- * large one there is the crash this exists to end.
+ * Exports one vault file through the shell: ciphertext streams to disk,
+ * the file-to-file decryptor verifies the digest in-pass, and the share
+ * sheet opens on the result, where the person chooses where the
+ * plaintext goes. The staged copy lives only as long as the sheet.
+ * Returns the name the export landed under; null on a shell without the
+ * command, so the caller keeps its in-page path. A shell that HAS the
+ * command but fails throws: the in-page path holds whole files in
+ * memory, and retrying a large one there is the crash this exists to end.
  */
-export async function nativeSaveDownload(
+export async function nativeExportFile(
   file: { id: string; name: string; key: Uint8Array; digest?: string },
   token: string,
 ): Promise<string | null> {
@@ -395,14 +405,10 @@ export async function nativeSaveDownload(
   if (!invoke) {
     return null;
   }
-  let raw = "";
-  for (let i = 0; i < file.key.length; i += 0x8000) {
-    raw += String.fromCharCode(...file.key.subarray(i, i + 0x8000));
-  }
   try {
-    return (await invoke("file_save_download", {
+    return (await invoke("file_export", {
       fileId: file.id,
-      key: btoa(raw),
+      key: keyB64(file.key),
       token,
       base: location.origin,
       name: file.name,
@@ -412,11 +418,125 @@ export async function nativeSaveDownload(
     const reason = err instanceof Error ? err.message : String(err);
     if (/not allowed|not found/i.test(reason)) {
       // An older shell: the command does not exist there.
-      diag("download", "shell cannot save downloads; using the in-page path");
+      diag("download", "shell cannot export files; using the in-page path");
       return null;
     }
     throw new Error(reason);
   }
+}
+
+// ----- offline store (the shell's disk copy of files' ciphertext) -----
+
+/** One stored file, for badges and the storage row. */
+export interface NativeOfflineEntry {
+  fileId: string;
+  pinned: boolean;
+  complete: boolean;
+  bytes: number;
+}
+
+/**
+ * A fully local file's ciphertext, or null when the store holds less
+ * than all of it (or there is no shell): callers fetch from the server
+ * exactly as they always did. Every failure is a null on purpose; the
+ * offline store must never break an open, only skip the network.
+ */
+export async function nativeOfflineRead(fileId: string): Promise<Uint8Array | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  try {
+    return fileBytes(await invoke("offline_read", { fileId }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Downloads whatever spans are still missing, verifies the whole file
+ * decrypts against its digest, and marks it kept: complete means "opens
+ * with no network", and pinned means "never evicted for cache space".
+ * Progress arrives as "pin-progress" shell events. False when the shell
+ * cannot (old build, no space, offline): the caller reports, nothing
+ * breaks.
+ */
+export async function nativeOfflinePin(
+  file: { id: string; key: Uint8Array; digest?: string },
+  token: string,
+): Promise<boolean> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return false;
+  }
+  try {
+    await invoke("offline_pin", {
+      fileId: file.id,
+      key: keyB64(file.key),
+      token,
+      base: location.origin,
+      digest: file.digest ?? null,
+    });
+    return true;
+  } catch (err) {
+    diag("offline", `pin failed: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
+/** Unpinned data stays cached until space is needed; only the promise
+ * to keep it goes. */
+export async function nativeOfflineUnpin(fileId: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return;
+  }
+  await invoke("offline_unpin", { fileId }).catch(() => {});
+}
+
+/** Everything the shell's store holds; empty outside the shell. */
+export async function nativeOfflineStatus(): Promise<NativeOfflineEntry[]> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return [];
+  }
+  try {
+    return (await invoke("offline_status")) as NativeOfflineEntry[];
+  } catch {
+    return [];
+  }
+}
+
+/** Drops every unpinned cached file; answers the bytes freed. */
+export async function nativeOfflineClearCache(): Promise<number> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return 0;
+  }
+  try {
+    return (await invoke("offline_clear_cache")) as number;
+  } catch {
+    return 0;
+  }
+}
+
+/** Signing out empties the store entirely, pins included. */
+export async function nativeOfflineClear(): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return;
+  }
+  await invoke("offline_clear").catch(() => {});
+}
+
+/** A stored file whose bytes changed on the server is no longer the
+ * file it promised to keep: drop the stale copy. */
+export async function nativeOfflineRemove(fileId: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return;
+  }
+  await invoke("offline_remove", { fileId }).catch(() => {});
 }
 
 /**

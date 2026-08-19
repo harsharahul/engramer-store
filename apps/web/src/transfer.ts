@@ -39,6 +39,7 @@ import { computeBlur } from "./intel/blur";
 import { decodeImageBitmap, normalizeImageMime } from "./intel/heic";
 import { isHandheld } from "./analysisslot";
 import { diag } from "./diag";
+import { nativeOfflineRead } from "./native";
 import { mimeFromName } from "./nativefile";
 
 const THUMB_SIZE = 512;
@@ -1164,7 +1165,11 @@ export async function downloadAndDecrypt(
   fileId: string,
   fileKey: Uint8Array,
   expectedDigest?: string,
-  opts?: { timeoutMs?: number },
+  opts?: {
+    timeoutMs?: number;
+    preferLocal?: boolean;
+    onProgress?: (loaded: number, total: number | null) => void;
+  },
 ): Promise<Uint8Array> {
   const { bytes } = await downloadContent(fileId, fileKey, expectedDigest, opts);
   return bytes;
@@ -1189,10 +1194,31 @@ export async function downloadContent(
   fileId: string,
   fileKey: Uint8Array,
   expectedDigest?: string,
-  opts?: { atLeast?: number | null; timeoutMs?: number },
+  opts?: {
+    atLeast?: number | null;
+    timeoutMs?: number;
+    /** Serve the shell's offline store when the file is fully local:
+     * instant opens, and pinned files open with no network at all. Left
+     * off for the integrity verifier, whose whole point is the server's
+     * bytes, and for anything else that must observe the server. */
+    preferLocal?: boolean;
+    onProgress?: (loaded: number, total: number | null) => void;
+  },
 ): Promise<{ bytes: Uint8Array; generation: number | null }> {
+  if (opts?.preferLocal) {
+    const local = await nativeOfflineRead(fileId);
+    if (local) {
+      // Same decrypt, same digest verdict; only the source differs.
+      const bytes = decryptContent(local, fileKey);
+      if (digestMatches(bytes, expectedDigest)) {
+        return { bytes, generation: null };
+      }
+      diag("offline", `${fileId} local copy is stale; refetching from the server`);
+    }
+  }
   const { bytes: ciphertext, generation } = await api.downloadBlobDetailed(fileId, "data", {
     ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    ...(opts?.onProgress ? { onProgress: opts.onProgress } : {}),
   });
   const bytes = decryptContent(ciphertext, fileKey);
   if (!digestMatches(bytes, expectedDigest)) {

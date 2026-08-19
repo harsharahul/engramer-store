@@ -606,6 +606,10 @@ export function OfficeEditor(props: {
             // busy room's saves cannot outrun this open at any cadence.
             const result = await downloadContent(entry.id, entry.key, entry.digest, {
               atLeast: joint ? (entry.generation ?? 0) : null,
+              // A room's document must observe the server: the local copy
+              // knows nothing about generations. Solo documents open from
+              // disk when the shell holds them whole.
+              preferLocal: !joint,
             });
             generation = result.generation;
             return result.bytes;

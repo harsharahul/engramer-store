@@ -2192,6 +2192,73 @@ a {
   height: 13px;
 }
 
+/* ---------- save narration (exports, downloads, offline pins) ---------- */
+
+.save-overlay {
+  position: fixed;
+  bottom: 74px;
+  right: 20px;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(86vw, 340px);
+}
+
+.save-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 7px;
+  background: var(--ink-1);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow-modal);
+  padding: 11px 14px;
+  animation: fade-rise 0.25s ease both;
+}
+
+.save-row .spinner {
+  width: 14px;
+  height: 14px;
+}
+
+.save-words {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.save-name {
+  font-size: 13px;
+  color: var(--paper);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.save-state {
+  font-size: 11.5px;
+  color: var(--paper-dim);
+}
+
+.save-bar {
+  grid-column: 1 / -1;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--ink-3);
+  overflow: hidden;
+}
+
+.save-bar div {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
 /* ---------- Word document editor and preview ---------- */
 
 .doc-editor-body {
@@ -3031,6 +3098,11 @@ button.tag:hover {
   margin-right: 5px;
   vertical-align: -1px;
   display: inline-flex;
+}
+
+/* The mark a kept file wears: green, the color of a promise held. */
+.offline-mark {
+  color: var(--ok, #34d399);
 }
 
 .row.selected {
@@ -4063,6 +4135,24 @@ span.item-menu {
   font-size: 12.5px;
   color: var(--paper-dim);
   pointer-events: none;
+}
+
+/* The thumbnail standing in while the true file downloads: scaled to the
+ * same box, softened so it reads as "arriving", never as the real thing. */
+.preview-warming {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.preview-warming img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  filter: blur(14px) saturate(1.05);
+  opacity: 0.85;
 }
 
 /* ---------- semantic search ---------- */

@@ -3,6 +3,38 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Added
+- **Offline access.** Any file can be kept on the device: choose
+  "Offline access" in its menu and the shell downloads what it does not
+  already hold, verifies the whole file decrypts against its recorded
+  checksum, and marks it kept. Kept files open, play, and export with no
+  network at all; a green mark on the tile and an Offline row in the
+  details panel say so. Everything is stored as ciphertext, unreadable
+  while the vault is locked, and signing out removes it all.
+- **A local content cache underneath every open.** Streaming playback
+  and file opens now write the ranges they fetch into the same on-disk
+  store, so a re-opened file is served from disk instead of the network
+  and a replayed video never re-downloads. Unpinned data is cache: kept
+  within a 2 GB budget and evicted oldest-first when space is needed,
+  with a Profile row showing kept files and cache size beside a Clear
+  cache control. A file whose content changes on the server drops its
+  stale local copy at the next sync, and kept files re-download their
+  new self in the background.
+- **Downloads on iPhone and iPad hand the file to the share sheet.**
+  The Download button streams the ciphertext down, decrypts it file to
+  file with the checksum verified in-pass, and opens the system share
+  sheet, so the plaintext goes exactly where the person sends it:
+  AirDrop, another app, or any folder in Files. The staged copy lives
+  only as long as the sheet. Browsers keep their ordinary download.
+- **One narration for bytes on the move.** Exports, browser downloads,
+  and offline pins report into a shared progress card showing the name,
+  phase, and byte counts; quick saves finish silently. Larger file
+  opens show their download progress in the preview, which now paints
+  the file's own thumbnail, softly blurred, the moment it opens, and
+  videos use it as their poster frame instead of a black rectangle.
+
 ## [0.50.0] - 2026-08-19
 
 ### Added

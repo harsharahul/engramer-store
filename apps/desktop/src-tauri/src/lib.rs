@@ -14,6 +14,7 @@ mod handoff;
 mod keychain;
 mod media;
 mod network;
+mod offline;
 mod outbox;
 mod photolib;
 mod photos;
@@ -149,7 +150,14 @@ pub fn run() {
             photos::picked_file_delete,
             photos::picked_sweep,
             photos::video_poster,
-            saveout::file_save_download,
+            saveout::file_export,
+            offline::offline_pin,
+            offline::offline_unpin,
+            offline::offline_remove,
+            offline::offline_status,
+            offline::offline_read,
+            offline::offline_clear,
+            offline::offline_clear_cache,
             unlock::native_unlock_available,
             unlock::unlock_secret_store,
             unlock::unlock_secret_get,
