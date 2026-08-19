@@ -64,15 +64,20 @@ layout flat.
 A consumer cloud is seconds away per request. The deployment stays fast by
 keeping request-heavy data local and shaping what remains:
 
-- **A local write spool** (`--vfs-cache-mode writes` in the gateway, on by
-  default in the recipe). An upload is acknowledged once it is durably on
-  the server's disk; the gateway drains it to the provider in the
-  background and keeps retrying, resuming pending uploads across restarts.
-  Without it, every upload waits out the provider's own write latency,
-  which for providers that ingest through an application API is seconds
-  per file. The trade, stated plainly: between acknowledgment and drain,
-  the only copy is the server's disk, so the spool volume deserves the
-  same care as the metadata database. Bound it with
+- **A local write spool and read cache** (`--vfs-cache-mode full` in the
+  gateway, on by default in the recipe). An upload is acknowledged once it
+  is durably on the server's disk; the gateway drains it to the provider
+  in the background and keeps retrying, resuming pending uploads across
+  restarts. Without it, every upload waits out the provider's own write
+  latency, which for providers that ingest through an application API is
+  seconds per file. The same cache also holds read data: media playback
+  asks for files in byte ranges, and with reads uncached every range is a
+  round trip to the provider, which cannot keep up with a video decoder;
+  ranges a play already fetched come from local disk instead, and
+  read-ahead (`--vfs-read-ahead`) keeps the decoder fed on first plays.
+  The trade, stated plainly: between acknowledgment and drain, an
+  upload's only copy is the server's disk, so the cache volume deserves
+  the same care as the metadata database. Bound it with
   `--vfs-cache-max-size`; the recipe uses 20G.
 - **Derived data on local disk** (`ENGRAMER_DERIVED_BACKEND=fs`).
   Thumbnails and search indexes are request-heavy and byte-light; a grid

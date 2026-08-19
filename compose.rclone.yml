@@ -50,13 +50,21 @@ x-engramer: &engramer
 # credentials and is reachable only from the compose network.
 #
 # Writes spool to the local volume and drain to the provider in the
-# background (--vfs-cache-mode writes): an upload is acknowledged once it
-# is durably on this machine's disk, and rclone keeps retrying delivery,
-# resuming pending uploads across restarts. Without the spool, every
-# upload waits out the provider's own write latency, which for app-tier
-# providers is seconds per file. The honest trade: losing this volume
-# before a file drains loses that file, so the spool belongs on the same
-# disk you already trust with the metadata database.
+# background: an upload is acknowledged once it is durably on this
+# machine's disk, and rclone keeps retrying delivery, resuming pending
+# uploads across restarts. Without the spool, every upload waits out the
+# provider's own write latency, which for app-tier providers is seconds
+# per file. The honest trade: losing this volume before a file drains
+# loses that file, so the spool belongs on the same disk you already
+# trust with the metadata database.
+#
+# Reads cache to the same volume (--vfs-cache-mode full, which includes
+# the write spool above): media playback asks for the file in byte
+# ranges, and with reads uncached every range was a round trip to the
+# provider's API, which cannot keep up with a video decoder; playback
+# opened smoothly and then starved. With the read cache, ranges a play
+# already fetched come from local disk, and read-ahead keeps the decoder
+# fed on first plays.
 x-rclone: &rclone
   image: rclone/rclone:latest
   command: >
@@ -67,7 +75,10 @@ x-rclone: &rclone
     --vfs-refresh
     --no-modtime
     --no-checksum
-    --vfs-cache-mode writes
+    --vfs-cache-mode full
+    --vfs-read-chunk-size 16M
+    --vfs-read-chunk-size-limit 512M
+    --vfs-read-ahead 64M
     --cache-dir /spool
     --vfs-write-back 2s
     --vfs-cache-max-size 20G
