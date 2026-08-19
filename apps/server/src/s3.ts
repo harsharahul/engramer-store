@@ -11,7 +11,13 @@ import {
   UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
-import { byteLimiter, type BlobRange, type BlobStore, type PartReceipt } from "./blobs.js";
+import {
+  byteLimiter,
+  sliceRange,
+  type BlobRange,
+  type BlobStore,
+  type PartReceipt,
+} from "./blobs.js";
 import { attachBudget } from "./budget.js";
 
 export interface S3Config {
@@ -126,8 +132,24 @@ export class S3BlobStore implements BlobStore {
         ...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}),
       }),
     );
-    return result.Body as Readable;
+    const body = result.Body as Readable;
+    // A compliant partial answer names its window; an answer without one
+    // ignored the Range and carries the whole object (some gateway-backed
+    // deployments do). Serving that AS the range would hand every client
+    // wrong bytes, silently; cut the window out of it instead.
+    if (range && !result.ContentRange) {
+      if (!this.warnedRangeBlind) {
+        this.warnedRangeBlind = true;
+        console.warn(
+          "blob backend ignores Range requests; serving ranges by reading through the full object (correct, but slow for media playback)",
+        );
+      }
+      return sliceRange(body, range.start, range.end - range.start + 1);
+    }
+    return body;
   }
+
+  private warnedRangeBlind = false;
 
   async remove(key: string): Promise<void> {
     await this.client

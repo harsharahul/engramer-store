@@ -116,6 +116,42 @@ export function byteLimiter(maxBytes: number): { transform: Transform; written: 
 }
 
 /**
+ * Cuts a byte window out of a stream: `start` bytes are dropped, `length`
+ * bytes pass, and the rest is never read. For backends that answer a
+ * ranged request with the whole object: serving that full body AS the
+ * range handed every client the wrong bytes, silently; cutting the
+ * window here keeps such backends correct, merely slower.
+ */
+export function sliceRange(source: Readable, start: number, length: number): Readable {
+  let toSkip = start;
+  let remaining = length;
+  const transform = new Transform({
+    transform(chunk: Buffer, _enc, callback) {
+      let window = chunk;
+      if (toSkip > 0) {
+        const dropped = Math.min(toSkip, window.length);
+        toSkip -= dropped;
+        window = window.subarray(dropped);
+      }
+      if (window.length === 0 || remaining === 0) {
+        callback();
+        return;
+      }
+      if (window.length > remaining) {
+        window = window.subarray(0, remaining);
+      }
+      remaining -= window.length;
+      callback(null, window);
+      if (remaining === 0) {
+        this.end();
+        source.destroy();
+      }
+    },
+  });
+  return source.pipe(transform);
+}
+
+/**
  * Local filesystem store: writes go through a temp file and an atomic rename,
  * so a crashed upload never leaves a partial blob under its final name.
  */
