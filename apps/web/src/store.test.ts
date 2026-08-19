@@ -642,6 +642,33 @@ describe("embedding model version", () => {
     expect(pendingDerivatives(files, 2)).toEqual({ thumbs: 2, text: 2, meaning: 2 });
   });
 
+  /**
+   * The automatic sweeps skip kinds whose preference is off, so a count
+   * that includes them describes work nothing will ever take up. With
+   * reading and meaning off by default, every deferred backup photo read
+   * as a permanently pending queue the size of the library.
+   */
+  it("pendingDerivatives excludes kinds whose sweep is turned off", () => {
+    const files = new Map<string, FileEntry>(
+      (
+        [
+          entry({ id: "a", mime: "image/jpeg", hasThumb: false, hasText: false, hasClip: false }),
+          entry({ id: "c", name: "scan.pdf", mime: "application/pdf", hasText: false }),
+        ] as FileEntry[]
+      ).map((f) => [f.id, f]),
+    );
+    expect(pendingDerivatives(files, 1, { ocr: false, semantic: true })).toEqual({
+      thumbs: 1,
+      text: 0,
+      meaning: 1,
+    });
+    expect(pendingDerivatives(files, 1, { ocr: true, semantic: false })).toEqual({
+      thumbs: 1,
+      text: 2,
+      meaning: 0,
+    });
+  });
+
   it("clipComparable admits only vectors from the current model", () => {
     const clip = new Float32Array(4);
     expect(clipComparable(entry({ hasClip: true, clip }), 1)).toBe(true);
