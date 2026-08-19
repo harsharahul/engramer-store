@@ -1,9 +1,9 @@
 import { useState, type CSSProperties } from "react";
-import type { FileEntry } from "../store";
+import { useStore, type FileEntry } from "../store";
 import { usePhotoThumb } from "../thumbs";
 import { blurUrl } from "../intel/blur";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
-import { DotsGlyph, PeopleGlyph, StarGlyph } from "./Icon";
+import { DotsGlyph, OfflineGlyph, PeopleGlyph, StarGlyph } from "./Icon";
 import { FolderArt, KIND_ACCENTS, SheetArt } from "./FileArt";
 import { useLongPress } from "../longpress";
 
@@ -49,6 +49,9 @@ export function FileCard(props: {
   // Thumbnails load only when the card approaches the viewport; until then
   // the ThumbHash placeholder (or the kind art) holds the frame.
   const { ref: cardRef, thumb } = usePhotoThumb<HTMLDivElement>(file);
+  const keptOffline = useStore((s) =>
+    s.offline.some((entry) => entry.fileId === file.id && entry.pinned && entry.complete),
+  );
   const longPress = useLongPress(props.onMenu);
 
   const placeholder = !thumb && file.blur ? blurUrl(file.blur) : null;
@@ -123,6 +126,11 @@ export function FileCard(props: {
                 }`}
               >
                 <PeopleGlyph size={11} />
+              </span>
+            )}
+            {keptOffline && (
+              <span className="fav-mark offline-mark" title="Available offline">
+                <OfflineGlyph size={11} />
               </span>
             )}
             {formatBytes(file.size)} · {formatDate(file.mtime)}

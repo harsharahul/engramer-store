@@ -45,6 +45,9 @@ export function DetailsPanel(props: {
 }) {
   const { file } = props;
   const folders = useStore((s) => s.folders);
+  const offline = useStore((s) =>
+    file ? s.offline.find((entry) => entry.fileId === file.id) : undefined,
+  );
   const setTags = useStore((s) => s.setTags);
   const removeFromAlbum = useStore((s) => s.removeFromAlbum);
   const panelRef = useRef<HTMLElement>(null);
@@ -228,6 +231,18 @@ export function DetailsPanel(props: {
                 ? "Checksum recorded, not read yet"
                 : "No checksum; stored before this existed"}
         </dd>
+        {offline && (
+          <>
+            <dt>Offline</dt>
+            <dd>
+              {offline.pinned
+                ? offline.complete
+                  ? "Kept on this device"
+                  : "Downloading for offline access"
+                : `Cached (${formatBytes(offline.bytes)})`}
+            </dd>
+          </>
+        )}
       </dl>
 
       <FileFacts file={file} />

@@ -12,7 +12,7 @@
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 /// How often download progress reaches the page; every chunk would be
 /// noise, and a stalled radio still reports within this many bytes.
@@ -130,10 +130,13 @@ pub(crate) fn unique_destination(dir: &Path, name: &str) -> PathBuf {
     unreachable!("some counter is free");
 }
 
-/// Saves one vault file into Documents/Downloads, streamed and verified.
-/// Returns the file name it landed under.
+/// Exports one vault file: streamed down, decrypted file to file, then
+/// handed to the iOS share sheet, where the person chooses where it goes
+/// - AirDrop, another app, or any folder in Files. The decrypted copy
+/// lives only in a private staging area; the sheet's completion removes
+/// it, and each new export sweeps whatever an earlier one left behind.
 #[tauri::command]
-pub async fn file_save_download(
+pub async fn file_export(
     app: tauri::AppHandle,
     file_id: String,
     key: String,
@@ -142,25 +145,28 @@ pub async fn file_save_download(
     name: String,
     digest: Option<String>,
 ) -> Result<String, String> {
+    use tauri::Manager;
     let key = crate::media::b64_decode(&key)?;
     if key.len() != 32 {
         return Err("file key must be 32 bytes".to_string());
     }
-    let documents = app
+    let data_dir = app
         .path()
-        .document_dir()
-        .map_err(|err| format!("no documents directory: {err}"))?;
-    let downloads = documents.join("Downloads");
-    std::fs::create_dir_all(&downloads).map_err(|err| err.to_string())?;
-    let staging = documents.join(".staging");
-    std::fs::create_dir_all(&staging).map_err(|err| err.to_string())?;
-    let cipher_path = staging.join(format!("{file_id}.cipher"));
-    let plain_path = staging.join(format!("{file_id}.plain"));
+        .app_data_dir()
+        .map_err(|err| format!("no data directory: {err}"))?;
+    let exports = data_dir.join("exports");
+    // Whatever an earlier sheet left behind goes now: an export's
+    // plaintext should live exactly as long as someone is choosing
+    // where to send it.
+    let _ = std::fs::remove_dir_all(&exports);
+    std::fs::create_dir_all(&exports).map_err(|err| err.to_string())?;
+    let cipher_path = exports.join(format!("{file_id}.cipher"));
+    let plain_path = exports.join(format!("{file_id}.plain"));
     let url = format!("{base}/api/files/{file_id}/data");
     let client = crate::media::http_client(&app);
     let progress_app = app.clone();
     let progress_id = file_id.clone();
-    let result = fetch_and_decrypt(
+    fetch_and_decrypt(
         &client,
         &url,
         &token,
@@ -180,14 +186,67 @@ pub async fn file_save_download(
             );
         },
     )
-    .await;
-    result?;
-    let destination = unique_destination(&downloads, &name);
+    .await?;
+    let destination = unique_destination(&exports, &name);
     std::fs::rename(&plain_path, &destination).map_err(|err| err.to_string())?;
+    #[cfg(target_os = "ios")]
+    {
+        let sheet_path = destination.clone();
+        app.run_on_main_thread(move || {
+            if let Err(err) = ios_share_sheet(&sheet_path) {
+                // The file stays staged; the next export sweeps it.
+                eprintln!("share sheet failed: {err}");
+            }
+        })
+        .map_err(|err| err.to_string())?;
+    }
     Ok(destination
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or(name))
+}
+
+/// Presents the share sheet on the exported file; its completion removes
+/// the decrypted staging copy, however the person finished.
+#[cfg(target_os = "ios")]
+fn ios_share_sheet(path: &Path) -> Result<(), String> {
+    use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyObject, Bool};
+    use objc2::{MainThreadMarker, MainThreadOnly};
+    use objc2_foundation::{NSArray, NSError, NSString, NSURL};
+    use objc2_ui_kit::{UIActivityType, UIActivityViewController, UIApplication};
+    let mtm = MainThreadMarker::new().ok_or("the share sheet must open on the main thread")?;
+    unsafe {
+        let url = NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()));
+        let url_object: Retained<AnyObject> = Retained::cast_unchecked(url);
+        let items = NSArray::from_retained_slice(&[url_object]);
+        let controller = UIActivityViewController::initWithActivityItems_applicationActivities(
+            UIActivityViewController::alloc(mtm),
+            &items,
+            None,
+        );
+        let staged = path.to_path_buf();
+        let completion = RcBlock::new(
+            move |_kind: *mut UIActivityType,
+                  _completed: Bool,
+                  _items: *mut NSArray,
+                  _error: *mut NSError| {
+                let _ = std::fs::remove_file(&staged);
+            },
+        );
+        controller.setCompletionWithItemsHandler(&*completion as *const _ as *mut _);
+        let application = UIApplication::sharedApplication(mtm);
+        #[allow(deprecated)]
+        let window = application
+            .keyWindow()
+            .ok_or("no window to present the share sheet from")?;
+        let root = window
+            .rootViewController()
+            .ok_or("no view controller to present the share sheet from")?;
+        root.presentViewController_animated_completion(&controller, true, None);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

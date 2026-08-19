@@ -101,6 +101,7 @@ import { TwoFactorDialog } from "./TwoFactorDialog";
 import { AdminPanel } from "./AdminPanel";
 import { ProfileView } from "./ProfileView";
 import { UploadTray } from "./UploadTray";
+import { SaveOverlay } from "./SaveOverlay";
 import { CommandPalette, type PaletteAction } from "./CommandPalette";
 import { Confirm, TextPrompt } from "./Dialogs";
 import {
@@ -131,6 +132,7 @@ import {
   MoonGlyph,
   MoveGlyph,
   NoteGlyph,
+  OfflineGlyph,
   PencilGlyph,
   PenNibGlyph,
   PhotoGlyph,
@@ -599,15 +601,28 @@ export function Vault() {
   // ----- actions -----
 
   const download = (file: FileEntry) => {
-    void saveDecryptedFile(file)
-      .then((saved) => {
-        if (saved) {
-          showToast(saved);
-        }
-      })
-      .catch((err: unknown) =>
-        showToast(err instanceof Error && err.message ? `Download failed: ${err.message}` : "Download failed."),
-      );
+    void saveDecryptedFile(file).catch((err: unknown) =>
+      showToast(err instanceof Error && err.message ? `Download failed: ${err.message}` : "Download failed."),
+    );
+  };
+
+  const toggleOffline = (file: FileEntry) => {
+    const kept = store.offline.some((entry) => entry.fileId === file.id && entry.pinned);
+    if (kept) {
+      void store
+        .unpinOffline(file.id)
+        .then(() => showToast(`"${file.name}" is no longer kept offline.`));
+    } else {
+      void store
+        .pinOffline(file.id)
+        .then((pinned) =>
+          showToast(
+            pinned
+              ? `"${file.name}" is available offline.`
+              : "Could not save this file for offline access.",
+          ),
+        );
+    }
   };
 
   const openFile = (id: string) => {
@@ -697,6 +712,21 @@ export function Vault() {
         ]
       : []),
     { id: "download", label: "Download", icon: <DownloadGlyph size={13} />, run: () => download(file) },
+    // Offline access is a shell promise: the store on disk does not
+    // exist in a plain browser, so the choice only appears where it can
+    // be kept.
+    ...(nativeShell()
+      ? [
+          {
+            id: "offline",
+            label: store.offline.some((e) => e.fileId === file.id && e.pinned)
+              ? "Remove offline access"
+              : "Offline access",
+            icon: <OfflineGlyph size={13} />,
+            run: () => toggleOffline(file),
+          },
+        ]
+      : []),
     // Sharing, moving and trashing belong to the file's owner; a shared
     // entry offers Leave instead, and only an editor may touch metadata.
     ...(file.shared
@@ -1099,6 +1129,9 @@ export function Vault() {
     // the shell reachable. Whatever cannot continue is cleaned up, and the
     // staging directory is swept around what can.
     void useStore.getState().scanResumableUploads();
+    // What the shell already keeps offline, so badges and the Profile
+    // row are truthful from the first paint.
+    void useStore.getState().refreshOffline();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.serverSynced]);
 
@@ -2334,6 +2367,7 @@ export function Vault() {
           />
         )}
         <UploadTray />
+        <SaveOverlay />
         {(selectMode || selection.size > 1) && (
           <SelectionBar
             count={selection.size}

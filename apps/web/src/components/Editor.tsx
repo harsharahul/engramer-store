@@ -26,7 +26,7 @@ export function Editor(props: {
   useEffect(() => {
     let cancelled = false;
     void openSharedContent(file, (entry) =>
-      downloadAndDecrypt(entry.id, entry.key, entry.digest),
+      downloadAndDecrypt(entry.id, entry.key, entry.digest, { preferLocal: true }),
     )
       .then((bytes) => {
         if (!cancelled) {

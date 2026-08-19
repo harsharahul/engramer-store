@@ -10,9 +10,5 @@
 	<string>Engram Store reads your photo library so it can back your photos and videos up to your vault. Each one is encrypted on this device before it is uploaded. If you leave automatic backup off, it reads only the photos you pick.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Engram Store saves photos to your library only when you export them.</string>
-	<key>UIFileSharingEnabled</key>
-	<true/>
-	<key>LSSupportsOpeningDocumentsInPlace</key>
-	<true/>
 </dict>
 </plist>

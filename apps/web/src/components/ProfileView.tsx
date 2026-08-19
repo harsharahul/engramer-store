@@ -632,6 +632,32 @@ export function ProfileView(props: {
           <div className="meter profile-meter">
             <div style={{ width: `${usagePercent}%` }} />
           </div>
+          {shell && (
+            <div className="profile-row">
+              <div className="profile-row-main">
+                <b>
+                  Offline files: {store.offline.filter((e) => e.pinned).length} · Cache:{" "}
+                  {formatBytes(store.offline.filter((e) => !e.pinned).reduce((sum, e) => sum + e.bytes, 0))}
+                </b>
+                <div className="profile-row-sub">
+                  Files kept offline stay until you remove them; the cache is what opens and
+                  playback left behind, reclaimed on its own when space is needed.
+                </div>
+              </div>
+              <button
+                className="btn"
+                onClick={() => {
+                  void store.clearOfflineCache().then((freed) =>
+                    props.onToast(
+                      freed > 0 ? `Cleared ${formatBytes(freed)} of cached files.` : "The cache is already empty.",
+                    ),
+                  );
+                }}
+              >
+                Clear cache
+              </button>
+            </div>
+          )}
         </section>
       )}
 

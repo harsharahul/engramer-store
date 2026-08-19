@@ -168,3 +168,154 @@ describe("watchedStreamedFile", () => {
     expect(await watchedStreamedFile(watched)).toBeNull();
   });
 });
+
+/**
+ * The offline store is the shell's disk copy of a file's ciphertext.
+ * A complete copy opens with no network at all; anything less answers
+ * null so the caller fetches from the server exactly as before. Every
+ * failure is a null too: an old shell without the commands has to look
+ * identical to an empty store, never break an open.
+ */
+describe("offline bridge", () => {
+  const shim = (invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>) => {
+    (globalThis as { window?: unknown }).window = { __TAURI__: { core: { invoke } } };
+    (globalThis as { location?: unknown }).location = { origin: "https://store.example" };
+  };
+
+  afterEach(() => {
+    delete (globalThis as { window?: unknown }).window;
+    delete (globalThis as { location?: unknown }).location;
+  });
+
+  it("hands back a complete file's ciphertext as bytes", async () => {
+    shim(async (cmd, args) => {
+      if (cmd === "offline_read" && args?.fileId === "f1") return [1, 2, 3];
+      throw new Error(`unexpected ${cmd}`);
+    });
+    const { nativeOfflineRead } = await import("./native");
+    const bytes = await nativeOfflineRead("f1");
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect([...bytes!]).toEqual([1, 2, 3]);
+  });
+
+  it("answers null when the file is not fully local", async () => {
+    shim(async () => {
+      throw new Error("that file is not fully local");
+    });
+    const { nativeOfflineRead } = await import("./native");
+    expect(await nativeOfflineRead("f1")).toBeNull();
+  });
+
+  it("answers null outside the shell", async () => {
+    (globalThis as { window?: unknown }).window = {};
+    const { nativeOfflineRead } = await import("./native");
+    expect(await nativeOfflineRead("f1")).toBeNull();
+  });
+
+  it("pins with the key encoded the way the media path sends it", async () => {
+    const seen: Record<string, unknown>[] = [];
+    shim(async (cmd, args) => {
+      if (cmd === "offline_pin") {
+        seen.push(args!);
+        return null;
+      }
+      throw new Error(`unexpected ${cmd}`);
+    });
+    const { nativeOfflinePin } = await import("./native");
+    const key = new Uint8Array(32).fill(7);
+    const ok = await nativeOfflinePin({ id: "f1", key, digest: "d1" }, "tok");
+    expect(ok).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.fileId).toBe("f1");
+    expect(seen[0]!.token).toBe("tok");
+    expect(seen[0]!.base).toBe("https://store.example");
+    expect(seen[0]!.digest).toBe("d1");
+    const sent = Uint8Array.from(atob(seen[0]!.key as string), (c) => c.charCodeAt(0));
+    expect([...sent]).toEqual([...key]);
+  });
+
+  it("reports a failed pin as false rather than breaking the caller", async () => {
+    shim(async () => {
+      throw new Error("no space");
+    });
+    const { nativeOfflinePin } = await import("./native");
+    expect(await nativeOfflinePin({ id: "f1", key: new Uint8Array(32) }, "tok")).toBe(false);
+  });
+
+  it("lists the store's entries, or nothing outside the shell", async () => {
+    shim(async (cmd) => {
+      if (cmd === "offline_status")
+        return [{ fileId: "f1", pinned: true, complete: true, bytes: 9 }];
+      throw new Error(`unexpected ${cmd}`);
+    });
+    const { nativeOfflineStatus } = await import("./native");
+    expect(await nativeOfflineStatus()).toEqual([
+      { fileId: "f1", pinned: true, complete: true, bytes: 9 },
+    ]);
+    (globalThis as { window?: unknown }).window = {};
+    expect(await nativeOfflineStatus()).toEqual([]);
+  });
+
+  it("clears the unpinned cache and names the bytes freed", async () => {
+    shim(async (cmd) => {
+      if (cmd === "offline_clear_cache") return 4096;
+      throw new Error(`unexpected ${cmd}`);
+    });
+    const { nativeOfflineClearCache } = await import("./native");
+    expect(await nativeOfflineClearCache()).toBe(4096);
+  });
+});
+
+/**
+ * Export replaces save-to-Downloads: the shell streams the ciphertext
+ * down, decrypts file to file, then presents the share sheet, where the
+ * person chooses where the plaintext goes. Old shells without the
+ * command answer null so the in-page path still works; a shell that HAS
+ * the command but fails throws, because retrying a large file in-page
+ * is the crash this path exists to end.
+ */
+describe("nativeExportFile", () => {
+  const shim = (invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>) => {
+    (globalThis as { window?: unknown }).window = { __TAURI__: { core: { invoke } } };
+    (globalThis as { location?: unknown }).location = { origin: "https://store.example" };
+  };
+
+  afterEach(() => {
+    delete (globalThis as { window?: unknown }).window;
+    delete (globalThis as { location?: unknown }).location;
+  });
+
+  const file = { id: "f1", name: "clip.mov", key: new Uint8Array(32).fill(3), digest: "d1" };
+
+  it("streams through the shell and answers the name the export landed under", async () => {
+    const seen: Record<string, unknown>[] = [];
+    shim(async (cmd, args) => {
+      if (cmd === "file_export") {
+        seen.push(args!);
+        return "clip 2.mov";
+      }
+      throw new Error(`unexpected ${cmd}`);
+    });
+    const { nativeExportFile } = await import("./native");
+    expect(await nativeExportFile(file, "tok")).toBe("clip 2.mov");
+    expect(seen[0]!.fileId).toBe("f1");
+    expect(seen[0]!.name).toBe("clip.mov");
+    expect(seen[0]!.digest).toBe("d1");
+  });
+
+  it("answers null where the shell lacks the command", async () => {
+    shim(async () => {
+      throw new Error("file_export not allowed");
+    });
+    const { nativeExportFile } = await import("./native");
+    expect(await nativeExportFile(file, "tok")).toBeNull();
+  });
+
+  it("surfaces a real failure instead of falling back in-page", async () => {
+    shim(async () => {
+      throw new Error("the server refused");
+    });
+    const { nativeExportFile } = await import("./native");
+    await expect(nativeExportFile(file, "tok")).rejects.toThrow(/refused/);
+  });
+});

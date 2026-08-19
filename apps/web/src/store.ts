@@ -47,7 +47,16 @@ import {
 } from "./transfer";
 import { materializeForAnalysis, NativePickedFile } from "./nativefile";
 import { tidyBackupName } from "./backupnames";
-import { nativeStagedSource, pickedSweep } from "./native";
+import {
+  nativeOfflineClear,
+  nativeOfflineClearCache,
+  nativeOfflineStatus,
+  nativeOfflineUnpin,
+  nativeStagedSource,
+  pickedSweep,
+  type NativeOfflineEntry,
+} from "./native";
+import { invalidateStaleOffline, offlineStale, pinFileOffline } from "./offlinefiles";
 import {
   clearResumeRecord,
   loadResumeRecords,
@@ -254,6 +263,15 @@ interface StoreState {
   resumeUpload: (fileId: string) => Promise<void>;
   /** Drops an interrupted upload: record, server row, and staged file. */
   discardResume: (fileId: string) => Promise<void>;
+  /** What the shell keeps on disk for offline access; empty in browsers. */
+  offline: NativeOfflineEntry[];
+  refreshOffline: () => Promise<void>;
+  /** Downloads what is missing, verifies the whole file, and keeps it. */
+  pinOffline: (fileId: string) => Promise<boolean>;
+  /** Back to ordinary cache: still local, evictable when space is needed. */
+  unpinOffline: (fileId: string) => Promise<void>;
+  /** Drops every unpinned cached file; answers the bytes freed. */
+  clearOfflineCache: () => Promise<number>;
   /** Cancels every transfer in flight; a fresh batch gets a fresh scope. */
   uploadAbort: AbortController | null;
   reveal: Reveal | null;
@@ -908,6 +926,7 @@ export const useStore = create<StoreState>((set, get) => {
     isAdmin: false,
     uploads: [],
     pendingResumes: [],
+    offline: [],
     uploadAbort: null,
     reveal: null,
     ocrProgress: null,
@@ -946,6 +965,9 @@ export const useStore = create<StoreState>((set, get) => {
       if (account) {
         void clearCache(account);
       }
+      // Signing out empties the shell's offline store, pins included:
+      // kept files belong to a signed-in account, not the device.
+      void nativeOfflineClear();
       syncCursor = 0;
       clearSession(account);
       try {
@@ -963,6 +985,7 @@ export const useStore = create<StoreState>((set, get) => {
         files: new Map(),
         usage: null,
         uploads: [],
+        offline: [],
         reveal: null,
       });
     },
@@ -970,6 +993,8 @@ export const useStore = create<StoreState>((set, get) => {
     lockVault: () => {
       syncCursor = 0;
       suspendSession();
+      // The offline store keeps its ciphertext through a lock: without
+      // the keys it is unreadable, and unlocking should not redownload.
       set({
         session: null,
         synced: false,
@@ -978,6 +1003,7 @@ export const useStore = create<StoreState>((set, get) => {
         files: new Map(),
         usage: null,
         uploads: [],
+        offline: [],
         reveal: null,
       });
     },
@@ -1005,8 +1031,19 @@ export const useStore = create<StoreState>((set, get) => {
         throw err;
       }
       set({ serverSynced: true });
+      // Rows whose content digest moved under a copy the shell keeps:
+      // their local bytes are stale the moment this sync lands.
+      const staleOffline: string[] = [];
       if (syncCursor === 0) {
+        const beforeFiles = get().files;
         const { folders, files } = buildLibrary(response.folders, response.files, response.shared);
+        if (beforeFiles.size > 0) {
+          for (const entry of files.values()) {
+            if (offlineStale(beforeFiles.get(entry.id), entry)) {
+              staleOffline.push(entry.id);
+            }
+          }
+        }
         set({ folders, files, synced: true, syncError: null });
       } else if (
         response.folders.length > 0 ||
@@ -1043,6 +1080,9 @@ export const useStore = create<StoreState>((set, get) => {
             if (entry.text === undefined && entry.hasText && before?.text !== undefined) {
               entry.text = before.text;
             }
+            if (offlineStale(before, entry)) {
+              staleOffline.push(dto.id);
+            }
             files.set(dto.id, entry);
           } catch {
             // keep the prior entry
@@ -1065,6 +1105,9 @@ export const useStore = create<StoreState>((set, get) => {
             if (entry.text === undefined && entry.hasText && before?.text !== undefined) {
               entry.text = before.text;
             }
+            if (offlineStale(before, entry)) {
+              staleOffline.push(dto.id);
+            }
             files.set(dto.id, entry);
           } catch {
             // keep the prior entry
@@ -1075,6 +1118,15 @@ export const useStore = create<StoreState>((set, get) => {
         set({ synced: true, syncError: null });
       }
       syncCursor = response.seq;
+      if (staleOffline.length > 0) {
+        // Fire and forget: dropping stale copies and renewing pins is
+        // background housekeeping, never something a sync waits on.
+        void invalidateStaleOffline(staleOffline, get().offline, async (id) => {
+          await get().pinOffline(id);
+        })
+          .then(() => get().refreshOffline())
+          .catch(() => {});
+      }
       void storeSyncRows(account, response);
       // Anything that arrived through a file request gets filed
       // automatically. Share invitations do NOT self-complete: releasing a
@@ -1666,6 +1718,40 @@ export const useStore = create<StoreState>((set, get) => {
       const files = new Map(get().files);
       files.set(id, { ...file, corrupt: true });
       set({ files });
+    },
+
+    refreshOffline: async () => {
+      set({ offline: await nativeOfflineStatus() });
+    },
+
+    pinOffline: async (fileId) => {
+      const file = get().files.get(fileId);
+      const token = get().session?.token;
+      if (!file || !token) {
+        return false;
+      }
+      const kept = await pinFileOffline(
+        {
+          id: file.id,
+          name: file.name,
+          key: file.key,
+          ...(file.digest ? { digest: file.digest } : {}),
+        },
+        token,
+      );
+      await get().refreshOffline();
+      return kept;
+    },
+
+    unpinOffline: async (fileId) => {
+      await nativeOfflineUnpin(fileId);
+      await get().refreshOffline();
+    },
+
+    clearOfflineCache: async () => {
+      const freed = await nativeOfflineClearCache();
+      await get().refreshOffline();
+      return freed;
     },
 
     setTags: async (id, tags) => {

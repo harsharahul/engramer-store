@@ -49,6 +49,9 @@ pub struct MediaSource {
     /// Serializes upstream fetches so parallel player requests for nearby
     /// ranges do not race the same span twice.
     fetching: tokio::sync::Mutex<()>,
+    /// The on-disk ciphertext store playback warms and pins live in; None
+    /// only where the store's directory cannot exist.
+    store: Option<crate::offline::OfflineStore>,
 }
 
 #[derive(Default)]
@@ -86,6 +89,7 @@ pub(crate) fn b64_decode(value: &str) -> Result<Vec<u8>, String> {
 
 #[tauri::command]
 pub fn media_register(
+    app: AppHandle,
     state: State<MediaState>,
     file_id: String,
     key: String,
@@ -97,6 +101,9 @@ pub fn media_register(
     let key: [u8; 32] = raw
         .try_into()
         .map_err(|_| "key must be 32 bytes".to_string())?;
+    let store = crate::offline::offline_root(&app)
+        .and_then(crate::offline::OfflineStore::new)
+        .ok();
     let source = Arc::new(MediaSource {
         key,
         token,
@@ -108,6 +115,7 @@ pub fn media_register(
             order: VecDeque::new(),
         }),
         fetching: tokio::sync::Mutex::new(()),
+        store,
     });
     state
         .sources
@@ -131,17 +139,21 @@ pub fn clear_all(app: &tauri::AppHandle) {
     }
 }
 
-async fn fetch_span(
+/// One authorized ranged fetch, verified, plus the object's total size
+/// when the answer names it (a compliant 206 always does). The offline
+/// store learns the size from here.
+pub(crate) async fn http_span(
     client: &reqwest::Client,
-    source: &MediaSource,
+    base: &str,
+    token: &str,
     file_id: &str,
     start: u64,
     end: u64,
-) -> Result<Vec<u8>, String> {
-    let url = format!("{}/api/files/{}/data", source.base, file_id);
+) -> Result<(Vec<u8>, Option<u64>), String> {
+    let url = format!("{base}/api/files/{file_id}/data");
     let mut response = client
         .get(url)
-        .header("authorization", format!("Bearer {}", source.token))
+        .header("authorization", format!("Bearer {token}"))
         .header("range", format!("bytes={start}-{end}"))
         .send()
         .await
@@ -150,8 +162,14 @@ async fn fetch_span(
     if !(status == 206 || status == 200) {
         return Err(format!("ciphertext fetch failed ({status})"));
     }
-    // A compliant partial answer names its window; one naming a different
-    // window would decrypt as garbage, so it is refused, not decoded.
+    // A compliant partial answer names its window; one starting elsewhere
+    // would decrypt as garbage, so it is refused, not decoded. A window
+    // SHORTER than asked is legitimate - an aligned request can reach past
+    // the end of a file whose size is not known yet, and the server clamps
+    // - so the response's own declaration decides how many bytes are owed.
+    // Its tail also names the object's size, which the offline store wants.
+    let mut total: Option<u64> = None;
+    let mut owed = end - start + 1;
     if status == 206 {
         if let Some(content_range) = response
             .headers()
@@ -161,6 +179,29 @@ async fn fetch_span(
             if !content_range.trim().starts_with(&format!("bytes {start}-")) {
                 return Err(format!("the server answered the wrong window ({content_range})"));
             }
+            total = content_range
+                .rsplit('/')
+                .next()
+                .and_then(|size| size.trim().parse::<u64>().ok());
+            let declared_end = content_range
+                .trim()
+                .strip_prefix(&format!("bytes {start}-"))
+                .and_then(|rest| rest.split('/').next())
+                .and_then(|value| value.trim().parse::<u64>().ok());
+            if let Some(declared_end) = declared_end {
+                if declared_end > end {
+                    return Err(format!("the server answered the wrong window ({content_range})"));
+                }
+                owed = declared_end - start + 1;
+            }
+        }
+    } else {
+        total = response.content_length();
+        if let Some(total) = total {
+            if start >= total {
+                return Err(format!("the span starts past the {total} byte object"));
+            }
+            owed = owed.min(total - start);
         }
     }
     // A 200 ignored the Range and carries the WHOLE object. The old code
@@ -168,7 +209,7 @@ async fn fetch_span(
     // wrong bytes from the second span on, and hundreds of megabytes
     // resident per request. Read through to the window instead, holding
     // one network chunk beyond it at most, and stop the body there.
-    let expected = (end - start + 1) as usize;
+    let expected = owed as usize;
     let mut skip = if status == 200 { start as usize } else { 0 };
     let mut span: Vec<u8> = Vec::with_capacity(expected);
     while let Some(chunk) = response
@@ -194,7 +235,36 @@ async fn fetch_span(
     if span.len() != expected {
         return Err(format!("read {} bytes of a {expected} byte span", span.len()));
     }
-    Ok(span)
+    Ok((span, total))
+}
+
+/// A ciphertext span, served from the offline store where its windows are
+/// already local, fetched (and remembered) where they are not. This is
+/// what turns playback into a disk-warming pass: replays and seeks stop
+/// touching the network, and a pinned file answers with none at all.
+async fn fetch_span(
+    client: &reqwest::Client,
+    source: &MediaSource,
+    file_id: &str,
+    start: u64,
+    end: u64,
+) -> Result<Vec<u8>, String> {
+    let Some(store) = source.store.as_ref() else {
+        return http_span(client, &source.base, &source.token, file_id, start, end)
+            .await
+            .map(|(bytes, _)| bytes);
+    };
+    for _ in 0..8 {
+        match store.plan_span(file_id, start, end) {
+            crate::offline::SpanPlan::Ready => return store.read_span(file_id, start, end),
+            crate::offline::SpanPlan::Fetch { from, to } => {
+                let (bytes, total) =
+                    http_span(client, &source.base, &source.token, file_id, from, to).await?;
+                store.store_bytes(file_id, from, &bytes, total)?;
+            }
+        }
+    }
+    Err("the span kept missing windows after fetching them".to_string())
 }
 
 async fn ensure_header(
@@ -363,6 +433,7 @@ mod tests {
                 order: VecDeque::new(),
             }),
             fetching: tokio::sync::Mutex::new(()),
+            store: None,
         }
     }
 
@@ -391,8 +462,37 @@ mod tests {
     fn span(port: u16, start: u64, end: u64) -> Result<Vec<u8>, String> {
         tauri::async_runtime::block_on(async {
             let source = canned_source(port);
-            fetch_span(&reqwest::Client::new(), &source, "f1", start, end).await
+            http_span(&reqwest::Client::new(), &source.base, &source.token, "f1", start, end)
+                .await
+                .map(|(bytes, _)| bytes)
         })
+    }
+
+    /// Playback warms the disk store: the same span asked twice reaches
+    /// the network once. The canned server accepts a single connection,
+    /// so a second fetch attempt would fail loudly.
+    #[test]
+    fn a_replayed_span_is_served_from_disk_not_the_network() {
+        let whole = pattern(4096);
+        let port = serve_bytes(
+            "HTTP/1.1 206 Partial Content",
+            &format!("content-range: bytes 0-4095/{}\r\n", whole.len()),
+            whole.clone(),
+        );
+        let root = std::env::temp_dir().join("engram-media-cache-test");
+        let _ = std::fs::remove_dir_all(&root);
+        let mut source = canned_source(port);
+        source.store = Some(crate::offline::OfflineStore::new(root.clone()).unwrap());
+        let got = tauri::async_runtime::block_on(async {
+            let client = reqwest::Client::new();
+            let first = fetch_span(&client, &source, "f1", 100, 200).await?;
+            let second = fetch_span(&client, &source, "f1", 150, 300).await?;
+            Ok::<_, String>((first, second))
+        })
+        .unwrap();
+        assert_eq!(got.0, whole[100..=200].to_vec());
+        assert_eq!(got.1, whole[150..=300].to_vec());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// The playback freeze that ended in a memory kill: a backend that

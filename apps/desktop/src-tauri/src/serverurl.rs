@@ -167,6 +167,9 @@ async fn teardown_previous(app: &AppHandle, email: String) {
     .await;
     let _ = crate::filesprovider::files_provider_disable(email).await;
     crate::media::clear_all(app);
+    // Offline ciphertext and staged exports belong to the vault this
+    // device is leaving; the next server starts clean.
+    crate::offline::clear_root(app);
     let _ = tauri::async_runtime::spawn_blocking(crate::outbox::clear_staging).await;
 }
 

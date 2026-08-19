@@ -82,6 +82,14 @@ export const DownloadGlyph = ({ size = 16 }: IconProps) => (
   </Svg>
 );
 
+/** Offline access: a circled check, the mark a kept file wears. */
+export const OfflineGlyph = ({ size = 16 }: IconProps) => (
+  <Svg size={size}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="m8.5 12.2 2.4 2.4 4.6-5" />
+  </Svg>
+);
+
 export const ShareGlyph = ({ size = 16 }: IconProps) => (
   <Svg size={size}>
     <circle cx="6.5" cy="12" r="2.6" />

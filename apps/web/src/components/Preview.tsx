@@ -8,6 +8,7 @@ import { swipeStep } from "../neighbors";
 import { fileKind, formatBytes } from "../format";
 import { displayableImage } from "../intel/heic";
 import { saveDecryptedFile } from "../download";
+import { thumbnailUrl } from "../thumbs";
 import { ZoomableImage } from "./ZoomableImage";
 import { IDENTITY, zoomAt, type Box, type ZoomState } from "../zoom";
 import {
@@ -287,6 +288,10 @@ export function Preview(props: {
   const [unreadable, setUnreadable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
+  // The tile's thumbnail, shown at once while the real bytes arrive and
+  // as the video's poster frame: the scene appears instantly and
+  // sharpens, instead of a blank body or a black rectangle.
+  const [thumb, setThumb] = useState<string | null>(null);
   const blobUrl = useRef<string | null>(null);
   const blobTried = useRef(false);
   const swipeFrom = useRef<{ x: number; y: number } | null>(null);
@@ -300,6 +305,23 @@ export function Preview(props: {
   useEffect(() => {
     setZoom(IDENTITY);
   }, [file.id]);
+
+  useEffect(() => {
+    setThumb(null);
+    if (!file.hasThumb) {
+      return;
+    }
+    let cancelled = false;
+    // The cache in thumbs.ts owns the object URL; nothing to revoke here.
+    void thumbnailUrl(file.id, file.key).then((url) => {
+      if (!cancelled) {
+        setThumb(url);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [file.id, file.hasThumb, file.key]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -345,6 +367,8 @@ export function Preview(props: {
    * phone should not be asked to hold a feature-length film in RAM.
    */
   const WHOLE_FILE_CAP = 150 * 1024 * 1024;
+  // Below this, an open finishes before a progress line means anything.
+  const OPEN_PROGRESS_FLOOR = 8 * 1024 * 1024;
   const playDecryptedWhole = async (el: HTMLMediaElement) => {
     if (blobTried.current) {
       return;
@@ -360,7 +384,7 @@ export function Preview(props: {
     }
     try {
       const bytes = await openSharedContent(file, (entry) =>
-        downloadAndDecrypt(entry.id, entry.key, entry.digest),
+        downloadAndDecrypt(entry.id, entry.key, entry.digest, { preferLocal: true }),
       );
       const url = URL.createObjectURL(
         new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime }),
@@ -405,12 +429,24 @@ export function Preview(props: {
       };
     }
     void openSharedContent(file, (entry) =>
-      downloadAndDecrypt(entry.id, entry.key, entry.digest),
+      downloadAndDecrypt(entry.id, entry.key, entry.digest, {
+        // The shell's offline store answers complete files instantly and
+        // with no network; every miss falls through to the server.
+        preferLocal: true,
+        // Byte progress for the wait, but only when there is a wait:
+        // small files open with no ceremony at all.
+        onProgress: (done, total) => {
+          if (!cancelled && total !== null && total > OPEN_PROGRESS_FLOOR) {
+            setProgress({ loaded: done, total });
+          }
+        },
+      }),
     )
       .then((bytes) => {
         if (cancelled) {
           return;
         }
+        setProgress(null);
         // Reading it through was the check; record that it passed.
         useStore.getState().markVerified(file.id);
         const empty = { url: null, text: null, docx: null, sheet: null, pdf: null };
@@ -443,6 +479,7 @@ export function Preview(props: {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
+          setProgress(null);
           if (err instanceof IntegrityError) {
             // Say what is wrong plainly, mark the file so the library shows
             // it too, and leave the download working: the bytes are all that
@@ -471,14 +508,11 @@ export function Preview(props: {
   }, [props]);
 
   const download = async () => {
-    // One shared path: the shell streams large files natively to the
-    // Files app, the browser keeps its anchor, and a failed integrity
-    // check still hands the bytes over rather than nothing.
+    // One shared path: the shell exports through the share sheet, the
+    // browser keeps its anchor, and a failed integrity check still hands
+    // the bytes over rather than nothing.
     try {
-      const saved = await saveDecryptedFile(file);
-      if (saved) {
-        props.onToast?.(saved);
-      }
+      await saveDecryptedFile(file);
     } catch (err) {
       props.onToast?.(
         err instanceof Error && err.message ? `Download failed: ${err.message}` : "Download failed.",
@@ -590,7 +624,27 @@ export function Preview(props: {
         {error ? (
           <div className="preview-fallback">{error}</div>
         ) : !loaded ? (
-          <div className="spinner" />
+          thumb ? (
+            // The scene, at once: the thumbnail scaled up and softened,
+            // sharpening into the true file when its bytes arrive.
+            <div className="preview-warming">
+              <img src={thumb} alt="" />
+              {progress && (
+                <div className="media-progress">
+                  Downloading {formatBytes(progress.loaded)} of {formatBytes(progress.total)}
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="spinner" />
+              {progress && (
+                <div className="media-progress">
+                  Downloading {formatBytes(progress.loaded)} of {formatBytes(progress.total)}
+                </div>
+              )}
+            </>
+          )
         ) : kind === "image" && loaded.url ? (
           <ZoomableImage
             src={loaded.url}
@@ -603,6 +657,7 @@ export function Preview(props: {
           <>
             <video
               src={loaded.url}
+              poster={thumb ?? undefined}
               controls
               autoPlay
               onWaiting={(e) =>

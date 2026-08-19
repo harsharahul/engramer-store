@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
-import type { FileEntry } from "../store";
+import { useStore, type FileEntry } from "../store";
 import { extension, formatBytes, formatDate } from "../format";
-import { DotsGlyph, StarGlyph } from "./Icon";
+import { DotsGlyph, OfflineGlyph, StarGlyph } from "./Icon";
 import { useLongPress } from "../longpress";
 
 export type SortKey = "name" | "mtime" | "size";
@@ -34,6 +34,9 @@ function FileRow(props: {
   onDragStart?: (event: React.DragEvent) => void;
 }) {
   const { file } = props;
+  const keptOffline = useStore((s) =>
+    s.offline.some((entry) => entry.fileId === file.id && entry.pinned && entry.complete),
+  );
   const longPress = useLongPress(props.onMenu);
   const coarse = window.matchMedia("(pointer: coarse)").matches;
 
@@ -64,6 +67,11 @@ function FileRow(props: {
         {file.favorite && (
           <span className="fav-mark">
             <StarGlyph filled size={11} />
+          </span>
+        )}
+        {keptOffline && (
+          <span className="fav-mark offline-mark" title="Available offline">
+            <OfflineGlyph size={11} />
           </span>
         )}
         <span className="name">{file.name}</span>

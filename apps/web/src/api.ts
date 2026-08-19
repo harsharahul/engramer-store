@@ -427,7 +427,12 @@ export const api = {
   downloadBlobDetailed: async (
     id: string,
     kind: "data" | "thumbnail" | "index",
-    opts?: { timeoutMs?: number },
+    opts?: {
+      timeoutMs?: number;
+      /** Byte progress as the body streams in; total is null when the
+       * server does not name a length. */
+      onProgress?: (loaded: number, total: number | null) => void;
+    },
   ): Promise<{ bytes: Uint8Array; generation: number | null }> => {
     const controller = opts?.timeoutMs ? new AbortController() : null;
     const timer =
@@ -443,8 +448,34 @@ export const api = {
         throw new ApiError(response.status, `download failed (${response.status})`);
       }
       const named = response.headers.get("x-generation");
+      const readBody = async (): Promise<Uint8Array> => {
+        if (!opts?.onProgress || !response.body) {
+          return new Uint8Array(await response.arrayBuffer());
+        }
+        const length = Number(response.headers.get("content-length"));
+        const total = Number.isFinite(length) && length > 0 ? length : null;
+        const reader = response.body.getReader();
+        const pieces: Uint8Array[] = [];
+        let loaded = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          pieces.push(value);
+          loaded += value.length;
+          opts.onProgress(loaded, total);
+        }
+        const bytes = new Uint8Array(loaded);
+        let offset = 0;
+        for (const piece of pieces) {
+          bytes.set(piece, offset);
+          offset += piece.length;
+        }
+        return bytes;
+      };
       return {
-        bytes: new Uint8Array(await response.arrayBuffer()),
+        bytes: await readBody(),
         generation: named === null ? null : Number(named),
       };
     } finally {
