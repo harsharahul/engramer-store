@@ -8,6 +8,7 @@ import {
 } from "../handoff";
 import {
   backupAvailable,
+  forgetBackupFailures,
   loadPolicy,
   requestBackupAccess,
   runBackup,
@@ -16,6 +17,7 @@ import {
   type BackupProgress,
   type BackupWindow,
 } from "../backup";
+import { resetBackupLedger } from "../backupledger";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
 import {
   checkStoredFiles,
@@ -166,6 +168,9 @@ export function ProfileView(props: {
   };
 
   const backupAbort = useRef<{ aborted: boolean } | null>(null);
+  // The reset question is asked in place: the iOS shell never renders
+  // window.confirm.
+  const [resetArmed, setResetArmed] = useState(false);
 
   const startBackup = async (next: BackupPolicy) => {
     const status = await requestBackupAccess();
@@ -179,10 +184,17 @@ export function ProfileView(props: {
       return;
     }
     props.onToast("Backing up your photos…");
+    // Asking by hand means "try everything": exports this device had
+    // given up on get their budget back.
+    forgetBackupFailures(store.session?.email ?? "");
     backupAbort.current = { aborted: false };
     const result = await runBackup(next, setBackupRun, backupAbort.current);
     backupAbort.current = null;
     setBackupRun(null);
+    if (!result) {
+      props.onToast("A backup pass is already running.");
+      return;
+    }
     props.onToast(
       result.failed > 0
         ? `Backed up ${result.done}; ${result.failed} could not be read.`
@@ -1055,12 +1067,40 @@ export function ProfileView(props: {
                     />
                     Include screenshots
                   </label>
+                  {resetArmed ? (
+                    <div className="profile-row-sub">
+                      Backup remembers every photo it ever uploaded, even ones you later deleted.
+                      Clearing that history makes photos you deleted forever upload again on the
+                      next pass; anything in the Trash can simply be restored instead.
+                      <div className="profile-head-actions">
+                        <button
+                          className="btn"
+                          onClick={() => {
+                            resetBackupLedger(store.session?.email ?? "");
+                            forgetBackupFailures(store.session?.email ?? "");
+                            setResetArmed(false);
+                            props.onToast("Backup history cleared.");
+                          }}
+                        >
+                          Clear history
+                        </button>
+                        <button className="btn btn-ghost" onClick={() => setResetArmed(false)}>
+                          Keep it
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button className="btn btn-ghost" onClick={() => setResetArmed(true)}>
+                      Reset backup history
+                    </button>
+                  )}
                 </div>
               )}
               {backupRun && (
                 <div className="profile-row-sub">
                   Backing up {backupRun.done} of {backupRun.total}
-                  {backupRun.failed > 0 ? ` (${backupRun.failed} failed)` : ""}…
+                  {backupRun.failed > 0 ? ` (${backupRun.failed} failed)` : ""}
+                  {backupRun.skipped > 0 ? ` (${backupRun.skipped} set aside)` : ""}…
                 </div>
               )}
             </div>

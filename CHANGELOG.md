@@ -3,6 +3,24 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+- **Photo backup no longer re-uploads the library.** Backup now keeps a
+  per-account record of every photo it ever uploaded, so trashing or
+  deleting vault copies does not re-arm them; a "Reset backup history"
+  control in Profile clears that record on request. Exports that keep
+  failing (for example originals iOS keeps in iCloud) are retried a
+  bounded number of times per device and then set aside visibly instead
+  of re-running on every pass. A pass can no longer start twice from
+  rapid app-switching, the manual and automatic passes share one lane,
+  and no pass starts before the device has heard from the server, which
+  previously re-uploaded whatever the on-device cache had not seen yet.
+- **Backed-up photos keep their camera names.** Photos uploaded by the
+  automatic backup were stored under their export path, an asset id
+  prefixed to the real filename; they now carry the photo library's own
+  name, matching photos added through the picker.
+
 ## [0.49.0] - 2026-08-18
 
 ### Added

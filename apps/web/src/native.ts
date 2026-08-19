@@ -295,16 +295,19 @@ export async function nativePhotosList(): Promise<NativePhotoAsset[]> {
 }
 
 /** Exports one asset's original and reads it back as a File (originals
- * intact), reusing the picker's own read-and-delete bridge. */
-export async function nativePhotoFile(id: string): Promise<File | null> {
+ * intact), reusing the picker's own read-and-delete bridge. Named from
+ * `name` when the caller knows the library's own filename: the export
+ * path prefixes the asset id for uniqueness on disk, and that prefix
+ * used to leak into the vault as the stored name. */
+export async function nativePhotoFile(id: string, name?: string): Promise<File | null> {
   const invoke = tauriInvoke();
   if (!invoke) {
     return null;
   }
   const path = (await invoke("photos_export", { id })) as string;
-  const name = path.split("/").pop() || "photo";
+  const chosen = name || path.split("/").pop() || "photo";
   const bytes = fileBytes(await invoke("picked_file_read", { path }));
-  return new File([bytes as BlobPart], name, { type: mimeFromName(name) });
+  return new File([bytes as BlobPart], chosen, { type: mimeFromName(chosen) });
 }
 
 // ----- watched folders (desktop shell only) -----
