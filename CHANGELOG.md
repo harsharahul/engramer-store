@@ -70,6 +70,13 @@ All notable changes to Engram Store are documented here, following
   name, matching photos added through the picker. A "Tidy backed-up
   photo names" palette command renames what earlier backups already
   stored, one metadata write per file, narrated with progress.
+- **The Library index card counts only work that will actually run.** With
+  image reading or meaning search turned off, their pending counts
+  described a queue no sweep would ever drain, and a library of deferred
+  backup photos read as permanently unfinished. Disabled kinds now say
+  they are off, name where the switch lives, and keep their manual
+  buttons; the summary line reports "done" against what this device is
+  actually set to index.
 
 ## [0.49.0] - 2026-08-18
 

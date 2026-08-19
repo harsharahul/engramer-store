@@ -270,8 +270,15 @@ export function ProfileView(props: {
   };
 
   // What each derivative sweep still has to do, by the sweeps' own
-  // predicates, so these numbers are exactly the remaining work.
+  // predicates, so these numbers are exactly the remaining work. The
+  // second count excludes kinds whose switch is off: that is what the
+  // automatic sweeps will actually take up, and it is what the summary
+  // line answers for.
   const pending = pendingDerivatives(store.files, CLIP_MODEL_VERSION);
+  const autoPending = pendingDerivatives(store.files, CLIP_MODEL_VERSION, {
+    ocr: props.ocrOn,
+    semantic: props.semanticOn,
+  });
   const [autoFill, setAutoFill] = useState(autoBackfillEnabled);
   /**
    * Asking for a pass by hand means "try again", including the files
@@ -1256,10 +1263,14 @@ export function ProfileView(props: {
               Thumbnails, search text, and meaning vectors are made on your devices, never on
               the server. Anything a device could not produce at upload fills in automatically
               while a vault is open somewhere; these numbers are what is left right now.
-              {pending.thumbs === 0 && pending.text === 0 && pending.meaning === 0 && (
+              {autoPending.thumbs === 0 && autoPending.text === 0 && autoPending.meaning === 0 && (
                 <>
                   {" "}
-                  <b>Everything is indexed.</b>
+                  <b>
+                    {pending.text > 0 || pending.meaning > 0
+                      ? "Everything set to index is done."
+                      : "Everything is indexed."}
+                  </b>
                 </>
               )}
             </div>
@@ -1336,9 +1347,13 @@ export function ProfileView(props: {
           <div className="profile-row-main">
             <b>Search text</b>
             <div className="profile-row-sub">
-              {pending.text === 0
-                ? "Every image and scan has been read."
-                : `${pending.text} image${pending.text === 1 ? "" : "s"} and scan${pending.text === 1 ? "" : "s"} not yet read for search, on-device.`}
+              {!props.ocrOn
+                ? pending.text === 0
+                  ? "Reading is off on this device."
+                  : `Reading is off on this device (the switch above), so ${pending.text} image${pending.text === 1 ? "" : "s"} will only be read by hand.`
+                : pending.text === 0
+                  ? "Every image and scan has been read."
+                  : `${pending.text} image${pending.text === 1 ? "" : "s"} and scan${pending.text === 1 ? "" : "s"} not yet read for search, on-device.`}
             </div>
             {store.ocrProgress && (
               <div className="profile-row-sub">
@@ -1373,9 +1388,13 @@ export function ProfileView(props: {
           <div className="profile-row-main">
             <b>Meaning</b>
             <div className="profile-row-sub">
-              {pending.meaning === 0
-                ? "Every photo and video is searchable by meaning."
-                : `${pending.meaning} file${pending.meaning === 1 ? "" : "s"} not yet searchable by meaning, or indexed by an older model.`}
+              {!props.semanticOn
+                ? pending.meaning === 0
+                  ? "Meaning search is off on this device."
+                  : `Meaning search is off on this device (the switch above), so ${pending.meaning} file${pending.meaning === 1 ? "" : "s"} will only be indexed by hand.`
+                : pending.meaning === 0
+                  ? "Every photo and video is searchable by meaning."
+                  : `${pending.meaning} file${pending.meaning === 1 ? "" : "s"} not yet searchable by meaning, or indexed by an older model.`}
             </div>
             {store.semanticProgress && (
               <div className="profile-row-sub">

@@ -590,12 +590,18 @@ export function needsText(file: FileEntry): boolean {
  * predicates so the numbers a person reads are exactly the work the
  * sweeps would take up. Facts are deliberately absent: a file with
  * unanswered facts stays rescan-eligible by design, so its "remaining"
- * count would never reach zero and would read as a stuck queue.
+ * count would never reach zero and would read as a stuck queue. Pass the
+ * reading/meaning preferences to exclude kinds the automatic sweeps skip:
+ * with a kind off, its count describes work nothing will ever take up,
+ * and it read as a permanently pending queue the size of the library.
  */
 export function pendingDerivatives(
   files: Map<string, FileEntry>,
   clipVersion: number,
+  opts: { ocr?: boolean; semantic?: boolean } = {},
 ): { thumbs: number; text: number; meaning: number } {
+  const countText = opts.ocr !== false;
+  const countMeaning = opts.semantic !== false;
   let thumbs = 0;
   let text = 0;
   let meaning = 0;
@@ -603,10 +609,10 @@ export function pendingDerivatives(
     if (needsThumb(file)) {
       thumbs++;
     }
-    if (needsText(file)) {
+    if (countText && needsText(file)) {
       text++;
     }
-    if (needsClip(file, clipVersion)) {
+    if (countMeaning && needsClip(file, clipVersion)) {
       meaning++;
     }
   }
