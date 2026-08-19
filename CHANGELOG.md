@@ -51,6 +51,11 @@ All notable changes to Engram Store are documented here, following
   rapid app-switching, the manual and automatic passes share one lane,
   and no pass starts before the device has heard from the server, which
   previously re-uploaded whatever the on-device cache had not seen yet.
+- **Backup recognizes photos the vault already holds, whatever their
+  name.** Before uploading, each candidate is hashed on the device and
+  compared against the content digests of what is already stored; a
+  byte-identical copy (a photo added by hand, a restore from another
+  device) is remembered as backed up instead of uploaded again.
 - **Backed-up photos keep their camera names.** Photos uploaded by the
   automatic backup were stored under their export path, an asset id
   prefixed to the real filename; they now carry the photo library's own

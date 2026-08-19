@@ -13,6 +13,7 @@ import {
   type NativePhotoAsset,
 } from "./native";
 import { useStore } from "./store";
+import { sourceDigest } from "./transfer";
 import { boundedRun } from "./uploader";
 
 /**
@@ -116,6 +117,17 @@ export async function runBackup(
     useStore.setState({ backupHold: heldVideos > 0 ? "shell-videos" : null });
     const fresh = assets.filter((a) => !ledger.has(a.id));
     const pending = fresh.filter((a) => !memory.exhausted(a.id));
+    // Content answers what the id cannot: a photo added by hand before
+    // the picker carried identities has no stamp, but its bytes are in
+    // the vault. Candidates are hashed before uploading (they were about
+    // to be read in full anyway) and a match becomes ledger knowledge
+    // instead of a duplicate.
+    const digests = new Set<string>();
+    for (const file of store.files.values()) {
+      if (file.digest) {
+        digests.add(file.digest);
+      }
+    }
 
     const progress: BackupProgress = {
       done: 0,
@@ -137,10 +149,19 @@ export async function runBackup(
         } else {
           progress.current = file.name;
           onProgress?.({ ...progress });
-          await useStore.getState().backupAsset(file, asset.id);
-          ledger.add(asset.id);
-          memory.record(asset.id, true);
-          progress.done++;
+          if (digests.size > 0 && digests.has(await sourceDigest(file))) {
+            // Already stored, byte for byte; remember that instead of
+            // uploading it again, and drop the staged export.
+            await file.dispose?.();
+            ledger.add(asset.id);
+            memory.record(asset.id, true);
+            progress.done++;
+          } else {
+            await useStore.getState().backupAsset(file, asset.id);
+            ledger.add(asset.id);
+            memory.record(asset.id, true);
+            progress.done++;
+          }
         }
       } catch {
         // Budgeted rather than endless: without the record, one export

@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createDigester, ready } from "@engramer/crypto";
 
 const rig = vi.hoisted(() => ({
   running: 0,
@@ -24,7 +25,7 @@ const rig = vi.hoisted(() => ({
   // Asset ids whose export the fake shell refuses.
   exportFail: new Set<string>(),
   // The synced library as the ledger sees it.
-  files: new Map<string, { sourceId?: string; trashed?: boolean }>(),
+  files: new Map<string, { sourceId?: string; trashed?: boolean; digest?: string }>(),
   // The path the fake network monitor reports; tests flip it to close
   // the Wi-Fi gate.
   network: {
@@ -361,6 +362,22 @@ describe("backup dedupe and failure memory", () => {
     expect(await autoBackupPass(200_000_000)).toBeNull();
     rig.serverSynced = true;
     expect(await autoBackupPass(200_000_000)).not.toBeNull();
+  });
+
+  it("recognizes an already-stored copy by content and uploads nothing", async () => {
+    // A photo added by hand before the picker carried identities has no
+    // sourceId, but its bytes are in the vault. Content answers what the
+    // id cannot; the industry calls this a checksum precheck.
+    await ready();
+    const digester = createDigester();
+    digester.update(new Uint8Array(8));
+    rig.files.set("hand-picked", { digest: digester.final() });
+    const progress = await runBackup(enabled);
+    expect(rig.backedUp).toEqual([]);
+    expect(progress?.done).toBe(6);
+    // The match fed the ledger: the next pass has nothing to weigh.
+    const again = await runBackup(enabled);
+    expect(again?.total).toBe(0);
   });
 
   it("holds videos back, visibly, when the shell can only read files whole", async () => {
