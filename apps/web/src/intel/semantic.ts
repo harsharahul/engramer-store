@@ -6,6 +6,8 @@
  * index blobs and this device's memory.
  */
 
+import { settingChanged } from "../settingsbus";
+
 const PREF_KEY = "engram-semantic";
 const IDLE_SHUTDOWN_MS = 90_000;
 const QUERY_CACHE_LIMIT = 32;
@@ -23,6 +25,7 @@ export function semanticEnabled(): boolean {
 export function setSemanticEnabled(on: boolean): void {
   try {
     localStorage.setItem(PREF_KEY, on ? "1" : "0");
+    settingChanged();
   } catch {
     // Preference persistence is best-effort.
   }

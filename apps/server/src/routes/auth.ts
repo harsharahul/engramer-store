@@ -671,6 +671,32 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     return reply.code(200).send({ displayName: name });
   });
 
+  // Account settings: one client-sealed blob, so preferences follow the
+  // account instead of living and dying with one device's local storage.
+  // The server stores and stamps it; the content is ciphertext to it.
+  app.get("/api/settings", auth, async (request) => {
+    const row = await app.db.get<{ settings_blob: string | null; settings_updated_ms: number }>(
+      "SELECT settings_blob, settings_updated_ms FROM users WHERE id = ?",
+      request.user.uid,
+    );
+    return {
+      blob: row?.settings_blob ?? null,
+      updatedAt: Number(row?.settings_updated_ms ?? 0),
+    };
+  });
+
+  app.put("/api/settings", auth, async (request) => {
+    const body = z.object({ blob: z.string().max(16_384) }).parse(request.body);
+    const updatedAt = Date.now();
+    await app.db.run(
+      "UPDATE users SET settings_blob = ?, settings_updated_ms = ? WHERE id = ?",
+      body.blob,
+      updatedAt,
+      request.user.uid,
+    );
+    return { updatedAt };
+  });
+
   app.get("/api/user", auth, async (request) => {
     const user = await getUser(request.user.uid);
     const digests = JSON.parse(user.recovery_code_digests ?? "[]") as string[];

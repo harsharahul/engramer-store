@@ -14,6 +14,7 @@
  * something to keep there, and neither is a fact identity derived from it.
  */
 
+import { settingChanged } from "../settingsbus";
 import { aamvaFacts } from "./aamva";
 import { readSymbols } from "./barcode";
 import { bcbpFacts } from "./bcbp";
@@ -42,6 +43,7 @@ export function factsEnabled(): boolean {
 export function setFactsEnabled(on: boolean): void {
   try {
     localStorage.setItem(PREF_KEY, on ? "1" : "0");
+    settingChanged();
   } catch {
     // Preference persistence is best-effort.
   }

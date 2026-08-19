@@ -7,6 +7,7 @@
  */
 import type { Worker } from "tesseract.js";
 import { decodeHeic, isHeicLike } from "./heic";
+import { settingChanged } from "../settingsbus";
 
 const PREF_KEY = "engram-ocr";
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -25,6 +26,7 @@ export function ocrEnabled(): boolean {
 export function setOcrEnabled(on: boolean): void {
   try {
     localStorage.setItem(PREF_KEY, on ? "1" : "0");
+    settingChanged();
   } catch {
     // Preference persistence is best-effort.
   }

@@ -16,6 +16,7 @@
  */
 
 import { diag } from "../diag";
+import { settingChanged } from "../settingsbus";
 
 const PREF_KEY = "engram-entities";
 const IDLE_SHUTDOWN_MS = 60_000;
@@ -35,6 +36,7 @@ export function entitiesEnabled(): boolean {
 export function setEntitiesEnabled(on: boolean): void {
   try {
     localStorage.setItem(PREF_KEY, on ? "1" : "0");
+    settingChanged();
   } catch {
     // Preference persistence is best-effort.
   }

@@ -5,6 +5,8 @@
  * one definition without importing each other.
  */
 
+import { settingChanged } from "./settingsbus";
+
 /** Which slice of the library backup covers, by capture date. */
 export type BackupWindow = "all" | "today" | "30d" | "90d";
 
@@ -56,4 +58,5 @@ export function loadPolicy(): BackupPolicy {
 
 export function savePolicy(policy: BackupPolicy): void {
   localStorage.setItem(POLICY_KEY, JSON.stringify(policy));
+  settingChanged();
 }

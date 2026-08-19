@@ -18,6 +18,7 @@ import {
   type BackupWindow,
 } from "../backup";
 import { resetBackupLedger } from "../backupledger";
+import { settingsEvents, SETTINGS_APPLIED_EVENT } from "../settingsync";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
 import {
   checkStoredFiles,
@@ -171,6 +172,17 @@ export function ProfileView(props: {
   // The reset question is asked in place: the iOS shell never renders
   // window.confirm.
   const [resetArmed, setResetArmed] = useState(false);
+
+  // Settings applied from another device change the knobs this view holds
+  // in state; re-read them so what is shown is what is true.
+  useEffect(() => {
+    const refresh = () => {
+      setPolicy(loadPolicy());
+      setAutoFill(autoBackfillEnabled());
+    };
+    settingsEvents.addEventListener(SETTINGS_APPLIED_EVENT, refresh);
+    return () => settingsEvents.removeEventListener(SETTINGS_APPLIED_EVENT, refresh);
+  }, []);
 
   const startBackup = async (next: BackupPolicy) => {
     const status = await requestBackupAccess();
