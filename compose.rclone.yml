@@ -64,6 +64,9 @@ x-rclone: &rclone
     --addr :8333
     --auth-key "${ENGRAM_GATEWAY_KEY},${ENGRAM_GATEWAY_SECRET}"
     --dir-cache-time 24h
+    --vfs-refresh
+    --no-modtime
+    --no-checksum
     --vfs-cache-mode writes
     --cache-dir /spool
     --vfs-write-back 2s
