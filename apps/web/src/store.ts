@@ -37,6 +37,7 @@ import {
   type UploadSource,
 } from "./transfer";
 import { materializeForAnalysis } from "./nativefile";
+import { tidyBackupName } from "./backupnames";
 import { openWithFreshEntry } from "./freshen";
 import { recognizeImage, recognizePdf } from "./intel/ocr";
 import { isPdf } from "./intel/extract";
@@ -277,6 +278,9 @@ interface StoreState {
   /** Backs one exported original up into the Camera Roll folder, stamped
    * with its library id so a reinstall recognizes it. Returns the file id. */
   backupAsset: (file: UploadSource, sourceId: string) => Promise<string>;
+  /** One-shot: renames backed-up files still carrying their export-path
+   * name (asset id prefixed) back to their camera name. Returns how many. */
+  tidyBackupNames: () => Promise<number>;
   /** Adds every file to the album, one metadata write at a time. */
   addToAlbum: (ids: string[], tag: string) => Promise<void>;
   removeFromAlbum: (ids: string[], tag: string) => Promise<void>;
@@ -1608,6 +1612,44 @@ export const useStore = create<StoreState>((set, get) => {
       );
       const kept = existingReserved.filter((t) => !edited.includes(t));
       await patchFileMeta(id, { tags: [...edited, ...kept] });
+    },
+
+    tidyBackupNames: async () => {
+      const candidates: Array<{ id: string; tidy: string; name: string }> = [];
+      for (const file of get().files.values()) {
+        // The trash is left as it lies; a restore brings the file back
+        // into reach of a later pass.
+        if (!file.sourceId || file.trashed) {
+          continue;
+        }
+        const tidy = tidyBackupName(file.name, file.sourceId);
+        if (tidy) {
+          candidates.push({ id: file.id, tidy, name: file.name });
+        }
+      }
+      let renamed = 0;
+      if (candidates.length === 0) {
+        return renamed;
+      }
+      set({ batch: { done: 0, failed: 0, total: candidates.length, current: "" } });
+      try {
+        for (const candidate of candidates) {
+          const progress = get().batch;
+          set({ batch: progress ? { ...progress, current: candidate.name } : null });
+          try {
+            await get().renameFile(candidate.id, candidate.tidy);
+            renamed++;
+            const after = get().batch;
+            set({ batch: after ? { ...after, done: after.done + 1 } : null });
+          } catch {
+            const after = get().batch;
+            set({ batch: after ? { ...after, failed: after.failed + 1 } : null });
+          }
+        }
+      } finally {
+        set({ batch: null });
+      }
+      return renamed;
     },
 
     backupAsset: async (file, sourceId) => {
