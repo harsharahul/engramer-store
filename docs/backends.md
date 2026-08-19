@@ -56,7 +56,8 @@ that break byte transport rather than merely erroring:
 | `ENGRAMER_S3_CREATE_BUCKET` | `false` for hosts that hand out a fixed bucket and deny CreateBucket; the bucket must then already exist. |
 | `ENGRAMER_S3_KEY_LAYOUT` | `sharded` fans keys into two directory levels. Leave it `flat` for gateway-backed providers: where creating a directory costs an application-API round trip, a sharded layout pays that on nearly every upload (measured at seconds per new shard), while listings of one large folder are rare and cached. `sharded` suits true S3 services, where prefixes are free. Choose before the first upload; layouts are not migrated. |
 
-The recipes in `compose.rclone.yml` set all three.
+The recipes in `compose.rclone.yml` set the checksum mode and keep the
+layout flat.
 
 ## Where speed comes from
 
