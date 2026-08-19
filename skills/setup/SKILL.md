@@ -218,7 +218,8 @@ browsers is good. The rules that decide whether the deployment works:
    middle and near the end.
 5. For remote backends: list the provider folder (e.g.
    `docker compose ... exec rclone-drime rclone lsf remote:engram-store/blobs`)
-   : only opaque sharded names, no readable filenames, no thumbnails.
+   : only opaque uuid names (flat, or sharded on older deployments),
+   no readable filenames, no thumbnails.
 6. Profile -> Integrity -> run both "Check stored files" and "Deep check";
    every file intact. This is the end-to-end proof that the backend
    returns exactly what was uploaded.
