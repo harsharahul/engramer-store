@@ -104,6 +104,35 @@ describe("NativePickedFile", () => {
     expect(shell.calls.filter((c) => c.cmd === "picked_file_delete")).toHaveLength(1);
   });
 
+  it("asks the shell for a poster frame, and answers null where it cannot", async () => {
+    const bytes = sourceBytes(32);
+    const calls: string[] = [];
+    const invoke = async (cmd: string) => {
+      calls.push(cmd);
+      if (cmd === "video_poster") {
+        return bytes;
+      }
+      throw new Error(`unexpected ${cmd}`);
+    };
+    const file = new NativePickedFile(invoke, "/tmp/engram-picked/clip.mov", {
+      name: "clip.mov",
+      type: "video/quicktime",
+      size: 64,
+      lastModified: 1,
+    });
+    expect(await file.poster()).toEqual(bytes);
+    expect(calls).toEqual(["video_poster"]);
+
+    const refused = new NativePickedFile(
+      async () => {
+        throw new Error("not allowed");
+      },
+      "/tmp/engram-picked/clip.mov",
+      { name: "clip.mov", type: "video/quicktime", size: 64, lastModified: 1 },
+    );
+    expect(await refused.poster()).toBeNull();
+  });
+
   it("serves media elements from the picked protocol", () => {
     const shell = fakeShell(sourceBytes(8));
     const file = picked(shell, 8, "clip one.mov");

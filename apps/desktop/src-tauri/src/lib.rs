@@ -147,6 +147,7 @@ pub fn run() {
             photos::picked_file_read_range,
             photos::picked_file_delete,
             photos::picked_sweep,
+            photos::video_poster,
             unlock::native_unlock_available,
             unlock::unlock_secret_store,
             unlock::unlock_secret_get,

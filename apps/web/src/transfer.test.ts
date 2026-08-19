@@ -214,6 +214,21 @@ describe("the upload path never materializes a large source", () => {
     const source = virtualSource(1000);
     await expect(makeThumbnail(source, "video/mp4")).resolves.toBeNull();
   });
+
+  it("asks a source for its native poster before trying to decode anything", async () => {
+    // Canvas capture from the native protocol can taint or refuse on iOS;
+    // a shell-generated poster frame has none of those rules, so it goes
+    // first, and only its absence falls back to capture.
+    let asked = 0;
+    const source = virtualSource(1000, {
+      poster: async () => {
+        asked++;
+        return null;
+      },
+    });
+    await expect(makeThumbnail(source, "video/mp4")).resolves.toBeNull();
+    expect(asked).toBe(1);
+  });
 });
 
 /**

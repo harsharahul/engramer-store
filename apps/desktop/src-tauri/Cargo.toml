@@ -52,12 +52,21 @@ objc2-photos = { version = "0.3", features = [
 objc2-ui-kit = { version = "0.3", features = [
     "UIApplication",
     "UIGeometry",
+    "UIImage",
     "UIResponder",
     "UIScrollView",
     "UIView",
     "UIViewController",
     "UIWindow",
 ] }
+objc2-av-foundation = { version = "0.3", features = [
+    "AVAsset",
+    "AVAssetImageGenerator",
+    "objc2-core-media",
+    "objc2-core-graphics",
+] }
+objc2-core-media = { version = "0.3", features = ["CMTime"] }
+objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
 
 [lib]
 name = "engram_store_desktop_lib"

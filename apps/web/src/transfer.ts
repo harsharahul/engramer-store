@@ -435,6 +435,25 @@ export async function makeThumbnail(file: UploadSource, mime: string): Promise<T
     return file instanceof File ? imageThumbnail(file) : null;
   }
   if (mime.startsWith("video/")) {
+    // A shell-generated poster first: canvas capture from the native
+    // protocol can be refused or tainted on iOS, and either way the
+    // video would upload with no thumbnail at all.
+    if (file.poster) {
+      try {
+        const jpeg = await file.poster();
+        if (jpeg) {
+          const posterFile = new File([jpeg.slice().buffer as ArrayBuffer], `${file.name}.jpg`, {
+            type: "image/jpeg",
+          });
+          const made = await imageThumbnail(posterFile);
+          if (made) {
+            return made;
+          }
+        }
+      } catch {
+        // The capture below is the fallback it always was.
+      }
+    }
     return videoThumbnail(file);
   }
   return null;
@@ -461,6 +480,10 @@ export interface UploadSource {
   /** The photo-library asset this came from, when the picker said; the
    * upload stamps it so the backup ledger recognizes the file. */
   readonly sourceId?: string;
+  /** A shell-generated poster frame as JPEG bytes, for video sources
+   * whose canvas capture the platform may refuse; null when the shell
+   * cannot make one. */
+  poster?(): Promise<Uint8Array | null>;
   dispose?(): Promise<void>;
 }
 
