@@ -258,7 +258,8 @@ browsers is good. The rules that decide whether the deployment works:
 | Every part upload fails 411 | checksum mode left at SDK default against a non-AWS backend | `ENGRAMER_S3_CHECKSUMS: when-required` |
 | Uploads fail as "network error" only for multi-MB files, everything else fine | HTTP/3 at the proxy | disable h3 |
 | Uploads 403 or the whole IP gets blocked mid-batch | WAF inspecting encrypted bodies | exempt upload paths, raise inspection caps |
-| Photo uploads finalize in ~10 s | no write spool, provider app-tier ingest | the shipped gateway config spools; check `--vfs-cache-mode writes` survived any edits |
+| Photo uploads finalize in ~10 s | no write spool, provider app-tier ingest | the shipped gateway config spools; check `--vfs-cache-mode full` survived any edits |
+| Video playback opens, then freezes mid-play | reads uncached: every byte range is a provider round trip | `--vfs-cache-mode full` plus the `--vfs-read-*` flags in the shipped config; a range-blind provider also logs a server warning and is served by read-through |
 | Every upload's data PUT takes ~5-8 s, everything else fast | sharded key layout paying provider directory creation per new shard | use the flat layout on gateway-backed providers |
 | First uploads each session wait on a huge download | ML runtimes not cached (old build) | upgrade; verify gate 8 |
 | Registration open despite "locked down" | typo fails open | verify gate 3, always |
