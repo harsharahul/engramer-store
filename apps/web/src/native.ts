@@ -379,6 +379,47 @@ export async function watchedFileRead(path: string): Promise<Uint8Array> {
 }
 
 /**
+ * Saves one vault file through the shell: ciphertext streams to disk,
+ * the file-to-file decryptor verifies the digest in-pass, and the result
+ * lands in Documents/Downloads, which the Files app shows. Returns the
+ * name it landed under; null on a shell without the command, so the
+ * caller keeps its in-page path. A shell that HAS the command but fails
+ * throws: the in-page path holds whole files in memory, and retrying a
+ * large one there is the crash this exists to end.
+ */
+export async function nativeSaveDownload(
+  file: { id: string; name: string; key: Uint8Array; digest?: string },
+  token: string,
+): Promise<string | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  let raw = "";
+  for (let i = 0; i < file.key.length; i += 0x8000) {
+    raw += String.fromCharCode(...file.key.subarray(i, i + 0x8000));
+  }
+  try {
+    return (await invoke("file_save_download", {
+      fileId: file.id,
+      key: btoa(raw),
+      token,
+      base: location.origin,
+      name: file.name,
+      digest: file.digest ?? null,
+    })) as string;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    if (/not allowed|not found/i.test(reason)) {
+      // An older shell: the command does not exist there.
+      diag("download", "shell cannot save downloads; using the in-page path");
+      return null;
+    }
+    throw new Error(reason);
+  }
+}
+
+/**
  * Rebuilds the handle an interrupted upload was reading from, verifying
  * the bytes on disk are still the recorded ones by size. Null when the
  * file is gone or changed: there is nothing safe to continue.

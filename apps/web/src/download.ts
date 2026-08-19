@@ -1,8 +1,31 @@
+import { isHandheld } from "./analysisslot";
+import { nativeSaveDownload, nativeShell } from "./native";
 import { IntegrityError, downloadAndDecrypt } from "./transfer";
 import { openSharedContent } from "./openshared";
-import type { FileEntry } from "./store";
+import { useStore, type FileEntry } from "./store";
 
-export async function saveDecryptedFile(file: FileEntry): Promise<void> {
+/**
+ * Saves a file where the person can reach it. On a handheld shell the
+ * bytes stream natively into Documents/Downloads (the Files app shows
+ * it), never held in the page: the in-page path decrypts the whole file
+ * into memory plus a Blob copy, and past a few hundred megabytes iOS
+ * killed the content process and silently reloaded the page. Returns a
+ * sentence saying where the file went when the shell saved it; null when
+ * the browser handled it its own way.
+ */
+export async function saveDecryptedFile(file: FileEntry): Promise<string | null> {
+  if (isHandheld() && nativeShell()) {
+    const token = useStore.getState().session?.token;
+    if (token) {
+      const saved = await nativeSaveDownload(
+        { id: file.id, name: file.name, key: file.key, ...(file.digest ? { digest: file.digest } : {}) },
+        token,
+      );
+      if (saved !== null) {
+        return `Saved to the Files app: On My iPhone › Engram Store › Downloads › ${saved}`;
+      }
+    }
+  }
   let bytes: Uint8Array;
   try {
     // A shared entry's digest can merely be stale; refresh and retry
@@ -22,6 +45,7 @@ export async function saveDecryptedFile(file: FileEntry): Promise<void> {
     type: file.mime || "application/octet-stream",
   });
   triggerDownload(blob, file.name);
+  return null;
 }
 
 export function triggerDownload(blob: Blob, name: string): void {

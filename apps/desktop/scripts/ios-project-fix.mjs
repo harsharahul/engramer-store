@@ -161,12 +161,16 @@ for (const name of readdirSync(source)) {
 }
 console.log(`ios project: stamped ${stamped} brand icons over the placeholder set`);
 
-// 6c. Privacy usage strings into the generated Info.plist.
+// 6c. Privacy usage strings and capability flags into the generated
+// Info.plist. Strings and booleans both: the document-browser keys that
+// put Documents/Downloads in the Files app are <true/>.
 const infoPlist = join(apple, "engram-store-desktop_iOS", "Info.plist");
 const wanted = readFileSync(join(tauriDir, "Info.ios.plist"), "utf8");
 let info = readFileSync(infoPlist, "utf8");
 let added = 0;
-for (const match of wanted.matchAll(/(<key>\w+<\/key>)\s*(<string>[^<]*<\/string>)/g)) {
+for (const match of wanted.matchAll(
+  /(<key>\w+<\/key>)\s*(<string>[^<]*<\/string>|<true\/>|<false\/>)/g,
+)) {
   const [, key, value] = match;
   if (info.includes(key)) continue;
   info = info.replace("</dict>\n</plist>", `\t${key}\n\t${value}\n</dict>\n</plist>`);
@@ -175,7 +179,7 @@ for (const match of wanted.matchAll(/(<key>\w+<\/key>)\s*(<string>[^<]*<\/string
 if (added) {
   writeFileSync(infoPlist, info);
 }
-console.log(`ios project: ${added ? `added ${added} privacy usage descriptions` : "privacy usage descriptions already present"}`);
+console.log(`ios project: ${added ? `added ${added} Info.plist entries` : "Info.plist entries already present"}`);
 
 // 7. Loud verification: every expected target, present in the pbxproj.
 const finalProject = readFileSync(project, "utf8");

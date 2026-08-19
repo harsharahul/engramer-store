@@ -926,6 +926,7 @@ dependencies = [
  "core-foundation",
  "crypto_secretbox",
  "engram-core",
+ "engram-ffi",
  "http",
  "notify",
  "objc2",

@@ -56,7 +56,7 @@ pub struct MediaState {
     sources: Mutex<HashMap<String, Arc<MediaSource>>>,
 }
 
-fn b64_decode(value: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn b64_decode(value: &str) -> Result<Vec<u8>, String> {
     // Standard alphabet with or without padding: the web side sends this
     // key through btoa, NOT through toB64 (which is URL-safe unpadded).
     // Switching the sender to toB64 would break decoding here.
@@ -252,7 +252,7 @@ async fn ensure_chunks(
     Ok(())
 }
 
-fn http_client(app: &AppHandle) -> reqwest::Client {
+pub(crate) fn http_client(app: &AppHandle) -> reqwest::Client {
     // One pooled client per app; connection reuse is half the point.
     struct Pooled(reqwest::Client);
     if app.try_state::<Pooled>().is_none() {

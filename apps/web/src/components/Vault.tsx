@@ -599,7 +599,15 @@ export function Vault() {
   // ----- actions -----
 
   const download = (file: FileEntry) => {
-    void saveDecryptedFile(file).catch(() => showToast("Download failed."));
+    void saveDecryptedFile(file)
+      .then((saved) => {
+        if (saved) {
+          showToast(saved);
+        }
+      })
+      .catch((err: unknown) =>
+        showToast(err instanceof Error && err.message ? `Download failed: ${err.message}` : "Download failed."),
+      );
   };
 
   const openFile = (id: string) => {
@@ -2382,6 +2390,7 @@ export function Vault() {
         <Preview
           file={previewFile}
           onClose={() => setPreviewId(null)}
+          onToast={showToast}
           onFavorite={() => void store.toggleFavorite(previewFile.id)}
           onShare={() => {
             setShareId(previewFile.id);
