@@ -54,7 +54,9 @@ All notable changes to Engram Store are documented here, following
 - **Backed-up photos keep their camera names.** Photos uploaded by the
   automatic backup were stored under their export path, an asset id
   prefixed to the real filename; they now carry the photo library's own
-  name, matching photos added through the picker.
+  name, matching photos added through the picker. A "Tidy backed-up
+  photo names" palette command renames what earlier backups already
+  stored, one metadata write per file, narrated with progress.
 
 ## [0.49.0] - 2026-08-18
 

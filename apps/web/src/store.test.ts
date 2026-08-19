@@ -251,6 +251,42 @@ describe("uploadFiles", () => {
  * these tests pin the sweep's contract: fill exactly the files that need
  * it, honor the phone's size cap, and never retry a file that failed.
  */
+/**
+ * Backed-up photos used to be stored under their export path (asset id
+ * prefixed to the camera name). The one-shot tidy renames exactly those,
+ * and nothing else: files without a stamp, files whose prefix is not
+ * their own id, and the trash are all left alone.
+ */
+describe("tidyBackupNames", () => {
+  it("renames only files whose stored name is their own export path", async () => {
+    const renames: [string, string][] = [];
+    const rows: FileEntry[] = [
+      entry({
+        id: "f1",
+        name: "ASSET_1_L0_001-IMG_0042.HEIC",
+        sourceId: "ASSET-1/L0/001",
+      }),
+      entry({ id: "f2", name: "IMG_0043.HEIC", sourceId: "ASSET-2/L0/001" }),
+      entry({ id: "f3", name: "ASSET_9_L0_001-doc.pdf" }),
+      entry({
+        id: "f4",
+        name: "ASSET_4_L0_001-IMG_0044.HEIC",
+        sourceId: "ASSET-4/L0/001",
+        trashed: true,
+      }),
+    ];
+    useStore.setState({
+      files: new Map(rows.map((f) => [f.id, f])),
+      renameFile: async (id: string, name: string) => {
+        renames.push([id, name]);
+      },
+    });
+    const renamed = await useStore.getState().tidyBackupNames();
+    expect(renamed).toBe(1);
+    expect(renames).toEqual([["f1", "IMG_0042.HEIC"]]);
+  });
+});
+
 describe("backfillThumbnails", () => {
   beforeAll(async () => {
     await ready();

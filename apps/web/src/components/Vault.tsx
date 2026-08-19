@@ -1315,6 +1315,20 @@ export function Vault() {
         },
       },
       {
+        id: "tidy-backup-names",
+        label: "Tidy backed-up photo names",
+        hint: "renames earlier backups to their camera names",
+        run: () => {
+          void store.tidyBackupNames().then((renamed) => {
+            showToast(
+              renamed > 0
+                ? `Renamed ${renamed} backed-up file${renamed === 1 ? "" : "s"}.`
+                : "Every backed-up file already carries its camera name.",
+            );
+          });
+        },
+      },
+      {
         id: "facts-all",
         label: "Find dates in my documents",
         hint: "reads text already stored; nothing is downloaded",
