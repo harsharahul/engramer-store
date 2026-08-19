@@ -1,5 +1,6 @@
 import { isHandheld } from "./analysisslot";
 import { loadPolicy } from "./backuppolicy";
+import { settingChanged } from "./settingsbus";
 import { connectionIsUnmetered } from "./connection";
 import { ocrEnabled } from "./intel/ocr";
 import { factsEnabled } from "./intel/scan";
@@ -44,6 +45,7 @@ export function autoBackfillEnabled(): boolean {
 export function setAutoBackfillEnabled(on: boolean): void {
   try {
     localStorage.setItem(AUTO_PREF_KEY, on ? "1" : "0");
+    settingChanged();
   } catch {
     // Preference persistence is best-effort.
   }

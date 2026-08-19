@@ -189,6 +189,10 @@ export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; type: str
   { table: "users", column: "recovery_code_digests", type: "TEXT" },
   { table: "users", column: "disabled", type: "BIGINT NOT NULL DEFAULT 0" },
   { table: "users", column: "quota_bytes", type: "BIGINT" },
+  // Account settings, sealed on the client with the master key; the
+  // server stores and stamps them, and can read nothing.
+  { table: "users", column: "settings_blob", type: "TEXT" },
+  { table: "users", column: "settings_updated_ms", type: "BIGINT NOT NULL DEFAULT 0" },
   // What collaborators see instead of an email address. Server-visible by
   // necessity: the point of it is that other people can read it.
   { table: "users", column: "display_name", type: "TEXT" },

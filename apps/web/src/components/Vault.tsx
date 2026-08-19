@@ -41,6 +41,12 @@ import {
   unlockDeclined,
 } from "../unlock";
 import { nativeShell, nativeUnlockAvailable, pickPhotos } from "../native";
+import {
+  installSettingsSync,
+  pullSettings,
+  settingsEvents,
+  SETTINGS_APPLIED_EVENT,
+} from "../settingsync";
 import type { UploadSource } from "../transfer";
 import { APP_VERSION } from "../version";
 import { reloadForUpdate, watchForUpdate } from "../update";
@@ -1067,6 +1073,35 @@ export function Vault() {
       installAutoBackup();
     }
   }, [store.serverSynced]);
+
+  // Account settings: pull once the server has answered, and from then on
+  // push every local toggle flip, so switches follow the account instead
+  // of living and dying with one device's storage.
+  useEffect(() => {
+    const session = store.session;
+    if (!store.serverSynced || !session) {
+      return;
+    }
+    void pullSettings(session.email, session.masterKey).catch(() => {});
+    installSettingsSync(() => {
+      const live = useStore.getState().session;
+      return live ? { email: live.email, masterKey: live.masterKey } : null;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.serverSynced]);
+
+  // A blob applied from another device changed the switches under this
+  // view's feet; re-read them so the sidebar and Profile stay truthful.
+  useEffect(() => {
+    const refresh = () => {
+      setOcrOn(ocrEnabled());
+      setSemanticOn(semanticEnabled());
+      setFactsOn(factsEnabled());
+      setEntitiesOn(entitiesEnabled());
+    };
+    settingsEvents.addEventListener(SETTINGS_APPLIED_EVENT, refresh);
+    return () => settingsEvents.removeEventListener(SETTINGS_APPLIED_EVENT, refresh);
+  }, []);
 
   // Desktop shell only: pick up watched-folder arrivals, past and live.
   useEffect(() => {

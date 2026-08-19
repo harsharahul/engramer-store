@@ -6,6 +6,14 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Added
+- **Settings follow the account.** Image reading, meaning search, date
+  scanning, entity extraction, automatic fill-in, and the backup knobs
+  now travel with the account as one blob sealed on the device with the
+  master key; the server stores and stamps it and can read nothing. A
+  new device signs in and finds the switches already set; a change on
+  one device reaches the others at their next sync. Per-device by
+  design: the backup on/off switch (bound to that device's photo
+  permission) and the theme.
 - **The shell serves picked and watched files in bounded ranges.** New
   commands stat, read 4 MiB windows of, and clean up the picker's staged
   files, and a `picked://` protocol serves them (and watched-folder

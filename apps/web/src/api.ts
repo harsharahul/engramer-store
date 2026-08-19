@@ -177,6 +177,16 @@ export const api = {
       "/api/auth/registration",
     ),
 
+  // Account settings: one client-sealed blob; the server stores and
+  // stamps it, and can read nothing.
+  getSettings: () => request<{ blob: string | null; updatedAt: number }>("/api/settings"),
+
+  putSettings: (blob: string) =>
+    request<{ updatedAt: number }>("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ blob }),
+    }),
+
   kdfAttributes: (email: string) =>
     request<{ kdf: KdfParams }>(`/api/auth/attributes?email=${encodeURIComponent(email)}`),
 
