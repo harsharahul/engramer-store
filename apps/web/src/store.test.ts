@@ -12,6 +12,7 @@ const gauge = vi.hoisted(() => ({
 const rig = vi.hoisted(() => ({
   blobPuts: [] as string[],
   thumbAttempts: 0,
+  stampedSourceIds: [] as (string | undefined)[],
 }));
 
 vi.mock("./api", async (importOriginal) => {
@@ -59,6 +60,7 @@ vi.mock("./transfer", async (importOriginal) => {
       masterKey: Uint8Array,
       prepared: PreparedFile,
     ) => {
+      rig.stampedSourceIds.push(prepared.meta.sourceId);
       const fileKey = generateKey();
       const dto: FileDto = {
         id: `up-${file.name}`,
@@ -211,6 +213,34 @@ describe("uploadFiles", () => {
     expect(gauge.peak).toBeGreaterThan(1);
     expect(gauge.peak).toBeLessThanOrEqual(4);
     expect(useStore.getState().files.size).toBe(6);
+  });
+
+  /**
+   * A photo added by hand through the picker used to carry no library
+   * identity, so the automatic backup re-uploaded it under another name.
+   * The picker now says which asset each file came from; the stamp is what
+   * the backup ledger keys on.
+   */
+  it("stamps a picked source's library id into its metadata", async () => {
+    useStore.setState({
+      session: {
+        email: "t@example.com",
+        token: "t",
+        masterKey: generateKey(),
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      refreshUsage: async () => {},
+    });
+    rig.stampedSourceIds.length = 0;
+    const picked = Object.assign(
+      new File([new Uint8Array(8)], "IMG_7.HEIC", { type: "image/heic" }),
+      { sourceId: "asset-77" },
+    );
+    const plain = new File([new Uint8Array(8)], "notes.txt", { type: "text/plain" });
+    await useStore.getState().uploadFiles([picked, plain], "folder-1");
+    expect(rig.stampedSourceIds).toContain("asset-77");
+    expect(rig.stampedSourceIds).toContain(undefined);
   });
 });
 

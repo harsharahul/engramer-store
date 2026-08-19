@@ -379,6 +379,43 @@ export async function watchedFileRead(path: string): Promise<Uint8Array> {
 }
 
 /**
+ * A watched file as a streamed handle: bounded windows over the bridge,
+ * nothing deleted (the file is the person's own), media served through
+ * the protocol's watched route. Null on a shell without the ranged
+ * commands; the caller keeps its bounded whole-file read there.
+ */
+export async function watchedStreamedFile(file: {
+  path: string;
+  name: string;
+  size: number;
+  mtime: number;
+}): Promise<UploadSource | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  try {
+    const stat = (await invoke("watched_file_stat", { path: file.path })) as {
+      size: number;
+      mtime_ms?: number;
+    };
+    return new NativePickedFile(
+      invoke,
+      file.path,
+      {
+        name: file.name,
+        type: mimeFromName(file.name),
+        size: stat.size,
+        lastModified: stat.mtime_ms ?? file.mtime,
+      },
+      { family: "watched" },
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Whether this shell can serve picked files in bounded windows. Old shells
  * only offer the whole-file read, which serialized entire videos through
  * the bridge and got the app killed for memory; on those, callers use the
@@ -423,20 +460,28 @@ export async function pickPhotos(): Promise<UploadSource[] | null> {
     diag("photos", "shell cannot stream picked files; using the file input");
     return null;
   }
-  let paths: unknown;
+  let entries: { path: string; id?: string | null }[];
   try {
-    paths = await invoke("pick_photos", {});
-  } catch (err) {
-    diag("photos", `native picker unavailable: ${err instanceof Error ? err.message : String(err)}`);
-    return null;
+    // Identities first: results say which library asset each file came
+    // from, so the upload can stamp what the backup ledger keys on.
+    entries = (await invoke("pick_photos_with_ids", {})) as { path: string; id?: string | null }[];
+  } catch {
+    let paths: unknown;
+    try {
+      paths = await invoke("pick_photos", {});
+    } catch (err) {
+      diag("photos", `native picker unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+    if (!Array.isArray(paths)) {
+      diag("photos", `native picker returned ${typeof paths}, not a list of paths`);
+      return null;
+    }
+    entries = (paths as string[]).map((path) => ({ path }));
   }
-  if (!Array.isArray(paths)) {
-    diag("photos", `native picker returned ${typeof paths}, not a list of paths`);
-    return null;
-  }
-  diag("photos", `native picker returned ${paths.length} item(s)`);
+  diag("photos", `native picker returned ${entries.length} item(s)`);
   const files: UploadSource[] = [];
-  for (const path of paths as string[]) {
+  for (const { path, id } of entries) {
     const name = path.split("/").pop() || "photo";
     try {
       const stat = (await invoke("picked_file_stat", { path })) as {
@@ -444,12 +489,17 @@ export async function pickPhotos(): Promise<UploadSource[] | null> {
         mtime_ms?: number;
       };
       files.push(
-        new NativePickedFile(invoke, path, {
-          name,
-          type: mimeFromName(name),
-          size: stat.size,
-          lastModified: stat.mtime_ms ?? Date.now(),
-        }),
+        new NativePickedFile(
+          invoke,
+          path,
+          {
+            name,
+            type: mimeFromName(name),
+            size: stat.size,
+            lastModified: stat.mtime_ms ?? Date.now(),
+          },
+          id ? { sourceId: id } : undefined,
+        ),
       );
     } catch (err) {
       // Skip the one that failed rather than abandoning the batch, and never

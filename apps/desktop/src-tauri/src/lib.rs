@@ -17,6 +17,8 @@ mod network;
 mod outbox;
 mod photolib;
 mod photos;
+mod pickedstream;
+mod ranges;
 mod serverurl;
 mod unlock;
 mod watched;
@@ -135,9 +137,15 @@ pub fn run() {
         .manage::<watched::SharedWatchState>(Arc::new(Mutex::new(Default::default())))
         .manage(media::MediaState::default())
         .register_asynchronous_uri_scheme_protocol("stream", media::handle)
+        .register_asynchronous_uri_scheme_protocol("picked", pickedstream::handle)
         .invoke_handler(tauri::generate_handler![
             photos::pick_photos,
+            photos::pick_photos_with_ids,
             photos::picked_file_read,
+            photos::picked_probe,
+            photos::picked_file_stat,
+            photos::picked_file_read_range,
+            photos::picked_file_delete,
             unlock::native_unlock_available,
             unlock::unlock_secret_store,
             unlock::unlock_secret_get,
@@ -147,6 +155,8 @@ pub fn run() {
             watched::watched_remove,
             watched::watched_scan,
             watched::watched_file_read,
+            watched::watched_file_stat,
+            watched::watched_file_read_range,
             media::media_register,
             media::media_clear,
             handoff::handoff_available,
@@ -169,6 +179,10 @@ pub fn run() {
             network::network_status,
         ])
         .setup(|app| {
+            // Staged picked files are deleted explicitly once their upload
+            // settles; an app killed mid-upload deletes nothing, so launch
+            // owns the leftover cleanup.
+            photos::clear_picked_dir();
             watched::rebuild_watchers(app.handle());
             // The window's first URL is "home": the bundled picker in a
             // generic build, the baked deployment otherwise. Clearing the

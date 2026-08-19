@@ -233,14 +233,13 @@ pub async fn watched_scan(app: AppHandle) -> Vec<WatchedFile> {
     .unwrap_or_default()
 }
 
-#[tauri::command]
-pub async fn watched_file_read(
-    app: AppHandle,
-    path: String,
-) -> Result<tauri::ipc::Response, String> {
-    let file = PathBuf::from(&path);
-    let folders = load_folders(&app);
-    // The webview may only read inside folders the user explicitly chose.
+/// Resolves a requested path to a real file inside a watched folder,
+/// refusing everything else. The webview may only read inside folders the
+/// user explicitly chose; every read command and the picked:// watched
+/// route go through this one check.
+pub fn watched_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
+    let file = PathBuf::from(path);
+    let folders = load_folders(app);
     let canonical = file.canonicalize().map_err(|err| err.to_string())?;
     let allowed = folders.iter().any(|root| {
         root.canonicalize()
@@ -250,10 +249,59 @@ pub async fn watched_file_read(
     if !allowed {
         return Err("path is outside every watched folder".to_string());
     }
+    Ok(canonical)
+}
+
+/// The whole-file read, kept for pages older than the ranged commands;
+/// those read bounded windows and leave the file where it lives.
+#[tauri::command]
+pub async fn watched_file_read(
+    app: AppHandle,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let canonical = watched_path(&app, &path)?;
     tauri::async_runtime::spawn_blocking(move || {
         std::fs::read(&canonical)
             .map(tauri::ipc::Response::new)
             .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+/// Size and modification time, so the page can build a file handle
+/// without moving a single content byte.
+#[tauri::command]
+pub async fn watched_file_stat(
+    app: AppHandle,
+    path: String,
+) -> Result<crate::photos::PickedStat, String> {
+    let canonical = watched_path(&app, &path)?;
+    let meta = std::fs::metadata(&canonical).map_err(|err| err.to_string())?;
+    let mtime_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as f64);
+    Ok(crate::photos::PickedStat {
+        size: meta.len(),
+        mtime_ms,
+    })
+}
+
+/// One bounded window of a watched file; the streaming upload's read.
+/// Watched files are the person's own documents, so nothing here ever
+/// deletes: uploads read, and that is all.
+#[tauri::command]
+pub async fn watched_file_read_range(
+    app: AppHandle,
+    path: String,
+    offset: u64,
+    length: u64,
+) -> Result<tauri::ipc::Response, String> {
+    let canonical = watched_path(&app, &path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::photos::read_range_at(&canonical, offset, length).map(tauri::ipc::Response::new)
     })
     .await
     .map_err(|err| err.to_string())?

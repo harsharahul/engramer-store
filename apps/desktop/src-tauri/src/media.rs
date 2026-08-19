@@ -131,30 +131,6 @@ pub fn clear_all(app: &tauri::AppHandle) {
     }
 }
 
-fn parse_range(header: Option<&str>, size: u64) -> Option<(u64, u64)> {
-    let header = header?.trim();
-    let rest = header.strip_prefix("bytes=")?;
-    let (from, to) = rest.split_once('-')?;
-    if from.is_empty() {
-        let suffix: u64 = to.parse().ok()?;
-        if suffix == 0 {
-            return None;
-        }
-        return Some((size.saturating_sub(suffix), size - 1));
-    }
-    let start: u64 = from.parse().ok()?;
-    let end: u64 = if to.is_empty() {
-        // Open-ended: answer a bounded window; the player follows up.
-        (start + MAX_ANSWER_BYTES - 1).min(size - 1)
-    } else {
-        to.parse::<u64>().ok()?.min(size - 1)
-    };
-    if start >= size || start > end {
-        return None;
-    }
-    Some((start, end))
-}
-
 async fn fetch_span(
     client: &reqwest::Client,
     source: &MediaSource,
@@ -283,7 +259,7 @@ pub fn handle(
             Err(err) => return respond(responder, 502, &[], err.into_bytes()),
         };
         let size = header.plain_size;
-        let range = parse_range(range_header.as_deref(), size);
+        let range = crate::ranges::parse_range(range_header.as_deref(), size, MAX_ANSWER_BYTES);
         if range_header.is_some() && range.is_none() {
             return respond(
                 responder,
