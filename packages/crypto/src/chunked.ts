@@ -88,11 +88,28 @@ export function readChunkedHeader(ciphertext: Uint8Array): ChunkedHeader {
 export class ChunkedEncryptor {
   readonly header: Uint8Array;
 
+  /**
+   * Pass `header` to rebuild the encryptor that produced it, sealing
+   * byte-identical chunks: what resuming an interrupted upload needs.
+   * The header's own record of the plaintext size must agree, or the
+   * chunks it would seal describe a different file.
+   */
   constructor(
     private readonly key: Uint8Array,
     plainSize: number,
+    header?: Uint8Array,
   ) {
-    this.header = buildHeader(plainSize);
+    if (header) {
+      const parsed = readChunkedHeader(header);
+      if (parsed.plainSize !== plainSize) {
+        throw new Error(
+          `the stored header describes a ${parsed.plainSize} byte file, not ${plainSize} bytes`,
+        );
+      }
+      this.header = header;
+    } else {
+      this.header = buildHeader(plainSize);
+    }
   }
 
   seal(chunkIndex: number, plainChunk: Uint8Array): Uint8Array {

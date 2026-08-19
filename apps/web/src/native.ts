@@ -379,6 +379,62 @@ export async function watchedFileRead(path: string): Promise<Uint8Array> {
 }
 
 /**
+ * Rebuilds the handle an interrupted upload was reading from, verifying
+ * the bytes on disk are still the recorded ones by size. Null when the
+ * file is gone or changed: there is nothing safe to continue.
+ */
+export async function nativeStagedSource(record: {
+  path: string;
+  family: "picked" | "watched";
+  name: string;
+  type: string;
+  size: number;
+  mtime: number;
+  sourceId?: string;
+}): Promise<UploadSource | null> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  try {
+    const command = record.family === "watched" ? "watched_file_stat" : "picked_file_stat";
+    const stat = (await invoke(command, { path: record.path })) as {
+      size: number;
+      mtime_ms?: number;
+    };
+    if (stat.size !== record.size) {
+      return null;
+    }
+    return new NativePickedFile(
+      invoke,
+      record.path,
+      {
+        name: record.name,
+        type: record.type,
+        size: stat.size,
+        lastModified: stat.mtime_ms ?? record.mtime,
+      },
+      {
+        family: record.family,
+        ...(record.sourceId ? { sourceId: record.sourceId } : {}),
+      },
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Sweeps the picker's staging directory, keeping only the named paths;
+ * what interrupted uploads still need survives, the rest goes. */
+export async function pickedSweep(keep: string[]): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return;
+  }
+  await invoke("picked_sweep", { keep }).catch(() => {});
+}
+
+/**
  * A watched file as a streamed handle: bounded windows over the bridge,
  * nothing deleted (the file is the person's own), media served through
  * the protocol's watched route. Null on a shell without the ranged

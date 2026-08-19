@@ -92,12 +92,15 @@ export class NativePickedFile implements UploadSource {
   readonly mediaUrl: string;
   /** The library asset this came from, when the picker said. */
   readonly sourceId?: string;
-  private readonly family: SourceFamily;
+  /** Which command family serves the handle; a resume record needs it. */
+  readonly family: SourceFamily;
   private disposed = false;
 
   constructor(
     private readonly invoke: ShellInvoke,
-    private readonly path: string,
+    /** Where the bytes live on disk; public so a resume record can name
+     * them again after an app kill. */
+    readonly path: string,
     meta: { name: string; type: string; size: number; lastModified: number },
     opts?: { family?: SourceFamily; sourceId?: string },
   ) {

@@ -146,6 +146,7 @@ pub fn run() {
             photos::picked_file_stat,
             photos::picked_file_read_range,
             photos::picked_file_delete,
+            photos::picked_sweep,
             unlock::native_unlock_available,
             unlock::unlock_secret_store,
             unlock::unlock_secret_get,
@@ -179,10 +180,6 @@ pub fn run() {
             network::network_status,
         ])
         .setup(|app| {
-            // Staged picked files are deleted explicitly once their upload
-            // settles; an app killed mid-upload deletes nothing, so launch
-            // owns the leftover cleanup.
-            photos::clear_picked_dir();
             watched::rebuild_watchers(app.handle());
             // The window's first URL is "home": the bundled picker in a
             // generic build, the baked deployment otherwise. Clearing the

@@ -336,15 +336,32 @@ pub async fn picked_file_delete(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Empties the staging directory at launch. Deletion is now explicit and
-/// an app killed mid-upload deletes nothing, so launch owns the cleanup.
-pub fn clear_picked_dir() {
-    let dir = picked_dir();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
+/// Sweeps the staging directory, keeping only the named files. Deletion
+/// is explicit and an app killed mid-upload deletes nothing, so the page
+/// drives this once it knows which interrupted uploads still need their
+/// staged bytes; everything else is a leftover of some earlier kill.
+#[tauri::command]
+pub fn picked_sweep(keep: Vec<String>) -> u32 {
+    sweep_dir(&picked_dir(), &keep)
+}
+
+fn sweep_dir(dir: &std::path::Path, keep: &[String]) -> u32 {
+    let kept: Vec<std::path::PathBuf> = keep
+        .iter()
+        .filter_map(|path| std::path::PathBuf::from(path).canonicalize().ok())
+        .collect();
+    let mut removed = 0;
+    if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
-            let _ = std::fs::remove_file(entry.path());
+            let Ok(canonical) = entry.path().canonicalize() else {
+                continue;
+            };
+            if !kept.contains(&canonical) && std::fs::remove_file(&canonical).is_ok() {
+                removed += 1;
+            }
         }
     }
+    removed
 }
 
 #[cfg(test)]
@@ -393,6 +410,24 @@ mod tests {
         assert_eq!(read_range_at(&path, 8, 100).unwrap(), b"89");
         assert_eq!(read_range_at(&path, 50, 4).unwrap(), Vec::<u8>::new());
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn the_sweep_keeps_what_interrupted_uploads_still_need() {
+        // Its own directory: the shared staging dir belongs to the other
+        // tests running beside this one.
+        let dir = std::env::temp_dir().join("engram-sweep-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("sweep dir");
+        let keeper = dir.join("keeper.bin");
+        let leftover = dir.join("leftover.bin");
+        std::fs::write(&keeper, b"keep").expect("keeper");
+        std::fs::write(&leftover, b"drop").expect("leftover");
+        let removed = sweep_dir(&dir, &[keeper.to_string_lossy().into_owned()]);
+        assert_eq!(removed, 1);
+        assert!(keeper.exists());
+        assert!(!leftover.exists());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

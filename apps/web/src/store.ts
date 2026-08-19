@@ -17,7 +17,16 @@ import {
   utf8Encode,
   type FileMetadata,
 } from "@engramer/crypto";
-import { ApiError, api, uploadBlob, withRetry, type FileDto, type FolderDto, type SharedFileDto } from "./api";
+import {
+  abortPartUpload,
+  ApiError,
+  api,
+  uploadBlob,
+  withRetry,
+  type FileDto,
+  type FolderDto,
+  type SharedFileDto,
+} from "./api";
 import { albumTag, isReservedTag } from "./albums";
 import { openSharedFileKey, sealFileKeyFor } from "./collab";
 import { SaveConflictError, copyName } from "./conflict";
@@ -36,8 +45,17 @@ import {
   withDeadlineOrThrow,
   type UploadSource,
 } from "./transfer";
-import { materializeForAnalysis } from "./nativefile";
+import { materializeForAnalysis, NativePickedFile } from "./nativefile";
 import { tidyBackupName } from "./backupnames";
+import { nativeStagedSource, pickedSweep } from "./native";
+import {
+  clearResumeRecord,
+  loadResumeRecords,
+  makeJournal,
+  resumeStateOf,
+  type ResumeRecord,
+} from "./resumeupload";
+import { resumableUpload, type UploadJournal } from "./transfer";
 import { openWithFreshEntry } from "./freshen";
 import { recognizeImage, recognizePdf } from "./intel/ocr";
 import { isPdf } from "./intel/extract";
@@ -224,6 +242,18 @@ interface StoreState {
   usage: Usage | null;
   isAdmin: boolean;
   uploads: UploadItem[];
+  /** Interrupted uploads whose bytes still wait on disk, found at start;
+   * the tray offers to continue or discard each. */
+  pendingResumes: ResumeRecord[];
+  /** Checks the resume records against what is actually on disk, frees
+   * what cannot continue, and sweeps the staging directory around the
+   * survivors. */
+  scanResumableUploads: () => Promise<void>;
+  /** Continues an interrupted upload from its last finished part; falls
+   * back to one fresh upload of the same bytes if the server side died. */
+  resumeUpload: (fileId: string) => Promise<void>;
+  /** Drops an interrupted upload: record, server row, and staged file. */
+  discardResume: (fileId: string) => Promise<void>;
   /** Cancels every transfer in flight; a fresh batch gets a fresh scope. */
   uploadAbort: AbortController | null;
   reveal: Reveal | null;
@@ -621,6 +651,29 @@ export const useStore = create<StoreState>((set, get) => {
     return session.masterKey;
   };
 
+  /** The resume journal a native upload writes through, when its bytes
+   * would survive an app kill; nothing for browser Files, whose contents
+   * die with the page. */
+  const journalFor = (
+    local: UploadSource,
+    folderId: string | null,
+  ): UploadJournal | undefined => {
+    const session = get().session;
+    if (!session || !(local instanceof NativePickedFile) || !resumableUpload(local)) {
+      return undefined;
+    }
+    return makeJournal(session.email, session.masterKey, {
+      path: local.path,
+      family: local.family,
+      name: local.name,
+      type: local.type,
+      size: local.size,
+      mtime: local.lastModified,
+      ...(local.sourceId ? { sourceId: local.sourceId } : {}),
+      folderId,
+    });
+  };
+
   /** The last sync sequence applied in this tab; 0 forces a full sync. */
   let syncCursor = 0;
   let autoReleasing = false;
@@ -848,6 +901,7 @@ export const useStore = create<StoreState>((set, get) => {
     usage: null,
     isAdmin: false,
     uploads: [],
+    pendingResumes: [],
     uploadAbort: null,
     reveal: null,
     ocrProgress: null,
@@ -1119,6 +1173,7 @@ export const useStore = create<StoreState>((set, get) => {
           // count), and a full bar that is still working reads "finalizing"
           // while the server stitches parts together.
           let peak = 0;
+          const journal = journalFor(local, destination);
           const result = await encryptAndUpload(
             local,
             destination,
@@ -1129,6 +1184,7 @@ export const useStore = create<StoreState>((set, get) => {
               update({ status: peak >= 1 ? "finalizing" : "uploading", progress: peak });
             },
             cancel.signal,
+            journal ? { journal } : undefined,
           );
           applyFile(result.dto);
           update({ status: "done", progress: 1 });
@@ -1228,8 +1284,17 @@ export const useStore = create<StoreState>((set, get) => {
             item.path.length > 0
               ? (folderIds.get(pathKey(item.path)) ?? baseFolderId)
               : (baseFolderId ?? (await ensureCategoryFolder(prepared.analysis.category)));
+          const journal = journalFor(local, destination);
           const result = await withRetry(() =>
-            encryptAndUpload(local, destination, key, prepared, () => {}, cancel.signal),
+            encryptAndUpload(
+              local,
+              destination,
+              key,
+              prepared,
+              () => {},
+              cancel.signal,
+              journal ? { journal } : undefined,
+            ),
           );
           applyFile(result.dto);
           if (revealItems.length < 3) {
@@ -1614,6 +1679,124 @@ export const useStore = create<StoreState>((set, get) => {
       await patchFileMeta(id, { tags: [...edited, ...kept] });
     },
 
+    scanResumableUploads: async () => {
+      const account = get().session?.email;
+      if (!account) {
+        return;
+      }
+      const alive: ResumeRecord[] = [];
+      for (const record of loadResumeRecords(account)) {
+        const source = await nativeStagedSource(record);
+        if (source) {
+          alive.push(record);
+        } else {
+          // The bytes are gone or changed; nothing safe to continue.
+          // Free the server side and forget.
+          void abortPartUpload(record.fileId, record.session).catch(() => {});
+          void api
+            .trashFile(record.fileId)
+            .then(() => api.deleteForever(record.fileId))
+            .catch(() => {});
+          clearResumeRecord(account, record.fileId);
+        }
+      }
+      set({ pendingResumes: alive });
+      // The staging directory holds only what interrupted uploads still
+      // need; everything else is a leftover of some earlier kill.
+      void pickedSweep(alive.filter((r) => r.family === "picked").map((r) => r.path));
+    },
+
+    discardResume: async (fileId) => {
+      const account = get().session?.email;
+      const record = get().pendingResumes.find((r) => r.fileId === fileId);
+      set({ pendingResumes: get().pendingResumes.filter((r) => r.fileId !== fileId) });
+      if (!account || !record) {
+        return;
+      }
+      clearResumeRecord(account, fileId);
+      void abortPartUpload(record.fileId, record.session).catch(() => {});
+      void api
+        .trashFile(record.fileId)
+        .then(() => api.deleteForever(record.fileId))
+        .catch(() => {});
+      const source = await nativeStagedSource(record);
+      void source?.dispose?.();
+    },
+
+    resumeUpload: async (fileId) => {
+      const session = get().session;
+      const record = get().pendingResumes.find((r) => r.fileId === fileId);
+      set({ pendingResumes: get().pendingResumes.filter((r) => r.fileId !== fileId) });
+      if (!session || !record) {
+        return;
+      }
+      const source = await nativeStagedSource(record);
+      if (!source) {
+        clearResumeRecord(session.email, fileId);
+        return;
+      }
+      const key = masterKey();
+      const cancel = transferScope();
+      const uploadId = crypto.randomUUID();
+      set({
+        uploads: [
+          ...get().uploads,
+          { id: uploadId, name: record.name, progress: 0, status: "encrypting" },
+        ],
+      });
+      const update = (patch: Partial<UploadItem>) =>
+        set({
+          uploads: get().uploads.map((u) => (u.id === uploadId ? { ...u, ...patch } : u)),
+        });
+      try {
+        const prepared = await withAnalysisSlot(() =>
+          analyzeFile(source, cancel.signal, (phase) => update({ detail: phase })),
+        );
+        if (record.sourceId) {
+          prepared.meta.sourceId = record.sourceId;
+        }
+        const resume = resumeStateOf(record, key);
+        const journal = journalFor(source, record.folderId);
+        let peak = 0;
+        const result = await encryptAndUpload(
+          source,
+          record.folderId,
+          key,
+          prepared,
+          (fraction) => {
+            peak = Math.max(peak, fraction);
+            update({ status: peak >= 1 ? "finalizing" : "uploading", progress: peak });
+          },
+          cancel.signal,
+          { resume, ...(journal ? { journal } : {}) },
+        );
+        applyFile(result.dto);
+        update({ status: "done", progress: 1 });
+        clearResumeRecord(session.email, fileId);
+        void source.dispose?.();
+      } catch (err) {
+        clearResumeRecord(session.email, fileId);
+        if (!cancel.signal.aborted) {
+          // The recorded session or row died on the server; the bytes on
+          // disk are still good, so start the same file over, once.
+          const fresh = await nativeStagedSource(record);
+          if (fresh) {
+            set({ uploads: get().uploads.filter((u) => u.id !== uploadId) });
+            await get().uploadFiles([fresh], record.folderId);
+            return;
+          }
+        }
+        update({
+          status: "error",
+          error: cancel.signal.aborted
+            ? "cancelled"
+            : err instanceof Error
+              ? err.message
+              : "upload failed",
+        });
+      }
+    },
+
     tidyBackupNames: async () => {
       const candidates: Array<{ id: string; tidy: string; name: string }> = [];
       for (const file of get().files.values()) {
@@ -1668,7 +1851,16 @@ export const useStore = create<StoreState>((set, get) => {
         // reinstall rebuilds its ledger from the synced library alone.
         prepared.meta.sourceId = sourceId;
         const destination = await ensureCategoryFolder("Camera Roll");
-        const result = await encryptAndUpload(local, destination, key, prepared, () => {});
+        const journal = journalFor(local, destination);
+        const result = await encryptAndUpload(
+          local,
+          destination,
+          key,
+          prepared,
+          () => {},
+          undefined,
+          journal ? { journal } : undefined,
+        );
         applyFile(result.dto);
         return result.dto.id;
       } finally {
