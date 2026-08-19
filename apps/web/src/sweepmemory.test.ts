@@ -66,6 +66,18 @@ describe("SweepMemory", () => {
     expect(memory.exhausted("f1")).toBe(true);
   });
 
+  /**
+   * A photo whose export fails (an unreadable original, a stalled iCloud
+   * download) used to be re-attempted on every single pass, forever - the
+   * re-pick loop. Backup rides the same per-device budget the sweeps use.
+   */
+  it("budgets backup exports like recoverable sweep work", () => {
+    expect(attemptCap("backup")).toBe(3);
+    const memory = new SweepMemory("me@example.com", "backup");
+    memory.record("asset-1", false);
+    expect(new SweepMemory("me@example.com", "backup").attempts("asset-1")).toBe(1);
+  });
+
   it("forgets everything when asked, so a manual run retries the stubborn ones", () => {
     const memory = new SweepMemory("me@example.com", "thumbs");
     for (let i = 0; i < attemptCap("thumbs"); i++) {

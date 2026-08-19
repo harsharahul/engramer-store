@@ -1,7 +1,9 @@
 import { uploadLanes } from "./analysisslot";
 import { scheduleBackfill } from "./backfill";
+import { BackupLedger } from "./backupledger";
 import { loadPolicy, windowStartMs, type BackupPolicy } from "./backuppolicy";
 import { connectionIsUnmetered } from "./connection";
+import { SweepMemory } from "./sweepmemory";
 import {
   nativePhotoFile,
   nativePhotosAuthorize,
@@ -44,8 +46,17 @@ export interface BackupProgress {
   done: number;
   total: number;
   failed: number;
+  /** Photos this device gave up on after repeated export failures; a
+   * hand-run pass clears the record and tries them again. */
+  skipped: number;
   /** The photo most recently taken up, once its name is known. */
   current?: string;
+}
+
+/** Clears the per-device export-failure record, so a manual pass means
+ * "try everything again". */
+export function forgetBackupFailures(account: string): void {
+  new SweepMemory(account, "backup").forgetAll();
 }
 
 function keep(asset: NativePhotoAsset, policy: BackupPolicy, since: number): boolean {
@@ -61,50 +72,77 @@ function keep(asset: NativePhotoAsset, policy: BackupPolicy, since: number): boo
   return true;
 }
 
+/** One pass at a time, whoever asked: a manual run overlapping the
+ * automatic one would upload the same pending set twice. */
+let passActive = false;
+
 /**
- * Runs one backup pass: everything in the library the vault does not
- * already hold, with transfers overlapped the same way the picker path
- * overlaps them. The memory-hungry half is safe because backupAsset reads
- * each photo inside the analysis slot, which admits one decode at a time
- * on a phone. Reports progress; never throws for a single asset's
- * failure, so one unreadable photo does not stop the rest.
+ * Runs one backup pass: everything in the library this account has never
+ * uploaded, with transfers overlapped the same way the picker path
+ * overlaps them. What counts as uploaded comes from the persisted ledger,
+ * fed by the synced library, so trashing or deleting vault copies never
+ * re-arms a re-upload on its own. Exports that keep failing are budgeted
+ * per device and then skipped, visibly. Reports progress; never throws
+ * for a single asset's failure, so one unreadable photo does not stop
+ * the rest. Returns null when a pass is already running.
  */
 export async function runBackup(
   policy: BackupPolicy,
   onProgress?: (progress: BackupProgress) => void,
   signal?: { aborted: boolean },
-): Promise<BackupProgress> {
-  const store = useStore.getState();
-  const since = windowStartMs(policy);
-  const assets = (await nativePhotosList()).filter((a) => keep(a, policy, since));
-  const already = store.backedUpSourceIds();
-  const pending = assets.filter((a) => !already.has(a.id));
+): Promise<BackupProgress | null> {
+  if (passActive) {
+    return null;
+  }
+  passActive = true;
+  try {
+    const store = useStore.getState();
+    const account = store.session?.email ?? "";
+    const ledger = new BackupLedger(account);
+    ledger.absorb(store.files.values());
+    const memory = new SweepMemory(account, "backup");
+    const since = windowStartMs(policy);
+    const assets = (await nativePhotosList()).filter((a) => keep(a, policy, since));
+    const fresh = assets.filter((a) => !ledger.has(a.id));
+    const pending = fresh.filter((a) => !memory.exhausted(a.id));
 
-  const progress: BackupProgress = { done: 0, total: pending.length, failed: 0 };
-  onProgress?.({ ...progress });
-
-  await boundedRun(pending, uploadLanes(), async (asset) => {
-    if (signal?.aborted) {
-      return;
-    }
-    try {
-      const file = await nativePhotoFile(asset.id);
-      if (!file) {
-        progress.failed++;
-      } else {
-        progress.current = file.name;
-        onProgress?.({ ...progress });
-        await useStore.getState().backupAsset(file, asset.id);
-        progress.done++;
-      }
-    } catch {
-      // A ledger of failures is better than a stalled loop; the next
-      // pass retries whatever is still missing.
-      progress.failed++;
-    }
+    const progress: BackupProgress = {
+      done: 0,
+      total: pending.length,
+      failed: 0,
+      skipped: fresh.length - pending.length,
+    };
     onProgress?.({ ...progress });
-  });
-  return progress;
+
+    await boundedRun(pending, uploadLanes(), async (asset) => {
+      if (signal?.aborted) {
+        return;
+      }
+      try {
+        const file = await nativePhotoFile(asset.id, asset.filename);
+        if (!file) {
+          progress.failed++;
+          memory.record(asset.id, false);
+        } else {
+          progress.current = file.name;
+          onProgress?.({ ...progress });
+          await useStore.getState().backupAsset(file, asset.id);
+          ledger.add(asset.id);
+          memory.record(asset.id, true);
+          progress.done++;
+        }
+      } catch {
+        // Budgeted rather than endless: without the record, one export
+        // the device can never finish re-ran on every pass forever.
+        progress.failed++;
+        memory.record(asset.id, false);
+      }
+      onProgress?.({ ...progress });
+    });
+    return progress;
+  } finally {
+    passActive = false;
+  }
 }
 
 /**
@@ -132,56 +170,67 @@ export async function autoBackupPass(now = Date.now()): Promise<BackupProgress |
   if (autoRunning || now - lastAutoPass < AUTO_COOLDOWN_MS) {
     return null;
   }
-  const policy = loadPolicy();
-  if (!policy.enabled) {
-    return null;
-  }
-  if (!(await nativePhotosAvailable())) {
-    return null;
-  }
-  const store = useStore.getState();
-  const uploading = store.uploads.some((u) => u.status !== "done" && u.status !== "error");
-  if (!store.session || !store.synced || uploading || store.batch) {
-    return null;
-  }
-  // Nothing to gain from starting an upload pass with no network; the
-  // next foreground brings the device back and tries again.
-  if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    return null;
-  }
-  // The Wi-Fi only knob is a promise, not a suggestion. Skipping happens
-  // before the cooldown is spent, so the next foreground retries; the
-  // hold is shown where the knob lives rather than passing silently.
-  if (policy.wifiOnly && !(await connectionIsUnmetered())) {
-    useStore.setState({ backupHold: "wifi" });
-    return null;
-  }
-  useStore.setState({ backupHold: null });
+  // Taken synchronously, before the first await: two foreground events in
+  // the same beat used to both clear this guard during the gates' async
+  // checks and run the whole pass twice.
   autoRunning = true;
-  lastAutoPass = now;
-  autoAbort = { aborted: false };
-  // Visibility and control travel together: the pill that narrates the
-  // pass is also where it can be stopped.
-  useStore.setState({ batchStop: stopAutoBackup });
   try {
-    const progress = await runBackup(
-      policy,
-      (p) => {
-        if (p.total > 0) {
-          useStore.setState({
-            batch: { done: p.done, total: p.total, failed: p.failed, current: p.current ?? "" },
-          });
-        }
-      },
-      autoAbort,
-    );
-    // The pass ships photos with their heavy scanners deferred; let the
-    // backfill catch up while the app is still open.
-    scheduleBackfill();
-    return progress;
+    const policy = loadPolicy();
+    if (!policy.enabled) {
+      return null;
+    }
+    if (!(await nativePhotosAvailable())) {
+      return null;
+    }
+    const store = useStore.getState();
+    const uploading = store.uploads.some((u) => u.status !== "done" && u.status !== "error");
+    // serverSynced, not just synced: the cached library satisfies synced
+    // before the network answers, and deciding what still needs uploading
+    // against that stale ledger re-uploaded whatever the cache had missed.
+    if (!store.session || !store.synced || !store.serverSynced || uploading || store.batch) {
+      return null;
+    }
+    // Nothing to gain from starting an upload pass with no network; the
+    // next foreground brings the device back and tries again.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      return null;
+    }
+    // The Wi-Fi only knob is a promise, not a suggestion. Skipping happens
+    // before the cooldown is spent, so the next foreground retries; the
+    // hold is shown where the knob lives rather than passing silently.
+    if (policy.wifiOnly && !(await connectionIsUnmetered())) {
+      useStore.setState({ backupHold: "wifi" });
+      return null;
+    }
+    useStore.setState({ backupHold: null });
+    lastAutoPass = now;
+    autoAbort = { aborted: false };
+    // Visibility and control travel together: the pill that narrates the
+    // pass is also where it can be stopped.
+    useStore.setState({ batchStop: stopAutoBackup });
+    try {
+      const progress = await runBackup(
+        policy,
+        (p) => {
+          if (p.total > 0) {
+            useStore.setState({
+              batch: { done: p.done, total: p.total, failed: p.failed, current: p.current ?? "" },
+            });
+          }
+        },
+        autoAbort,
+      );
+      if (progress) {
+        // The pass ships photos with their heavy scanners deferred; let
+        // the backfill catch up while the app is still open.
+        scheduleBackfill();
+      }
+      return progress;
+    } finally {
+      useStore.setState({ batch: null, batchStop: null });
+      autoAbort = null;
+    }
   } finally {
-    useStore.setState({ batch: null, batchStop: null });
-    autoAbort = null;
     autoRunning = false;
   }
 }

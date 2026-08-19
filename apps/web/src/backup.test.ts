@@ -1,13 +1,19 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rig = vi.hoisted(() => ({
   running: 0,
   peak: 0,
   backedUp: [] as string[],
+  fileNames: [] as string[],
   batches: [] as ({ done: number; total: number; current: string } | null)[],
   stops: [] as ((() => void) | null | undefined)[],
   holds: [] as ("wifi" | null)[],
   backfills: 0,
+  serverSynced: true,
+  // Asset ids whose export the fake shell refuses.
+  exportFail: new Set<string>(),
+  // The synced library as the ledger sees it.
+  files: new Map<string, { sourceId?: string; trashed?: boolean }>(),
   // The path the fake network monitor reports; tests flip it to close
   // the Wi-Fi gate.
   network: {
@@ -34,13 +40,18 @@ vi.mock("./native", () => ({
   nativePhotosList: async () =>
     Array.from({ length: 6 }, (_, i) => ({
       id: `asset-${i}`,
-      kind: "photo",
+      kind: "image",
+      filename: `IMG_${i}.HEIC`,
       screenshot: false,
       created_ms: 1_754_700_000_000 + i,
+      mtime_ms: 1_754_700_000_000 + i,
     })),
-  nativePhotoFile: async (id: string) => {
+  nativePhotoFile: async (id: string, name?: string) => {
+    if (rig.exportFail.has(id)) {
+      throw new Error("export failed");
+    }
     await new Promise((resolve) => setTimeout(resolve, 5));
-    return new File([new Uint8Array(8)], `${id}.jpg`, { type: "image/jpeg" });
+    return new File([new Uint8Array(8)], name ?? `${id}.jpg`, { type: "image/jpeg" });
   },
 }));
 
@@ -49,15 +60,23 @@ vi.mock("./store", () => ({
     getState: () => ({
       session: { email: "t@example.com" },
       synced: true,
+      serverSynced: rig.serverSynced,
       uploads: [],
       batch: null,
-      backedUpSourceIds: () => new Set<string>(),
-      backupAsset: async (_file: File, sourceId: string) => {
+      files: rig.files,
+      backedUpSourceIds: () =>
+        new Set(
+          [...rig.files.values()]
+            .filter((f) => f.sourceId && !f.trashed)
+            .map((f) => f.sourceId as string),
+        ),
+      backupAsset: async (file: File, sourceId: string) => {
         rig.running++;
         rig.peak = Math.max(rig.peak, rig.running);
         await new Promise((resolve) => setTimeout(resolve, 20));
         rig.running--;
         rig.backedUp.push(sourceId);
+        rig.fileNames.push(file.name);
         return sourceId;
       },
     }),
@@ -85,12 +104,14 @@ vi.mock("./analysisslot", () => ({
 import {
   DEFAULT_POLICY,
   autoBackupPass,
+  forgetBackupFailures,
   loadPolicy,
   runBackup,
   savePolicy,
   stopAutoBackup,
   windowStartMs,
 } from "./backup";
+import { resetBackupLedger } from "./backupledger";
 
 // The policy lives in localStorage; give the node test env one.
 beforeAll(() => {
@@ -107,6 +128,19 @@ beforeAll(() => {
   } as Storage;
 });
 
+// The ledger and failure memory persist by design; between tests that
+// permanence is just leakage.
+beforeEach(() => {
+  localStorage.clear();
+  rig.running = 0;
+  rig.peak = 0;
+  rig.backedUp.length = 0;
+  rig.fileNames.length = 0;
+  rig.serverSynced = true;
+  rig.exportFail.clear();
+  rig.files = new Map();
+});
+
 /**
  * The wait in a backup pass is the network, and the phone's analysis slot
  * already guards the memory-hungry half; running the loop one photo at a
@@ -121,7 +155,13 @@ describe("runBackup", () => {
     const progress = await runBackup({ ...DEFAULT_POLICY, enabled: true }, (p) =>
       seen.push(p.done),
     );
-    expect(progress).toEqual({ done: 6, total: 6, failed: 0, current: expect.any(String) });
+    expect(progress).toEqual({
+      done: 6,
+      total: 6,
+      failed: 0,
+      skipped: 0,
+      current: expect.any(String),
+    });
     expect(rig.backedUp).toHaveLength(6);
     expect(rig.peak).toBe(2);
     // One initial report, then two per photo (name known, then done),
@@ -144,7 +184,7 @@ describe("runBackup", () => {
         signal.aborted = true;
       }
     }, signal);
-    expect(progress.done).toBeLessThan(6);
+    expect(progress!.done).toBeLessThan(6);
   });
 });
 
@@ -171,7 +211,8 @@ describe("autoBackupPass", () => {
     expect(progress?.done).toBe(6);
     // The pill saw real progress with real names, then cleared.
     expect(rig.batches.length).toBeGreaterThan(1);
-    expect(rig.batches.some((b) => b?.total === 6 && /asset-\d\.jpg/.test(b.current))).toBe(true);
+    // The pill shows the photo's own library name, not the export path.
+    expect(rig.batches.some((b) => b?.total === 6 && /IMG_\d\.HEIC/.test(b.current))).toBe(true);
     expect(rig.batches[rig.batches.length - 1]).toBeNull();
     expect(rig.backfills).toBe(1);
   });
@@ -223,6 +264,92 @@ describe("autoBackupPass", () => {
     expect(rig.stops[rig.stops.length - 1]).toBeNull();
     expect(rig.batches[rig.batches.length - 1]).toBeNull();
     localStorage.clear();
+  });
+});
+
+/**
+ * The re-pick loop had four independent causes: trashed rows re-arming
+ * their assets, failed exports retried forever, passes racing their own
+ * guard, and passes reading a ledger the network had not filled yet.
+ * Each gets its own test so a regression names itself.
+ */
+describe("backup dedupe and failure memory", () => {
+  const enabled = { ...DEFAULT_POLICY, enabled: true };
+
+  it("does not re-upload a photo whose vault copy is trashed", async () => {
+    rig.files.set("f1", { sourceId: "asset-0", trashed: true });
+    const progress = await runBackup(enabled);
+    expect(progress?.done).toBe(5);
+    expect(rig.backedUp).not.toContain("asset-0");
+  });
+
+  it("remembers deleted-forever uploads and leaves them alone", async () => {
+    await runBackup(enabled);
+    rig.backedUp.length = 0;
+    // Deleting forever prunes the rows; only the ledger still knows.
+    rig.files = new Map();
+    const progress = await runBackup(enabled);
+    expect(progress?.done).toBe(0);
+    expect(rig.backedUp).toEqual([]);
+  });
+
+  it("backs deleted photos up again after a history reset", async () => {
+    await runBackup(enabled);
+    rig.backedUp.length = 0;
+    resetBackupLedger("t@example.com");
+    const progress = await runBackup(enabled);
+    expect(progress?.done).toBe(6);
+  });
+
+  it("stops retrying an export that keeps failing, and says so", async () => {
+    rig.exportFail.add("asset-3");
+    for (let i = 0; i < 3; i++) {
+      const p = await runBackup(enabled);
+      expect(p?.failed).toBe(1);
+    }
+    const after = await runBackup(enabled);
+    expect(after?.failed).toBe(0);
+    expect(after?.skipped).toBe(1);
+  });
+
+  it("retries an exhausted export after an explicit clear", async () => {
+    rig.exportFail.add("asset-3");
+    for (let i = 0; i < 3; i++) {
+      await runBackup(enabled);
+    }
+    rig.exportFail.clear();
+    rig.backedUp.length = 0;
+    // The budget is spent; a healthy export changes nothing by itself.
+    expect((await runBackup(enabled))?.done).toBe(0);
+    forgetBackupFailures("t@example.com");
+    expect((await runBackup(enabled))?.done).toBe(1);
+    expect(rig.backedUp).toContain("asset-3");
+  });
+
+  it("names backups after the photo library's own filename", async () => {
+    await runBackup(enabled);
+    expect(rig.fileNames).toContain("IMG_0.HEIC");
+  });
+
+  it("refuses a second pass while one is running", async () => {
+    const [a, b] = await Promise.all([runBackup(enabled), runBackup(enabled)]);
+    expect([a, b].filter((r) => r === null)).toHaveLength(1);
+    expect(rig.backedUp).toHaveLength(6);
+  });
+
+  it("waits for a real server sync before an automatic pass", async () => {
+    savePolicy(enabled);
+    rig.serverSynced = false;
+    expect(await autoBackupPass(200_000_000)).toBeNull();
+    rig.serverSynced = true;
+    expect(await autoBackupPass(200_000_000)).not.toBeNull();
+  });
+
+  it("starts exactly one pass when foreground events double-fire", async () => {
+    savePolicy(enabled);
+    const [a, b] = await Promise.all([autoBackupPass(300_000_000), autoBackupPass(300_000_000)]);
+    expect([a, b].filter((r) => r !== null)).toHaveLength(1);
+    expect(rig.backedUp).toHaveLength(6);
   });
 });
 

@@ -1057,13 +1057,15 @@ export function Vault() {
   }, [store.synced]);
 
   // Photo backup runs itself when the app opens or comes back to the
-  // foreground (iOS shell only; a no-op everywhere else). Waiting for
-  // sync first keeps the already-backed-up ledger honest.
+  // foreground (iOS shell only; a no-op everywhere else). Waiting for a
+  // SERVER sync keeps the already-backed-up ledger honest: `synced` is
+  // satisfied by the on-device cache, and a pass against that snapshot
+  // re-uploaded whatever the cache had not seen yet.
   useEffect(() => {
-    if (store.synced) {
+    if (store.serverSynced) {
       installAutoBackup();
     }
-  }, [store.synced]);
+  }, [store.serverSynced]);
 
   // Desktop shell only: pick up watched-folder arrivals, past and live.
   useEffect(() => {

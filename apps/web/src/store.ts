@@ -210,6 +210,10 @@ export interface BatchProgress {
 interface StoreState {
   session: Session | null;
   synced: boolean;
+  /** True once a sync round-trip has landed this session. `synced` alone
+   * can come from the on-device cache, which is a stale ledger for any
+   * pass that decides what still needs uploading. */
+  serverSynced: boolean;
   /** Set when the last sync attempt failed; the UI offers a retry. */
   syncError: string | null;
   folders: Map<string, FolderEntry>;
@@ -268,9 +272,6 @@ interface StoreState {
   rotateFileKey: (id: string) => Promise<void>;
   renameFile: (id: string, name: string) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
-  /** The set of photo-library asset ids already in the vault, read from
-   * the synced metadata; a backup pass skips these. */
-  backedUpSourceIds: () => Set<string>;
   /** Backs one exported original up into the Camera Roll folder, stamped
    * with its library id so a reinstall recognizes it. Returns the file id. */
   backupAsset: (file: File, sourceId: string) => Promise<string>;
@@ -834,6 +835,7 @@ export const useStore = create<StoreState>((set, get) => {
     autoReleasedNote: null,
     consumeAutoReleaseNote: () => set({ autoReleasedNote: null }),
     synced: false,
+    serverSynced: false,
     syncError: null,
     folders: new Map(),
     files: new Map(),
@@ -858,6 +860,7 @@ export const useStore = create<StoreState>((set, get) => {
       set({
         session,
         synced: false,
+        serverSynced: false,
         syncError: null,
         folders: new Map(),
         files: new Map(),
@@ -889,6 +892,7 @@ export const useStore = create<StoreState>((set, get) => {
       set({
         session: null,
         synced: false,
+        serverSynced: false,
         folders: new Map(),
         files: new Map(),
         usage: null,
@@ -903,6 +907,7 @@ export const useStore = create<StoreState>((set, get) => {
       set({
         session: null,
         synced: false,
+        serverSynced: false,
         folders: new Map(),
         files: new Map(),
         usage: null,
@@ -933,6 +938,7 @@ export const useStore = create<StoreState>((set, get) => {
         set({ syncError: err instanceof Error ? err.message : "could not reach the server" });
         throw err;
       }
+      set({ serverSynced: true });
       if (syncCursor === 0) {
         const { folders, files } = buildLibrary(response.folders, response.files, response.shared);
         set({ folders, files, synced: true, syncError: null });
@@ -1576,18 +1582,6 @@ export const useStore = create<StoreState>((set, get) => {
       );
       const kept = existingReserved.filter((t) => !edited.includes(t));
       await patchFileMeta(id, { tags: [...edited, ...kept] });
-    },
-
-    backedUpSourceIds: () => {
-      const ids = new Set<string>();
-      for (const file of get().files.values()) {
-        // A trashed photo is no longer "backed up": leaving it here would
-        // refuse to re-upload one the owner deleted and wants again.
-        if (file.sourceId && !file.trashed) {
-          ids.add(file.sourceId);
-        }
-      }
-      return ids;
     },
 
     backupAsset: async (file, sourceId) => {

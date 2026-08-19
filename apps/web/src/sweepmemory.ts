@@ -13,14 +13,14 @@
  * clears the slate, because asking for it explicitly means "try again".
  */
 
-export type SweepKind = "thumbs" | "text" | "meaning" | "facts";
+export type SweepKind = "thumbs" | "text" | "meaning" | "facts" | "backup";
 
 /**
  * How many automatic attempts a file gets on this device before it is
  * left alone. Three for work that can succeed on a later try (a stalled
- * download, a moment of memory pressure). One for the dates pass, which
- * is re-eligible by design: without a budget it would re-read the whole
- * library on every open.
+ * download, a moment of memory pressure; a photo export waiting on
+ * iCloud). One for the dates pass, which is re-eligible by design:
+ * without a budget it would re-read the whole library on every open.
  */
 export function attemptCap(kind: SweepKind): number {
   return kind === "facts" ? 1 : 3;
