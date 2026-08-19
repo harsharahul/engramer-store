@@ -139,21 +139,62 @@ async fn fetch_span(
     end: u64,
 ) -> Result<Vec<u8>, String> {
     let url = format!("{}/api/files/{}/data", source.base, file_id);
-    let response = client
+    let mut response = client
         .get(url)
         .header("authorization", format!("Bearer {}", source.token))
         .header("range", format!("bytes={start}-{end}"))
         .send()
         .await
         .map_err(|err| format!("ciphertext fetch failed: {err}"))?;
-    if !(response.status() == 206 || response.status() == 200) {
-        return Err(format!("ciphertext fetch failed ({})", response.status()));
+    let status = response.status().as_u16();
+    if !(status == 206 || status == 200) {
+        return Err(format!("ciphertext fetch failed ({status})"));
     }
-    response
-        .bytes()
+    // A compliant partial answer names its window; one naming a different
+    // window would decrypt as garbage, so it is refused, not decoded.
+    if status == 206 {
+        if let Some(content_range) = response
+            .headers()
+            .get("content-range")
+            .and_then(|value| value.to_str().ok())
+        {
+            if !content_range.trim().starts_with(&format!("bytes {start}-")) {
+                return Err(format!("the server answered the wrong window ({content_range})"));
+            }
+        }
+    }
+    // A 200 ignored the Range and carries the WHOLE object. The old code
+    // buffered that body whole and decrypted it at the span's offsets:
+    // wrong bytes from the second span on, and hundreds of megabytes
+    // resident per request. Read through to the window instead, holding
+    // one network chunk beyond it at most, and stop the body there.
+    let expected = (end - start + 1) as usize;
+    let mut skip = if status == 200 { start as usize } else { 0 };
+    let mut span: Vec<u8> = Vec::with_capacity(expected);
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map(|b| b.to_vec())
-        .map_err(|err| format!("ciphertext body failed: {err}"))
+        .map_err(|err| format!("ciphertext body failed: {err}"))?
+    {
+        let mut piece: &[u8] = &chunk;
+        if skip > 0 {
+            let dropped = skip.min(piece.len());
+            skip -= dropped;
+            piece = &piece[dropped..];
+        }
+        if piece.is_empty() {
+            continue;
+        }
+        let take = piece.len().min(expected - span.len());
+        span.extend_from_slice(&piece[..take]);
+        if span.len() == expected {
+            break;
+        }
+    }
+    if span.len() != expected {
+        return Err(format!("read {} bytes of a {expected} byte span", span.len()));
+    }
+    Ok(span)
 }
 
 async fn ensure_header(
@@ -301,4 +342,103 @@ pub fn handle(
             body,
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn canned_source(port: u16) -> MediaSource {
+        MediaSource {
+            key: [0; 32],
+            token: "t".into(),
+            base: format!("http://127.0.0.1:{port}"),
+            mime: "video/mp4".into(),
+            header: tokio::sync::Mutex::new(None),
+            cache: Mutex::new(ChunkCache {
+                chunks: HashMap::new(),
+                order: VecDeque::new(),
+            }),
+            fetching: tokio::sync::Mutex::new(()),
+        }
+    }
+
+    fn pattern(size: usize) -> Vec<u8> {
+        (0..size).map(|i| ((i * 31 + 7) % 251) as u8).collect()
+    }
+
+    fn serve_bytes(status_line: &str, headers: &str, body: Vec<u8>) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let head = format!(
+            "{status_line}\r\ncontent-length: {}\r\n{headers}\r\n",
+            body.len()
+        );
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+            }
+        });
+        port
+    }
+
+    fn span(port: u16, start: u64, end: u64) -> Result<Vec<u8>, String> {
+        tauri::async_runtime::block_on(async {
+            let source = canned_source(port);
+            fetch_span(&reqwest::Client::new(), &source, "f1", start, end).await
+        })
+    }
+
+    /// The playback freeze that ended in a memory kill: a backend that
+    /// ignored the Range answered 200 with the whole object, the old code
+    /// buffered it whole and decrypted the span's offsets against bytes
+    /// that started at zero. Wrong frames, then jetsam.
+    #[test]
+    fn a_range_blind_full_body_yields_the_right_window_not_the_whole() {
+        let whole = pattern(4096);
+        let port = serve_bytes("HTTP/1.1 200 OK", "", whole.clone());
+        let got = span(port, 1000, 1999).unwrap();
+        assert_eq!(got.len(), 1000);
+        assert_eq!(got, whole[1000..2000].to_vec());
+    }
+
+    #[test]
+    fn a_compliant_partial_answer_passes_through() {
+        let whole = pattern(4096);
+        let window = whole[1000..2000].to_vec();
+        let port = serve_bytes(
+            "HTTP/1.1 206 Partial Content",
+            "content-range: bytes 1000-1999/4096\r\n",
+            window.clone(),
+        );
+        assert_eq!(span(port, 1000, 1999).unwrap(), window);
+    }
+
+    #[test]
+    fn a_partial_answer_for_the_wrong_window_is_refused() {
+        let port = serve_bytes(
+            "HTTP/1.1 206 Partial Content",
+            "content-range: bytes 0-999/4096\r\n",
+            pattern(1000),
+        );
+        let err = span(port, 1000, 1999).unwrap_err();
+        assert!(err.contains("wrong window"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn a_short_body_is_an_error_not_a_short_span() {
+        let port = serve_bytes(
+            "HTTP/1.1 206 Partial Content",
+            "content-range: bytes 1000-1999/4096\r\n",
+            pattern(400),
+        );
+        let err = span(port, 1000, 1999).unwrap_err();
+        assert!(err.contains("400 bytes of a 1000"), "unexpected: {err}");
+    }
 }
