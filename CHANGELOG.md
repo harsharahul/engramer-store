@@ -6,6 +6,18 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Fixed
+- **Large photo and video uploads no longer crash the iOS app.** Files
+  chosen through the native "Photos and videos" picker were read whole
+  across the app-to-page bridge, holding several times the file's size in
+  memory; a 30-second video was enough for iOS to end the process. Picked
+  files now travel as handles whose bytes are read in 4 MiB windows on
+  demand, feeding the streaming upload the disk-backed source it was
+  designed around. On app builds that predate the streamed bridge, the
+  picker falls back to the standard file input (crash-free; iOS may
+  transcode until the app updates), and the automatic backup holds
+  videos back visibly instead of risking the same crash. A standing test
+  now fails if any future change makes the upload path materialize a
+  large file again.
 - **Photo backup no longer re-uploads the library.** Backup now keeps a
   per-account record of every photo it ever uploaded, so trashing or
   deleting vault copies does not re-arm them; a "Reset backup history"

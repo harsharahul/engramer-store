@@ -1051,6 +1051,11 @@ export function ProfileView(props: {
                   {policy.wifiOnly && store.backupHold === "wifi" && (
                     <div className="profile-row-sub">Waiting for Wi-Fi to back up.</div>
                   )}
+                  {store.backupHold === "shell-videos" && (
+                    <div className="profile-row-sub">
+                      Videos wait for an updated app to back up safely; photos continue.
+                    </div>
+                  )}
                   <label>
                     <input
                       type="checkbox"

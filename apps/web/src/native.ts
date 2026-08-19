@@ -7,6 +7,8 @@
  */
 
 import { diag } from "./diag";
+import { fileBytes, mimeFromName, NativePickedFile } from "./nativefile";
+import type { UploadSource } from "./transfer";
 
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -294,18 +296,32 @@ export async function nativePhotosList(): Promise<NativePhotoAsset[]> {
   return (await invoke("photos_list")) as NativePhotoAsset[];
 }
 
-/** Exports one asset's original and reads it back as a File (originals
- * intact), reusing the picker's own read-and-delete bridge. Named from
+/** Exports one asset's original as an upload source (originals intact).
+ * On a streaming shell the source is a handle whose bytes stay on disk
+ * until the upload slices them; on an old shell the whole-file read
+ * remains, and the backup pass holds videos back from it. Named from
  * `name` when the caller knows the library's own filename: the export
  * path prefixes the asset id for uniqueness on disk, and that prefix
  * used to leak into the vault as the stored name. */
-export async function nativePhotoFile(id: string, name?: string): Promise<File | null> {
+export async function nativePhotoFile(id: string, name?: string): Promise<UploadSource | null> {
   const invoke = tauriInvoke();
   if (!invoke) {
     return null;
   }
   const path = (await invoke("photos_export", { id })) as string;
   const chosen = name || path.split("/").pop() || "photo";
+  if (await pickedStreamingAvailable()) {
+    const stat = (await invoke("picked_file_stat", { path })) as {
+      size: number;
+      mtime_ms?: number;
+    };
+    return new NativePickedFile(invoke, path, {
+      name: chosen,
+      type: mimeFromName(chosen),
+      size: stat.size,
+      lastModified: stat.mtime_ms ?? Date.now(),
+    });
+  }
   const bytes = fileBytes(await invoke("picked_file_read", { path }));
   return new File([bytes as BlobPart], chosen, { type: mimeFromName(chosen) });
 }
@@ -352,31 +368,7 @@ export async function watchedScan(): Promise<WatchedFile[]> {
   return (await invoke("watched_scan")) as WatchedFile[];
 }
 
-/**
- * File content as bytes, whatever shape the shell hands it over in.
- *
- * This crossing has no type safety: the value arrives as JSON from another
- * process, and declaring it an ArrayBuffer only asserted a hope. It arrives
- * as a plain array of byte values, and `new Blob([array])` does not reject
- * that: it stringifies it, so a PDF became the text "37,80,68,70,..." and
- * every file a watched folder uploaded was silently corrupted, at three and
- * a half times its real size. Convert rather than assert.
- */
-export function fileBytes(value: unknown): Uint8Array {
-  if (value instanceof Uint8Array) {
-    return value;
-  }
-  if (value instanceof ArrayBuffer) {
-    return new Uint8Array(value);
-  }
-  if (ArrayBuffer.isView(value)) {
-    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-  }
-  if (Array.isArray(value)) {
-    return Uint8Array.from(value as number[]);
-  }
-  throw new Error("the shell returned something that is not file content");
-}
+export { fileBytes, mimeFromName } from "./nativefile";
 
 export async function watchedFileRead(path: string): Promise<Uint8Array> {
   const invoke = tauriInvoke();
@@ -387,43 +379,37 @@ export async function watchedFileRead(path: string): Promise<Uint8Array> {
 }
 
 /**
- * The type a picked file's name implies, or "" when the name does not say.
- *
- * The shell hands over paths rather than browser `File`s, so nothing sets a
- * type and everything downstream branches on one. Only the formats a photo
- * library actually holds are listed: an empty answer is honest and can be
- * recovered from the name later, a wrong one cannot.
+ * Whether this shell can serve picked files in bounded windows. Old shells
+ * only offer the whole-file read, which serialized entire videos through
+ * the bridge and got the app killed for memory; on those, callers use the
+ * browser file input instead, trading original bytes for staying alive
+ * until the shell updates.
  */
-export function mimeFromName(name: string): string {
-  const ext = name.toLowerCase().split(".").pop() ?? "";
-  const known: Record<string, string> = {
-    heic: "image/heic",
-    heif: "image/heif",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    png: "image/png",
-    gif: "image/gif",
-    webp: "image/webp",
-    tiff: "image/tiff",
-    dng: "image/x-adobe-dng",
-    mov: "video/quicktime",
-    mp4: "video/mp4",
-    m4v: "video/x-m4v",
-  };
-  return known[ext] ?? "";
+export async function pickedStreamingAvailable(): Promise<boolean> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return false;
+  }
+  try {
+    return (await invoke("picked_probe")) === true;
+  } catch {
+    return false;
+  }
 }
 
 /**
- * The system photo picker, as `File`s carrying the ORIGINAL bytes.
+ * The system photo picker, as upload sources carrying the ORIGINAL bytes.
  *
  * A web file input cannot get these on iOS: the system transcodes HEIC to
  * JPEG on the way out, whatever the accept attribute says, so the page never
  * sees what the camera recorded. The shell's picker asks for each asset as
- * stored instead. Returns null where there is no such picker (every browser,
- * and any shell too old to carry the command), so callers fall back to the
- * file input rather than losing the ability to add photos at all.
+ * stored instead, and hands back streamed HANDLES: no byte crosses the
+ * bridge until the upload slices its 4 MiB windows. Returns null where
+ * there is no such picker, or where the shell cannot stream (reading a
+ * video whole is the memory kill this exists to end), so callers fall back
+ * to the file input rather than losing the ability to add photos at all.
  */
-export async function pickPhotos(): Promise<File[] | null> {
+export async function pickPhotos(): Promise<UploadSource[] | null> {
   const invoke = tauriInvoke();
   if (!invoke) {
     // Distinct from a failed call: no shell at all, or its bridge was never
@@ -431,13 +417,16 @@ export async function pickPhotos(): Promise<File[] | null> {
     diag("photos", "no shell bridge on this page; using the file input");
     return null;
   }
+  if (!(await pickedStreamingAvailable())) {
+    // Asked BEFORE the picker shows: an old shell should never stage
+    // originals it has no safe way to hand over.
+    diag("photos", "shell cannot stream picked files; using the file input");
+    return null;
+  }
   let paths: unknown;
   try {
     paths = await invoke("pick_photos", {});
   } catch (err) {
-    // An older shell, or a platform without the picker. Falling back is
-    // right, but silently is not: it looks identical to the picker running
-    // and handing back a transcoded file, which is the bug it exists to fix.
     diag("photos", `native picker unavailable: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
@@ -446,17 +435,27 @@ export async function pickPhotos(): Promise<File[] | null> {
     return null;
   }
   diag("photos", `native picker returned ${paths.length} item(s)`);
-  const files: File[] = [];
+  const files: UploadSource[] = [];
   for (const path of paths as string[]) {
     const name = path.split("/").pop() || "photo";
     try {
-      const bytes = fileBytes(await invoke("picked_file_read", { path }));
-      files.push(new File([bytes as BlobPart], name, { type: mimeFromName(name) }));
+      const stat = (await invoke("picked_file_stat", { path })) as {
+        size: number;
+        mtime_ms?: number;
+      };
+      files.push(
+        new NativePickedFile(invoke, path, {
+          name,
+          type: mimeFromName(name),
+          size: stat.size,
+          lastModified: stat.mtime_ms ?? Date.now(),
+        }),
+      );
     } catch (err) {
       // Skip the one that failed rather than abandoning the batch, and never
       // fall back to the file input from here: the picker DID hand over
       // originals, and quietly re-picking them would transcode instead.
-      diag("photos", `could not read a picked file: ${err instanceof Error ? err.message : String(err)}`);
+      diag("photos", `could not stat a picked file: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   return files;

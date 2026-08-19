@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { generateKey, ready } from "@engramer/crypto";
+import { chunkedCiphertextSize, generateKey, ready } from "@engramer/crypto";
 import type { FileDto } from "./api";
 
 const relay = vi.hoisted(() => ({
@@ -48,6 +48,10 @@ vi.mock("./api", async (importOriginal) => {
       }
       return bytes.length;
     },
+    beginPartUpload: async () => ({ session: "s1" }),
+    uploadPart: async (_id: string, _s: string, _no: number, body: Uint8Array) => body.length,
+    completePartUpload: async () => ({ size: 0 }),
+    abortPartUpload: async () => {},
   };
 });
 
@@ -69,7 +73,14 @@ vi.mock("./intel/scan", () => ({
   scanForFacts: vi.fn(async () => ({ facts: [], evidence: [], decoded: [] })),
 }));
 
-import { encryptAndUpload, withDeadline, type PreparedFile } from "./transfer";
+import {
+  contentCiphertextSize,
+  encryptAndUpload,
+  makeThumbnail,
+  withDeadline,
+  type PreparedFile,
+  type UploadSource,
+} from "./transfer";
 
 describe("withDeadline", () => {
   it("passes a value through when the work finishes in time", async () => {
@@ -129,6 +140,79 @@ describe("encryptAndUpload", () => {
     const result = await done;
     expect(result.dto.uploaded).toBe(true);
     expect(result.meta.digest).toBeDefined();
+  });
+});
+
+/**
+ * The upload path was designed to never hold a large file: 4 MiB slices,
+ * bounded part bodies. That property was silently defeated once, by a
+ * picker that handed it memory-backed Files, and the whole app died on a
+ * 30-second video. This suite guards the property itself, so the next
+ * change that re-materializes a source fails here instead of on a phone.
+ */
+describe("the upload path never materializes a large source", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  const virtualSource = (size: number, over: Partial<UploadSource> = {}): UploadSource & {
+    wholeReads: () => number;
+    maxWindow: () => number;
+  } => {
+    let whole = 0;
+    let max = 0;
+    return {
+      name: "big.mov",
+      type: "video/mp4",
+      size,
+      lastModified: 1,
+      slice(start = 0, end = size) {
+        const from = Math.min(start, size);
+        const to = Math.min(end, size);
+        return {
+          size: to - from,
+          arrayBuffer: async () => {
+            max = Math.max(max, to - from);
+            return new Uint8Array(to - from).buffer as ArrayBuffer;
+          },
+        };
+      },
+      arrayBuffer: async () => {
+        whole++;
+        return new ArrayBuffer(size);
+      },
+      text: async () => "",
+      wholeReads: () => whole,
+      maxWindow: () => max,
+      ...over,
+    };
+  };
+
+  it("streams a 64MiB source in bounded windows, never whole", async () => {
+    const source = virtualSource(64 * 1024 * 1024 + 5);
+    const prepared: PreparedFile = {
+      meta: { name: source.name, mime: source.type, size: source.size, mtime: 1 },
+      analysis: { category: "Other", tags: [] },
+      thumbnail: null,
+    };
+    await encryptAndUpload(source, null, generateKey(), prepared, () => {});
+    expect(source.wholeReads()).toBe(0);
+    expect(source.maxWindow()).toBeLessThanOrEqual(4 * 1024 * 1024);
+  });
+
+  it("sizes a typeless picked video as media, so playback can seek", () => {
+    // The shell hands over paths; an extension outside the mime table
+    // means an empty type, and an empty type used to pick the stream
+    // format, which cannot answer range requests.
+    const source = virtualSource(1000, { name: "clip.mov", type: "" });
+    expect(contentCiphertextSize(source)).toBe(chunkedCiphertextSize(1000));
+  });
+
+  it("yields no thumbnail, quickly, for a video source with no URL to decode", async () => {
+    // A source that is neither a Blob nor URL-served cannot feed a media
+    // element; the honest answer is no thumbnail, not a hang or a throw.
+    const source = virtualSource(1000);
+    await expect(makeThumbnail(source, "video/mp4")).resolves.toBeNull();
   });
 });
 

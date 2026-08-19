@@ -34,7 +34,9 @@ import {
   encryptAndUpload,
   makeThumbnail,
   withDeadlineOrThrow,
+  type UploadSource,
 } from "./transfer";
+import { materializeForAnalysis } from "./nativefile";
 import { openWithFreshEntry } from "./freshen";
 import { recognizeImage, recognizePdf } from "./intel/ocr";
 import { isPdf } from "./intel/extract";
@@ -231,7 +233,7 @@ interface StoreState {
   /** Stops whatever the batch pill is narrating; set by the pass that owns it. */
   batchStop: (() => void) | null;
   /** Why automatic backup is holding, shown beside the knob that caused it. */
-  backupHold: "wifi" | null;
+  backupHold: "wifi" | "shell-videos" | null;
   /** Search-index warm-up progress; null when idle or complete. */
   indexWarm: { done: number; total: number } | null;
 
@@ -245,7 +247,7 @@ interface StoreState {
   createFolder: (name: string, parentId: string | null) => Promise<void>;
   renameFolder: (id: string, name: string) => Promise<void>;
   deleteFolder: (id: string) => Promise<void>;
-  uploadFiles: (files: File[], folderId: string | null) => Promise<void>;
+  uploadFiles: (files: UploadSource[], folderId: string | null) => Promise<void>;
   uploadTree: (items: TreeFile[], baseFolderId: string | null) => Promise<void>;
   saveFileContent: (id: string, text: string) => Promise<void>;
   saveFileBinary: (
@@ -274,7 +276,7 @@ interface StoreState {
   setTags: (id: string, tags: string[]) => Promise<void>;
   /** Backs one exported original up into the Camera Roll folder, stamped
    * with its library id so a reinstall recognizes it. Returns the file id. */
-  backupAsset: (file: File, sourceId: string) => Promise<string>;
+  backupAsset: (file: UploadSource, sourceId: string) => Promise<string>;
   /** Adds every file to the album, one metadata write at a time. */
   addToAlbum: (ids: string[], tag: string) => Promise<void>;
   removeFromAlbum: (ids: string[], tag: string) => Promise<void>;
@@ -1090,10 +1092,15 @@ export const useStore = create<StoreState>((set, get) => {
           set({
             uploads: get().uploads.map((u) => (u.id === uploadId ? { ...u, ...patch } : u)),
           });
+        // Native sources are handles until the slot admits them: image
+        // decoders need real bytes, and the slot is what bounds how many
+        // are held at once. Videos stay handles the whole way through.
+        let local: UploadSource = file;
         try {
-          const prepared = await withAnalysisSlot(() =>
-            analyzeFile(file, cancel.signal, (phase) => update({ detail: phase })),
-          );
+          const prepared = await withAnalysisSlot(async () => {
+            local = await materializeForAnalysis(file);
+            return analyzeFile(local, cancel.signal, (phase) => update({ detail: phase }));
+          });
           update({ detail: "encrypting" });
           // Root uploads are auto-filed into a category folder; uploads into a
           // folder the user picked stay where the user put them.
@@ -1104,7 +1111,7 @@ export const useStore = create<StoreState>((set, get) => {
           // while the server stitches parts together.
           let peak = 0;
           const result = await encryptAndUpload(
-            file,
+            local,
             destination,
             key,
             prepared,
@@ -1133,6 +1140,10 @@ export const useStore = create<StoreState>((set, get) => {
                 ? err.message
                 : "upload failed",
           });
+        } finally {
+          // A native source staged a file on disk; settled either way, so
+          // the staging can go. Materialization already cleaned its own.
+          void local.dispose?.();
         }
       });
       releaseTransferLock();
@@ -1586,16 +1597,26 @@ export const useStore = create<StoreState>((set, get) => {
 
     backupAsset: async (file, sourceId) => {
       const key = masterKey();
-      // Deferred: the heavy scanners leave their flags unset and the
-      // backfill sweeps finish the job from whichever device is open.
-      const prepared = await withAnalysisSlot(() => analyzeFile(file, undefined, undefined, { defer: true }));
-      // The library id rides inside the encrypted metadata, so a
-      // reinstall rebuilds its ledger from the synced library alone.
-      prepared.meta.sourceId = sourceId;
-      const destination = await ensureCategoryFolder("Camera Roll");
-      const result = await encryptAndUpload(file, destination, key, prepared, () => {});
-      applyFile(result.dto);
-      return result.dto.id;
+      let local: UploadSource = file;
+      try {
+        // Deferred: the heavy scanners leave their flags unset and the
+        // backfill sweeps finish the job from whichever device is open.
+        // Native image sources become real bytes inside the slot, which
+        // bounds how many are held at once; videos stay streamed handles.
+        const prepared = await withAnalysisSlot(async () => {
+          local = await materializeForAnalysis(file);
+          return analyzeFile(local, undefined, undefined, { defer: true });
+        });
+        // The library id rides inside the encrypted metadata, so a
+        // reinstall rebuilds its ledger from the synced library alone.
+        prepared.meta.sourceId = sourceId;
+        const destination = await ensureCategoryFolder("Camera Roll");
+        const result = await encryptAndUpload(local, destination, key, prepared, () => {});
+        applyFile(result.dto);
+        return result.dto.id;
+      } finally {
+        void local.dispose?.();
+      }
     },
 
     addToAlbum: async (ids, tag) => {
