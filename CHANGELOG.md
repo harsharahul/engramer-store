@@ -6,6 +6,22 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Fixed
+- **Streaming playback no longer stutters at window boundaries.** The
+  local content store answered the player only after writing each
+  downloaded window to disk and reading it back; on videos whose bitrate
+  sits near the connection's speed, that beat surfaced as a periodic lag.
+  The player is now served straight from the downloaded bytes while the
+  disk write happens alongside, and the next window downloads in the
+  background while the current one plays, so a boundary crossing finds
+  its bytes already local.
+- **Exporting a file kept offline no longer touches the network.** The
+  share-sheet export staged its ciphertext by downloading it even when
+  the offline store held the whole file; it now stages from disk, so a
+  pinned file exports with no connection at all.
+- **Failures with no network say so.** Opening, playing, or downloading
+  a file that is not saved offline while disconnected now says
+  "You're offline, and this file isn't saved for offline access" instead
+  of a misleading "too large to play" or a raw fetch error.
 - **Signing in with an unregistered or mistyped email no longer dead-ends.**
   The decoy key-derivation parameters served for unknown emails carried a
   salt in standard base64, while real accounts use URL-safe unpadded

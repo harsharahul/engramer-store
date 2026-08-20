@@ -75,6 +75,7 @@ import { SelectionBar } from "./SelectionBar";
 import { usePullToRefresh } from "../pulltorefresh";
 import { useKeyboardInset } from "../keyboard";
 import { saveDecryptedFile } from "../download";
+import { offlineExcuse } from "../offlinefiles";
 import { clearThumbnailCache } from "../thumbs";
 import { FileCard, FolderCard } from "./FileCard";
 import { BrandMark, FolderArt, Wordmark } from "./FileArt";
@@ -602,7 +603,10 @@ export function Vault() {
 
   const download = (file: FileEntry) => {
     void saveDecryptedFile(file).catch((err: unknown) =>
-      showToast(err instanceof Error && err.message ? `Download failed: ${err.message}` : "Download failed."),
+      showToast(
+        offlineExcuse(navigator.onLine) ??
+          (err instanceof Error && err.message ? `Download failed: ${err.message}` : "Download failed."),
+      ),
     );
   };
 

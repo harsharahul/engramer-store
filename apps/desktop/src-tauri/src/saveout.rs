@@ -84,6 +84,18 @@ pub(crate) async fn fetch_and_decrypt(
         let _ = std::fs::remove_file(cipher_path);
         return Err(err);
     }
+    decrypt_staged(cipher_path, plain_path, key, expected_digest, &mut on_progress).await
+}
+
+/// Decrypts an already-staged ciphertext file to `plain_path`, digest
+/// verified in-pass; the staged ciphertext is removed either way.
+pub(crate) async fn decrypt_staged(
+    cipher_path: &Path,
+    plain_path: &Path,
+    key: Vec<u8>,
+    expected_digest: Option<String>,
+    mut on_progress: impl FnMut(&str, u64, Option<u64>),
+) -> Result<(), String> {
     on_progress("decrypt", 0, None);
     let cipher = cipher_path.to_path_buf();
     let plain = plain_path.to_path_buf();
@@ -105,6 +117,32 @@ pub(crate) async fn fetch_and_decrypt(
             Err(format!("{err:?}"))
         }
     }
+}
+
+/// Stages a file's whole ciphertext out of the offline store, one window
+/// at a time; false when the store holds anything less than all of it,
+/// and the caller downloads exactly as before.
+pub(crate) fn stage_from_store(
+    store: &crate::offline::OfflineStore,
+    file_id: &str,
+    dest: &Path,
+) -> Result<bool, String> {
+    if !store.complete(file_id) {
+        return Ok(false);
+    }
+    let Some(total) = store.meta(file_id).total else {
+        return Ok(false);
+    };
+    let mut out = std::fs::File::create(dest).map_err(|err| err.to_string())?;
+    let mut offset = 0u64;
+    while offset < total {
+        let end = (offset + crate::offline::SEGMENT).min(total) - 1;
+        let bytes = store.read_span(file_id, offset, end)?;
+        out.write_all(&bytes).map_err(|err| err.to_string())?;
+        offset = end + 1;
+    }
+    out.flush().map_err(|err| err.to_string())?;
+    Ok(true)
 }
 
 /// The first name in `dir` that nothing holds yet: the name itself, then
@@ -166,27 +204,40 @@ pub async fn file_export(
     let client = crate::media::http_client(&app);
     let progress_app = app.clone();
     let progress_id = file_id.clone();
-    fetch_and_decrypt(
-        &client,
-        &url,
-        &token,
-        &cipher_path,
-        &plain_path,
-        key,
-        digest,
-        move |phase, done, total| {
-            let _ = progress_app.emit(
-                "save-progress",
-                serde_json::json!({
-                    "fileId": progress_id,
-                    "phase": phase,
-                    "done": done,
-                    "total": total,
-                }),
-            );
-        },
-    )
-    .await?;
+    let progress = move |phase: &str, done: u64, total: Option<u64>| {
+        let _ = progress_app.emit(
+            "save-progress",
+            serde_json::json!({
+                "fileId": progress_id,
+                "phase": phase,
+                "done": done,
+                "total": total,
+            }),
+        );
+    };
+    // A file the offline store holds whole exports from disk: a pinned
+    // file shares with no network at all, and nothing is paid for twice.
+    // Any store hiccup falls back to the download unchanged.
+    let staged = crate::offline::offline_root(&app)
+        .and_then(crate::offline::OfflineStore::new)
+        .ok()
+        .and_then(|store| stage_from_store(&store, &file_id, &cipher_path).ok())
+        .unwrap_or(false);
+    if staged {
+        decrypt_staged(&cipher_path, &plain_path, key, digest, progress).await?;
+    } else {
+        fetch_and_decrypt(
+            &client,
+            &url,
+            &token,
+            &cipher_path,
+            &plain_path,
+            key,
+            digest,
+            progress,
+        )
+        .await?;
+    }
     let destination = unique_destination(&exports, &name);
     std::fs::rename(&plain_path, &destination).map_err(|err| err.to_string())?;
     #[cfg(target_os = "ios")]
@@ -283,6 +334,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// A file the offline store holds whole is exported from disk: the
+    /// ciphertext staged for decryption is byte-identical to the store's,
+    /// and no network is touched. Anything less than whole declines, so
+    /// the caller downloads exactly as before.
+    #[test]
+    fn a_complete_store_stages_the_export_without_the_network() {
+        use crate::offline::SEGMENT;
+        let dir = temp_dir("stage-store");
+        let store = crate::offline::OfflineStore::new(dir.join("offline")).unwrap();
+        let cipher = pattern((SEGMENT + 1024) as usize);
+        let total = cipher.len() as u64;
+        store.store_bytes("f1", 0, &cipher[..SEGMENT as usize], Some(total)).unwrap();
+        store.store_bytes("f1", SEGMENT, &cipher[SEGMENT as usize..], Some(total)).unwrap();
+        let staged = dir.join("f1.cipher");
+        assert!(stage_from_store(&store, "f1", &staged).unwrap());
+        assert_eq!(std::fs::read(&staged).unwrap(), cipher);
+        // A file with windows still missing is not the store's to stage.
+        store.store_bytes("f2", 0, &cipher[..SEGMENT as usize], Some(total)).unwrap();
+        assert!(!stage_from_store(&store, "f2", &dir.join("f2.cipher")).unwrap());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// The whole promise in one round trip: ciphertext streams down,

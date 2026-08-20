@@ -25,7 +25,7 @@ vi.mock("./native", () => ({
   },
 }));
 
-import { invalidateStaleOffline, offlineStale, pinFileOffline } from "./offlinefiles";
+import { invalidateStaleOffline, offlineExcuse, offlineStale, pinFileOffline } from "./offlinefiles";
 import { activeSaves } from "./saveprogress";
 
 beforeEach(() => {
@@ -62,6 +62,23 @@ describe("pinFileOffline", () => {
     rig.pinOk = false;
     expect(await pinFileOffline(file, "tok")).toBe(false);
     expect(activeSaves()).toEqual([]);
+  });
+});
+
+/**
+ * A failure with no network must say so: falling through to "too large
+ * to play" or a raw fetch error told a person their file was broken
+ * when the truth was that they were offline and it was never saved.
+ */
+describe("offlineExcuse", () => {
+  it("names the real problem when offline", () => {
+    expect(offlineExcuse(false)).toBe(
+      "You're offline, and this file isn't saved for offline access.",
+    );
+  });
+
+  it("stays quiet online, so the real error can speak", () => {
+    expect(offlineExcuse(true)).toBeNull();
   });
 });
 
