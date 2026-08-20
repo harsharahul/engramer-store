@@ -4137,6 +4137,31 @@ span.item-menu {
   pointer-events: none;
 }
 
+/* The honest line for a link that cannot carry the clip, with the pin
+ * one tap away. Sits above the transport controls, never over them. */
+.media-advice {
+  position: absolute;
+  bottom: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(88vw, 560px);
+  background: var(--ink-1);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow-modal);
+  padding: 10px 12px 10px 16px;
+  font-size: 13px;
+  color: var(--paper);
+  animation: fade-rise 0.25s ease both;
+}
+
+.media-advice .btn {
+  flex-shrink: 0;
+}
+
 /* The thumbnail standing in while the true file downloads: scaled to the
  * same box, softened so it reads as "arriving", never as the real thing. */
 .preview-warming {

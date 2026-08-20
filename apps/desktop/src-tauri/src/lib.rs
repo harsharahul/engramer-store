@@ -170,6 +170,8 @@ pub fn run() {
             watched::watched_file_stat,
             watched::watched_file_read_range,
             media::media_register,
+            media::media_release,
+            media::media_pace,
             media::media_clear,
             handoff::handoff_available,
             handoff::handoff_store,

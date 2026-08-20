@@ -377,7 +377,7 @@ pub async fn offline_pin(
             SpanPlan::Ready => {}
             SpanPlan::Fetch { from, to } => {
                 let (bytes, total) =
-                    crate::media::http_span(&client, &base, &token, &file_id, from, to).await?;
+                    crate::media::http_span(&client, &base, &token, &file_id, from, to, None).await?;
                 store.store_bytes(&file_id, from, &bytes, total)?;
             }
         }
@@ -391,7 +391,7 @@ pub async fn offline_pin(
         let window_end = (cursor + 4 * SEGMENT - 1).min(total - 1);
         if let SpanPlan::Fetch { from, to } = store.plan_span(&file_id, cursor, window_end) {
             let (bytes, _) =
-                crate::media::http_span(&client, &base, &token, &file_id, from, to).await?;
+                crate::media::http_span(&client, &base, &token, &file_id, from, to, None).await?;
             store.store_bytes(&file_id, from, &bytes, None)?;
         }
         cursor = window_end + 1;
