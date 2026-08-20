@@ -48,6 +48,8 @@ commands.allow = [
     "watched_scan",
     "watched_file_read",
     "media_register",
+    "media_release",
+    "media_pace",
     "media_clear",
     "handoff_available",
     "handoff_store",

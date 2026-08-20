@@ -55,6 +55,13 @@ pub struct MediaSource {
     /// One background warm-up in flight at a time; more would just queue
     /// on the fetch lock and hold buffers for nothing.
     warming: std::sync::atomic::AtomicBool,
+    /// Set when the player closes: warming stops, and in-flight transfers
+    /// abort within a chunk. On a starved link the video on screen must
+    /// not share the pipe with ones already closed.
+    released: std::sync::atomic::AtomicBool,
+    /// Bytes per second of the last network window; what the page reads
+    /// to say, honestly, that a link cannot carry a clip.
+    pace: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Default)]
@@ -120,6 +127,8 @@ pub fn media_register(
         fetching: tokio::sync::Mutex::new(()),
         store,
         warming: std::sync::atomic::AtomicBool::new(false),
+        released: std::sync::atomic::AtomicBool::new(false),
+        pace: std::sync::atomic::AtomicU64::new(0),
     });
     state
         .sources
@@ -127,6 +136,37 @@ pub fn media_register(
         .expect("media state")
         .insert(file_id, source);
     Ok(())
+}
+
+/// The player for this file closed: its background warming stops and any
+/// in-flight transfer aborts within a chunk, so a starved link belongs
+/// entirely to whatever is on screen now. Reopening re-registers.
+#[tauri::command]
+pub fn media_release(state: State<MediaState>, file_id: String) {
+    if let Some(source) = state
+        .sources
+        .lock()
+        .expect("media state")
+        .remove(&file_id)
+    {
+        source
+            .released
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Bytes per second of this file's last network window; zero before any
+/// window has been fetched. What the page reads to say, honestly, that
+/// a link cannot carry a clip.
+#[tauri::command]
+pub fn media_pace(state: State<MediaState>, file_id: String) -> u64 {
+    state
+        .sources
+        .lock()
+        .expect("media state")
+        .get(&file_id)
+        .map(|source| source.pace.load(std::sync::atomic::Ordering::SeqCst))
+        .unwrap_or(0)
 }
 
 /// Locking the vault revokes every registered key.
@@ -153,7 +193,14 @@ pub(crate) async fn http_span(
     file_id: &str,
     start: u64,
     end: u64,
+    cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<(Vec<u8>, Option<u64>), String> {
+    let cancelled = || {
+        cancel.is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst))
+    };
+    if cancelled() {
+        return Err("the source was released".to_string());
+    }
     let url = format!("{base}/api/files/{file_id}/data");
     let mut response = client
         .get(url)
@@ -216,11 +263,30 @@ pub(crate) async fn http_span(
     let expected = owed as usize;
     let mut skip = if status == 200 { start as usize } else { 0 };
     let mut span: Vec<u8> = Vec::with_capacity(expected);
-    while let Some(chunk) = response
-        .chunk()
+    loop {
+        // The read races the release flag: a closed player's transfer
+        // must abort even while the connection is silent, or every byte
+        // it later receives is stolen from whatever is on screen now.
+        let chunk = match tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            response.chunk(),
+        )
         .await
-        .map_err(|err| format!("ciphertext body failed: {err}"))?
-    {
+        {
+            Err(_) => {
+                if cancelled() {
+                    return Err("the source was released".to_string());
+                }
+                continue;
+            }
+            Ok(read) => read.map_err(|err| format!("ciphertext body failed: {err}"))?,
+        };
+        let Some(chunk) = chunk else {
+            break;
+        };
+        if cancelled() {
+            return Err("the source was released".to_string());
+        }
         let mut piece: &[u8] = &chunk;
         if skip > 0 {
             let dropped = skip.min(piece.len());
@@ -254,16 +320,38 @@ async fn fetch_span(
     end: u64,
 ) -> Result<Vec<u8>, String> {
     let Some(store) = source.store.as_ref() else {
-        return http_span(client, &source.base, &source.token, file_id, start, end)
-            .await
-            .map(|(bytes, _)| bytes);
+        return http_span(
+            client,
+            &source.base,
+            &source.token,
+            file_id,
+            start,
+            end,
+            Some(&source.released),
+        )
+        .await
+        .map(|(bytes, _)| bytes);
     };
     for _ in 0..8 {
         match store.plan_span(file_id, start, end) {
             crate::offline::SpanPlan::Ready => return store.read_span(file_id, start, end),
             crate::offline::SpanPlan::Fetch { from, to } => {
-                let (bytes, total) =
-                    http_span(client, &source.base, &source.token, file_id, from, to).await?;
+                let begun = std::time::Instant::now();
+                let (bytes, total) = http_span(
+                    client,
+                    &source.base,
+                    &source.token,
+                    file_id,
+                    from,
+                    to,
+                    Some(&source.released),
+                )
+                .await?;
+                let millis = begun.elapsed().as_millis().max(1) as u64;
+                source.pace.store(
+                    (bytes.len() as u64).saturating_mul(1000) / millis,
+                    std::sync::atomic::Ordering::SeqCst,
+                );
                 // The player is served straight from this buffer, stitched
                 // with disk only for edges the store already held; the write
                 // records the window for next time but never gates the
@@ -320,12 +408,23 @@ async fn read_ahead(
     start: u64,
     end: u64,
 ) {
+    if source.released.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     let Some(store) = source.store.as_ref() else {
         return;
     };
     if let crate::offline::SpanPlan::Fetch { from, to } = store.plan_span(file_id, start, end) {
-        if let Ok((bytes, total)) =
-            http_span(client, &source.base, &source.token, file_id, from, to).await
+        if let Ok((bytes, total)) = http_span(
+            client,
+            &source.base,
+            &source.token,
+            file_id,
+            from,
+            to,
+            Some(&source.released),
+        )
+        .await
         {
             let _ = store.store_bytes(file_id, from, &bytes, total);
         }
@@ -589,6 +688,8 @@ mod tests {
             fetching: tokio::sync::Mutex::new(()),
             store: None,
             warming: std::sync::atomic::AtomicBool::new(false),
+            released: std::sync::atomic::AtomicBool::new(false),
+            pace: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -617,7 +718,7 @@ mod tests {
     fn span(port: u16, start: u64, end: u64) -> Result<Vec<u8>, String> {
         tauri::async_runtime::block_on(async {
             let source = canned_source(port);
-            http_span(&reqwest::Client::new(), &source.base, &source.token, "f1", start, end)
+            http_span(&reqwest::Client::new(), &source.base, &source.token, "f1", start, end, None)
                 .await
                 .map(|(bytes, _)| bytes)
         })
@@ -722,6 +823,80 @@ mod tests {
         // A clamped answer that stops before the span's end cannot serve it.
         assert!(assemble_span(&store, "f1", span_start, span_end, SEGMENT, &tail[..50], Some(total))
             .is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Closing a video releases its source, and a released source's
+    /// transfer aborts mid-body within a chunk: on a starved link, the
+    /// video on screen must not share the pipe with ones already closed.
+    #[test]
+    fn a_released_source_aborts_its_transfer_mid_body() {
+        use std::io::Write;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let head = "HTTP/1.1 206 Partial Content\r\ncontent-length: 4096\r\ncontent-range: bytes 0-4095/4096\r\n\r\n";
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&[7u8; 1024]);
+                let _ = stream.flush();
+                // The rest of the body arrives much later than any player
+                // should wait for a source that is already closed.
+                thread::sleep(std::time::Duration::from_secs(5));
+                let _ = stream.write_all(&[7u8; 3072]);
+            }
+        });
+        let released = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let begun = std::time::Instant::now();
+        let result = tauri::async_runtime::block_on(async {
+            let flag = released.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            });
+            http_span(
+                &reqwest::Client::new(),
+                &format!("http://127.0.0.1:{port}"),
+                "t",
+                "f1",
+                0,
+                4095,
+                Some(&released),
+            )
+            .await
+        });
+        let err = result.unwrap_err();
+        assert!(err.contains("released"), "unexpected: {err}");
+        assert!(
+            begun.elapsed() < std::time::Duration::from_secs(3),
+            "the release did not abort the transfer"
+        );
+    }
+
+    /// A released source neither warms nor fetches: its read-ahead is a
+    /// no-op and its span fetches refuse by name.
+    #[test]
+    fn a_released_source_neither_warms_nor_fetches() {
+        let root = std::env::temp_dir().join("engram-media-released-test");
+        let _ = std::fs::remove_dir_all(&root);
+        let mut source = canned_source(1);
+        source.store = Some(crate::offline::OfflineStore::new(root.clone()).unwrap());
+        source.released.store(true, std::sync::atomic::Ordering::SeqCst);
+        let source = std::sync::Arc::new(source);
+        tauri::async_runtime::block_on(async {
+            read_ahead(&reqwest::Client::new(), &source, "f1", 0, 4095).await;
+            let err = fetch_span(&reqwest::Client::new(), &source, "f1", 0, 4095)
+                .await
+                .unwrap_err();
+            assert!(err.contains("released"), "unexpected: {err}");
+        });
+        let store = crate::offline::OfflineStore::new(root.clone()).unwrap();
+        assert!(matches!(
+            store.plan_span("f1", 0, 4095),
+            crate::offline::SpanPlan::Fetch { .. }
+        ));
         let _ = std::fs::remove_dir_all(root);
     }
 

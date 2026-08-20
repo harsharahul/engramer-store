@@ -3,7 +3,8 @@ import { useStore, type FileEntry } from "../store";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
 import { openSharedContent } from "../openshared";
 import { bridgeMediaUrl, mediaBridgeAvailable, mediaUrl, onMediaProgress, registerMediaKey } from "../mediastream";
-import { nativeShell } from "../native";
+import { nativeMediaPace, nativeMediaRelease, nativeShell } from "../native";
+import { linkStarved } from "../streamhealth";
 import { swipeStep } from "../neighbors";
 import { fileKind, formatBytes } from "../format";
 import { displayableImage } from "../intel/heic";
@@ -293,6 +294,12 @@ export function Preview(props: {
   // as the video's poster frame: the scene appears instantly and
   // sharpens, instead of a blank body or a black rectangle.
   const [thumb, setThumb] = useState<string | null>(null);
+  // The link measurably cannot carry this clip; the player offers the
+  // pin instead of an endless spinner. Two verdicts in a row required.
+  const [starved, setStarved] = useState(false);
+  const [adviceDismissed, setAdviceDismissed] = useState(false);
+  const starvedOnce = useRef(false);
+  const durationRef = useRef<number | null>(null);
   const blobUrl = useRef<string | null>(null);
   const blobTried = useRef(false);
   const swipeFrom = useRef<{ x: number; y: number } | null>(null);
@@ -414,6 +421,10 @@ export function Preview(props: {
     setUnreadable(false);
     setError(null);
     setProgress(null);
+    setStarved(false);
+    setAdviceDismissed(false);
+    durationRef.current = null;
+    starvedOnce.current = false;
     // Video and audio stream: through the shell's native protocol where
     // there is one, else through the service worker's media bridge. Both
     // decrypt on the fly and answer range requests; nothing buffers whole.
@@ -426,7 +437,27 @@ export function Preview(props: {
       const stopProgress = onMediaProgress(file.id, (done, total) =>
         setProgress(done < total ? { loaded: done, total } : null),
       );
+      // The link is judged against the clip: two consecutive windows
+      // slower than the clip's own byte rate, and the player offers the
+      // pin instead of spinning forever.
+      const pacePoll = nativeShell()
+        ? window.setInterval(() => {
+            void nativeMediaPace(file.id).then((pace) => {
+              const verdict = linkStarved(pace, file.size, durationRef.current);
+              if (verdict && starvedOnce.current) {
+                setStarved(true);
+              }
+              starvedOnce.current = verdict;
+            });
+          }, 2500)
+        : null;
       return () => {
+        if (pacePoll !== null) {
+          window.clearInterval(pacePoll);
+        }
+        // Closing the player hands the whole link to whatever plays
+        // next: the shell stops warming and aborts in-flight transfers.
+        void nativeMediaRelease(file.id);
         stopProgress();
         if (blobUrl.current) {
           URL.revokeObjectURL(blobUrl.current);
@@ -672,6 +703,9 @@ export function Preview(props: {
               poster={thumb ?? undefined}
               controls
               autoPlay
+              onLoadedMetadata={(e) => {
+                durationRef.current = e.currentTarget.duration || null;
+              }}
               onWaiting={(e) =>
                 diag(
                   "playback",
@@ -714,6 +748,39 @@ export function Preview(props: {
             {progress && (
               <div className="media-progress">
                 Decrypting {formatBytes(progress.loaded)} of {formatBytes(progress.total)}
+              </div>
+            )}
+            {starved && !adviceDismissed && (
+              <div className="media-advice">
+                <span>
+                  Your connection is slower than this video. Keep it offline and watch it
+                  when it&apos;s ready?
+                </span>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setAdviceDismissed(true);
+                    void useStore
+                      .getState()
+                      .pinOffline(file.id)
+                      .then((kept) =>
+                        props.onToast?.(
+                          kept
+                            ? "Saving for offline. The green mark appears when it's ready."
+                            : "Could not save this file for offline access.",
+                        ),
+                      );
+                  }}
+                >
+                  Keep offline
+                </button>
+                <button
+                  className="icon-btn"
+                  title="Dismiss"
+                  onClick={() => setAdviceDismissed(true)}
+                >
+                  <XGlyph />
+                </button>
               </div>
             )}
           </>

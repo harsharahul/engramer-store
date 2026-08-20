@@ -794,6 +794,32 @@ export async function nativeMediaRegister(
   }
 }
 
+/** The player for this file closed: the shell stops its background
+ * warming and aborts its in-flight transfer, so a starved link belongs
+ * entirely to whatever plays next. Reopening re-registers. */
+export async function nativeMediaRelease(fileId: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return;
+  }
+  await invoke("media_release", { fileId }).catch(() => {});
+}
+
+/** Bytes per second of the file's last network window; 0 when unknown
+ * or outside the shell. What the starvation offer is judged against. */
+export async function nativeMediaPace(fileId: string): Promise<number> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return 0;
+  }
+  try {
+    const pace = await invoke("media_pace", { fileId });
+    return typeof pace === "number" ? pace : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /** Locking or signing out revokes every key the shell holds. */
 export async function nativeMediaClear(): Promise<void> {
   const invoke = tauriInvoke();

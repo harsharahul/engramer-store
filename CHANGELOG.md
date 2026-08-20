@@ -5,7 +5,20 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Added
+- **A slow connection gets an honest offer instead of a spinner.** The
+  player measures what the link actually delivers against what the clip
+  needs, and when the link clearly cannot carry it, says so and offers
+  one tap: keep the file offline and watch it when it's ready. The
+  offer uses the same keeping machinery as the file menu, progress card
+  and green mark included.
+
 ### Fixed
+- **Closing a video hands the connection to whatever plays next.** An
+  abandoned player's background downloads used to keep running; on a
+  slow link, tapping through several videos left them all competing and
+  the one on screen starved. Closing a player now releases it: its
+  warming stops and its in-flight transfer aborts within moments.
 - **Streaming playback no longer stutters at window boundaries.** The
   local content store answered the player only after writing each
   downloaded window to disk and reading it back; on videos whose bitrate
