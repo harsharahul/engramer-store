@@ -3,7 +3,7 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## [Unreleased]
+## [0.51.1] - 2026-08-20
 
 ### Added
 - **A slow connection gets an honest offer instead of a spinner.** The
