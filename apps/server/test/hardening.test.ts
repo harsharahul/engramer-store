@@ -92,6 +92,22 @@ describe("public-exposure hardening", () => {
     expect((again.json().kdf as { salt: string }).salt).toBe(unknownKdf.salt);
   });
 
+  it("hands unknown emails a salt in the alphabet the client decodes", async () => {
+    // Real salts are URL-safe unpadded base64: the client writes them that
+    // way at registration and decodes them the same way at sign-in. A decoy
+    // salt in any other alphabet crashes the client before a request is
+    // sent, which both strands anyone who mistyped their email and marks
+    // the address as unregistered, the exact tell the decoy exists to hide.
+    const known = await app.inject({ method: "GET", url: "/api/auth/attributes?email=known@example.com" });
+    const unknown = await app.inject({
+      method: "GET",
+      url: "/api/auth/attributes?email=never-registered@example.com",
+    });
+    const urlSafeUnpadded = /^[A-Za-z0-9_-]+$/;
+    expect((known.json().kdf as { salt: string }).salt).toMatch(urlSafeUnpadded);
+    expect((unknown.json().kdf as { salt: string }).salt).toMatch(urlSafeUnpadded);
+  });
+
   it("refuses to enrol two-factor over an already-enabled account", async () => {
     const keys = generateAccountKeys("a two factor password");
     const registered = await app.inject({

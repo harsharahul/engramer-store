@@ -68,7 +68,11 @@ function decoyKdf(email: string, serverSecret: string): {
     .update(`engram-decoy-kdf|${serverSecret}|${email}`)
     .digest()
     .subarray(0, 16)
-    .toString("base64");
+    // Real salts are URL-safe unpadded (the client's one alphabet, both
+    // when it writes them and when it decodes them); a decoy in standard
+    // base64 crashed the client before any request, which stranded typo'd
+    // emails and was itself the enumeration tell this decoy exists to hide.
+    .toString("base64url");
   // The MODERATE profile every account is created with.
   return { salt, opsLimit: 3, memLimit: 268435456 };
 }

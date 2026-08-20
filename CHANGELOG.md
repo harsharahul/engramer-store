@@ -3,6 +3,17 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+- **Signing in with an unregistered or mistyped email no longer dead-ends.**
+  The decoy key-derivation parameters served for unknown emails carried a
+  salt in standard base64, while real accounts use URL-safe unpadded
+  encoding; the app failed decoding it before any request was sent, showing
+  a bare "invalid input" and, in the process, revealing exactly what the
+  decoy exists to conceal: whether an address has an account. Decoy salts
+  now use the same encoding as real ones.
+
 ## [0.51.0] - 2026-08-19
 
 ### Added
