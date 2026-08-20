@@ -52,6 +52,9 @@ pub struct MediaSource {
     /// The on-disk ciphertext store playback warms and pins live in; None
     /// only where the store's directory cannot exist.
     store: Option<crate::offline::OfflineStore>,
+    /// One background warm-up in flight at a time; more would just queue
+    /// on the fetch lock and hold buffers for nothing.
+    warming: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Default)]
@@ -116,6 +119,7 @@ pub fn media_register(
         }),
         fetching: tokio::sync::Mutex::new(()),
         store,
+        warming: std::sync::atomic::AtomicBool::new(false),
     });
     state
         .sources
@@ -260,11 +264,100 @@ async fn fetch_span(
             crate::offline::SpanPlan::Fetch { from, to } => {
                 let (bytes, total) =
                     http_span(client, &source.base, &source.token, file_id, from, to).await?;
+                // The player is served straight from this buffer, stitched
+                // with disk only for edges the store already held; the write
+                // records the window for next time but never gates the
+                // answer behind a read-back of what just arrived.
+                let answer = assemble_span(store, file_id, start, end, from, &bytes, total);
                 store.store_bytes(file_id, from, &bytes, total)?;
+                if let Ok(answer) = answer {
+                    return Ok(answer);
+                }
+                // A clamped answer left part of the span unserved; replan
+                // over what actually landed.
             }
         }
     }
     Err("the span kept missing windows after fetching them".to_string())
+}
+
+/// [start..=end] out of the window `bytes` beginning at `from`, with any
+/// prefix the store already holds read from disk. Refuses when the window
+/// stops short of the span's end (a clamped answer): the caller replans.
+fn assemble_span(
+    store: &crate::offline::OfflineStore,
+    file_id: &str,
+    start: u64,
+    end: u64,
+    from: u64,
+    bytes: &[u8],
+    total: Option<u64>,
+) -> Result<Vec<u8>, String> {
+    let end = match total {
+        Some(total) if total > 0 => end.min(total - 1),
+        _ => end,
+    };
+    let fetched_end = from + bytes.len() as u64;
+    if end >= fetched_end {
+        return Err("the window stops short of the span".to_string());
+    }
+    let mut out = Vec::with_capacity((end - start + 1) as usize);
+    if start < from {
+        out.extend_from_slice(&store.read_span(file_id, start, from - 1)?);
+    }
+    let lo = start.max(from);
+    out.extend_from_slice(&bytes[(lo - from) as usize..=(end - from) as usize]);
+    Ok(out)
+}
+
+/// Warms [start..=end] into the store: fetches only what the plan says is
+/// missing, stores it, reads nothing back. Quiet on every failure;
+/// read-ahead is an optimization, never a promise.
+async fn read_ahead(
+    client: &reqwest::Client,
+    source: &MediaSource,
+    file_id: &str,
+    start: u64,
+    end: u64,
+) {
+    let Some(store) = source.store.as_ref() else {
+        return;
+    };
+    if let crate::offline::SpanPlan::Fetch { from, to } = store.plan_span(file_id, start, end) {
+        if let Ok((bytes, total)) =
+            http_span(client, &source.base, &source.token, file_id, from, to).await
+        {
+            let _ = store.store_bytes(file_id, from, &bytes, total);
+        }
+    }
+}
+
+/// While the player consumes the chunks just delivered, the next window
+/// downloads in the background: a boundary crossing then finds its bytes
+/// on disk instead of stalling the stream on a fresh fetch.
+fn spawn_read_ahead(
+    client: reqwest::Client,
+    source: Arc<MediaSource>,
+    file_id: String,
+    header: egc1::Header,
+    first: u64,
+    total_chunks: u64,
+) {
+    use std::sync::atomic::Ordering;
+    if first >= total_chunks || source.store.is_none() {
+        return;
+    }
+    let last = (first + PREFETCH_CHUNKS - 1).min(total_chunks - 1);
+    if source.warming.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        let byte_start = egc1::chunk_offset(first);
+        let byte_end = egc1::chunk_offset(last) + egc1::sealed_chunk_len(&header, last) as u64 - 1;
+        let _serial = source.fetching.lock().await;
+        read_ahead(&client, &source, &file_id, byte_start, byte_end).await;
+        source.warming.store(false, Ordering::SeqCst);
+    });
 }
 
 async fn ensure_header(
@@ -286,7 +379,7 @@ async fn ensure_header(
 /// tail plus a read-ahead window in one ranged request.
 async fn ensure_chunks(
     client: &reqwest::Client,
-    source: &MediaSource,
+    source: &Arc<MediaSource>,
     file_id: &str,
     header: &egc1::Header,
     first: u64,
@@ -319,6 +412,14 @@ async fn ensure_chunks(
             .put(index, Arc::new(plain));
         offset += len;
     }
+    spawn_read_ahead(
+        client.clone(),
+        source.clone(),
+        file_id.to_string(),
+        header.clone(),
+        to + 1,
+        total,
+    );
     Ok(())
 }
 
@@ -434,6 +535,7 @@ mod tests {
             }),
             fetching: tokio::sync::Mutex::new(()),
             store: None,
+            warming: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -540,5 +642,70 @@ mod tests {
         );
         let err = span(port, 1000, 1999).unwrap_err();
         assert!(err.contains("400 bytes of a 1000"), "unexpected: {err}");
+    }
+
+    /// The player is answered from the buffer the network just filled,
+    /// stitched with disk only for edges the store already held. A span
+    /// whose head is on disk and whose tail just arrived comes out exactly
+    /// right; a clamped (short) answer refuses so the caller replans.
+    #[test]
+    fn a_span_is_assembled_from_the_fetch_buffer_and_present_edges() {
+        use crate::offline::SEGMENT;
+        let root = std::env::temp_dir().join("engram-media-assemble-test");
+        let _ = std::fs::remove_dir_all(&root);
+        let store = crate::offline::OfflineStore::new(root.clone()).unwrap();
+        let total = SEGMENT * 2;
+        let head = pattern(SEGMENT as usize);
+        let tail = pattern((SEGMENT as usize) * 2)[SEGMENT as usize..].to_vec();
+        store.store_bytes("f1", 0, &head, Some(total)).unwrap();
+        // The tail just arrived from the network; nothing read it back.
+        let span_start = SEGMENT - 100;
+        let span_end = SEGMENT + 99;
+        let got = assemble_span(&store, "f1", span_start, span_end, SEGMENT, &tail, Some(total))
+            .unwrap();
+        let mut expected = head[(SEGMENT - 100) as usize..].to_vec();
+        expected.extend_from_slice(&tail[..100]);
+        assert_eq!(got, expected);
+        // A clamped answer that stops before the span's end cannot serve it.
+        assert!(assemble_span(&store, "f1", span_start, span_end, SEGMENT, &tail[..50], Some(total))
+            .is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Read-ahead fills the store while the player is busy elsewhere: after
+    /// one call, the next window's plan answers Ready with no further
+    /// network. The canned server accepts a single connection, so a second
+    /// fetch would fail loudly.
+    #[test]
+    fn read_ahead_lands_the_next_window_in_the_store() {
+        use crate::offline::SEGMENT;
+        let whole = pattern((SEGMENT * 2) as usize);
+        let window = whole[SEGMENT as usize..].to_vec();
+        let port = serve_bytes(
+            "HTTP/1.1 206 Partial Content",
+            &format!("content-range: bytes {}-{}/{}\r\n", SEGMENT, SEGMENT * 2 - 1, SEGMENT * 2),
+            window,
+        );
+        let root = std::env::temp_dir().join("engram-media-readahead-test");
+        let _ = std::fs::remove_dir_all(&root);
+        let mut source = canned_source(port);
+        source.store = Some(crate::offline::OfflineStore::new(root.clone()).unwrap());
+        let source = std::sync::Arc::new(source);
+        let store = crate::offline::OfflineStore::new(root.clone()).unwrap();
+        store
+            .store_bytes("f1", 0, &whole[..SEGMENT as usize], Some(SEGMENT * 2))
+            .unwrap();
+        tauri::async_runtime::block_on(async {
+            read_ahead(&reqwest::Client::new(), &source, "f1", SEGMENT, SEGMENT * 2 - 1).await;
+        });
+        assert!(matches!(
+            store.plan_span("f1", SEGMENT, SEGMENT * 2 - 1),
+            crate::offline::SpanPlan::Ready
+        ));
+        // Already-present spans are left alone: no network, no disk churn.
+        tauri::async_runtime::block_on(async {
+            read_ahead(&reqwest::Client::new(), &source, "f1", 0, SEGMENT - 1).await;
+        });
+        let _ = std::fs::remove_dir_all(root);
     }
 }

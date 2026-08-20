@@ -49,6 +49,16 @@ export async function pinFileOffline(
 }
 
 /**
+ * The honest words for an open, playback, or download that failed with
+ * no network: null when online (the real error speaks for itself), a
+ * plain sentence when offline. A complete local copy never reaches a
+ * failure path, so reaching one offline means the file was never saved.
+ */
+export function offlineExcuse(online: boolean): string | null {
+  return online ? null : "You're offline, and this file isn't saved for offline access.";
+}
+
+/**
  * Whether a just-synced row made the shell's copy stale: the row
  * replaced one this client already had, and its content digest moved.
  * A first appearance has nothing local to go stale.

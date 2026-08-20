@@ -8,6 +8,7 @@ import { swipeStep } from "../neighbors";
 import { fileKind, formatBytes } from "../format";
 import { displayableImage } from "../intel/heic";
 import { saveDecryptedFile } from "../download";
+import { offlineExcuse } from "../offlinefiles";
 import { thumbnailUrl } from "../thumbs";
 import { ZoomableImage } from "./ZoomableImage";
 import { IDENTITY, zoomAt, type Box, type ZoomState } from "../zoom";
@@ -374,6 +375,12 @@ export function Preview(props: {
       return;
     }
     blobTried.current = true;
+    const excuse = offlineExcuse(navigator.onLine);
+    if (excuse) {
+      diag("playback", `${file.name} not saved offline and no network`);
+      setError(excuse);
+      return;
+    }
     if (file.size > WHOLE_FILE_CAP) {
       diag(
         "playback",
@@ -485,8 +492,13 @@ export function Preview(props: {
             // it too, and leave the download working: the bytes are all that
             // is left of it and the reader may still rescue something.
             useStore.getState().markCorrupt(file.id);
+            setError(err.message);
+            return;
           }
-          setError(err instanceof Error ? err.message : "could not decrypt this file");
+          setError(
+            offlineExcuse(navigator.onLine) ??
+              (err instanceof Error ? err.message : "could not decrypt this file"),
+          );
         }
       });
     return () => {
