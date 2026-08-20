@@ -385,8 +385,61 @@ async fn ensure_chunks(
     first: u64,
     last: u64,
 ) -> Result<(), String> {
-    let _serial = source.fetching.lock().await;
     let total = egc1::chunk_count(header.plain_size);
+    // The fetch lock is for the NETWORK only. A cache or disk hit serves
+    // without it: while a background warm-up downloads the next window,
+    // the player keeps getting what is already here, or the warm-up
+    // would stall the very stream it exists to smooth.
+    let cache_miss = {
+        let mut cache = source.cache.lock().expect("chunk cache");
+        (first..=last).any(|i| cache.get(i).is_none())
+    };
+    if !cache_miss {
+        spawn_read_ahead(
+            client.clone(),
+            source.clone(),
+            file_id.to_string(),
+            header.clone(),
+            last + 1,
+            total,
+        );
+        return Ok(());
+    }
+    if let Some(store) = source.store.as_ref() {
+        let byte_start = egc1::chunk_offset(first);
+        let byte_end = egc1::chunk_offset(last) + egc1::sealed_chunk_len(header, last) as u64 - 1;
+        if matches!(
+            store.plan_span(file_id, byte_start, byte_end),
+            crate::offline::SpanPlan::Ready
+        ) {
+            let sealed = store.read_span(file_id, byte_start, byte_end)?;
+            let mut offset = 0usize;
+            for index in first..=last {
+                let len = egc1::sealed_chunk_len(header, index);
+                if offset + len > sealed.len() {
+                    return Err("short ciphertext read".to_string());
+                }
+                let plain =
+                    egc1::decrypt_chunk(header, &source.key, index, &sealed[offset..offset + len])?;
+                source
+                    .cache
+                    .lock()
+                    .expect("chunk cache")
+                    .put(index, Arc::new(plain));
+                offset += len;
+            }
+            spawn_read_ahead(
+                client.clone(),
+                source.clone(),
+                file_id.to_string(),
+                header.clone(),
+                last + 1,
+                total,
+            );
+            return Ok(());
+        }
+    }
+    let _serial = source.fetching.lock().await;
     let missing_from = {
         let mut cache = source.cache.lock().expect("chunk cache");
         (first..=last).find(|i| cache.get(*i).is_none())
@@ -669,6 +722,64 @@ mod tests {
         // A clamped answer that stops before the span's end cannot serve it.
         assert!(assemble_span(&store, "f1", span_start, span_end, SEGMENT, &tail[..50], Some(total))
             .is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A background warm-up must never make the player wait: chunks the
+    /// memory cache already holds are served while the fetch lock is held
+    /// by someone else (a read-ahead mid-download, in real life).
+    #[test]
+    fn cached_chunks_are_served_while_a_warm_up_holds_the_fetch_lock() {
+        let source = std::sync::Arc::new(canned_source(1));
+        source
+            .cache
+            .lock()
+            .unwrap()
+            .put(0, Arc::new(vec![7u8; 16]));
+        let header = egc1::Header {
+            plain_size: 16,
+            bytes: [0; egc1::HEADER_BYTES],
+        };
+        tauri::async_runtime::block_on(async {
+            let _warming = source.fetching.lock().await;
+            let served = tokio::time::timeout(
+                std::time::Duration::from_millis(300),
+                ensure_chunks(&reqwest::Client::new(), &source, "f1", &header, 0, 0),
+            )
+            .await;
+            assert!(served.is_ok(), "a cache hit waited on the fetch lock");
+            assert!(served.unwrap().is_ok());
+        });
+    }
+
+    /// Chunks the disk store already holds decrypt and serve without the
+    /// fetch lock too: only an actual network need queues behind warming.
+    #[test]
+    fn disk_present_chunks_are_served_while_a_warm_up_holds_the_fetch_lock() {
+        let plain = pattern(16 * 1024);
+        let cipher = engram_core::chunked::encrypt(&plain, &[0u8; 32], &[1u8; 16]);
+        let header = egc1::read_header(&cipher).unwrap();
+        let root = std::env::temp_dir().join("engram-media-diskserve-test");
+        let _ = std::fs::remove_dir_all(&root);
+        let store = crate::offline::OfflineStore::new(root.clone()).unwrap();
+        store
+            .store_bytes("f1", 0, &cipher, Some(cipher.len() as u64))
+            .unwrap();
+        let mut source = canned_source(1);
+        source.store = Some(crate::offline::OfflineStore::new(root.clone()).unwrap());
+        let source = std::sync::Arc::new(source);
+        tauri::async_runtime::block_on(async {
+            let _warming = source.fetching.lock().await;
+            let served = tokio::time::timeout(
+                std::time::Duration::from_millis(300),
+                ensure_chunks(&reqwest::Client::new(), &source, "f1", &header, 0, 0),
+            )
+            .await;
+            assert!(served.is_ok(), "a disk hit waited on the fetch lock");
+            assert!(served.unwrap().is_ok());
+        });
+        let chunk = source.cache.lock().unwrap().get(0).unwrap();
+        assert_eq!(chunk.as_slice(), &plain[..]);
         let _ = std::fs::remove_dir_all(root);
     }
 

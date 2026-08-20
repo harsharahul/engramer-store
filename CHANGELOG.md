@@ -13,7 +13,9 @@ All notable changes to Engram Store are documented here, following
   The player is now served straight from the downloaded bytes while the
   disk write happens alongside, and the next window downloads in the
   background while the current one plays, so a boundary crossing finds
-  its bytes already local.
+  its bytes already local. Serving is also fully decoupled from that
+  background warm-up: chunks already in memory or on disk answer
+  immediately, and only a genuine network need ever waits its turn.
 - **Exporting a file kept offline no longer touches the network.** The
   share-sheet export staged its ciphertext by downloading it even when
   the offline store held the whole file; it now stages from disk, so a
