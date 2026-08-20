@@ -3,7 +3,7 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## [Unreleased]
+## [0.51.0] - 2026-08-19
 
 ### Added
 - **Offline access.** Any file can be kept on the device: choose
