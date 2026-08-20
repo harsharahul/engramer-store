@@ -45,6 +45,14 @@ pub struct OfflineStore {
     root: PathBuf,
 }
 
+/// Meta files are read-modify-written by playback serves (touch),
+/// warm-ups (segment bits), pin commands, and the fill loop, often from
+/// separate store instances over the same directory. Every mutation
+/// re-reads under this lock and applies only its own delta, so no
+/// writer can roll back what a peer just recorded. The big .bin writes
+/// stay outside: this guards the tiny json, nothing else.
+static META_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -123,10 +131,6 @@ impl OfflineStore {
         if offset % SEGMENT != 0 {
             return Err("stored ranges align to segments".to_string());
         }
-        let mut meta = self.meta(file_id);
-        if meta.total.is_none() {
-            meta.total = total;
-        }
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -134,27 +138,34 @@ impl OfflineStore {
             .map_err(|err| err.to_string())?;
         file.seek(SeekFrom::Start(offset)).map_err(|err| err.to_string())?;
         file.write_all(bytes).map_err(|err| err.to_string())?;
-        let covered_end = offset + bytes.len() as u64;
-        let first = (offset / SEGMENT) as usize;
-        let mut index = first;
-        loop {
-            let seg_end = (index as u64 + 1) * SEGMENT;
-            let complete = covered_end >= seg_end
-                || meta.total.is_some_and(|total| covered_end >= total && seg_end >= total);
-            if !complete {
-                break;
+        {
+            let _guard = META_LOCK.lock().expect("meta lock");
+            let mut meta = self.meta(file_id);
+            if meta.total.is_none() {
+                meta.total = total;
             }
-            if meta.segs.len() <= index {
-                meta.segs.resize(index + 1, false);
+            let covered_end = offset + bytes.len() as u64;
+            let first = (offset / SEGMENT) as usize;
+            let mut index = first;
+            loop {
+                let seg_end = (index as u64 + 1) * SEGMENT;
+                let complete = covered_end >= seg_end
+                    || meta.total.is_some_and(|total| covered_end >= total && seg_end >= total);
+                if !complete {
+                    break;
+                }
+                if meta.segs.len() <= index {
+                    meta.segs.resize(index + 1, false);
+                }
+                meta.segs[index] = true;
+                if seg_end >= covered_end {
+                    break;
+                }
+                index += 1;
             }
-            meta.segs[index] = true;
-            if seg_end >= covered_end {
-                break;
-            }
-            index += 1;
+            meta.touched_ms = now_ms();
+            self.write_meta(file_id, &meta)?;
         }
-        meta.touched_ms = now_ms();
-        self.write_meta(file_id, &meta)?;
         self.evict_over_cap(file_id);
         Ok(())
     }
@@ -162,7 +173,7 @@ impl OfflineStore {
     /// The bytes themselves; an error names what is still missing rather
     /// than serving a hole out of a sparse file.
     pub fn read_span(&self, file_id: &str, start: u64, end: u64) -> Result<Vec<u8>, String> {
-        let mut meta = self.meta(file_id);
+        let meta = self.meta(file_id);
         let end = match meta.total {
             Some(total) if total > 0 => end.min(total - 1),
             _ => end,
@@ -178,8 +189,15 @@ impl OfflineStore {
         file.seek(SeekFrom::Start(start)).map_err(|err| err.to_string())?;
         let mut bytes = vec![0u8; (end - start + 1) as usize];
         file.read_exact(&mut bytes).map_err(|err| err.to_string())?;
-        meta.touched_ms = now_ms();
-        let _ = self.write_meta(file_id, &meta);
+        {
+            // Touch on the FRESHEST meta: writing back the copy read
+            // before the (milliseconds-long) file read rolled back pins
+            // and segment bits peers recorded in between.
+            let _guard = META_LOCK.lock().expect("meta lock");
+            let mut fresh = self.meta(file_id);
+            fresh.touched_ms = now_ms();
+            let _ = self.write_meta(file_id, &fresh);
+        }
         Ok(bytes)
     }
 
@@ -196,6 +214,7 @@ impl OfflineStore {
     }
 
     pub fn set_pinned(&self, file_id: &str, pinned: bool) -> Result<(), String> {
+        let _guard = META_LOCK.lock().expect("meta lock");
         let mut meta = self.meta(file_id);
         meta.pinned = pinned;
         meta.touched_ms = now_ms();
@@ -493,6 +512,37 @@ mod tests {
 
     fn pattern(size: usize) -> Vec<u8> {
         (0..size).map(|i| ((i * 31 + 7) % 251) as u8).collect()
+    }
+
+    /// Meta files are touched by playback serves, marked by warm-ups, and
+    /// pinned by commands, all at once and from separate store instances.
+    /// A read-modify-write that loses a peer's update would silently drop
+    /// a pin or a "this window is local" bit; every writer must apply only
+    /// its own delta against the freshest meta.
+    #[test]
+    fn concurrent_touches_never_roll_back_a_pin() {
+        let store = temp_store("meta-race");
+        let root = store.root.clone();
+        let bytes = pattern(1024);
+        store.store_bytes("f1", 0, &bytes, Some(1024)).unwrap();
+        let toucher = OfflineStore::new(root.clone()).unwrap();
+        let touching = std::thread::spawn(move || {
+            for _ in 0..2000 {
+                let _ = toucher.read_span("f1", 0, 1023);
+            }
+        });
+        let pinner = OfflineStore::new(root.clone()).unwrap();
+        for round in 0..2000 {
+            pinner.set_pinned("f1", true).unwrap();
+            assert!(
+                pinner.meta("f1").pinned,
+                "a concurrent touch rolled the pin back (round {round})"
+            );
+        }
+        touching.join().unwrap();
+        assert!(store.meta("f1").pinned, "the pin did not survive the touches");
+        assert!(store.complete("f1"), "a touch dropped the segment bits");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
