@@ -668,17 +668,35 @@ export function Preview(props: {
           <div className="preview-fallback">{error}</div>
         ) : !loaded ? (
           thumb ? (
-            // The scene, at once: the thumbnail shown sharp - the same
-            // picture the tile held - replaced by the true file when its
-            // bytes arrive. The progress pill is what says "arriving".
-            <div className="preview-warming">
-              <img src={thumb} alt="" />
+            // The scene, at once: the thumbnail shown sharp, declaring the
+            // ORIGINAL's intrinsic size and laid out by the same rules as
+            // the final image - so the swap changes sharpness and never
+            // geometry. The progress pill is what says "arriving".
+            <>
+              <img
+                className="preview-standin"
+                src={thumb}
+                alt=""
+                width={file.width}
+                // Width only, ratio via CSS: with BOTH attributes set, a
+                // viewport that caps one axis leaves the other axis its
+                // full specified size (aspect-ratio:auto needs an auto
+                // dimension to engage), yielding a letterboxed oversized
+                // box on phones. One specified axis plus an explicit
+                // ratio rescales under any cap, exactly like the final
+                // image's own natural-size constraint math.
+                style={
+                  file.width && file.height
+                    ? { aspectRatio: `${file.width} / ${file.height}` }
+                    : undefined
+                }
+              />
               {progress && (
                 <div className="media-progress">
                   Downloading {formatBytes(progress.loaded)} of {formatBytes(progress.total)}
                 </div>
               )}
-            </div>
+            </>
           ) : (
             <>
               <div className="spinner" />

@@ -4162,23 +4162,22 @@ span.item-menu {
   flex-shrink: 0;
 }
 
-/* The thumbnail standing in, sharp, while the true file downloads: it is
- * the same picture the tile already showed, and blurring it only threw
- * away information the person had a moment ago. The progress pill is
- * what says "still arriving"; the full-quality image simply replaces
- * this when its bytes land. */
-.preview-warming {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 100%;
-  height: 100%;
-}
-
-.preview-warming img {
-  max-width: 100%;
-  max-height: 100%;
+/* The thumbnail standing in, sharp, while the true file downloads. It is
+ * a direct child of the preview body carrying the ORIGINAL's intrinsic
+ * dimensions (width/height attributes from the file's metadata), so the
+ * shared `.preview-body img` rules size it EXACTLY as they will size the
+ * full image - the swap changes sharpness, never geometry. A wrapper
+ * with its own sizing produced small-but-real jumps; measured, not
+ * guessed. Files stored before dimensions existed fall back to the
+ * thumbnail's own size: sharp, merely smaller, and only for old files. */
+.preview-standin {
   object-fit: contain;
+  /* NEVER add a border, background, or shadow here. On height-bound
+   * viewports (short windows) the element's BOX can exceed its painted
+   * pixels - the replaced-element algorithm only cascades caps from the
+   * specified width axis to the derived height, not back - and
+   * object-fit keeps the pixels right while decoration would reveal
+   * the oversized box. Measured on 1280x500; pixels exact, box not. */
 }
 
 /* ---------- semantic search ---------- */

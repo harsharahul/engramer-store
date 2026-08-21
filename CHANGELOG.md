@@ -3,6 +3,17 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+- **Opening a photo no longer jumps when the full image arrives.** The
+  thumbnail standing in now declares the original photo's dimensions
+  and is laid out by the same rules as the final image, so it occupies
+  exactly the footprint the full image will fill: the swap changes
+  sharpness, never size or position. Verified by measurement at desktop
+  and phone layouts, where the before and after boxes now match to the
+  pixel.
+
 ## [0.51.2] - 2026-08-20
 
 ### Fixed
