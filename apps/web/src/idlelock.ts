@@ -64,7 +64,9 @@ export function installIdleLock(options: IdleLockOptions): () => void {
   if (!target) {
     return () => {};
   }
-  const now = options.now ?? Date.now;
+  // Read through the global each time rather than capturing the function:
+  // a test clock installed after the watch exists must still be honored.
+  const now = options.now ?? (() => Date.now());
   let last = now();
   let locked = false;
 
