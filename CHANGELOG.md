@@ -3,7 +3,7 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## [Unreleased]
+## [0.51.2] - 2026-08-20
 
 ### Fixed
 - **The preview's stand-in is the sharp thumbnail, not a blur.** While a
