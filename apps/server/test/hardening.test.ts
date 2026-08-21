@@ -264,3 +264,56 @@ describe("insecure-request upgrading follows the actual scheme", () => {
     expect(csp).toContain("wss://");
   });
 });
+
+describe("strict transport security", () => {
+  let dataDir: string;
+  let priorProxies: string | undefined;
+
+  beforeAll(() => {
+    priorProxies = process.env.ENGRAMER_TRUSTED_PROXIES;
+    process.env.ENGRAMER_TRUSTED_PROXIES = "127.0.0.1";
+    dataDir = mkdtempSync(join(tmpdir(), "engramer-hsts-"));
+  });
+
+  afterAll(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+    if (priorProxies === undefined) {
+      delete process.env.ENGRAMER_TRUSTED_PROXIES;
+    } else {
+      process.env.ENGRAMER_TRUSTED_PROXIES = priorProxies;
+    }
+  });
+
+  it("is off unless the deployment turns it on", async () => {
+    const plain = await buildApp({ dataDir: join(dataDir, "off"), webDistDir: null });
+    try {
+      const response = await plain.inject({
+        method: "GET",
+        url: "/api/health",
+        headers: { "x-forwarded-proto": "https" },
+        remoteAddress: "127.0.0.1",
+      });
+      expect(response.headers["strict-transport-security"]).toBeUndefined();
+    } finally {
+      await plain.close();
+    }
+  });
+
+  it("is sent on TLS responses only when turned on", async () => {
+    const strict = await buildApp({ dataDir: join(dataDir, "on"), webDistDir: null, hsts: true });
+    try {
+      const secure = await strict.inject({
+        method: "GET",
+        url: "/api/health",
+        headers: { "x-forwarded-proto": "https" },
+        remoteAddress: "127.0.0.1",
+      });
+      expect(secure.headers["strict-transport-security"]).toBe("max-age=31536000; includeSubDomains");
+      // Over plain HTTP the header would be ignored by browsers; it is not sent.
+      const insecure = await strict.inject({ method: "GET", url: "/api/health" });
+      expect(insecure.headers["strict-transport-security"]).toBeUndefined();
+    } finally {
+      await strict.close();
+    }
+  });
+});

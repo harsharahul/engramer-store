@@ -1,6 +1,20 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { Vault } from "./vault.js";
 import { buildBridge } from "./server.js";
+
+/** The first line of the file, without its line ending; undefined when unset or unreadable. */
+function readPasswordFile(path: string | undefined): string | undefined {
+  if (!path) {
+    return undefined;
+  }
+  try {
+    const text = readFileSync(path, "utf8");
+    return text.split(/\r?\n/)[0] || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * CLI entry point for the local S3 bridge.
@@ -12,12 +26,14 @@ import { buildBridge } from "./server.js";
 async function main(): Promise<void> {
   const serverUrl = process.env.ENGRAM_SERVER_URL ?? "http://127.0.0.1:3080";
   const email = process.env.ENGRAM_EMAIL;
-  const password = process.env.ENGRAM_PASSWORD;
+  // A file keeps the password out of the process environment, which every
+  // process of the same user can read.
+  const password = process.env.ENGRAM_PASSWORD ?? readPasswordFile(process.env.ENGRAM_PASSWORD_FILE);
   const host = process.env.BRIDGE_HOST ?? "127.0.0.1";
   const port = Number(process.env.BRIDGE_PORT ?? 3081);
 
   if (!email || !password) {
-    console.error("Set ENGRAM_EMAIL and ENGRAM_PASSWORD.");
+    console.error("Set ENGRAM_EMAIL and ENGRAM_PASSWORD (or ENGRAM_PASSWORD_FILE).");
     process.exit(1);
   }
 

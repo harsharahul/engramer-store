@@ -12,6 +12,13 @@ pub const CTX_LOGIN: &[u8; 8] = b"es-login";
 pub const CTX_UNLOCK: &[u8; 8] = b"es-unlck";
 pub const CTX_SHARE: &[u8; 8] = b"es-share";
 
+/// Floor for accepted Argon2id work, mirroring `MIN_OPS_LIMIT` and
+/// `MIN_MEM_LIMIT` in the TypeScript core. Parameters arrive from a
+/// server; anything weaker than the OWASP minimum is refused rather than
+/// derived, so a downgraded set can never yield a cheap login key.
+pub const MIN_OPS_LIMIT: u64 = 2;
+pub const MIN_MEM_LIMIT: usize = 19 * 1024 * 1024;
+
 /// Argon2id KEK derivation. `mem_limit` is in bytes, matching the
 /// TypeScript side and libsodium itself.
 pub fn derive_kek(
@@ -20,6 +27,11 @@ pub fn derive_kek(
     ops_limit: u64,
     mem_limit: usize,
 ) -> Result<[u8; KEY_BYTES], CryptoError> {
+    if ops_limit < MIN_OPS_LIMIT || mem_limit < MIN_MEM_LIMIT {
+        return Err(CryptoError::Rejected(
+            "password-hashing parameters below the accepted floor",
+        ));
+    }
     Ok(
         backend::pwhash_argon2id(KEY_BYTES, password.as_bytes(), salt, ops_limit, mem_limit)?
             .try_into()
@@ -56,4 +68,28 @@ pub fn share_subkey(link_kek: &[u8; KEY_BYTES], id: u64) -> [u8; KEY_BYTES] {
     backend::kdf_derive(KEY_BYTES, id, CTX_SHARE, link_kek)
         .try_into()
         .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refuses_parameters_below_the_floor() {
+        let salt = [7u8; SALT_BYTES];
+        assert!(matches!(
+            derive_kek("password", &salt, 1, MIN_MEM_LIMIT),
+            Err(CryptoError::Rejected(_))
+        ));
+        assert!(matches!(
+            derive_kek("password", &salt, MIN_OPS_LIMIT, MIN_MEM_LIMIT - 1),
+            Err(CryptoError::Rejected(_))
+        ));
+    }
+
+    #[test]
+    fn derives_at_the_floor() {
+        let salt = [7u8; SALT_BYTES];
+        assert!(derive_kek("password", &salt, MIN_OPS_LIMIT, MIN_MEM_LIMIT).is_ok());
+    }
 }
