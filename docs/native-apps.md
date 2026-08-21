@@ -78,8 +78,10 @@ only, never in iCloud, and removed at sign-out.
 
 The installed web app (without the native app) works offline for the app
 shell, but iOS applies tighter storage limits than other platforms and can
-evict site storage after long disuse. Keys live in the session only, so
-eviction never risks data loss; you sign back in and the vault resyncs. In
+evict site storage after long disuse. Nothing stored on the device can
+open the vault by itself (the device-unlock record and the tab's reload
+record hold keys only in sealed form), so eviction never risks data loss;
+you sign back in and the vault resyncs. In
 the EU, Apple opens home-screen web apps in the browser instead of
 standalone mode.
 

@@ -135,6 +135,7 @@ Configuration via environment variables:
 | `ENGRAMER_COLLAB_RELAY` | `on` | `off` disables live co-editing; documents stay editable one person at a time |
 | `ENGRAMER_TRUSTED_PROXIES` | unset | Hop count or address allowlist for forwarded headers behind a proxy |
 | `ENGRAMER_CORS_ORIGINS` | unset | Extra origins allowed to call the API |
+| `ENGRAMER_HSTS` | `off` | `on` sends `Strict-Transport-Security` on HTTPS responses, for deployments whose proxy does not |
 | `ENGRAMER_MAC_DMG_URL` | unset | Where this deployment hosts the Mac app DMG; adds a "Get the Mac app" row to Profile |
 
 The full list, including the storage tiering, cache, and request-budget knobs, is in [docs/storage.md](docs/storage.md) and [docs/backends.md](docs/backends.md).

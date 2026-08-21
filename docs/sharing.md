@@ -72,12 +72,18 @@ can use to send files into your vault.
 Creating a request produces a link of the form:
 
 ```
-https://your-host/r/<token>#<label>
+https://your-host/r/<token>#<label and owner key>
 ```
 
-The label (what you are asking for) rides in the fragment, so the upload page
-can greet the sender without the server storing the label in the clear; the
-owner's copy of the label is stored encrypted under the master key.
+The fragment carries two things the server never sees: the label (what you
+are asking for), so the upload page can greet the sender without the server
+storing it in the clear, and the owner's public key. The sender's browser
+seals every file key to the owner's public key, and the server is the only
+other place it could learn that key from. Because the link travels from
+owner to sender outside the server, the page compares the key the server
+reports with the key in the link and refuses to send anything if they
+differ. The owner's copy of the label is stored encrypted under the master
+key.
 
 For each file the sender picks, their browser:
 
@@ -122,7 +128,7 @@ learn who has an account:
    `/c/<token>`. The invitation carries identity, not key material; a leaked
    invitation decrypts nothing.
 2. The recipient opens it signed in and claims it. Claiming reveals the
-   recipient's email and account public key to the owner — and only then,
+   recipient's email and account public key to the owner, and only then,
    which is what makes the disclosure consented. Every dead token
    (fictional, revoked, expired, or already claimed) answers with one
    identical response, so tokens cannot be told apart and accounts cannot
@@ -130,6 +136,19 @@ learn who has an account:
 3. The owner's client seals the file key to the claimant's X25519 public
    key (an anonymous sealed box) and releases it. This happens the moment
    the owner opens the share dialog, or automatically on their next sync.
+
+The server is what reports the claimant's public key, so the release is
+only as trustworthy as that report. Two things make a substitution
+visible. Every account has a **key fingerprint**, eight groups of hex
+digits derived from its public key, shown in Profile and beside each
+claimant in the share dialog; two people who read the same groups to each
+other hold the same key, whatever the server said. And the first key
+released to a person is **pinned**, sealed inside the account's synced
+settings: a different key for the same address later stops the release,
+shows both fingerprints, and asks for an explicit decision before anything
+is sealed to the new one. The same check guards the key rotation that
+follows a revocation, where a member whose key changed is left out and
+named rather than sealed to on the server's word.
 
 A shared file then arrives through the recipient's ordinary delta sync,
 under its own cursor, and appears in **Shared with me**. It stays out of

@@ -48,10 +48,31 @@ unaffected.
 
 ## Session state
 
-Sessions are bearer tokens (30-day JWT). The decrypted keys live in
-sessionStorage, scoped to the tab and cleared on lock. A failed first sync
-after unlock surfaces an explicit retry rather than blocking the interface,
-and pages restored from the browser's back/forward cache reload cleanly.
+Sessions are bearer tokens (30-day JWT). The server checks every token
+against the account's token epoch and disabled flag on every request, so a
+credential change, a revocation, or an administrator disabling the account
+ends existing sessions immediately.
+
+The decrypted keys live in the tab's memory. So that a reload does not
+cost the password, the tab keeps a reload record in sessionStorage: the
+keys sealed under a random 32-byte session key that the server mints for
+that one live session and returns only to that session, only while its
+token epoch stands. What a browser may write to disk for a tab is
+therefore ciphertext plus a bearer token, and the token alone decrypts
+nothing. Signing out or locking deletes the session key on the server and
+the record in the tab. **Sign out everywhere** in Profile advances the
+token epoch and deletes every session key, ending every other device's
+session at once while the current tab carries on with a fresh token. The
+limit: someone who copies the disk and replays the token before the
+session is revoked can fetch the session key. The optional **Lock
+after inactivity** setting (off by default, synced with the account)
+shortens that window.
+
+Device unlock wraps the master key under a secret only the passkey or
+the device keychain can reproduce, with the session token sealed inside
+the same record. A failed first sync after unlock surfaces an explicit
+retry rather than blocking the interface, and pages restored from the
+browser's back/forward cache reload cleanly.
 
 ## Registration policy and administration
 
@@ -84,4 +105,15 @@ page at startup, so the policy never needs `unsafe-inline` for scripts.
 Cross-origin browser access is off unless origins are listed explicitly,
 and the pre-login endpoint returns a stable decoy salt for unknown
 addresses so it cannot be used to discover who has an account.
+
+The media bridge, the service worker that streams decrypted video and
+audio to the player, serves only video and audio, only to media elements,
+and marks every response it builds as something that cannot act as a
+document, so a file that arrived from someone else can never be rendered
+as a page on the vault's origin.
+
+`Strict-Transport-Security` is usually set by the TLS-terminating proxy.
+Deployments whose proxy does not set it can turn it on with
+`ENGRAMER_HSTS=on`; the server then sends it on responses that arrived
+over HTTPS.
 
