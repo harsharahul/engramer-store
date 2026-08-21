@@ -3,6 +3,16 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+- **A reload without a connection keeps the tab's session.** The reload
+  record is discarded only when the server refuses it; when the server
+  cannot be reached at all, the record stays and the next reload with a
+  connection restores the tab without a password.
+- **Session keys are bounded per account.** The server keeps the newest
+  fifty, so a runaway client cannot grow the table.
+
 ## [0.52.0] - 2026-08-21
 
 ### Security
