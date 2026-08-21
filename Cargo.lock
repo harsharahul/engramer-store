@@ -919,7 +919,7 @@ dependencies = [
 
 [[package]]
 name = "engram-store-desktop"
-version = "0.51.2"
+version = "0.52.0"
 dependencies = [
  "blake2",
  "block2",

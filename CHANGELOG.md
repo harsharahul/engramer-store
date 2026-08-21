@@ -3,7 +3,7 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## [Unreleased]
+## [0.52.0] - 2026-08-21
 
 ### Security
 - **Nothing on disk can open a vault by itself.** A tab's reload record
