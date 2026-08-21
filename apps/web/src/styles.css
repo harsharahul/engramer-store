@@ -4162,8 +4162,11 @@ span.item-menu {
   flex-shrink: 0;
 }
 
-/* The thumbnail standing in while the true file downloads: scaled to the
- * same box, softened so it reads as "arriving", never as the real thing. */
+/* The thumbnail standing in, sharp, while the true file downloads: it is
+ * the same picture the tile already showed, and blurring it only threw
+ * away information the person had a moment ago. The progress pill is
+ * what says "still arriving"; the full-quality image simply replaces
+ * this when its bytes land. */
 .preview-warming {
   position: relative;
   display: grid;
@@ -4176,8 +4179,6 @@ span.item-menu {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  filter: blur(14px) saturate(1.05);
-  opacity: 0.85;
 }
 
 /* ---------- semantic search ---------- */
