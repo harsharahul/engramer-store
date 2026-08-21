@@ -40,8 +40,10 @@ import {
 } from "../backfill";
 import { CLIP_MODEL_VERSION } from "../intel/semantic";
 import { SweepMemory, type SweepKind } from "../sweepmemory";
-import { api, setAuthToken } from "../api";
+import { publicKeyFingerprint } from "@engramer/crypto";
+import { api } from "../api";
 import { changePassword } from "../changepassword";
+import { IDLE_LOCK_CHOICES, idleLockMinutes, setIdleLockMinutes } from "../idlelock";
 import { revealRecoveryKey, rotateRecoveryKey } from "../recoverykey";
 import { RecoveryKeyModal } from "./RecoveryKeyModal";
 import { formatBytes } from "../format";
@@ -523,6 +525,14 @@ export function ProfileView(props: {
     }
   };
 
+  const [idleMinutes, setIdleMinutes] = useState(() => idleLockMinutes());
+  useEffect(() => {
+    // Another device's choice arrives through the synced settings.
+    const refresh = () => setIdleMinutes(idleLockMinutes());
+    settingsEvents.addEventListener(SETTINGS_APPLIED_EVENT, refresh);
+    return () => settingsEvents.removeEventListener(SETTINGS_APPLIED_EVENT, refresh);
+  }, []);
+
   const [signingOutEverywhere, setSigningOutEverywhere] = useState(false);
   const signOutEverywhere = async () => {
     setSigningOutEverywhere(true);
@@ -741,6 +751,43 @@ export function ProfileView(props: {
             </button>
           ) : null}
         </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Lock after inactivity</b>
+            <div className="profile-row-sub">
+              A quiet spell locks the vault the way the Lock button does; device unlock or the
+              password reopens it. The choice follows your account to every device.
+            </div>
+          </div>
+          <select
+            aria-label="Lock after inactivity"
+            value={idleMinutes}
+            onChange={(e) => {
+              const minutes = Number(e.target.value);
+              setIdleLockMinutes(minutes);
+              setIdleMinutes(minutes);
+            }}
+          >
+            {IDLE_LOCK_CHOICES.map((choice) => (
+              <option key={choice.minutes} value={choice.minutes}>
+                {choice.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        {store.session && (
+          <div className="profile-row">
+            <div className="profile-row-main">
+              <b>Your key fingerprint</b>
+              <div className="profile-row-sub">
+                When someone releases a document to you, this is shown beside your address. Read it
+                to them over a call or in person: if it matches what they see, the key the server
+                gave them is yours.
+              </div>
+              <div className="profile-row-sub mono">{publicKeyFingerprint(store.session.publicKey)}</div>
+            </div>
+          </div>
+        )}
         <div className="profile-row">
           <div className="profile-row-main">
             <b>Recovery key</b>

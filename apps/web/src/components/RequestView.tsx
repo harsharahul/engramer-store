@@ -8,10 +8,9 @@ import {
   encryptFileMetadata,
   generateKey,
   sealToPublicKey,
-  fromB64,
-  utf8Decode,
 } from "@engramer/crypto";
 import { api, ApiError, uploadRequestBlob } from "../api";
+import { parseRequestFragment } from "../requestlink";
 import { analyzeFile } from "../transfer";
 import { formatBytes } from "../format";
 import { BrandMark } from "./FileArt";
@@ -46,15 +45,20 @@ export function RequestView() {
     void (async () => {
       try {
         await ready();
-        const fragment = location.hash.replace(/^#/, "");
-        if (fragment) {
-          try {
-            setLabel(utf8Decode(fromB64(fragment)));
-          } catch {
-            // The label is cosmetic; a malformed fragment never blocks sending.
-          }
+        const link = parseRequestFragment(location.hash);
+        if (link.label) {
+          setLabel(link.label);
         }
         const info = await api.publicRequestInfo(token!);
+        // The link carries the key the owner minted it with; the server's
+        // answer has to be that key. Anything else means the files would
+        // be sealed to someone other than the person who asked for them.
+        if (link.publicKey && link.publicKey !== info.publicKey) {
+          setError(
+            "This link does not match the vault it points to, so nothing can be sent through it. Ask for a fresh link.",
+          );
+          return;
+        }
         setPublicKey(info.publicKey);
         setMaxBytes(info.maxBytes);
       } catch (err) {

@@ -29,6 +29,7 @@ import { collectDropped, fromDirectoryInput } from "../uploader";
 import { MOBILE_QUERY, useMediaQuery } from "../media";
 import { installMediaKeyResponder } from "../mediastream";
 import { installHandoffForegroundRefresh } from "../handoff";
+import { idleLockMinutes, installIdleLock } from "../idlelock";
 import { installAutoSync } from "../autosync";
 import { useLongPress } from "../longpress";
 import {
@@ -1090,6 +1091,11 @@ export function Vault() {
   // returning to the foreground rewrites the extension handoff and
   // signals the drive, so that trip actually reconnects it.
   useEffect(() => installHandoffForegroundRefresh(() => useStore.getState().session), []);
+
+  // Lock after inactivity, where the account has asked for it: the same
+  // lock as the button, so device unlock or the password reopens it.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => installIdleLock({ minutes: idleLockMinutes, onLock: lock }), []);
 
   // Sync is a client-driven pull; this adds the foreground-and-interval
   // heartbeat that makes shared documents and phone uploads appear on

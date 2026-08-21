@@ -12,6 +12,7 @@ import {
   encryptJson,
   generateKey,
   openSealed,
+  publicKeyFingerprint,
   secretBoxOpen,
   secretBoxSeal,
   utf8Encode,
@@ -34,6 +35,7 @@ import { uploadLanes, withAnalysisSlot } from "./analysisslot";
 import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { activateSession, clearSession, suspendSession, type Session } from "./session";
+import { checkPin, KeyChangedError, pinKey, pinnedKey } from "./keypins";
 import { autoReleaseMatches, forgetAutoRelease } from "./autorelease";
 import { holdTransferLock, releaseTransferLock } from "./wakelock";
 import {
@@ -392,7 +394,7 @@ interface StoreState {
   consumeAutoReleaseNote: () => void;
   refreshPendingClaims: () => Promise<void>;
   /** Releases the file key to the account that claimed this invitation. */
-  approveClaim: (token: string) => Promise<void>;
+  approveClaim: (token: string, options?: { trustNewKey?: boolean }) => Promise<void>;
   recognizeFile: (id: string) => Promise<boolean>;
   recognizeAllImages: (opts?: SweepOptions) => Promise<number>;
   /** Reads dates out of documents stored before this feature existed. */
@@ -1660,15 +1662,31 @@ export const useStore = create<StoreState>((set, get) => {
       });
       applyFile(dto);
       const { collaborators } = await api.listCollaborators(id);
-      if (collaborators.length > 0) {
+      // Members whose account key no longer matches the pinned one are
+      // left out rather than sealed to on the server's word alone.
+      const changed: string[] = [];
+      const held = collaborators.filter((member) => {
+        if (checkPin(member.email, member.publicKey) === "changed") {
+          changed.push(member.email);
+          return false;
+        }
+        pinKey(member.email, member.publicKey);
+        return true;
+      });
+      if (held.length > 0) {
         await api.rekeyShared(
           id,
           (file.keyEpoch ?? 0) + 1,
-          collaborators.map((member) => ({
+          held.map((member) => ({
             userId: member.userId,
             sealedKey: sealFileKeyFor(newKey, member.publicKey),
           })),
         );
+      }
+      if (changed.length > 0) {
+        set({
+          autoReleasedNote: `The new key was not sent to ${changed.join(", ")}: their account key has changed. Check the new fingerprint with them, then remove and invite them again.`,
+        });
       }
     },
 
@@ -2271,14 +2289,28 @@ export const useStore = create<StoreState>((set, get) => {
       }
     },
 
-    approveClaim: async (token) => {
+    approveClaim: async (token, options) => {
       const { invites } = await api.listCollabInvites();
       const invite = invites.find((i) => i.token === token);
       const file = invite ? get().files.get(invite.fileId) : undefined;
       if (!invite?.claimantPublicKey || !file) {
         throw new Error("this invitation is no longer available");
       }
+      // The server names the claimant's key. A key that differs from the
+      // one this account released to before is not sealed to until the
+      // owner has seen both fingerprints and chosen the new one.
+      const email = invite.claimantEmail ?? "";
+      if (email && checkPin(email, invite.claimantPublicKey) === "changed" && !options?.trustNewKey) {
+        throw new KeyChangedError(
+          email,
+          publicKeyFingerprint(pinnedKey(email)!),
+          publicKeyFingerprint(invite.claimantPublicKey),
+        );
+      }
       await api.grantCollabInvite(token, sealFileKeyFor(file.key, invite.claimantPublicKey));
+      if (email) {
+        pinKey(email, invite.claimantPublicKey);
+      }
       await get().refreshPendingClaims();
     },
 

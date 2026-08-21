@@ -79,3 +79,4 @@ export {
   openShareKey,
   shareAccessDigest,
 } from "./share.js";
+export { publicKeyFingerprint } from "./fingerprint.js";
