@@ -3,6 +3,16 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+- **The preview's stand-in is the sharp thumbnail, not a blur.** While a
+  photo's full bytes download, the preview now shows its thumbnail
+  exactly as the tile did, and swaps to the full image when it lands;
+  the earlier deliberate blur only discarded a picture the person was
+  already looking at. The progress pill remains the "still arriving"
+  signal for larger files.
+
 ## [0.51.1] - 2026-08-20
 
 ### Added

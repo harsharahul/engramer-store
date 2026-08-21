@@ -668,8 +668,9 @@ export function Preview(props: {
           <div className="preview-fallback">{error}</div>
         ) : !loaded ? (
           thumb ? (
-            // The scene, at once: the thumbnail scaled up and softened,
-            // sharpening into the true file when its bytes arrive.
+            // The scene, at once: the thumbnail shown sharp - the same
+            // picture the tile held - replaced by the true file when its
+            // bytes arrive. The progress pill is what says "arriving".
             <div className="preview-warming">
               <img src={thumb} alt="" />
               {progress && (
