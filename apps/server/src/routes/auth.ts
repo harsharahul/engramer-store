@@ -568,26 +568,41 @@ export function registerAuthRoutes(app: FastifyInstance): void {
    * deletes them all. The server never sees what the key seals.
    */
   const SESSION_KEY_TTL_MS = 30 * 24 * 60 * 60_000;
+  /** Live tabs an account can reasonably have at once; older keys go. */
+  const SESSION_KEYS_PER_USER = 50;
 
   app.post("/api/auth/session-key", auth, async (request, reply) => {
     const uid = request.user.uid;
     const id = randomBytes(16).toString("base64url");
     const key = randomBytes(32).toString("base64url");
-    // Keys outlive the tokens that could fetch them by nothing: anything
-    // older than a token's lifetime is unreachable and goes.
-    await app.db.run(
-      "DELETE FROM session_keys WHERE user_id = ? AND created_at < ?",
-      uid,
-      Date.now() - SESSION_KEY_TTL_MS,
-    );
-    await app.db.run(
-      "INSERT INTO session_keys (id, user_id, key, token_epoch, created_at) VALUES (?, ?, ?, ?, ?)",
-      id,
-      uid,
-      key,
-      request.user.ep ?? 0,
-      Date.now(),
-    );
+    const now = Date.now();
+    await app.db.tx(async (t) => {
+      // Keys outlive the tokens that could fetch them by nothing: anything
+      // older than a token's lifetime is unreachable and goes.
+      await t.run(
+        "DELETE FROM session_keys WHERE user_id = ? AND created_at < ?",
+        uid,
+        now - SESSION_KEY_TTL_MS,
+      );
+      await t.run(
+        "INSERT INTO session_keys (id, user_id, key, token_epoch, created_at) VALUES (?, ?, ?, ?, ?)",
+        id,
+        uid,
+        key,
+        request.user.ep ?? 0,
+        now,
+      );
+      // A bound on what one account can accumulate: a token holder minting
+      // keys in a loop trims its own oldest ones, never the table.
+      await t.run(
+        `DELETE FROM session_keys WHERE user_id = ? AND id NOT IN (
+           SELECT id FROM session_keys WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?
+         )`,
+        uid,
+        uid,
+        SESSION_KEYS_PER_USER,
+      );
+    });
     return reply.code(201).send({ id, key });
   });
 

@@ -6,7 +6,7 @@ import {
   secretBoxOpen,
   type KeyAttributes,
 } from "@engramer/crypto";
-import { api, setAuthToken } from "./api";
+import { api, ApiError, setAuthToken } from "./api";
 import { diag } from "./diag";
 import { clearHandoff, refreshHandoff } from "./handoff";
 import { clearNativeUnlock, deviceUnlock, updateUnlockToken } from "./unlock";
@@ -166,11 +166,18 @@ export async function restoreSession(): Promise<Session | null> {
     const { key } = await api.getSessionKey(stored.skid);
     return openTabSession(stored, decodeSessionKey(key));
   } catch (err) {
+    setAuthToken(null);
+    if (!(err instanceof ApiError)) {
+      // No answer at all (offline, or the server unreachable): the record
+      // is not refused, merely unverifiable right now. It stays, so the
+      // next reload with a connection restores the tab without a password.
+      diag("session", `reload record could not be checked: ${err instanceof Error ? err.message : "unknown"}`);
+      return null;
+    }
     // Revoked, expired, signed out elsewhere, or tampered: the record is
     // worthless and the unlock gate or the password form takes over.
-    diag("session", `reload record not honored: ${err instanceof Error ? err.message : "unknown"}`);
+    diag("session", `reload record not honored: ${err.message}`);
     sessionStorage.removeItem(SESSION_KEY);
-    setAuthToken(null);
     return null;
   }
 }

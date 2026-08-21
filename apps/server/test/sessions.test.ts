@@ -85,6 +85,32 @@ describe("session keys", () => {
     expect(again.statusCode).toBe(204);
   });
 
+  it("keeps only the newest fifty keys for an account", async () => {
+    const first = await app.inject({ method: "POST", url: "/api/auth/session-key", headers: auth() });
+    const { id: oldest } = first.json() as { id: string };
+    for (let i = 0; i < 55; i++) {
+      await app.inject({ method: "POST", url: "/api/auth/session-key", headers: auth() });
+    }
+    const latest = await app.inject({ method: "POST", url: "/api/auth/session-key", headers: auth() });
+    const { id: newest } = latest.json() as { id: string };
+    const gone = await app.inject({ method: "GET", url: `/api/auth/session-key/${oldest}`, headers: auth() });
+    expect(gone.statusCode).toBe(404);
+    const kept = await app.inject({ method: "GET", url: `/api/auth/session-key/${newest}`, headers: auth() });
+    expect(kept.statusCode).toBe(200);
+    // The other account is untouched by this account's trimming.
+    const theirs = await app.inject({ method: "POST", url: "/api/auth/session-key", headers: auth(otherToken) });
+    const { id: theirId } = theirs.json() as { id: string };
+    for (let i = 0; i < 55; i++) {
+      await app.inject({ method: "POST", url: "/api/auth/session-key", headers: auth() });
+    }
+    const stillTheirs = await app.inject({
+      method: "GET",
+      url: `/api/auth/session-key/${theirId}`,
+      headers: auth(otherToken),
+    });
+    expect(stillTheirs.statusCode).toBe(200);
+  });
+
   it("cannot delete another account's key", async () => {
     const minted = await app.inject({ method: "POST", url: "/api/auth/session-key", headers: auth() });
     const { id } = minted.json() as { id: string };
