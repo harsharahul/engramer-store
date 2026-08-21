@@ -24,6 +24,7 @@ at them (path-style, region `us-east-1`).
 |---|---|---|
 | `ENGRAM_SERVER_URL` | `http://127.0.0.1:3080` | Your Engram Store server |
 | `ENGRAM_EMAIL` / `ENGRAM_PASSWORD` | required | Your account credentials |
+| `ENGRAM_PASSWORD_FILE` | unset | Read the password from this file's first line instead of the environment, which other processes of the same user can read |
 | `BRIDGE_HOST` / `BRIDGE_PORT` | `127.0.0.1` / `3081` | Where the bridge listens |
 | `BRIDGE_ACCESS_KEY` / `BRIDGE_SECRET_KEY` | generated | Pin the S3 credentials instead of generating them |
 

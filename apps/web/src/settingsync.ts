@@ -26,6 +26,8 @@ import { entitiesEnabled, setEntitiesEnabled } from "./intel/entities";
 import { ocrEnabled, setOcrEnabled } from "./intel/ocr";
 import { factsEnabled, setFactsEnabled } from "./intel/scan";
 import { semanticEnabled, setSemanticEnabled } from "./intel/semantic";
+import { idleLockMinutes, setIdleLockMinutes } from "./idlelock";
+import { mergePins, pinnedKeys } from "./keypins";
 import { onSettingChanged } from "./settingsbus";
 
 export interface SyncedSettings {
@@ -42,6 +44,10 @@ export interface SyncedSettings {
     includeScreenshots: boolean;
     wifiOnly: boolean;
   };
+  /** Lock after this many quiet minutes; 0 or absent means off. */
+  idleLockMinutes?: number;
+  /** The account public key last released to, per email address. */
+  contacts?: Record<string, string>;
 }
 
 /** Fires after a remote blob is applied, so open views re-read the
@@ -86,6 +92,8 @@ export function snapshotSettings(): SyncedSettings {
       includeScreenshots: policy.includeScreenshots,
       wifiOnly: policy.wifiOnly,
     },
+    idleLockMinutes: idleLockMinutes(),
+    contacts: pinnedKeys(),
   };
 }
 
@@ -121,6 +129,12 @@ function applyInner(values: SyncedSettings): void {
     includeScreenshots: values.backup.includeScreenshots,
     wifiOnly: values.backup.wifiOnly,
   });
+  // Fields a device from before they existed never writes: absent means
+  // "no word on it", not "off", so such a blob leaves the local value be.
+  if (values.idleLockMinutes !== undefined) {
+    setIdleLockMinutes(values.idleLockMinutes);
+  }
+  mergePins(values.contacts);
 }
 
 function seal(values: SyncedSettings, masterKey: Uint8Array): string {

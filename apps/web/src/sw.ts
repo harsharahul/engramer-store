@@ -16,6 +16,7 @@ import {
   type ChunkedHeader,
 } from "@engramer/crypto";
 import { ChunkCache } from "./swcache";
+import { isMediaFetch, isStreamableMime, mediaResponseHeaders } from "./mediapolicy";
 
 declare let self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Parameters<typeof precacheAndRoute>[0];
@@ -58,6 +59,13 @@ self.addEventListener("message", (event) => {
     | { type: "media-key"; fileId: string; key: ArrayBuffer; token: string; mime: string; size: number }
     | undefined;
   if (!data || data.type !== "media-key") {
+    return;
+  }
+  // Only video and audio are ever served decrypted on this origin. A key
+  // for anything else is dropped here, whatever the page that sent it
+  // believed, so no registration can turn the bridge into a document
+  // server for a file somebody else wrote.
+  if (!isStreamableMime(data.mime)) {
     return;
   }
   const entry: MediaEntry = {
@@ -334,7 +342,7 @@ function chunkedResponse(
   });
 
   const headers = new Headers({
-    "content-type": entry.mime,
+    ...mediaResponseHeaders(entry.mime),
     "accept-ranges": "bytes",
     "content-length": String(end - start + 1),
   });
@@ -386,7 +394,7 @@ function legacyResponse(fileId: string, entry: MediaEntry): Response {
   return new Response(stream, {
     status: 200,
     headers: new Headers({
-      "content-type": entry.mime,
+      ...mediaResponseHeaders(entry.mime),
       "content-length": String(entry.plainSize),
     }),
   });
@@ -540,6 +548,13 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (url.pathname.startsWith("/media/")) {
+    // Media elements only. A navigation to this path, a fetch, a frame, an
+    // image: none of them get decrypted bytes, because every one of those
+    // would let the file's own contents act as a page on this origin. They
+    // fall through to the network, which has nothing at this path.
+    if (!isMediaFetch(event.request)) {
+      return;
+    }
     const fileId = url.pathname.slice("/media/".length);
     event.respondWith(serveMedia(event.request, fileId));
     return;

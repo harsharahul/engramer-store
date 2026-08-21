@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { toB64, protectShareKey } from "@engramer/crypto";
+import { toB64, protectShareKey, publicKeyFingerprint } from "@engramer/crypto";
 import { api, type CollabInviteInfo, type CollaboratorInfo, type ShareInfo, type ShareOptions } from "../api";
 import { useStore, type FileEntry } from "../store";
 import { inviteLink } from "../collab";
+import { KeyChangedError } from "../keypins";
 import { rememberAutoRelease } from "../autorelease";
 import { downloadAndDecrypt } from "../transfer";
 import { openSharedContent } from "../openshared";
@@ -228,12 +229,31 @@ export function ShareDialog(props: {
     }
   };
 
-  const approve = async (token: string) => {
+  // A claimant whose account key differs from the one this account released
+  // to before: the release waits until the owner has compared fingerprints.
+  const [keyChange, setKeyChange] = useState<{
+    token: string;
+    email: string;
+    before: string;
+    after: string;
+  } | null>(null);
+
+  const approve = async (token: string, trustNewKey = false) => {
     try {
-      await useStore.getState().approveClaim(token);
+      await useStore.getState().approveClaim(token, { trustNewKey });
+      setKeyChange(null);
       await load();
       props.onToast("Key released. They can open the document now.");
-    } catch {
+    } catch (err) {
+      if (err instanceof KeyChangedError) {
+        setKeyChange({
+          token,
+          email: err.email,
+          before: err.previousFingerprint,
+          after: err.currentFingerprint,
+        });
+        return;
+      }
       props.onToast("Could not release the key. The invitation may have been revoked.");
     }
   };
@@ -310,24 +330,52 @@ export function ShareDialog(props: {
         {claims.length > 0 && (
           <div className="share-list">
             {claims.map((claim) => (
-              <div key={claim.token} className="share-row">
-                <div className="share-row-main">
-                  <span className="share-row-token">{claim.claimantEmail}</span>
-                  <span className="badge">
-                    claimed · {claim.role === "editor" ? "edit" : "view"}
-                  </span>
-                  <span className="share-row-meta">waiting for you to release the key</span>
+              <div key={claim.token}>
+                <div className="share-row">
+                  <div className="share-row-main">
+                    <span className="share-row-token">{claim.claimantEmail}</span>
+                    <span className="badge">
+                      claimed · {claim.role === "editor" ? "edit" : "view"}
+                    </span>
+                    {claim.claimantPublicKey && (
+                      <span
+                        className="share-row-meta mono"
+                        title="Their account key's fingerprint. Compare it with what their Profile shows before releasing."
+                      >
+                        {publicKeyFingerprint(claim.claimantPublicKey)}
+                      </span>
+                    )}
+                    <span className="share-row-meta">waiting for you to release the key</span>
+                  </div>
+                  <button className="btn" onClick={() => void approve(claim.token)}>
+                    Release the key
+                  </button>
+                  <button
+                    className="icon-btn danger"
+                    title="Refuse and revoke this invitation"
+                    onClick={() => void revokeInvite(claim.token)}
+                  >
+                    <TrashGlyph size={14} />
+                  </button>
                 </div>
-                <button className="btn" onClick={() => void approve(claim.token)}>
-                  Release the key
-                </button>
-                <button
-                  className="icon-btn danger"
-                  title="Refuse and revoke this invitation"
-                  onClick={() => void revokeInvite(claim.token)}
-                >
-                  <TrashGlyph size={14} />
-                </button>
+                {keyChange?.token === claim.token && (
+                  <div className="share-row share-key-change">
+                    <div className="share-row-main">
+                      <span className="error-text">
+                        The account key for {keyChange.email} is not the one you released to before.
+                        Check the new fingerprint with them before trusting it.
+                      </span>
+                      <span className="share-row-meta mono">before: {keyChange.before}</span>
+                      <span className="share-row-meta mono">now: {keyChange.after}</span>
+                    </div>
+                    <button className="btn" onClick={() => void approve(claim.token, true)}>
+                      Trust the new key
+                    </button>
+                    <button className="btn btn-ghost" onClick={() => setKeyChange(null)}>
+                      Not now
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

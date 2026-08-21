@@ -170,7 +170,9 @@ The web client persists the sync rows it receives, verbatim, in IndexedDB,
 one cache per account. The rows are already ciphertext plus the structure
 the server sees (ids, sizes, timestamps, tree shape), so the cache adds no
 additional key handling and stores nothing the server does not already hold;
-decryption still happens only in memory, with keys that live in the session.
+decryption still happens only in memory, with keys the session holds there
+(see [auth.md](auth.md) for how a tab survives a reload without writing a
+key to disk).
 On the next visit the library decrypts and renders from the cache first, at
 50,000 files in roughly a second, and a single delta request then reconciles
 whatever changed. Tombstones prune cached rows; a row is only ever replaced

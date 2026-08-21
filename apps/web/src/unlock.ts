@@ -4,6 +4,8 @@ import {
   secretBoxOpen,
   secretBoxSeal,
   toB64,
+  utf8Decode,
+  utf8Encode,
   type SecretBox,
 } from "@engramer/crypto";
 import { NATIVE_CANCELLED, nativeSecretDelete, nativeSecretGet, nativeSecretStore } from "./native";
@@ -29,7 +31,13 @@ export interface UnlockSession {
 
 export interface UnlockRecord {
   email: string;
-  token: string;
+  /** The bearer token, sealed under the master key so the stored record
+   * carries no usable credential of any kind. */
+  sealedToken?: SecretBox;
+  /** Records written before the token was sealed carried it here. Read
+   * once more so an enrolled device keeps working; rewritten sealed on
+   * the next sign-in. */
+  token?: string;
   publicKey: string;
   credentialId: string;
   salt: string;
@@ -55,7 +63,7 @@ export function wrapForUnlock(
   const wrapKey = deriveUnlockKey(prfSecret);
   return {
     email: session.email,
-    token: session.token,
+    sealedToken: sealToken(session.token, session.masterKey),
     publicKey: session.publicKey,
     credentialId,
     salt,
@@ -66,11 +74,21 @@ export function wrapForUnlock(
   };
 }
 
+function sealToken(token: string, masterKey: Uint8Array): SecretBox {
+  return secretBoxSeal(utf8Encode(token), masterKey);
+}
+
 export function openUnlockRecord(prfSecret: Uint8Array, record: UnlockRecord): UnlockSession {
   const masterKey = secretBoxOpen(record.wrappedMasterKey, deriveUnlockKey(prfSecret));
+  const token = record.sealedToken
+    ? utf8Decode(secretBoxOpen(record.sealedToken, masterKey))
+    : record.token;
+  if (!token) {
+    throw new Error("unlock record carries no session");
+  }
   return {
     email: record.email,
-    token: record.token,
+    token,
     masterKey,
     privateKey: secretBoxOpen(record.wrappedPrivateKey, masterKey),
     publicKey: record.publicKey,
@@ -108,11 +126,15 @@ export function clearUnlockRecord(): void {
   }
 }
 
-/** A fresh password login renews the 30-day window for the enrolled account. */
-export function updateUnlockToken(email: string, token: string): void {
+/** A fresh sign-in renews the 30-day window for the enrolled account. The
+ * token is sealed under the master key; a record that still carried it in
+ * the clear is rewritten without it. */
+export function updateUnlockToken(session: Pick<UnlockSession, "email" | "token" | "masterKey">): void {
   const record = loadUnlockRecord();
-  if (record && record.email === email) {
-    saveUnlockRecord({ ...record, token });
+  if (record && record.email === session.email) {
+    const renewed: UnlockRecord = { ...record, sealedToken: sealToken(session.token, session.masterKey) };
+    delete renewed.token;
+    saveUnlockRecord(renewed);
   }
 }
 

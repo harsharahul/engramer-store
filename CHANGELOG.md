@@ -5,6 +5,41 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Security
+- **Nothing on disk can open a vault by itself.** A tab's reload record
+  now holds its keys sealed under a random session key that the server
+  keeps for that one live session and returns only while the session
+  stands. What a browser writes to disk for a tab is ciphertext and a
+  token; signing out or locking deletes the session key. The device-unlock
+  record seals its token the same way, and a password change renews the
+  reload record instead of orphaning it.
+- **The media bridge serves video and audio to media elements only.** The
+  service worker that streams decrypted media no longer answers
+  navigations or other kinds of request under its path, hands over keys
+  only for video and audio, and marks every response it builds as
+  something that cannot act as a document on the vault's origin.
+- **Account key fingerprints and pinned contact keys.** Every account has a
+  fingerprint, shown in Profile and beside each claimant in the share
+  dialog, so two people can compare keys out of band. The first key
+  released to a person is pinned; a different key later stops the release,
+  shows both fingerprints, and asks for a decision. File-request links now
+  carry the owner's key, and the receiving page refuses to send when the
+  server names any other.
+- **The Rust crypto core refuses weak password-hashing parameters**, the
+  same OWASP floor the TypeScript core enforces.
+
+### Added
+- **Sign out everywhere.** One button in Profile ends every other device's
+  session at once; the current tab carries on with a fresh token.
+- **Lock after inactivity.** An optional setting (off by default, synced
+  with the account) locks the vault after a quiet spell; device unlock or
+  the password reopens it. The unlock gate now also appears after a manual
+  lock wherever a device holds a passkey-wrapped session.
+- **`ENGRAMER_HSTS=on`** sends `Strict-Transport-Security` on HTTPS
+  responses, for deployments whose proxy does not set it.
+- **`ENGRAM_PASSWORD_FILE`** lets the local S3 bridge read its password
+  from a file instead of the process environment.
+
 ### Fixed
 - **Opening a photo no longer jumps when the full image arrives.** The
   thumbnail standing in now declares the original photo's dimensions

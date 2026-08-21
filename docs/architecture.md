@@ -132,14 +132,15 @@ React 19 + Vite. All cryptography runs in the browser through the shared crypto 
 - Uploads: read, chunk-encrypt, and stream per file; generate and encrypt thumbnails for images and video frames; extract text content from small text files into the encrypted metadata for search.
 - Previews decrypt to an in-memory blob URL: images, video, audio, PDF, and text render natively without the plaintext ever touching the server.
 - Search runs entirely on the client over decrypted metadata: fuzzy file name match, type filters, and full-text hits from the extracted content index. This is the Ente principle applied to files: the intelligence lives with the user, the ciphertext lives with the server. Auto-categorization, tags, and the search grammar are described in [intelligence.md](intelligence.md).
-- Session state keeps decrypted keys in memory only. Reloading re-derives from the password or a session-cached wrapped key.
+- Session state keeps decrypted keys in memory. So that a reload does not cost the password, the tab stores its keys sealed under a random session key the server holds for that one live session ([auth.md](auth.md) describes the mechanism); signing out, locking, or revoking the session makes the stored record worthless.
 
 ## Trust model
 
 - The server is honest-but-curious at best, fully compromised at worst. In both cases it holds only ciphertext, wrapped keys, and traffic metadata (sizes, timestamps, tree shape, access patterns).
 - TLS protects the login key in transit; a network attacker who somehow obtained the login key still could not decrypt any content.
-- The client is the trust anchor. Anyone who controls the code served to the browser controls the crypto, which is the standard limitation of web-delivered E2EE; self-hosting puts that code under the operator's control.
-- Local caches on the client device hold decrypted metadata in memory for the session. Device security is the user's responsibility.
+- The client is the trust anchor. Anyone who controls the code served to the browser controls the crypto, which is the standard limitation of web-delivered E2EE; self-hosting puts that code under the operator's control. The native shells load the client from the deployment too, so they inherit this rather than escape it.
+- The server names the public key when one account shares with another or a stranger answers a file request. Key fingerprints, pinned contact keys, and the owner key carried in request links make a substitution visible; [sharing.md](sharing.md) has the details.
+- Local caches on the client device hold decrypted metadata in memory for the session; what persists (the IndexedDB library cache, the device-unlock record, the tab's reload record) is ciphertext. Device security is the user's responsibility.
 
 ## Testing
 

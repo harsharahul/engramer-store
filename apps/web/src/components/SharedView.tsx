@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { decryptJson, toB64, utf8Encode } from "@engramer/crypto";
+import { decryptJson } from "@engramer/crypto";
 import { api, type FileRequestInfo, type ShareInfo, type SharedPersonInfo } from "../api";
+import { buildRequestFragment } from "../requestlink";
 import { useStore } from "../store";
 import { formatDate } from "../format";
 import { describeShare, shareLink, ShareDialog } from "./ShareDialog";
@@ -20,8 +21,11 @@ interface RequestEntry extends FileRequestInfo {
 
 function requestLink(entry: RequestEntry): string {
   // The label rides in the fragment so the upload page can greet the sender
-  // without the server ever storing it in the clear.
-  return `${location.origin}/r/${entry.token}#${toB64(utf8Encode(entry.label))}`;
+  // without the server ever storing it in the clear, and the owner's public
+  // key rides with it so the sender can check the key the server shows
+  // against the one this link was minted with.
+  const publicKey = useStore.getState().session?.publicKey ?? "";
+  return `${location.origin}/r/${entry.token}#${buildRequestFragment(entry.label, publicKey)}`;
 }
 
 /** Everything this account is sharing: outgoing links and incoming requests. */

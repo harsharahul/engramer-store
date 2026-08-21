@@ -143,16 +143,23 @@ export async function withRetry<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers);
+interface ApiInit extends RequestInit {
+  /** A 401 here is an answer, not a verdict on the session: the caller
+   * decides what it means instead of the global sign-out handler. */
+  quiet?: boolean;
+}
+
+async function request<T>(path: string, init: ApiInit = {}): Promise<T> {
+  const { quiet, ...fetchInit } = init;
+  const headers = new Headers(fetchInit.headers);
   if (authToken) {
     headers.set("authorization", `Bearer ${authToken}`);
   }
-  if (init.body && typeof init.body === "string") {
+  if (fetchInit.body && typeof fetchInit.body === "string") {
     headers.set("content-type", "application/json");
   }
-  const response = await fetch(path, { ...init, headers });
-  if (response.status === 401 && authToken) {
+  const response = await fetch(path, { ...fetchInit, headers });
+  if (response.status === 401 && authToken && !quiet) {
     onUnauthorized?.();
   }
   if (!response.ok) {
@@ -240,6 +247,18 @@ export const api = {
     }),
 
   keyAttributes: () => request<{ keyAttributes: KeyAttributes }>("/api/user/key-attributes"),
+
+  // A random key the server keeps for this live session; the tab seals its
+  // keys under it so a reload costs no password and the disk holds no key.
+  createSessionKey: () =>
+    request<{ id: string; key: string }>("/api/auth/session-key", { method: "POST" }),
+  getSessionKey: (id: string) =>
+    request<{ key: string }>(`/api/auth/session-key/${encodeURIComponent(id)}`, { quiet: true }),
+  deleteSessionKey: (id: string) =>
+    request<void>(`/api/auth/session-key/${encodeURIComponent(id)}`, { method: "DELETE", quiet: true }),
+  /** Signs every device out; the caller gets a fresh token and stays in. */
+  revokeAllSessions: () =>
+    request<{ token: string }>("/api/auth/sessions/revoke-all", { method: "POST" }),
 
   changePassword: (
     currentLoginKey: string,

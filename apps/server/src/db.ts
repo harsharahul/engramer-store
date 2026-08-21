@@ -341,6 +341,14 @@ export const COMMON_SCHEMA = `
     );
     CREATE INDEX IF NOT EXISTS collab_invites_owner ON collab_invites(owner_id, granted, revoked);
     CREATE INDEX IF NOT EXISTS collab_invites_file ON collab_invites(file_id);
+    CREATE TABLE IF NOT EXISTS session_keys (
+      id TEXT PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id),
+      key TEXT NOT NULL,
+      token_epoch BIGINT NOT NULL DEFAULT 0,
+      created_at BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS session_keys_user ON session_keys(user_id);
     CREATE TABLE IF NOT EXISTS channel_messages (
       file_id TEXT NOT NULL,
       seq BIGINT NOT NULL,

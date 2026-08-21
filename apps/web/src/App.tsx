@@ -17,7 +17,14 @@ export function App() {
   const startSession = useStore((s) => s.startSession);
   const logout = useStore((s) => s.logout);
   const [booting, setBooting] = useState(true);
-  const [locked, setLocked] = useState(false);
+  // Chosen on the unlock gate: the password form instead of the passkey.
+  // Forgotten once a session starts, so the next lock offers the gate again.
+  const [usePassword, setUsePassword] = useState(false);
+  useEffect(() => {
+    if (session) {
+      setUsePassword(false);
+    }
+  }, [session]);
 
   useEffect(() => {
     // Why this page is here at all. "It went back to the start" reads the
@@ -31,11 +38,9 @@ export function App() {
       .then(async (restored) => {
         if (restored) {
           await startSession(restored);
-        } else {
-          // No live tab session, but this device may hold a passkey-wrapped
-          // one: offer Touch ID before falling back to the password form.
-          setLocked(hasDeviceUnlock());
         }
+        // Otherwise the render below offers the passkey gate where this
+        // device holds a wrapped session, and the password form elsewhere.
       })
       .finally(() => setBooting(false));
 
@@ -65,10 +70,10 @@ export function App() {
             </div>
           ) : session ? (
             <Vault />
-          ) : locked && hasDeviceUnlock() ? (
-            // Re-checked each render: signing out purges the record, and the
-            // gate must fall away with it.
-            <UnlockGate onUsePassword={() => setLocked(false)} />
+          ) : hasDeviceUnlock() && !usePassword ? (
+            // Re-checked each render: a lock keeps the record and gets the
+            // gate, a sign-out purges it and the gate falls away with it.
+            <UnlockGate onUsePassword={() => setUsePassword(true)} />
           ) : (
             <Auth />
           )

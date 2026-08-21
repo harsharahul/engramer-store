@@ -62,6 +62,9 @@ export interface ServerConfig {
   macAppDmgUrl: string | null;
   /** Extra browser origins allowed to call the API; empty means same-origin only. */
   corsOrigins: string[];
+  /** Send Strict-Transport-Security on HTTPS responses. Off by default,
+   * because the terminating proxy usually owns this header. */
+  hsts: boolean;
   /**
    * Who is allowed to speak for the client address. Either a hop count
    * ("2") or, preferably, a comma-separated list of proxy addresses and
@@ -125,6 +128,7 @@ export interface ConfigOverrides {
   port?: number;
   webDistDir?: string | null;
   macAppDmgUrl?: string | null;
+  hsts?: boolean;
 }
 
 export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
@@ -151,6 +155,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
     ),
     collabRelay:
       overrides.collabRelay ?? (process.env.ENGRAMER_COLLAB_RELAY ?? "on") !== "off",
+    hsts: overrides.hsts ?? ["on", "1", "true"].includes((process.env.ENGRAMER_HSTS ?? "off").toLowerCase()),
     // A ceiling smaller than one checkpoint crossing's worth of typing
     // puts a busy room into a trim-reload spiral no client can follow:
     // stress runs showed refused frames dying with the remounts they

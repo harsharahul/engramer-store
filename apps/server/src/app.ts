@@ -303,6 +303,11 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     reply.header("permissions-policy", "camera=(), microphone=(), geolocation=()");
     reply.header("cross-origin-opener-policy", "same-origin");
     reply.header("cross-origin-resource-policy", "same-origin");
+    // Only on a response that really travelled over TLS: sent on plain
+    // HTTP the header is ignored by browsers and misleading in a log.
+    if (config.hsts && request.protocol === "https") {
+      reply.header("strict-transport-security", "max-age=31536000; includeSubDomains");
+    }
   });
 
   app.setErrorHandler((error: unknown, _request, reply) => {

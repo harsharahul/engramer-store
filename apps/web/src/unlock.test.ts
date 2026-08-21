@@ -77,12 +77,27 @@ describe("unlock record crypto", () => {
     expect(() => openUnlockRecord(prf, corrupted)).toThrow();
   });
 
-  it("never stores plaintext key material in the record", () => {
+  it("never stores plaintext key material or the session token in the record", () => {
     const session = fakeSession();
     const record = wrapForUnlock(generateKey(), session, "cred", "salt");
     const serialized = JSON.stringify(record);
     expect(serialized).not.toContain(Buffer.from(session.masterKey).toString("base64"));
     expect(serialized).not.toContain(Buffer.from(session.privateKey).toString("base64"));
+    expect(serialized).not.toContain(session.token);
+  });
+
+  it("still opens a record written before the token was sealed", () => {
+    const prf = generateKey();
+    const session = fakeSession();
+    const { sealedToken: _sealed, ...legacy } = wrapForUnlock(prf, session, "cred", "salt");
+    const opened = openUnlockRecord(prf, { ...legacy, token: "legacy-token" });
+    expect(opened.token).toBe("legacy-token");
+  });
+
+  it("refuses a record that carries no session at all", () => {
+    const prf = generateKey();
+    const { sealedToken: _sealed, ...bare } = wrapForUnlock(prf, fakeSession(), "cred", "salt");
+    expect(() => openUnlockRecord(prf, bare)).toThrow();
   });
 });
 
@@ -98,13 +113,26 @@ describe("unlock record storage", () => {
     expect(loadUnlockRecord()).toBeNull();
   });
 
-  it("refreshes the stored token for the matching account only", () => {
-    const record = wrapForUnlock(generateKey(), fakeSession(), "cred", "salt");
-    saveUnlockRecord(record);
-    updateUnlockToken("someone-else@example.com", "other-token");
-    expect(loadUnlockRecord()?.token).toBe("jwt-token-1");
-    updateUnlockToken("unlock@example.com", "jwt-token-2");
-    expect(loadUnlockRecord()?.token).toBe("jwt-token-2");
+  it("refreshes the sealed token for the matching account only", () => {
+    const prf = generateKey();
+    const session = fakeSession();
+    saveUnlockRecord(wrapForUnlock(prf, session, "cred", "salt"));
+    updateUnlockToken({ ...session, email: "someone-else@example.com", token: "other-token" });
+    expect(openUnlockRecord(prf, loadUnlockRecord()!).token).toBe("jwt-token-1");
+    updateUnlockToken({ ...session, token: "jwt-token-2" });
+    expect(openUnlockRecord(prf, loadUnlockRecord()!).token).toBe("jwt-token-2");
+    expect(JSON.stringify(loadUnlockRecord())).not.toContain("jwt-token-2");
+  });
+
+  it("seals the token into a record that still carried it in the clear", () => {
+    const prf = generateKey();
+    const session = fakeSession();
+    const { sealedToken: _sealed, ...legacy } = wrapForUnlock(prf, session, "cred", "salt");
+    saveUnlockRecord({ ...legacy, token: "legacy-token" });
+    updateUnlockToken({ ...session, token: "jwt-token-3" });
+    const stored = loadUnlockRecord()!;
+    expect(stored.token).toBeUndefined();
+    expect(openUnlockRecord(prf, stored).token).toBe("jwt-token-3");
   });
 
   it("tracks the one-time prompt decline flag", () => {

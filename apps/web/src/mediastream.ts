@@ -1,6 +1,7 @@
 import { useStore } from "./store";
 import { diag } from "./diag";
 import { nativeMediaRegister, nativeMediaUrl, nativeShell } from "./native";
+import { isStreamableMime } from "./mediapolicy";
 
 /**
  * Page side of the media bridge: the service worker serves decrypted
@@ -30,6 +31,12 @@ function postKey(fileId: string): void {
   const token = state.session?.token;
   const controller = navigator.serviceWorker?.controller;
   if (!file || !token || !controller) {
+    return;
+  }
+  // The worker asks for keys by file id alone, and the library holds files
+  // other people wrote. Only a file that is actually video or audio gets
+  // its key handed across; the worker checks again on its side.
+  if (!isStreamableMime(file.mime)) {
     return;
   }
   controller.postMessage({

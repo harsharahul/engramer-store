@@ -40,8 +40,10 @@ import {
 } from "../backfill";
 import { CLIP_MODEL_VERSION } from "../intel/semantic";
 import { SweepMemory, type SweepKind } from "../sweepmemory";
-import { api, setAuthToken } from "../api";
+import { publicKeyFingerprint } from "@engramer/crypto";
+import { api } from "../api";
 import { changePassword } from "../changepassword";
+import { IDLE_LOCK_CHOICES, idleLockMinutes, setIdleLockMinutes } from "../idlelock";
 import { revealRecoveryKey, rotateRecoveryKey } from "../recoverykey";
 import { RecoveryKeyModal } from "./RecoveryKeyModal";
 import { formatBytes } from "../format";
@@ -523,6 +525,27 @@ export function ProfileView(props: {
     }
   };
 
+  const [idleMinutes, setIdleMinutes] = useState(() => idleLockMinutes());
+  useEffect(() => {
+    // Another device's choice arrives through the synced settings.
+    const refresh = () => setIdleMinutes(idleLockMinutes());
+    settingsEvents.addEventListener(SETTINGS_APPLIED_EVENT, refresh);
+    return () => settingsEvents.removeEventListener(SETTINGS_APPLIED_EVENT, refresh);
+  }, []);
+
+  const [signingOutEverywhere, setSigningOutEverywhere] = useState(false);
+  const signOutEverywhere = async () => {
+    setSigningOutEverywhere(true);
+    try {
+      await store.signOutEverywhere();
+      props.onToast("Every other device has been signed out. This one stays in.");
+    } catch {
+      props.onToast("Could not reach the server to sign other devices out. Try again.");
+    } finally {
+      setSigningOutEverywhere(false);
+    }
+  };
+
   const submitPasswordChange = async () => {
     if (pwNext.length < 10) {
       setPwError("Use at least 10 characters; this password protects your keys.");
@@ -535,7 +558,9 @@ export function ProfileView(props: {
     setPwError(null);
     setPwBusy(true);
     try {
-      await changePassword(pwCurrent, pwNext, { api, setAuthToken });
+      // The renewed token goes everywhere a sign-in would put it, so this
+      // tab's reload record and its unlock record survive the epoch bump.
+      await changePassword(pwCurrent, pwNext, { api, setAuthToken: store.adoptToken });
       setChangingPassword(false);
       setPwCurrent("");
       setPwNext("");
@@ -582,6 +607,15 @@ export function ProfileView(props: {
             onClick={props.onSignOut}
           >
             Sign out
+          </button>
+          <button
+            className="btn"
+            title="Every other device and browser is signed out now; this one stays in"
+            disabled={signingOutEverywhere}
+            onClick={() => void signOutEverywhere()}
+          >
+            {signingOutEverywhere ? <span className="spinner" /> : null}
+            Sign out everywhere
           </button>
         </div>
       </section>
@@ -717,6 +751,43 @@ export function ProfileView(props: {
             </button>
           ) : null}
         </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Lock after inactivity</b>
+            <div className="profile-row-sub">
+              A quiet spell locks the vault the way the Lock button does; device unlock or the
+              password reopens it. The choice follows your account to every device.
+            </div>
+          </div>
+          <select
+            aria-label="Lock after inactivity"
+            value={idleMinutes}
+            onChange={(e) => {
+              const minutes = Number(e.target.value);
+              setIdleLockMinutes(minutes);
+              setIdleMinutes(minutes);
+            }}
+          >
+            {IDLE_LOCK_CHOICES.map((choice) => (
+              <option key={choice.minutes} value={choice.minutes}>
+                {choice.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        {store.session && (
+          <div className="profile-row">
+            <div className="profile-row-main">
+              <b>Your key fingerprint</b>
+              <div className="profile-row-sub">
+                When someone releases a document to you, this is shown beside your address. Read it
+                to them over a call or in person: if it matches what they see, the key the server
+                gave them is yours.
+              </div>
+              <div className="profile-row-sub mono">{publicKeyFingerprint(store.session.publicKey)}</div>
+            </div>
+          </div>
+        )}
         <div className="profile-row">
           <div className="profile-row-main">
             <b>Recovery key</b>

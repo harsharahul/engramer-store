@@ -4,14 +4,19 @@ import {
   deriveLoginKey,
   generateAccountKeys,
   secretBoxOpen,
-  toB64,
-  fromB64,
   type KeyAttributes,
 } from "@engramer/crypto";
 import { api, setAuthToken } from "./api";
+import { diag } from "./diag";
 import { clearHandoff, refreshHandoff } from "./handoff";
 import { clearNativeUnlock, deviceUnlock, updateUnlockToken } from "./unlock";
 import { nativeMediaClear } from "./native";
+import {
+  decodeSessionKey,
+  openTabSession,
+  parseStoredTabSession,
+  sealTabSession,
+} from "./tabsession";
 
 export interface Session {
   email: string;
@@ -22,10 +27,13 @@ export interface Session {
 }
 
 /**
- * The decrypted master key lives in sessionStorage so a page refresh does not
- * force a full Argon2id re-derivation. sessionStorage is tab-scoped and cleared
- * when the tab closes; anyone with access to a logged-in tab already has the
- * session. Locking (logout) wipes it.
+ * The decrypted keys live in this module's memory and nowhere else on the
+ * device. So that a reload does not cost the password, the tab also keeps
+ * a record in sessionStorage: the keys sealed under a random session key
+ * the server holds for this one live session (see tabsession.ts). A
+ * reload asks the server for that key; signing out or locking deletes it,
+ * and "sign out everywhere" deletes every device's. What a browser may
+ * write to disk for this tab is therefore ciphertext, never a key.
  */
 const SESSION_KEY = "engramer-session";
 
@@ -109,55 +117,69 @@ export function activateSession(session: Session): void {
 function activate(session: Session): void {
   setAuthToken(session.token);
   // A fresh login renews the device-unlock record's 30-day token window.
-  updateUnlockToken(session.email, session.token);
+  updateUnlockToken(session);
   // And the extension handoff record's, where this device opted in.
   refreshHandoff(session);
-  sessionStorage.setItem(
-    SESSION_KEY,
-    JSON.stringify({
-      email: session.email,
-      token: session.token,
-      masterKey: toB64(session.masterKey),
-      privateKey: toB64(session.privateKey),
-      publicKey: session.publicKey,
-    }),
-  );
+  void persistTabSession(session);
+}
+
+/**
+ * Writes the tab's reload record: a fresh server-held session key seals
+ * the keys, and only the sealed form is stored. Best effort: offline, or
+ * against a server without the route, the tab simply will not survive a
+ * reload and the unlock gate or the password takes over.
+ */
+async function persistTabSession(session: Session): Promise<void> {
+  // Whatever record a previous activation left is superseded; its key
+  // is released so it cannot be presented again.
+  releaseStoredSessionKey();
+  try {
+    const { id, key } = await api.createSessionKey();
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(sealTabSession(session, id, decodeSessionKey(key))));
+  } catch (err) {
+    diag("session", `reload record not written: ${err instanceof Error ? err.message : "unknown"}`);
+  }
+}
+
+/** Deletes this tab's server-held session key, if a record names one. */
+function releaseStoredSessionKey(): void {
+  const stored = parseStoredTabSession(sessionStorage.getItem(SESSION_KEY));
+  sessionStorage.removeItem(SESSION_KEY);
+  if (stored) {
+    void api.deleteSessionKey(stored.skid).catch(() => {});
+  }
 }
 
 export async function restoreSession(): Promise<Session | null> {
-  const raw = sessionStorage.getItem(SESSION_KEY);
-  if (!raw) {
+  const stored = parseStoredTabSession(sessionStorage.getItem(SESSION_KEY));
+  if (!stored) {
+    // Nothing usable here, including a record from before keys were
+    // sealed: that format is discarded rather than honored.
+    sessionStorage.removeItem(SESSION_KEY);
     return null;
   }
   await ready();
   try {
-    const stored = JSON.parse(raw) as {
-      email: string;
-      token: string;
-      masterKey: string;
-      privateKey: string;
-      publicKey: string;
-    };
-    const session: Session = {
-      email: stored.email,
-      token: stored.token,
-      masterKey: fromB64(stored.masterKey),
-      privateKey: fromB64(stored.privateKey),
-      publicKey: stored.publicKey,
-    };
-    setAuthToken(session.token);
-    return session;
-  } catch {
+    // The record's token fetches the session key that opens the record;
+    // the server answers only while that session still stands.
+    setAuthToken(stored.token);
+    const { key } = await api.getSessionKey(stored.skid);
+    return openTabSession(stored, decodeSessionKey(key));
+  } catch (err) {
+    // Revoked, expired, signed out elsewhere, or tampered: the record is
+    // worthless and the unlock gate or the password form takes over.
+    diag("session", `reload record not honored: ${err instanceof Error ? err.message : "unknown"}`);
     sessionStorage.removeItem(SESSION_KEY);
+    setAuthToken(null);
     return null;
   }
 }
 
 export function clearSession(email?: string): void {
-  sessionStorage.removeItem(SESSION_KEY);
-  // Signing out is the revocation gesture: the wrapped session must not
-  // outlive it, in this browser, the shell's Keychain, or the extension
-  // handoff item.
+  // Signing out is the revocation gesture: the tab's reload record, its
+  // server-held key, the shell's Keychain secret, and the extension
+  // handoff item all go.
+  releaseStoredSessionKey();
   clearNativeUnlock();
   if (email) {
     clearHandoff(email);
@@ -175,7 +197,7 @@ export function clearSession(email?: string): void {
  * full wipe.
  */
 export function suspendSession(): void {
-  sessionStorage.removeItem(SESSION_KEY);
+  releaseStoredSessionKey();
   void nativeMediaClear();
   setAuthToken(null);
 }
