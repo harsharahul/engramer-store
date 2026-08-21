@@ -33,7 +33,7 @@ import { SaveConflictError, copyName } from "./conflict";
 import { uploadLanes, withAnalysisSlot } from "./analysisslot";
 import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
-import { clearSession, suspendSession, type Session } from "./session";
+import { activateSession, clearSession, suspendSession, type Session } from "./session";
 import { autoReleaseMatches, forgetAutoRelease } from "./autorelease";
 import { holdTransferLock, releaseTransferLock } from "./wakelock";
 import {
@@ -290,6 +290,11 @@ interface StoreState {
   logout: () => void;
   /** Locks the vault but keeps device-unlock enrolled; Touch ID reopens it. */
   lockVault: () => void;
+  /** Signs every other device out; this tab carries on with a fresh token. */
+  signOutEverywhere: () => Promise<void>;
+  /** Installs a renewed token (after a password change) everywhere a
+   * sign-in would, so this tab's reload record and unlock record follow. */
+  adoptToken: (token: string) => void;
   refresh: () => Promise<void>;
   resyncLibrary: () => Promise<void>;
   refreshUsage: () => Promise<void>;
@@ -958,6 +963,25 @@ export const useStore = create<StoreState>((set, get) => {
       } catch {
         // refresh() already recorded syncError; nothing else to do here.
       }
+    },
+
+    signOutEverywhere: async () => {
+      const session = get().session;
+      if (!session) {
+        return;
+      }
+      const { token } = await api.revokeAllSessions();
+      get().adoptToken(token);
+    },
+
+    adoptToken: (token) => {
+      const session = get().session;
+      if (!session) {
+        return;
+      }
+      const next = { ...session, token };
+      activateSession(next);
+      set({ session: next });
     },
 
     logout: () => {

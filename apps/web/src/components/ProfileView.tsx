@@ -523,6 +523,19 @@ export function ProfileView(props: {
     }
   };
 
+  const [signingOutEverywhere, setSigningOutEverywhere] = useState(false);
+  const signOutEverywhere = async () => {
+    setSigningOutEverywhere(true);
+    try {
+      await store.signOutEverywhere();
+      props.onToast("Every other device has been signed out. This one stays in.");
+    } catch {
+      props.onToast("Could not reach the server to sign other devices out. Try again.");
+    } finally {
+      setSigningOutEverywhere(false);
+    }
+  };
+
   const submitPasswordChange = async () => {
     if (pwNext.length < 10) {
       setPwError("Use at least 10 characters; this password protects your keys.");
@@ -535,7 +548,9 @@ export function ProfileView(props: {
     setPwError(null);
     setPwBusy(true);
     try {
-      await changePassword(pwCurrent, pwNext, { api, setAuthToken });
+      // The renewed token goes everywhere a sign-in would put it, so this
+      // tab's reload record and its unlock record survive the epoch bump.
+      await changePassword(pwCurrent, pwNext, { api, setAuthToken: store.adoptToken });
       setChangingPassword(false);
       setPwCurrent("");
       setPwNext("");
@@ -582,6 +597,15 @@ export function ProfileView(props: {
             onClick={props.onSignOut}
           >
             Sign out
+          </button>
+          <button
+            className="btn"
+            title="Every other device and browser is signed out now; this one stays in"
+            disabled={signingOutEverywhere}
+            onClick={() => void signOutEverywhere()}
+          >
+            {signingOutEverywhere ? <span className="spinner" /> : null}
+            Sign out everywhere
           </button>
         </div>
       </section>

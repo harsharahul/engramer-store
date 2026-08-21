@@ -157,6 +157,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       await t.run("DELETE FROM files WHERE user_id = ?", user.id);
       await t.run("DELETE FROM folders WHERE user_id = ?", user.id);
       await t.run("DELETE FROM invites WHERE created_by = ?", user.id);
+      await t.run("DELETE FROM session_keys WHERE user_id = ?", user.id);
       await t.run("DELETE FROM users WHERE id = ?", user.id);
     });
     // Ciphertext cleanup is best-effort; a leftover blob is unreferenced

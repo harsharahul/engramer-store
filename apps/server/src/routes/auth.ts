@@ -557,6 +557,82 @@ export function registerAuthRoutes(app: FastifyInstance): void {
     return sessionResponse(await getUser(user.id));
   });
 
+  // ----- session keys (what lets a tab survive a reload without the password) -----
+
+  /**
+   * A tab keeps its keys only in memory. To survive a reload it stores
+   * them sealed under a random session key that lives HERE, handed out
+   * only to the live session that minted it and only while that session's
+   * token epoch stands. What sits on the device is therefore ciphertext
+   * plus a token; signing out deletes the key, and revoking every session
+   * deletes them all. The server never sees what the key seals.
+   */
+  const SESSION_KEY_TTL_MS = 30 * 24 * 60 * 60_000;
+
+  app.post("/api/auth/session-key", auth, async (request, reply) => {
+    const uid = request.user.uid;
+    const id = randomBytes(16).toString("base64url");
+    const key = randomBytes(32).toString("base64url");
+    // Keys outlive the tokens that could fetch them by nothing: anything
+    // older than a token's lifetime is unreachable and goes.
+    await app.db.run(
+      "DELETE FROM session_keys WHERE user_id = ? AND created_at < ?",
+      uid,
+      Date.now() - SESSION_KEY_TTL_MS,
+    );
+    await app.db.run(
+      "INSERT INTO session_keys (id, user_id, key, token_epoch, created_at) VALUES (?, ?, ?, ?, ?)",
+      id,
+      uid,
+      key,
+      request.user.ep ?? 0,
+      Date.now(),
+    );
+    return reply.code(201).send({ id, key });
+  });
+
+  app.get("/api/auth/session-key/:id", auth, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const row = await app.db.get<{ key: string; token_epoch: number }>(
+      "SELECT key, token_epoch FROM session_keys WHERE id = ? AND user_id = ?",
+      id,
+      request.user.uid,
+    );
+    // A key minted under an earlier epoch belongs to a session a credential
+    // change or a revoke-all already ended; it is not served again.
+    if (!row || Number(row.token_epoch) !== (request.user.ep ?? 0)) {
+      return reply.code(404).send({ error: "session key not found" });
+    }
+    return { key: row.key };
+  });
+
+  app.delete("/api/auth/session-key/:id", auth, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    await app.db.run(
+      "DELETE FROM session_keys WHERE id = ? AND user_id = ?",
+      id,
+      request.user.uid,
+    );
+    return reply.code(204).send();
+  });
+
+  /**
+   * Signs every device out: the token epoch advances, so every token minted
+   * before this moment is refused, and every stored session key is gone.
+   * The caller receives a fresh token so its own tab carries on.
+   */
+  app.post("/api/auth/sessions/revoke-all", auth, async (request, reply) => {
+    const uid = request.user.uid;
+    await app.db.tx(async (t) => {
+      await t.run("UPDATE users SET token_epoch = token_epoch + 1 WHERE id = ?", uid);
+      await t.run("DELETE FROM session_keys WHERE user_id = ?", uid);
+    });
+    const user = await getUser(uid);
+    return reply.code(200).send({
+      token: app.jwt.sign({ uid: user.id, ep: user.token_epoch ?? 0 }),
+    });
+  });
+
   /**
    * Rotates the recovery key from a signed-in session. The current
    * password is proven, then only the two recovery wraps are re-sealed;
