@@ -1,6 +1,6 @@
 [package]
 name = "engram-store-desktop"
-version = "0.52.0"
+version = "0.53.0"
 description = "Engram Store desktop app"
 authors = ["Harsha Rahul Boggaram"]
 license = "AGPL-3.0-only"
