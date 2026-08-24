@@ -16,6 +16,12 @@ import type { Writable } from "node:stream";
  */
 const FLUSH_MS = 150;
 
+/** Streams one account may hold at once; a device needs exactly one.
+ * The newest connection wins and the oldest is ended, the same stance
+ * the session-key cap takes, so a looping reconnect can never pile up
+ * server-side state. */
+const STREAMS_PER_USER = 16;
+
 export class SeqEvents {
   private readonly sinks = new Map<number, Set<Writable>>();
   private readonly pending = new Map<number, number>();
@@ -39,6 +45,14 @@ export class SeqEvents {
     if (!set) {
       set = new Set();
       this.sinks.set(userId, set);
+    }
+    while (set.size >= STREAMS_PER_USER) {
+      const oldest = set.values().next().value;
+      if (!oldest) {
+        break;
+      }
+      set.delete(oldest);
+      oldest.end();
     }
     set.add(sink);
     return () => {

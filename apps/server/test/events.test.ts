@@ -108,8 +108,29 @@ class Feed {
     throw new Error("no event arrived");
   }
 
-  /** Asserts silence: no event within the window. */
+  /** Reads until a sequence past the mark arrives. Stale re-announcements
+   * are allowed by design (they cost one empty pull), so assertions wait
+   * for the value, never the position. */
+  async nextAbove(mark: number, timeoutMs = 3000): Promise<{ seq: number }> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const event = this.events.shift();
+      if (event && event.seq > mark) {
+        return event;
+      }
+      if (!event) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+    throw new Error(`no event above ${mark} arrived`);
+  }
+
+  /** Asserts silence: nothing NEW within the window. A coalescing flush
+   * armed before the stream opened may still land a stale poke, so the
+   * queue first settles past the flush interval and is purged. */
   async none(windowMs = 400): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    this.events.length = 0;
     await new Promise((resolve) => setTimeout(resolve, windowMs));
     expect(this.events).toHaveLength(0);
   }
@@ -249,7 +270,7 @@ describe("the change feed", () => {
       },
     });
     expect(created.statusCode).toBe(201);
-    const poked = await feed.next();
+    const poked = await feed.nextAbove(before);
     expect(poked.seq).toBeGreaterThan(before);
     feed.close();
   });
@@ -264,7 +285,7 @@ describe("the change feed", () => {
       payload: Buffer.from(encryptBytes(utf8Encode("owner edit"), fileKey)),
     });
     expect(replaced.statusCode).toBe(200);
-    const poked = await memberFeed.next();
+    const poked = await memberFeed.nextAbove(before);
     expect(poked.seq).toBeGreaterThan(before);
     memberFeed.close();
   });
@@ -281,6 +302,21 @@ describe("the change feed", () => {
     await feed.next();
     await feed.heartbeat();
     feed.close();
+  });
+
+  it("caps streams per account, ending the oldest", async () => {
+    const account = await register("capped@example.com", "juniper marble spool");
+    const first = await new Feed().open(base, account.token);
+    await first.next();
+    const rest: Feed[] = [];
+    for (let i = 0; i < 16; i++) {
+      rest.push(await new Feed().open(base, account.token));
+    }
+    // The 17th connection displaced the very first stream.
+    await first.closedByServer();
+    for (const feed of rest) {
+      feed.close();
+    }
   });
 
   it("ends the stream when the session is revoked", async () => {

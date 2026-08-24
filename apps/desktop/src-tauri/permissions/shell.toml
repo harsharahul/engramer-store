@@ -57,6 +57,7 @@ commands.allow = [
     "handoff_probe",
     "handoff_clear",
     "files_provider_available",
+    "files_provider_feed_state",
     "files_provider_enable",
     "files_provider_signal",
     "outbox_drain",
