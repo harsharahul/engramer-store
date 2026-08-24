@@ -48,6 +48,11 @@ export interface ServerConfig {
   maxVersions: number;
   /** Whether the live-collaboration relay accepts connections. */
   collabRelay: boolean;
+  /** Whether the change feed (server-sent events) accepts connections. */
+  events: boolean;
+  /** Change-feed heartbeat cadence; also how often a held stream
+   * re-checks that its session is still valid. */
+  eventsHeartbeatMs: number;
   /** Ceiling on a document channel's stored frames, in bytes. */
   channelMaxBytes: number;
   /** Directory of a built web client to serve, if any. */
@@ -124,6 +129,8 @@ export interface ConfigOverrides {
   maxBlobBytes?: number;
   maxVersions?: number;
   collabRelay?: boolean;
+  events?: boolean;
+  eventsHeartbeatMs?: number;
   channelMaxBytes?: number;
   port?: number;
   webDistDir?: string | null;
@@ -155,6 +162,10 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
     ),
     collabRelay:
       overrides.collabRelay ?? (process.env.ENGRAMER_COLLAB_RELAY ?? "on") !== "off",
+    events: overrides.events ?? (process.env.ENGRAMER_EVENTS ?? "on") !== "off",
+    eventsHeartbeatMs:
+      overrides.eventsHeartbeatMs ??
+      Number(process.env.ENGRAMER_EVENTS_HEARTBEAT_MS ?? 25_000),
     hsts: overrides.hsts ?? ["on", "1", "true"].includes((process.env.ENGRAMER_HSTS ?? "off").toLowerCase()),
     // A ceiling smaller than one checkpoint crossing's worth of typing
     // puts a busy room into a trim-reload spiral no client can follow:

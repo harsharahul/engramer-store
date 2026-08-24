@@ -20,6 +20,7 @@ import {
  * parses them to numbers; every value we store this way is far below 2^53.
  */
 export class PostgresDb implements Db {
+  onSeq?: (userId: number, seq: number) => void;
   private readonly pool: pg.Pool;
 
   constructor(connectionString: string) {
@@ -87,7 +88,9 @@ export class PostgresDb implements Db {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const result = await fn(new PgClientDb(client));
+      const handle = new PgClientDb(client);
+      handle.onSeq = this.onSeq;
+      const result = await fn(handle);
       await client.query("COMMIT");
       return result;
     } catch (err) {
@@ -105,6 +108,8 @@ export class PostgresDb implements Db {
 
 /** The transaction handle: same facade, pinned to one client connection. */
 class PgClientDb implements Db {
+  onSeq?: (userId: number, seq: number) => void;
+
   constructor(private readonly client: pg.PoolClient) {}
 
   async get<T = unknown>(sql: string, ...params: unknown[]): Promise<T | undefined> {

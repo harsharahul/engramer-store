@@ -807,6 +807,8 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       // Clients read this before ever dialing the relay, so a deployment
       // with the relay off degrades cleanly to turn-based editing.
       collab: { relay: app.config.collabRelay },
+      // Same courtesy for the change feed; without it clients poll.
+      events: app.config.events,
     };
   });
 }
