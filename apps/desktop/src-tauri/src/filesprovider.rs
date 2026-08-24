@@ -33,6 +33,20 @@ pub async fn files_provider_available() -> bool {
     cfg!(any(target_os = "macos", target_os = "ios"))
 }
 
+/// What the change-feed holder is doing right now, so the Profile page
+/// can show live updates as they actually are, not as assumed.
+#[tauri::command]
+pub async fn files_provider_feed_state() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        crate::pushsync::state().to_string()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "off".to_string()
+    }
+}
+
 #[tauri::command]
 pub async fn files_provider_enable(app: tauri::AppHandle, email: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]

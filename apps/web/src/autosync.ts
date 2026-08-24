@@ -1,5 +1,11 @@
 import { scheduleBackfill } from "./backfill";
-import { nativeFilesProviderSignal, nativeListen, nativeOutboxDrain } from "./native";
+import {
+  nativeFilesProviderFeedState,
+  nativeFilesProviderSignal,
+  nativeListen,
+  nativeOutboxDrain,
+  type FeedState,
+} from "./native";
 import { useStore } from "./store";
 
 /**
@@ -75,6 +81,17 @@ export function installAutoSync(): void {
       kick();
     }
   }, POLL_INTERVAL_MS);
-  // Desktop shell only; a no-op unsubscribe everywhere else.
+  // Desktop shell only; no-op unsubscribes everywhere else. The feed's
+  // state rides its own event so Profile shows the holder as it is;
+  // the query covers a window that loaded after the last transition.
   void nativeListen("vault-changed", () => kick(true));
+  void nativeListen<{ state: FeedState }>("vault-feed-state", (event) => {
+    useStore.setState({ liveFeed: event.state });
+  });
+  void nativeFilesProviderFeedState().then((state) => {
+    // A transition event that raced ahead of this answer is fresher.
+    if (useStore.getState().liveFeed === "off") {
+      useStore.setState({ liveFeed: state });
+    }
+  });
 }

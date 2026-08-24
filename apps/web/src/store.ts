@@ -285,6 +285,10 @@ interface StoreState {
   batchStop: (() => void) | null;
   /** Why automatic backup is holding, shown beside the knob that caused it. */
   backupHold: "wifi" | "shell-videos" | null;
+  /** The shell change-feed holder's reported state; "off" outside the
+   * desktop shell. Written only from the holder's own transitions, so
+   * what Profile shows is what the feed is doing. */
+  liveFeed: "off" | "connecting" | "live" | "unavailable";
   /** Search-index warm-up progress; null when idle or complete. */
   indexWarm: { done: number; total: number } | null;
 
@@ -942,6 +946,7 @@ export const useStore = create<StoreState>((set, get) => {
     batch: null,
     batchStop: null,
     backupHold: null,
+    liveFeed: "off",
     indexWarm: null,
 
     // A failed first sync must never strand the user on a spinner: the

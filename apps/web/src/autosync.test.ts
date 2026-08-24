@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 
 const rig = vi.hoisted(() => ({
   pushed: null as ((payload: unknown) => void) | null,
+  feedState: null as ((payload: unknown) => void) | null,
   refreshes: 0,
   signals: [] as string[],
 }));
@@ -11,9 +12,13 @@ vi.mock("./native", () => ({
   nativeFilesProviderSignal: async (email: string) => {
     rig.signals.push(email);
   },
+  nativeFilesProviderFeedState: async () => "off",
   nativeListen: async (event: string, handler: (payload: unknown) => void) => {
     if (event === "vault-changed") {
       rig.pushed = handler;
+    }
+    if (event === "vault-feed-state") {
+      rig.feedState = handler;
     }
     return () => {};
   },
@@ -29,13 +34,19 @@ vi.mock("./store", () => {
     synced: true,
     files: new Map(),
     folders: new Map(),
+    liveFeed: "off" as string,
     refresh: async () => {
       rig.refreshes += 1;
       // A changed map reference is autosync's "something arrived".
       state.files = new Map(state.files);
     },
   };
-  return { useStore: { getState: () => state } };
+  return {
+    useStore: {
+      getState: () => state,
+      setState: (patch: Record<string, unknown>) => Object.assign(state, patch),
+    },
+  };
 });
 
 import { installAutoSync } from "./autosync";
@@ -78,5 +89,14 @@ describe("autosync push", () => {
     await settled();
     expect(rig.refreshes).toBe(after + 1);
     expect(rig.signals).toContain("owner@example.com");
+  });
+
+  it("mirrors the feed holder's reported state into the store", async () => {
+    const { useStore } = await import("./store");
+    expect(rig.feedState).not.toBeNull();
+    rig.feedState?.({ state: "live" });
+    expect((useStore.getState() as { liveFeed: string }).liveFeed).toBe("live");
+    rig.feedState?.({ state: "unavailable" });
+    expect((useStore.getState() as { liveFeed: string }).liveFeed).toBe("unavailable");
   });
 });

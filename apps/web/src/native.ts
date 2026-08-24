@@ -200,6 +200,27 @@ export async function nativeFilesProviderDisable(email: string): Promise<void> {
   await invoke("files_provider_disable", { email }).catch(() => {});
 }
 
+export type FeedState = "off" | "connecting" | "live" | "unavailable";
+
+/** What the shell's change-feed holder is doing right now; "off"
+ * wherever no holder exists. Transitions arrive as "vault-feed-state"
+ * shell events; this is the answer for a window that just loaded. */
+export async function nativeFilesProviderFeedState(): Promise<FeedState> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return "off";
+  }
+  try {
+    const state = await invoke("files_provider_feed_state");
+    if (state === "connecting" || state === "live" || state === "unavailable") {
+      return state;
+    }
+  } catch {
+    // An older shell without the command has no holder either.
+  }
+  return "off";
+}
+
 // ----- share-sheet outbox (iOS; staged uploads the app can flush) -----
 
 /** What a drain pass did with the extension's staged uploads. */

@@ -12,12 +12,57 @@
 //! sync pull every client already runs.
 
 use std::io::{BufRead, BufReader};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 
 static ACTIVE: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
+
+/// What the holder is actually doing right now, kept queryable so a
+/// freshly loaded window can show the truth without waiting for the
+/// next transition. "live" covers a stream that is held OR cycling as
+/// a long-poll: either way pokes are arriving. The generation keeps a
+/// stopped thread that lingers in a blocked read from stamping state
+/// over its replacement.
+static CURRENT: Mutex<(u64, FeedState)> = Mutex::new((0, FeedState::Off));
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum FeedState {
+    Off,
+    Connecting,
+    Live,
+    Unavailable,
+}
+
+impl FeedState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FeedState::Off => "off",
+            FeedState::Connecting => "connecting",
+            FeedState::Live => "live",
+            FeedState::Unavailable => "unavailable",
+        }
+    }
+}
+
+/// The state as of this moment, for the query command.
+pub fn state() -> &'static str {
+    CURRENT.lock().unwrap().1.as_str()
+}
+
+/// Records a transition and tells the web layer only when it changed.
+/// A stale generation's report is dropped: the newest holder owns the
+/// display.
+fn set_state(app: &tauri::AppHandle, generation: u64, state: FeedState) {
+    let mut current = CURRENT.lock().unwrap();
+    if generation < current.0 || (generation == current.0 && current.1 == state) {
+        return;
+    }
+    *current = (generation, state);
+    let _ = app.emit("vault-feed-state", serde_json::json!({ "state": state.as_str() }));
+}
 
 /// Starts the holder if it is not already running. Called from the
 /// drive's enable and signal commands, which the web layer invokes on
@@ -30,10 +75,11 @@ pub fn ensure_running(app: &tauri::AppHandle) {
     }
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
+    let generation = GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
     let app = app.clone();
     let spawned = std::thread::Builder::new()
         .name("engram-pushsync".into())
-        .spawn(move || supervise(app, thread_stop));
+        .spawn(move || supervise(app, generation, thread_stop));
     if spawned.is_ok() {
         *active = Some(stop);
     }
@@ -65,7 +111,7 @@ enum Outcome {
     Offline,
 }
 
-fn supervise(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
+fn supervise(app: tauri::AppHandle, generation: u64, stop: Arc<AtomicBool>) {
     // One deadline covers connecting AND each body read: the blocking
     // client applies it per read, so a silent connection dies within
     // ~three missed server heartbeats and the loop reconnects.
@@ -77,36 +123,56 @@ fn supervise(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
     };
     let mut last_seen: u64 = 0;
     let mut failures: u32 = 0;
+    set_state(&app, generation, FeedState::Connecting);
     while !stop.load(Ordering::Relaxed) {
         let outcome = if !crate::network::currently_online() {
             Outcome::Offline
         } else if let Some(record) = read_record() {
+            let stream_app = app.clone();
+            let mut on_open = || set_state(&stream_app, generation, FeedState::Live);
             let mut on_seq = |seq: u64| {
                 // The drive first; an error here just means the domain
                 // is gone or busy, and the next poke tries again.
                 let _ = crate::filesprovider::signal_for(&record.email);
                 let _ = app.emit("vault-changed", serde_json::json!({ "seq": seq }));
             };
-            attempt(&client, &record, &stop, &mut last_seen, &mut on_seq)
+            attempt(
+                &client,
+                &record,
+                &stop,
+                &mut last_seen,
+                &mut on_open,
+                &mut on_seq,
+            )
         } else {
             Outcome::Failed
         };
         let delay = match outcome {
             Outcome::Served => {
+                // A stream that served and cycles is a working feed in
+                // long-poll clothing; the state stays live.
                 failures = 0;
                 5 + jitter(5)
             }
-            Outcome::Denied => 1800 + jitter(300),
+            Outcome::Denied => {
+                set_state(&app, generation, FeedState::Unavailable);
+                1800 + jitter(300)
+            }
             Outcome::Failed => {
+                set_state(&app, generation, FeedState::Connecting);
                 failures = failures.saturating_add(1);
                 (5u64 << failures.min(6)).min(300) + jitter(10)
             }
-            Outcome::Offline => 10,
+            Outcome::Offline => {
+                set_state(&app, generation, FeedState::Connecting);
+                10
+            }
         };
         if !wait(&stop, delay) {
-            return;
+            break;
         }
     }
+    set_state(&app, generation, FeedState::Off);
 }
 
 /// One connection: dial, read events, report each fresh sequence.
@@ -117,6 +183,7 @@ fn attempt(
     record: &Record,
     stop: &AtomicBool,
     last_seen: &mut u64,
+    on_open: &mut dyn FnMut(),
     on_seq: &mut dyn FnMut(u64),
 ) -> Outcome {
     let response = client
@@ -133,6 +200,7 @@ fn attempt(
         401 | 403 | 404 => return Outcome::Denied,
         _ => return Outcome::Failed,
     }
+    on_open();
     let mut served = false;
     for line in BufReader::new(response).lines() {
         if stop.load(Ordering::Relaxed) {
@@ -242,11 +310,18 @@ mod tests {
         );
         let (client, record, stop) = rig(origin);
         let mut last_seen = 0u64;
+        let mut opened = false;
         let mut seen = Vec::new();
-        let outcome = attempt(&client, &record, &stop, &mut last_seen, &mut |seq| {
-            seen.push(seq)
-        });
+        let outcome = attempt(
+            &client,
+            &record,
+            &stop,
+            &mut last_seen,
+            &mut || opened = true,
+            &mut |seq| seen.push(seq),
+        );
         assert!(matches!(outcome, Outcome::Served));
+        assert!(opened);
         assert_eq!(seen, vec![5, 9]);
         assert_eq!(last_seen, 9);
     }
@@ -259,9 +334,14 @@ mod tests {
         let (client, record, stop) = rig(origin);
         let mut last_seen = 10u64;
         let mut seen = Vec::new();
-        let outcome = attempt(&client, &record, &stop, &mut last_seen, &mut |seq| {
-            seen.push(seq)
-        });
+        let outcome = attempt(
+            &client,
+            &record,
+            &stop,
+            &mut last_seen,
+            &mut || {},
+            &mut |seq| seen.push(seq),
+        );
         assert!(matches!(outcome, Outcome::Served));
         assert!(seen.is_empty());
         assert_eq!(last_seen, 10);
@@ -271,15 +351,17 @@ mod tests {
     fn a_refused_session_waits_instead_of_hammering() {
         let origin = serve("HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
         let (client, record, stop) = rig(origin);
-        let outcome = attempt(&client, &record, &stop, &mut 0, &mut |_| {});
+        let mut opened = false;
+        let outcome = attempt(&client, &record, &stop, &mut 0, &mut || opened = true, &mut |_| {});
         assert!(matches!(outcome, Outcome::Denied));
+        assert!(!opened);
     }
 
     #[test]
     fn a_server_without_the_feed_reads_as_denied() {
         let origin = serve("HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
         let (client, record, stop) = rig(origin);
-        let outcome = attempt(&client, &record, &stop, &mut 0, &mut |_| {});
+        let outcome = attempt(&client, &record, &stop, &mut 0, &mut || {}, &mut |_| {});
         assert!(matches!(outcome, Outcome::Denied));
     }
 
@@ -287,7 +369,7 @@ mod tests {
     fn a_server_error_is_a_plain_failure() {
         let origin = serve("HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
         let (client, record, stop) = rig(origin);
-        let outcome = attempt(&client, &record, &stop, &mut 0, &mut |_| {});
+        let outcome = attempt(&client, &record, &stop, &mut 0, &mut || {}, &mut |_| {});
         assert!(matches!(outcome, Outcome::Failed));
     }
 
@@ -300,7 +382,7 @@ mod tests {
             .unwrap()
             .port();
         let (client, record, stop) = rig(format!("http://127.0.0.1:{port}"));
-        let outcome = attempt(&client, &record, &stop, &mut 0, &mut |_| {});
+        let outcome = attempt(&client, &record, &stop, &mut 0, &mut || {}, &mut |_| {});
         assert!(matches!(outcome, Outcome::Failed));
     }
 
