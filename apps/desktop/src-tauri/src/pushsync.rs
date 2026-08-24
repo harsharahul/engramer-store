@@ -78,7 +78,20 @@ fn supervise(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
     let mut last_seen: u64 = 0;
     let mut failures: u32 = 0;
     while !stop.load(Ordering::Relaxed) {
-        let delay = match attempt(&app, &client, &stop, &mut last_seen) {
+        let outcome = if !crate::network::currently_online() {
+            Outcome::Offline
+        } else if let Some(record) = read_record() {
+            let mut on_seq = |seq: u64| {
+                // The drive first; an error here just means the domain
+                // is gone or busy, and the next poke tries again.
+                let _ = crate::filesprovider::signal_for(&record.email);
+                let _ = app.emit("vault-changed", serde_json::json!({ "seq": seq }));
+            };
+            attempt(&client, &record, &stop, &mut last_seen, &mut on_seq)
+        } else {
+            Outcome::Failed
+        };
+        let delay = match outcome {
             Outcome::Served => {
                 failures = 0;
                 5 + jitter(5)
@@ -96,18 +109,16 @@ fn supervise(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
     }
 }
 
+/// One connection: dial, read events, report each fresh sequence.
+/// Everything it touches comes in as arguments, so the whole exchange
+/// is provable against a plain local socket.
 fn attempt(
-    app: &tauri::AppHandle,
     client: &reqwest::blocking::Client,
+    record: &Record,
     stop: &AtomicBool,
     last_seen: &mut u64,
+    on_seq: &mut dyn FnMut(u64),
 ) -> Outcome {
-    if !crate::network::currently_online() {
-        return Outcome::Offline;
-    }
-    let Some(record) = read_record() else {
-        return Outcome::Failed;
-    };
     let response = client
         .get(format!("{}/api/events", record.origin))
         .header("authorization", format!("Bearer {}", record.token))
@@ -129,21 +140,11 @@ fn attempt(
         }
         let Ok(line) = line else { break };
         served = true;
-        let Some(payload) = line.strip_prefix("data:") else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
-            continue;
-        };
-        let Some(seq) = value.get("seq").and_then(|v| v.as_u64()) else {
-            continue;
-        };
-        if seq > *last_seen {
-            *last_seen = seq;
-            // The drive first; an error here just means the domain is
-            // gone or busy, and the next poke tries again.
-            let _ = crate::filesprovider::signal_for(&record.email);
-            let _ = app.emit("vault-changed", serde_json::json!({ "seq": seq }));
+        if let Some(seq) = parse_seq(&line) {
+            if seq > *last_seen {
+                *last_seen = seq;
+                on_seq(seq);
+            }
         }
     }
     if served {
@@ -151,6 +152,16 @@ fn attempt(
     } else {
         Outcome::Failed
     }
+}
+
+/// The one line shape that matters: `data: {"seq":N}`. Comments,
+/// retry hints, and blanks all fall through.
+fn parse_seq(line: &str) -> Option<u64> {
+    let payload = line.strip_prefix("data:")?;
+    serde_json::from_str::<serde_json::Value>(payload)
+        .ok()?
+        .get("seq")?
+        .as_u64()
 }
 
 /// The same record the extension reads, by the same account-less query.
@@ -188,4 +199,118 @@ fn jitter(max: u64) -> u64 {
         .map(|d| d.subsec_nanos() as u64)
         .unwrap_or(0);
     nanos % max.max(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    /// Serves one canned HTTP response on a fresh port and returns the
+    /// origin; the real blocking client dials it like any server.
+    fn serve(response: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            if let Ok((mut socket, _)) = listener.accept() {
+                let mut request = [0u8; 2048];
+                let _ = socket.read(&mut request);
+                let _ = socket.write_all(response.as_bytes());
+            }
+        });
+        origin
+    }
+
+    fn rig(origin: String) -> (reqwest::blocking::Client, Record, AtomicBool) {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let record = Record {
+            email: "owner@example.com".into(),
+            origin,
+            token: "token".into(),
+        };
+        (client, record, AtomicBool::new(false))
+    }
+
+    #[test]
+    fn a_stream_reports_each_fresh_sequence_once() {
+        let origin = serve(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\nretry: 5000\ndata: {\"seq\":5}\n\n: hb\n\ndata: {\"seq\":5}\n\ndata: {\"seq\":9}\n\n",
+        );
+        let (client, record, stop) = rig(origin);
+        let mut last_seen = 0u64;
+        let mut seen = Vec::new();
+        let outcome = attempt(&client, &record, &stop, &mut last_seen, &mut |seq| {
+            seen.push(seq)
+        });
+        assert!(matches!(outcome, Outcome::Served));
+        assert_eq!(seen, vec![5, 9]);
+        assert_eq!(last_seen, 9);
+    }
+
+    #[test]
+    fn a_sequence_already_seen_is_not_redelivered() {
+        let origin = serve(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\ndata: {\"seq\":7}\n\n",
+        );
+        let (client, record, stop) = rig(origin);
+        let mut last_seen = 10u64;
+        let mut seen = Vec::new();
+        let outcome = attempt(&client, &record, &stop, &mut last_seen, &mut |seq| {
+            seen.push(seq)
+        });
+        assert!(matches!(outcome, Outcome::Served));
+        assert!(seen.is_empty());
+        assert_eq!(last_seen, 10);
+    }
+
+    #[test]
+    fn a_refused_session_waits_instead_of_hammering() {
+        let origin = serve("HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+        let (client, record, stop) = rig(origin);
+        let outcome = attempt(&client, &record, &stop, &mut 0, &mut |_| {});
+        assert!(matches!(outcome, Outcome::Denied));
+    }
+
+    #[test]
+    fn a_server_without_the_feed_reads_as_denied() {
+        let origin = serve("HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+        let (client, record, stop) = rig(origin);
+        let outcome = attempt(&client, &record, &stop, &mut 0, &mut |_| {});
+        assert!(matches!(outcome, Outcome::Denied));
+    }
+
+    #[test]
+    fn a_server_error_is_a_plain_failure() {
+        let origin = serve("HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+        let (client, record, stop) = rig(origin);
+        let outcome = attempt(&client, &record, &stop, &mut 0, &mut |_| {});
+        assert!(matches!(outcome, Outcome::Failed));
+    }
+
+    #[test]
+    fn an_unreachable_server_is_a_plain_failure() {
+        // Bind then drop, so the port is fresh but nothing listens.
+        let port = TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let (client, record, stop) = rig(format!("http://127.0.0.1:{port}"));
+        let outcome = attempt(&client, &record, &stop, &mut 0, &mut |_| {});
+        assert!(matches!(outcome, Outcome::Failed));
+    }
+
+    #[test]
+    fn only_event_lines_parse() {
+        assert_eq!(parse_seq("data: {\"seq\":42}"), Some(42));
+        assert_eq!(parse_seq("data:{\"seq\":1}"), Some(1));
+        assert_eq!(parse_seq(": hb"), None);
+        assert_eq!(parse_seq("retry: 5000"), None);
+        assert_eq!(parse_seq(""), None);
+        assert_eq!(parse_seq("data: not json"), None);
+    }
 }
