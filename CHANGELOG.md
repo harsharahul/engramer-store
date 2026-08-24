@@ -3,7 +3,30 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
-## [Unreleased]
+## [0.53.0] - 2026-08-24
+
+### Added
+- **Changes reach the Finder drive live.** The server gained a change
+  feed: an authenticated event stream that tells a signed-in device the
+  moment its account's data moves, carrying only a sync counter and never
+  content. The Mac app holds the feed from its tray process and refreshes
+  the Finder drive within seconds of an upload from any other device,
+  whether the window is visible, hidden, or closed to the tray; the
+  window itself refreshes on the same poke instead of waiting for its
+  next poll. Edits to a shared file poke every collaborator's devices
+  too. Servers without the feed, and deployments that set
+  `ENGRAMER_EVENTS=off`, fall back to the regular sync cycle.
+- **Live updates are visible where their switch lives.** Profile shows
+  the feed's actual state (connected, connecting, or not offered by the
+  server) beside the Extensions switch that controls it, derived from
+  the connection itself.
+
+### Security
+- **A revoked session loses its stream in seconds.** The change feed
+  re-checks the session on every heartbeat, so "Sign out everywhere",
+  a password change, or a disabled account ends any held stream within
+  one beat instead of the token's lifetime. Streams are capped per
+  account, newest first.
 
 ### Fixed
 - **A reload without a connection keeps the tab's session.** The reload
