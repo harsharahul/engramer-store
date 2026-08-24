@@ -87,6 +87,10 @@ pub async fn handoff_probe() -> Result<Option<usize>, String> {
 
 #[tauri::command]
 pub async fn handoff_clear(email: String) -> Result<(), String> {
+    // A cleared record ends the change-feed holder too; sign-out must
+    // not leave a thread reconnecting with a dead credential.
+    #[cfg(target_os = "macos")]
+    crate::pushsync::stop();
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         return spawn_blocking(move || crate::keychain::delete_shared(SERVICE, &email))

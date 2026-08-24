@@ -19,6 +19,8 @@ mod outbox;
 mod photolib;
 mod photos;
 mod pickedstream;
+#[cfg(target_os = "macos")]
+mod pushsync;
 mod ranges;
 mod saveout;
 mod serverurl;

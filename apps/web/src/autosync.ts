@@ -1,5 +1,5 @@
 import { scheduleBackfill } from "./backfill";
-import { nativeFilesProviderSignal, nativeOutboxDrain } from "./native";
+import { nativeFilesProviderSignal, nativeListen, nativeOutboxDrain } from "./native";
 import { useStore } from "./store";
 
 /**
@@ -10,7 +10,9 @@ import { useStore } from "./store";
  * refresh whenever the window returns to the foreground, and a gentle
  * poll while it stays visible. Each pass first flushes the share
  * sheet's staged uploads (iOS shell only; a no-op elsewhere), so the
- * refresh that follows already sees them.
+ * refresh that follows already sees them. In the desktop shell the
+ * server's change feed also lands here: a pushed poke refreshes now,
+ * visible or not, instead of waiting for the next poll.
  */
 
 const FOREGROUND_COOLDOWN_MS = 15_000;
@@ -26,8 +28,10 @@ export function installAutoSync(): void {
   let lastRun = 0;
   let inFlight = false;
 
-  const kick = () => {
-    if (inFlight || Date.now() - lastRun < FOREGROUND_COOLDOWN_MS) {
+  const kick = (pushed = false) => {
+    // A pushed poke IS fresh news, so it skips the cooldown; one
+    // refresh at a time still holds.
+    if (inFlight || (!pushed && Date.now() - lastRun < FOREGROUND_COOLDOWN_MS)) {
       return;
     }
     const store = useStore.getState();
@@ -65,10 +69,12 @@ export function installAutoSync(): void {
       kick();
     }
   });
-  window.addEventListener("focus", kick);
+  window.addEventListener("focus", () => kick());
   window.setInterval(() => {
     if (document.visibilityState === "visible") {
       kick();
     }
   }, POLL_INTERVAL_MS);
+  // Desktop shell only; a no-op unsubscribe everywhere else.
+  void nativeListen("vault-changed", () => kick(true));
 }

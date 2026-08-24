@@ -20,6 +20,15 @@ pub struct NetworkStatus {
     pub constrained: bool,
 }
 
+/// The monitor's answer for in-process callers: offline only when it
+/// has actually said so; an unanswered first query fails open, the
+/// same stance the web layer takes.
+#[cfg(target_os = "macos")]
+pub(crate) fn currently_online() -> bool {
+    let status = apple::current();
+    !status.known || status.online
+}
+
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod apple {
     use super::NetworkStatus;
