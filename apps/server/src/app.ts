@@ -24,7 +24,9 @@ import { registerShareRoutes } from "./routes/shares.js";
 import { registerRequestRoutes } from "./routes/requests.js";
 import { registerCollabRoutes } from "./routes/collab.js";
 import { registerChannelRoutes } from "./routes/channel.js";
+import { registerEventsRoutes } from "./routes/events.js";
 import { InProcessHub, type ChannelHub } from "./collabhub.js";
+import { SeqEvents } from "./events.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -32,6 +34,7 @@ declare module "fastify" {
     db: Db;
     blobs: BlobStore;
     hub: ChannelHub;
+    seqEvents: SeqEvents;
     /** Identifies this process in shared presence rows. */
     podId: string;
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -139,7 +142,16 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   app.decorate("blobs", blobs);
   app.decorate("db", db);
   app.decorate("hub", new InProcessHub());
+  app.decorate("seqEvents", new SeqEvents());
+  // The allocator sees every sequence advance, including the ones a
+  // mutation makes on other accounts; the change feed watches it there.
+  db.onSeq = (userId, seq) => app.seqEvents.note(userId, seq);
   app.decorate("podId", randomUUID());
+  // Held event streams would otherwise keep close() waiting forever;
+  // the websocket plugin drains its own clients the same way.
+  app.addHook("preClose", async () => {
+    app.seqEvents.closeAll();
+  });
   app.addHook("onClose", async () => {
     await db.close();
   });
@@ -340,6 +352,9 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   registerCollabRoutes(app);
   if (config.collabRelay) {
     registerChannelRoutes(app);
+  }
+  if (config.events) {
+    registerEventsRoutes(app);
   }
 
   app.get("/api/health", async () => ({ status: "ok" }));

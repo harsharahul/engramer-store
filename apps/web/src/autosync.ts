@@ -1,5 +1,11 @@
 import { scheduleBackfill } from "./backfill";
-import { nativeFilesProviderSignal, nativeOutboxDrain } from "./native";
+import {
+  nativeFilesProviderFeedState,
+  nativeFilesProviderSignal,
+  nativeListen,
+  nativeOutboxDrain,
+  type FeedState,
+} from "./native";
 import { useStore } from "./store";
 
 /**
@@ -10,7 +16,9 @@ import { useStore } from "./store";
  * refresh whenever the window returns to the foreground, and a gentle
  * poll while it stays visible. Each pass first flushes the share
  * sheet's staged uploads (iOS shell only; a no-op elsewhere), so the
- * refresh that follows already sees them.
+ * refresh that follows already sees them. In the desktop shell the
+ * server's change feed also lands here: a pushed poke refreshes now,
+ * visible or not, instead of waiting for the next poll.
  */
 
 const FOREGROUND_COOLDOWN_MS = 15_000;
@@ -26,8 +34,10 @@ export function installAutoSync(): void {
   let lastRun = 0;
   let inFlight = false;
 
-  const kick = () => {
-    if (inFlight || Date.now() - lastRun < FOREGROUND_COOLDOWN_MS) {
+  const kick = (pushed = false) => {
+    // A pushed poke IS fresh news, so it skips the cooldown; one
+    // refresh at a time still holds.
+    if (inFlight || (!pushed && Date.now() - lastRun < FOREGROUND_COOLDOWN_MS)) {
       return;
     }
     const store = useStore.getState();
@@ -65,10 +75,23 @@ export function installAutoSync(): void {
       kick();
     }
   });
-  window.addEventListener("focus", kick);
+  window.addEventListener("focus", () => kick());
   window.setInterval(() => {
     if (document.visibilityState === "visible") {
       kick();
     }
   }, POLL_INTERVAL_MS);
+  // Desktop shell only; no-op unsubscribes everywhere else. The feed's
+  // state rides its own event so Profile shows the holder as it is;
+  // the query covers a window that loaded after the last transition.
+  void nativeListen("vault-changed", () => kick(true));
+  void nativeListen<{ state: FeedState }>("vault-feed-state", (event) => {
+    useStore.setState({ liveFeed: event.state });
+  });
+  void nativeFilesProviderFeedState().then((state) => {
+    // A transition event that raced ahead of this answer is fresher.
+    if (useStore.getState().liveFeed === "off") {
+      useStore.setState({ liveFeed: state });
+    }
+  });
 }

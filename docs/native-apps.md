@@ -22,8 +22,13 @@ Locations in Finder's sidebar. Files download and decrypt as they are opened;
 new and edited files encrypt and upload in place; a delete goes to the vault's
 trash, so it is recoverable; a conflicting save becomes a "(conflicted copy)"
 rather than lost work. Finder's own "Download Now" and "Remove Download"
-work on drive files, and changes made on other devices appear within a sync
-cycle while the app is open. Right-clicking a drive file offers "Copy Share
+work on drive files. Changes made on other devices reach the drive live:
+the app holds the server's change feed (`GET /api/events`, a server-sent
+event stream carrying only the account's sync sequence) and refreshes the
+drive within seconds of another device's upload, whether the window is
+visible, hidden, or parked in the tray. Servers without the feed, or
+deployments that set `ENGRAMER_EVENTS=off`, fall back to the app's
+foreground sync cycle. Right-clicking a drive file offers "Copy Share
 Link", which puts a working share link on the clipboard, reusing an existing
 open share when one exists; links stay revocable from the web app's Shared
 view. The app can leave the Dock and park in the menu-bar tray.

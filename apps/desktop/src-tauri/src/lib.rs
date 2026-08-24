@@ -19,6 +19,8 @@ mod outbox;
 mod photolib;
 mod photos;
 mod pickedstream;
+#[cfg(target_os = "macos")]
+mod pushsync;
 mod ranges;
 mod saveout;
 mod serverurl;
@@ -179,6 +181,7 @@ pub fn run() {
             handoff::handoff_probe,
             handoff::handoff_clear,
             filesprovider::files_provider_available,
+            filesprovider::files_provider_feed_state,
             filesprovider::files_provider_enable,
             filesprovider::files_provider_signal,
             filesprovider::files_provider_disable,

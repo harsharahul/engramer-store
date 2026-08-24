@@ -198,6 +198,16 @@ browsers is good. The rules that decide whether the deployment works:
   depends on the server's own values).
 - WebSockets: forward `Upgrade`/`Connection` on `/api/collab/`, idle
   timeout above 75 seconds.
+- The change feed at `/api/events` is a held, streaming response
+  (server-sent events; it is how always-on clients such as the Mac
+  app's Finder drive learn about changes within seconds). Do not
+  buffer responses on it: the server sends `x-accel-buffering: no`,
+  which nginx-family proxies honor; on anything else switch response
+  buffering off for that path. Let its responses run long, and keep
+  idle timeouts above 30 seconds; the stream carries a heartbeat
+  comment every 25. A proxy that buffers or cuts it anyway breaks
+  nothing (clients degrade to reconnect cycles), but live updates
+  lose their seconds-level freshness.
 - Add HSTS at the proxy; the app does not set it.
 
 ### Module C: verification gates (run all that apply; do not skip)
@@ -232,10 +242,17 @@ browsers is good. The rules that decide whether the deployment works:
 8. Reload the app and upload again: the second session must show no
    re-download of the multi-megabyte ML runtimes (`/ort/`, `/ocr/`) in
    the browser's network panel.
-9. Back up `/data/engramer.db` from the data volume, restore it into a
-   scratch container, sign in. A backup never restored is a hypothesis.
-   Tell the user plainly: losing this database loses the vault even if
-   the provider still has every byte; the wrapped keys live here.
+9. Behind a proxy: `curl -sN https://host/api/events` must answer 401
+   immediately (the route is reachable and nothing swallowed it). With
+   a signed-in session's bearer token, the first `data:` line arrives
+   instantly and a `: hb` comment within ~25 seconds; a long silence
+   before the first line means something is buffering the stream. On
+   the Mac app, Profile's "Live updates" line shows the same verdict
+   without curl.
+10. Back up `/data/engramer.db` from the data volume, restore it into a
+    scratch container, sign in. A backup never restored is a hypothesis.
+    Tell the user plainly: losing this database loses the vault even if
+    the provider still has every byte; the wrapped keys live here.
 
 ### Module D: day two (tell the user before leaving)
 
@@ -263,6 +280,7 @@ browsers is good. The rules that decide whether the deployment works:
 | Every upload's data PUT takes ~5-8 s, everything else fast | sharded key layout paying provider directory creation per new shard | use the flat layout on gateway-backed providers |
 | First uploads each session wait on a huge download | ML runtimes not cached (old build) | upgrade; verify gate 8 |
 | Registration open despite "locked down" | typo fails open | verify gate 3, always |
+| Finder drive only updates when the Mac app window is opened | proxy buffers or cuts the change feed | exempt `/api/events` from response buffering; run gate 9 |
 | Fast LAN, slow from outside | comparison across different network paths | measure upstream bandwidth before blaming the stack |
 
 ## Where to read more

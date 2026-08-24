@@ -172,6 +172,15 @@ export interface Db {
   run(sql: string, ...params: unknown[]): Promise<DbRunResult>;
   tx<T>(fn: (t: Db) => Promise<T>): Promise<T>;
   close(): Promise<void>;
+  /**
+   * Observes every per-user sequence advance, wherever it happens:
+   * the allocator is the one point that sees all of them, including
+   * bumps a mutation makes on OTHER accounts (collaborator fan-out).
+   * Must stay synchronous and I/O-free; it may be called from inside
+   * a transaction, and anything slow or awaited here would break the
+   * tx contract above. Transaction handles inherit it.
+   */
+  onSeq?: (userId: number, seq: number) => void;
 }
 
 /** Additive column migrations, shared by both backends. BIGINT is accepted
@@ -417,6 +426,8 @@ export const COMMON_SCHEMA = `
 /** Embedded SQLite behind the async facade; every call is synchronous
  * underneath, which is exactly what makes it safe (see the Db contract). */
 export class SqliteDb implements Db {
+  onSeq?: (userId: number, seq: number) => void;
+
   /** Serializes transactions; two tx() calls never interleave. */
   private txQueue: Promise<unknown> = Promise.resolve();
 
@@ -512,6 +523,7 @@ export async function nextSeq(db: Db, userId: number): Promise<number> {
     "UPDATE users SET last_seq = last_seq + 1 WHERE id = ? RETURNING last_seq",
     userId,
   );
+  db.onSeq?.(userId, row!.last_seq);
   return row!.last_seq;
 }
 

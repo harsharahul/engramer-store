@@ -1125,6 +1125,24 @@ export function ProfileView(props: {
             </button>
           </div>
         )}
+        {store.liveFeed !== "off" && (
+          <div className="profile-row">
+            <div className="profile-row-main">
+              <b>Live updates</b>
+              <div className="profile-row-sub">
+                {store.liveFeed === "live"
+                  ? "Connected. Changes from your other devices reach the drive within " +
+                    "seconds, even while this window is closed. Turning Extensions off " +
+                    "ends it."
+                  : store.liveFeed === "connecting"
+                    ? "Reaching the server's change feed. Until it connects, the drive " +
+                      "refreshes on the regular sync cycle."
+                    : "This server does not offer the change feed, so the drive refreshes " +
+                      "on the regular sync cycle instead."}
+              </div>
+            </div>
+          </div>
+        )}
         {backupOk && (
           <div className="profile-row profile-row-stack">
             <div className="profile-row-main">

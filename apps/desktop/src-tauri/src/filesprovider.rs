@@ -21,13 +21,38 @@ fn domain_identifier(email: &str) -> String {
     engram_core::b64::to_b64url(&engram_core::backend::generichash(32, email.as_bytes()))
 }
 
+/// The change-feed holder signals the drive without going through the
+/// command layer.
+#[cfg(target_os = "macos")]
+pub(crate) fn signal_for(email: &str) -> Result<(), String> {
+    apple::signal_domain(&domain_identifier(email))
+}
+
 #[tauri::command]
 pub async fn files_provider_available() -> bool {
     cfg!(any(target_os = "macos", target_os = "ios"))
 }
 
+/// What the change-feed holder is doing right now, so the Profile page
+/// can show live updates as they actually are, not as assumed.
 #[tauri::command]
-pub async fn files_provider_enable(email: String) -> Result<(), String> {
+pub async fn files_provider_feed_state() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        crate::pushsync::state().to_string()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "off".to_string()
+    }
+}
+
+#[tauri::command]
+pub async fn files_provider_enable(app: tauri::AppHandle, email: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    crate::pushsync::ensure_running(&app);
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         return apple::add_domain(&domain_identifier(&email), "Engram Store");
@@ -42,9 +67,15 @@ pub async fn files_provider_enable(email: String) -> Result<(), String> {
 /// Nudges the Files app to re-enumerate the domain. Called after the
 /// handoff record is (re)written, so a provider instance that came up
 /// before the key existed stops showing "not signed in" the moment the
-/// app has reconnected it.
+/// app has reconnected it. Also where the change-feed holder comes up:
+/// the web layer invokes this on every launch and sign-in, which is
+/// exactly when a drive worth keeping fresh exists.
 #[tauri::command]
-pub async fn files_provider_signal(email: String) -> Result<(), String> {
+pub async fn files_provider_signal(app: tauri::AppHandle, email: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    crate::pushsync::ensure_running(&app);
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         return apple::signal_domain(&domain_identifier(&email));
@@ -58,6 +89,8 @@ pub async fn files_provider_signal(email: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn files_provider_disable(email: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    crate::pushsync::stop();
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         return apple::remove_domain(&domain_identifier(&email));
