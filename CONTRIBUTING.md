@@ -59,6 +59,15 @@ hard refresh clears a stale build during local testing.
    24 matrix, a dependency audit, and a Docker image build with a health-check
    smoke test.
 
+## Contributor License Agreement
+
+By submitting a contribution you agree to the project's
+[Contributor License Agreement](CLA.md). In short: you keep ownership of your
+work and license it to the project broadly enough that the project can be
+licensed consistently, including under licenses other than AGPL-3.0 in the
+future. Read the full text before your first pull request; opening one
+constitutes agreement.
+
 ## Commit style
 
 Conventional prefixes: `feat:`, `fix:`, `refactor:`, `docs:`, `deploy:`.

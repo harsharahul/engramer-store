@@ -3,6 +3,15 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [Unreleased]
+
+### Added
+- **Contributor License Agreement.** `CLA.md` sets the terms for outside
+  contributions: contributors keep ownership of their work and license it
+  broadly enough that the project can stay consistently licensable, including
+  future dual licensing. Linked from the contribution guide and the new pull
+  request template; submitting a contribution constitutes agreement.
+
 ## [0.53.1] - 2026-08-24
 
 ### Fixed
