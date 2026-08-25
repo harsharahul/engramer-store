@@ -5,6 +5,11 @@ const rig = vi.hoisted(() => ({
   feedState: null as ((payload: unknown) => void) | null,
   refreshes: 0,
   signals: [] as string[],
+  handoffOn: true,
+}));
+
+vi.mock("./handoff", () => ({
+  handoffEnabled: () => rig.handoffOn,
 }));
 
 vi.mock("./native", () => ({
@@ -89,6 +94,15 @@ describe("autosync push", () => {
     await settled();
     expect(rig.refreshes).toBe(after + 1);
     expect(rig.signals).toContain("owner@example.com");
+  });
+
+  it("does not poke the drive when extensions are off", async () => {
+    rig.handoffOn = false;
+    const before = rig.signals.length;
+    rig.pushed?.({ seq: 99 });
+    await settled();
+    expect(rig.signals.length).toBe(before);
+    rig.handoffOn = true;
   });
 
   it("mirrors the feed holder's reported state into the store", async () => {

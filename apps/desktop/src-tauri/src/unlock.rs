@@ -92,9 +92,12 @@ mod apple {
     }
 
     pub fn delete(origin: &str, email: &str) -> Result<(), String> {
-        // Every generation of the item; any may exist.
-        let _ = passwords::delete_generic_password(SERVICE, email);
-        let _ = crate::keychain::delete(SERVICE, email);
+        // Only this origin's item. The bare-email generations are NOT
+        // ours to destroy: with the same address registered on two
+        // servers they may belong to the other server's enrollment,
+        // and a sign-out here must not break Touch ID there. A truly
+        // legacy item left behind is inert without its web record and
+        // is adopted or replaced by the migration path in get().
         crate::keychain::delete(SERVICE, &super::scoped_account(origin, email))
     }
 }

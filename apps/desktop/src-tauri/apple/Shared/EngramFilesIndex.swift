@@ -111,6 +111,11 @@ final class EngramFilesIndex {
     private struct Persisted: Codable {
         let cursor: Int
         let entries: [IndexEntry]
+        /// The server this index was pulled from. The file's name is
+        /// fixed, so it survives a server switch; the cursor and
+        /// entries must not. Optional because files written before the
+        /// field existed carry none, which reads as a mismatch.
+        let origin: String?
     }
 
     private func load() {
@@ -118,6 +123,13 @@ final class EngramFilesIndex {
               let data = try? Data(contentsOf: url),
               let stored = try? JSONDecoder().decode(Persisted.self, from: data)
         else { return }
+        // Another server's index is worse than none: its cursor points
+        // into a different sequence space and its entries name files
+        // this server has never heard of. Start fresh instead.
+        guard stored.origin == record.origin else {
+            Self.wipe()
+            return
+        }
         cursor = stored.cursor
         entries = Dictionary(uniqueKeysWithValues: stored.entries.map { ($0.id, $0) })
     }
@@ -126,7 +138,8 @@ final class EngramFilesIndex {
 
     private func save() {
         guard let url = Self.indexURL,
-              let data = try? JSONEncoder().encode(Persisted(cursor: cursor, entries: Array(entries.values)))
+              let data = try? JSONEncoder().encode(
+                  Persisted(cursor: cursor, entries: Array(entries.values), origin: record.origin))
         else { return }
         // File protection classes are an iOS concept; asking for one on
         // macOS is how this write failed silently for a whole day.

@@ -184,6 +184,23 @@ pub fn rebuild_watchers(app: &AppHandle) {
 #[cfg(mobile)]
 pub fn rebuild_watchers(_app: &AppHandle) {}
 
+/// Forgets every watched folder and stops its watcher. A server switch
+/// calls this: the folders were pointed at one vault, and left armed
+/// they would upload into whichever server loads next.
+#[cfg(desktop)]
+pub fn clear_all(app: &AppHandle) {
+    if let Ok(path) = config_path(app) {
+        let _ = std::fs::remove_file(path);
+    }
+    let state: tauri::State<SharedWatchState> = app.state();
+    let mut guard = state.lock().expect("watch state");
+    guard.watchers.clear();
+    guard.folders.clear();
+}
+
+#[cfg(mobile)]
+pub fn clear_all(_app: &AppHandle) {}
+
 #[tauri::command]
 pub fn watched_folders(app: AppHandle) -> Vec<String> {
     load_folders(&app)
