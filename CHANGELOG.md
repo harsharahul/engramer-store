@@ -3,6 +3,26 @@
 All notable changes to Engram Store are documented here, following
 [Keep a Changelog](https://keepachangelog.com/) and semantic versioning.
 
+## [0.53.1] - 2026-08-24
+
+### Fixed
+- **Switching servers is a clean start.** With the same email registered
+  on two servers, a switch used to tangle: a stale automatic unlock
+  attempt could sign the user out moments after a successful login, and
+  the collateral broke the other server's Touch ID. A failed request now
+  only ends the session that actually sent it, unlock records identify
+  their account by keypair rather than address, and sign-out removes
+  only this server's stored secret.
+- **A server switch disarms everything aimed at the old vault.** Watched
+  folders are cleared (the confirmation dialog says so), the live-update
+  connection stops immediately, and the drive extension discards a
+  previous server's file listing instead of serving it against the new
+  one.
+- **The login throttle shows its timer.** Too many failed attempts now
+  render a counting-down wait with the button disabled, instead of a
+  refusal that read like a wrong password. Transfer retries honor the
+  server's pacing, capped at a minute.
+
 ## [0.53.0] - 2026-08-24
 
 ### Added
