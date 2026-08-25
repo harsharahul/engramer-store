@@ -128,10 +128,15 @@ export function clearUnlockRecord(): void {
 
 /** A fresh sign-in renews the 30-day window for the enrolled account. The
  * token is sealed under the master key; a record that still carried it in
- * the clear is rewritten without it. */
-export function updateUnlockToken(session: Pick<UnlockSession, "email" | "token" | "masterKey">): void {
+ * the clear is rewritten without it. Identity is the account KEYPAIR,
+ * not the address: the same email on a different server is a different
+ * account, and resealing its record under this session's master key
+ * would corrupt an enrollment that still works where it belongs. */
+export function updateUnlockToken(
+  session: Pick<UnlockSession, "email" | "token" | "masterKey" | "publicKey">,
+): void {
   const record = loadUnlockRecord();
-  if (record && record.email === session.email) {
+  if (record && record.email === session.email && record.publicKey === session.publicKey) {
     const renewed: UnlockRecord = { ...record, sealedToken: sealToken(session.token, session.masterKey) };
     delete renewed.token;
     saveUnlockRecord(renewed);

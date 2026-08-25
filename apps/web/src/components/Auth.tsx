@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import { nativeServerUrlSet, nativeShell } from "../native";
 import { activateSession, login, registerAccount, type LoginResult, type Session } from "../session";
 import { beginRecovery, type RecoveryStep, type SetPasswordStep } from "../recovery";
@@ -53,6 +53,37 @@ export function Auth() {
   }, []);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The server's failure throttle, surfaced honestly: a 429 puts the
+  // form on a visible countdown instead of a refusal that reads like
+  // wrong credentials.
+  const [holdUntil, setHoldUntil] = useState<number | null>(null);
+  const holding = holdUntil !== null;
+
+  useEffect(() => {
+    if (holdUntil === null) {
+      return;
+    }
+    const tick = () => {
+      const left = Math.ceil((holdUntil - Date.now()) / 1000);
+      if (left <= 0) {
+        setHoldUntil(null);
+        setError(null);
+        return;
+      }
+      setError(`Too many attempts. Try again in ${left}s.`);
+    };
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [holdUntil]);
+
+  const fail = (err: unknown, fallback: string) => {
+    if (err instanceof ApiError && err.status === 429) {
+      setHoldUntil(Date.now() + Math.max(1_000, err.retryAfterMs ?? 30_000));
+      return;
+    }
+    setError(err instanceof Error ? err.message : fallback);
+  };
   const [twoFactor, setTwoFactor] = useState<Extract<LoginResult, { kind: "two-factor" }> | null>(
     null,
   );
@@ -103,7 +134,7 @@ export function Auth() {
         await startSession(result.session);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "something went wrong");
+      fail(err, "something went wrong");
     } finally {
       setBusy(null);
     }
@@ -121,7 +152,7 @@ export function Auth() {
       setBusy("Decrypting your library.");
       await startSession(session);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "that code is not valid");
+      fail(err, "that code is not valid");
     } finally {
       setBusy(null);
     }
@@ -138,7 +169,7 @@ export function Auth() {
       setRecoveryStep(await recoveryStep.complete(code.trim()));
       setCode("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "that code is not valid");
+      fail(err, "that code is not valid");
     } finally {
       setBusy(null);
     }
@@ -164,7 +195,7 @@ export function Auth() {
       setBusy("Decrypting your library.");
       await startSession(session);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "something went wrong");
+      fail(err, "something went wrong");
       setBusy(null);
     }
   };
@@ -198,7 +229,7 @@ export function Auth() {
               <button
                 className="btn btn-primary"
                 type="submit"
-                disabled={busy !== null || !code.trim()}
+                disabled={busy !== null || holding || !code.trim()}
               >
                 {busy ? <span className="spinner" /> : null}
                 {busy ? "Verifying" : "Verify"}
@@ -228,7 +259,7 @@ export function Auth() {
                 onChange={(e) => setConfirm(e.target.value)}
               />
               {error && <div className="error-text">{error}</div>}
-              <button className="btn btn-primary" type="submit" disabled={busy !== null}>
+              <button className="btn btn-primary" type="submit" disabled={busy !== null || holding}>
                 {busy ? <span className="spinner" /> : null}
                 {busy ? "Saving" : "Set password and open my vault"}
               </button>
@@ -278,7 +309,7 @@ export function Auth() {
               onChange={(e) => setCode(e.target.value)}
             />
             {error && <div className="error-text">{error}</div>}
-            <button className="btn btn-primary" type="submit" disabled={busy !== null || !code.trim()}>
+            <button className="btn btn-primary" type="submit" disabled={busy !== null || holding || !code.trim()}>
               {busy ? <span className="spinner" /> : null}
               {busy ? "Verifying" : "Verify"}
             </button>
@@ -398,7 +429,7 @@ export function Auth() {
             </>
           )}
           {error && <div className="error-text">{error}</div>}
-          <button className="btn btn-primary" type="submit" disabled={busy !== null}>
+          <button className="btn btn-primary" type="submit" disabled={busy !== null || holding}>
             {busy ? <span className="spinner" /> : null}
             {busy
               ? mode === "signup"

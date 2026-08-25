@@ -1,4 +1,5 @@
 import { scheduleBackfill } from "./backfill";
+import { handoffEnabled } from "./handoff";
 import {
   nativeFilesProviderFeedState,
   nativeFilesProviderSignal,
@@ -53,9 +54,16 @@ export function installAutoSync(): void {
       const foldersBefore = useStore.getState().folders;
       await useStore.getState().refresh();
       const after = useStore.getState();
-      if (after.session && (after.files !== filesBefore || after.folders !== foldersBefore)) {
+      if (
+        after.session &&
+        (after.files !== filesBefore || after.folders !== foldersBefore) &&
+        handoffEnabled(after.session.email)
+      ) {
         // The system drive shows the change within this poll cycle
         // instead of whenever Finder or Files next asks on its own.
+        // Only where extensions are actually on: a signal also wakes
+        // the shell's change-feed holder, which has nothing to hold
+        // without the extension record.
         await nativeFilesProviderSignal(after.session.email);
       }
       // Sync may have brought files that arrived without derivatives

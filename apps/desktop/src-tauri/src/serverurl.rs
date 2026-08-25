@@ -132,7 +132,7 @@ fn switch_teardown_needed(record: &[u8], new_origin: &str) -> Option<(String, St
 async fn confirm_switch(app: &AppHandle, new_origin: &str, old_origin: &str) -> Result<(), String> {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
     let message = format!(
-        "Switch this app to {}?\n\nThe drive and extension access for {} will be removed from this device. Files on that server are not affected.",
+        "Switch this app to {}?\n\nThe drive, extension access, and watched folders for {} will be removed from this device. Files on that server are not affected.",
         host_of(new_origin),
         host_of(old_origin)
     );
@@ -171,6 +171,9 @@ async fn teardown_previous(app: &AppHandle, email: String) {
     // device is leaving; the next server starts clean.
     crate::offline::clear_root(app);
     let _ = tauri::async_runtime::spawn_blocking(crate::outbox::clear_staging).await;
+    // Watched folders feed whichever server is loaded; left armed they
+    // would silently upload into the next one.
+    crate::watched::clear_all(app);
 }
 
 fn navigate_main(app: &AppHandle, url: url::Url) -> Result<(), String> {
@@ -268,15 +271,28 @@ pub async fn server_url_set(app: AppHandle, url: String) -> Result<(), String> {
             crate::keychain::read_any(crate::handoff::SERVICE)
         })
         .await
-        .map_err(|err| err.to_string())?
-        .unwrap_or_default();
-        if let Some(bytes) = record {
-            if let Some((old_origin, old_email)) = switch_teardown_needed(&bytes, &final_origin) {
-                confirm_switch(&app, &final_origin, &old_origin).await?;
-                teardown_previous(&app, old_email).await;
+        .map_err(|err| err.to_string())?;
+        match record {
+            Ok(Some(bytes)) => {
+                if let Some((old_origin, old_email)) = switch_teardown_needed(&bytes, &final_origin) {
+                    confirm_switch(&app, &final_origin, &old_origin).await?;
+                    teardown_previous(&app, old_email).await;
+                }
+            }
+            Ok(None) => {}
+            // A keychain refusal must not silently skip the switch
+            // hygiene: the email is unknowable without the record, so
+            // the record-keyed teardown cannot run, but everything
+            // record-independent still does.
+            Err(err) => {
+                eprintln!("server switch: extension record unreadable ({err}); continuing");
             }
         }
     }
+    // Whatever the record said, the change-feed holder belongs to the
+    // server being left; it restarts on the new one's first signal.
+    #[cfg(target_os = "macos")]
+    crate::pushsync::stop();
     let path = store_path(&app)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;

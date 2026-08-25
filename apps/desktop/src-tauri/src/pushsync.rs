@@ -86,10 +86,20 @@ pub fn ensure_running(app: &tauri::AppHandle) {
 }
 
 /// Ends the holder; the thread notices within one read timeout. Called
-/// when the drive is disabled and when the handoff record is cleared.
+/// when the drive is disabled, when the handoff record is cleared, and
+/// on a server switch.
 pub fn stop() {
     if let Some(flag) = ACTIVE.lock().unwrap().take() {
         flag.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Clears this thread's own registration when it ends itself; a
+/// replacement holder's registration is left alone.
+fn release(stop: &Arc<AtomicBool>) {
+    let mut active = ACTIVE.lock().unwrap();
+    if active.as_ref().is_some_and(|current| Arc::ptr_eq(current, stop)) {
+        *active = None;
     }
 }
 
@@ -123,11 +133,13 @@ fn supervise(app: tauri::AppHandle, generation: u64, stop: Arc<AtomicBool>) {
     };
     let mut last_seen: u64 = 0;
     let mut failures: u32 = 0;
+    let mut record_missing: u32 = 0;
     set_state(&app, generation, FeedState::Connecting);
     while !stop.load(Ordering::Relaxed) {
         let outcome = if !crate::network::currently_online() {
             Outcome::Offline
         } else if let Some(record) = read_record() {
+            record_missing = 0;
             let stream_app = app.clone();
             let mut on_open = || set_state(&stream_app, generation, FeedState::Live);
             let mut on_seq = |seq: u64| {
@@ -145,6 +157,17 @@ fn supervise(app: tauri::AppHandle, generation: u64, stop: Arc<AtomicBool>) {
                 &mut on_seq,
             )
         } else {
+            // No extension record after repeated looks means there is
+            // nothing to hold: say off, not connecting, and end. The
+            // enable and signal commands start a fresh holder the
+            // moment a record exists. Three looks ride out the
+            // delete-then-add instant of a record rewrite.
+            record_missing += 1;
+            if record_missing >= 3 {
+                set_state(&app, generation, FeedState::Off);
+                release(&stop);
+                return;
+            }
             Outcome::Failed
         };
         let delay = match outcome {
@@ -173,6 +196,7 @@ fn supervise(app: tauri::AppHandle, generation: u64, stop: Arc<AtomicBool>) {
         }
     }
     set_state(&app, generation, FeedState::Off);
+    release(&stop);
 }
 
 /// One connection: dial, read events, report each fresh sequence.
