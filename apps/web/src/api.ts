@@ -137,7 +137,12 @@ export async function withRetry<T>(run: () => Promise<T>): Promise<T> {
       if (!(err instanceof ApiError) || !RETRYABLE.has(err.status) || attempt >= MAX_ATTEMPTS) {
         throw err;
       }
-      const wait = err.retryAfterMs ?? Math.min(15_000, 500 * 2 ** attempt);
+      // The server's pacing wins, but clamped: a proxy in front can
+      // stamp an hours-long retry-after, and a transfer loop must
+      // never sleep that long on one response.
+      const wait = err.retryAfterMs
+        ? Math.min(err.retryAfterMs, 60_000)
+        : Math.min(15_000, 500 * 2 ** attempt);
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
   }
@@ -158,13 +163,22 @@ async function request<T>(path: string, init: ApiInit = {}): Promise<T> {
   if (fetchInit.body && typeof fetchInit.body === "string") {
     headers.set("content-type", "application/json");
   }
+  // The token this request actually carries. A 401 is a verdict on
+  // THAT token only: if a newer session has since signed in, a late
+  // failure from a superseded attempt must not sign the new one out.
+  const sent = authToken;
   const response = await fetch(path, { ...fetchInit, headers });
-  if (response.status === 401 && authToken && !quiet) {
+  if (response.status === 401 && sent && sent === authToken && !quiet) {
     onUnauthorized?.();
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: string };
-    throw new ApiError(response.status, body.error ?? `request failed (${response.status})`);
+    const retryAfter = Number(response.headers.get("retry-after"));
+    throw new ApiError(
+      response.status,
+      body.error ?? `request failed (${response.status})`,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : undefined,
+    );
   }
   if (response.status === 204) {
     return undefined as T;

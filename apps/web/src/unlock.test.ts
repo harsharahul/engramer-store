@@ -124,6 +124,20 @@ describe("unlock record storage", () => {
     expect(JSON.stringify(loadUnlockRecord())).not.toContain("jwt-token-2");
   });
 
+  it("leaves a same-email record from a different account untouched", () => {
+    // The same address registered on two servers is two accounts with
+    // two keypairs; resealing the other account's record under this
+    // session's master key would corrupt an enrollment that still
+    // works where it belongs.
+    const prf = generateKey();
+    const session = fakeSession();
+    saveUnlockRecord(wrapForUnlock(prf, session, "cred", "salt"));
+    const before = JSON.stringify(loadUnlockRecord());
+    updateUnlockToken({ ...session, publicKey: "another-servers-keypair", token: "foreign-token" });
+    expect(JSON.stringify(loadUnlockRecord())).toBe(before);
+    expect(openUnlockRecord(prf, loadUnlockRecord()!).token).toBe("jwt-token-1");
+  });
+
   it("seals the token into a record that still carried it in the clear", () => {
     const prf = generateKey();
     const session = fakeSession();
