@@ -34,6 +34,8 @@ export function PhotoGrid(props: {
   onMenu: (id: string, x: number, y: number) => void;
   /** Long-press on a tile starts gathering, the photos-app idiom. */
   onEnterSelect?: (id: string) => void;
+  /** Pointer drag of a tile, to move it (or the selection) into a folder. */
+  onDragStart?: (id: string, event: React.DragEvent) => void;
 }) {
   const sections = useMemo(() => byMonth(props.files), [props.files]);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -117,6 +119,7 @@ export function PhotoGrid(props: {
                     onOpen={() => props.onOpen(file.id)}
                     onMenu={(x, y) => props.onMenu(file.id, x, y)}
                     onEnterSelect={props.onEnterSelect ? () => props.onEnterSelect!(file.id) : undefined}
+                    onDragStart={props.onDragStart ? (e) => props.onDragStart!(file.id, e) : undefined}
                   />
                 ))}
               </div>
@@ -137,6 +140,7 @@ function PhotoTile(props: {
   onOpen: () => void;
   onMenu: (x: number, y: number) => void;
   onEnterSelect?: () => void;
+  onDragStart?: (event: React.DragEvent) => void;
 }) {
   const { file } = props;
   const { ref, thumb } = usePhotoThumb<HTMLButtonElement>(file);
@@ -156,8 +160,20 @@ function PhotoTile(props: {
   return (
     <button
       ref={ref}
+      data-file-id={file.id}
       className={`photo-tile${props.selected ? " selected" : ""}`}
-      onClick={(e) => (props.selectMode || (!coarse && (e.metaKey || e.ctrlKey || e.shiftKey)) ? props.onSelect(e) : props.onOpen())}
+      /* Photos on the Mac: a click selects, a double-click opens. A finger
+         taps to open unless it is gathering, when taps toggle. */
+      onClick={(e) => (coarse ? (props.selectMode ? props.onSelect(e) : props.onOpen()) : props.onSelect(e))}
+      onDoubleClick={coarse ? undefined : props.onOpen}
+      draggable={!coarse}
+      onDragStart={coarse ? undefined : props.onDragStart}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          props.onOpen();
+        }
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         props.onMenu(e.clientX, e.clientY);

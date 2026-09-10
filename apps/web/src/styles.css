@@ -897,6 +897,8 @@ a {
 
 .content {
   flex: 1;
+  /* The selection band is positioned in this element's scroll space. */
+  position: relative;
   overflow-y: auto;
   /* The app's own chrome never rubber-bands along with a scroll. */
   overscroll-behavior-y: contain;
@@ -5143,4 +5145,105 @@ span.item-menu {
 }
 .trip-eyebrow svg {
   color: var(--accent-2);
+}
+
+/* ---------- selection band, drag ghost, drop targets ---------- */
+
+/* While a band is drawn nothing else should react: no text selection, no
+   card lift on hover, so the rectangle reads as the only moving thing. */
+.content.marquee-active {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.content.marquee-active .card,
+.content.marquee-active .row,
+.content.marquee-active .photo-tile {
+  transition: none;
+}
+
+.content.marquee-active .card:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.marquee {
+  position: absolute;
+  z-index: 5;
+  border: 1px solid color-mix(in srgb, var(--accent) 75%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+/* The ghost must be laid out to be photographed, and WebKit refuses an
+   element parked off screen, so it sits at the corner behind everything for
+   the one tick it exists. */
+.drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  background: var(--ink-2);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: var(--shadow-modal);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.drag-ghost img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 9px;
+}
+
+.drag-ghost-blank {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--paper-dim);
+}
+
+.drag-ghost-count {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* Anywhere a folder is named can take a drop, and says so the same way. */
+.crumbs button.drop-target,
+.nav-item.drop-target {
+  background: var(--accent-dim);
+  color: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.bulk-hint {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--paper-faint);
+  margin-top: 1px;
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .bulk-hint {
+    display: none;
+  }
 }

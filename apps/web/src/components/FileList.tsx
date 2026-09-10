@@ -42,10 +42,12 @@ function FileRow(props: {
 
   return (
     <div
+      data-file-id={file.id}
       className={`row${props.selected ? " selected" : ""}`}
       style={{ "--i": Math.min(props.index, 20) } as CSSProperties}
+      /* Same rule as the card: a pointer selects, a finger opens. */
       onClick={(e) => (coarse ? props.onOpen() : props.onSelect(e))}
-      onDoubleClick={props.onOpen}
+      onDoubleClick={coarse ? undefined : props.onOpen}
       onContextMenu={(e) => {
         e.preventDefault();
         props.onMenu(e.clientX, e.clientY);

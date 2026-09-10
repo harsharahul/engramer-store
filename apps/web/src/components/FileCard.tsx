@@ -1,5 +1,6 @@
-import { useState, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import { useStore, type FileEntry } from "../store";
+import { useDropTarget } from "../droptarget";
 import { usePhotoThumb } from "../thumbs";
 import { blurUrl } from "../intel/blur";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
@@ -61,16 +62,20 @@ export function FileCard(props: {
   return (
     <div
       ref={cardRef}
+      data-file-id={file.id}
       className={`card${props.selected ? " selected" : ""}${props.fresh ? " fresh" : ""}`}
       style={{ "--i": Math.min(props.index, 20) } as CSSProperties}
+      /* A pointer clicks to select and double-clicks to open, the Mac's
+         rule; a finger taps to open unless it is gathering, when taps
+         toggle. The selection rules themselves live in one reducer. */
       onClick={(e) =>
-        props.selectMode && props.onToggleSelect
-          ? props.onToggleSelect()
-          : coarse
-            ? props.onOpen()
-            : props.onSelect(e)
+        coarse
+          ? props.selectMode && props.onToggleSelect
+            ? props.onToggleSelect()
+            : props.onOpen()
+          : props.onSelect(e)
       }
-      onDoubleClick={props.selectMode ? undefined : props.onOpen}
+      onDoubleClick={coarse ? undefined : props.onOpen}
       onContextMenu={(e) => {
         e.preventDefault();
         props.onMenu(e.clientX, e.clientY);
@@ -150,12 +155,14 @@ export function FolderCard(props: {
   onMenu: (x: number, y: number) => void;
   onDropFiles?: (event: React.DragEvent) => void;
 }) {
-  const [dropping, setDropping] = useState(false);
   const longPress = useLongPress(props.onMenu);
+  // A drag that lingers springs the folder open, so it can travel on into
+  // subfolders without being dropped first.
+  const drop = useDropTarget((event) => props.onDropFiles?.(event), { springLoad: props.onOpen });
 
   return (
     <div
-      className={`card folder-card${dropping ? " drop-target" : ""}`}
+      className={`card folder-card${drop.dropping ? " drop-target" : ""}`}
       style={{ "--i": Math.min(props.index, 20) } as CSSProperties}
       onClick={props.onOpen}
       onContextMenu={(e) => {
@@ -169,22 +176,7 @@ export function FolderCard(props: {
           props.onOpen();
         }
       }}
-      onDragOver={(e) => {
-        if (e.dataTransfer.types.includes("application/x-engramer-files")) {
-          e.preventDefault();
-          e.stopPropagation();
-          setDropping(true);
-        }
-      }}
-      onDragLeave={() => setDropping(false)}
-      onDrop={(e) => {
-        if (e.dataTransfer.types.includes("application/x-engramer-files")) {
-          e.preventDefault();
-          e.stopPropagation();
-          setDropping(false);
-          props.onDropFiles?.(e);
-        }
-      }}
+      {...drop.props}
       title={props.name}
     >
       <div className="art">
