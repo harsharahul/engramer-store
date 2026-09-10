@@ -89,6 +89,8 @@ final class EngramFilesIndex {
     private let backgroundQueue = DispatchQueue(label: "com.harsharahul.engramstore.index-refresh")
     private var backgroundInFlight = false
     private var lastRefreshEnd = Date.distantPast
+    // One deferred refresh at a time for the change path; see refreshCoalesced.
+    private var deferredArmed = false
 
     init?(record: HandoffRecord) {
         guard let master = record.masterKeyBytes, master.count == 32 else { return nil }
@@ -230,6 +232,38 @@ final class EngramFilesIndex {
                 onChange(changed)
             }
         }
+    }
+
+    /// The change path's refresh. The system asks for changes once per
+    /// signal, and the app signals once per change-feed poke, for both
+    /// the root and the working set: a burst of writes elsewhere used to
+    /// cost one delta pull per signal, each after the first answering
+    /// empty. Inside `window` of the last refresh this answers from the
+    /// index instead and arms ONE deferred refresh; when that lands with
+    /// news, `onLater` fires (the caller re-signals the system), so the
+    /// enumeration converges on the next request. Deferred, never
+    /// dropped: a signal is a promise of news, and a timer that discards
+    /// it would leave the drive stale until the next unrelated write.
+    func refreshCoalesced(window: TimeInterval = 2, onLater: @escaping ([String]) -> Void) -> [String] {
+        let recent: Bool = withState { Date().timeIntervalSince(self.lastRefreshEnd) < window }
+        if !recent {
+            return refresh()
+        }
+        let armed: Bool = withState {
+            if self.deferredArmed { return false }
+            self.deferredArmed = true
+            return true
+        }
+        if armed {
+            backgroundQueue.asyncAfter(deadline: .now() + window) {
+                let changed = self.refresh()
+                self.withState { self.deferredArmed = false }
+                if !changed.isEmpty {
+                    onLater(changed)
+                }
+            }
+        }
+        return []
     }
 
     private func withState<T>(_ body: () -> T) -> T {
