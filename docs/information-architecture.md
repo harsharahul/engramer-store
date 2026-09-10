@@ -20,9 +20,10 @@ has one home and mirrors elsewhere, never two homes that drift.
 | **Search field and panel** | Find: one box for words, operators, sentences, and questions | When focused and empty: recent searches, chips that narrow a search, and one sentence saying what search reads. While typing: one merged list, with an "Interpreted as" line whenever the query was rewritten. For a question: an answer above the same list, with the files it came from as rows. | A second search anywhere in the app. |
 | **Command palette** | Do and jump, by keyboard | Actions and files. Every action is a mirror of a control that has a visible home somewhere else. | The only home of any capability. |
 | **Toolbar and view bar** | This view: act on the current place and its display | New, Upload, Select, sort, layout, the details and sidebar toggles, the Activity button. | Account or device settings. |
-| **Details pane** | About one thing. With nothing selected, the "Right now" digest of what needs attention | Every signal derived about the item, each in its own section with a line saying where it came from and a way to correct or remove it in place. Actions on the item. | Library-wide controls. |
+| **Details pane** | About one thing | Every signal derived about the item, each in its own section with a line saying where it came from and a way to correct or remove it in place. Actions on the item. With nothing selected, a short invitation to select something; never a digest. | Library-wide controls, notices. |
 | **Heads-up strip** | Decisions: things waiting for a yes or no, where waiting has a cost | Dates read from documents awaiting confirmation, proposed trips. Collapses to one line; dismissing is one click. | Information, progress, tips. |
-| **Activity** | Work: what the app is doing in the background | Every pass, with progress, a Stop button, and a log entry that says what it did. | Settings. Nothing else in the app shows a progress indicator. |
+| **Notice center** (the bell) | What the app wants to tell you: what needs attention, and what it is doing | Two sections. Needs attention: dates coming up, what the rules noticed, files stored twice, trips, each opening its file, each dismissable. Activity: every background pass with progress, a Stop button, and a log entry saying what it did. The badge counts unread notices and a running job. The same bell on the Mac and the phone. | Settings. Nothing else in the app shows a progress indicator or a digest. |
+| **System notifications** | Reaching you when the app is not in front | Time-sensitive notices only: a date approaching or past, a trip proposed. One notification per fact, never repeated, opening the app on that notice. Permission is asked the first time there is something to say, never at launch. A Profile switch turns them off. | Information, progress, anything without a date. |
 | **Profile** | Capabilities and settings | Preferences that follow the account to every device (the switches). Per-device state with its honest reason when a capability is absent. What remains, as counts computed by the same predicates the passes run. Retry. | Places, items. |
 | **Context menu and selection bar** | These items | Per-item and bulk actions, including on-demand readings of a file. | Navigation. |
 | **Toasts** | Acknowledge and reveal | An outcome that created or moved something is a toast that opens the destination when clicked. A plain toast is used only for an outcome with nowhere to go. | Anything the user must act on. |
@@ -113,8 +114,9 @@ Two examples of the rules at work:
   has an Activity job, a Profile switch, and a Profile count. A date is a
   decision, so it appears in the heads-up strip with confirm and dismiss,
   and on the file in the details pane with its source named. Once
-  confirmed it becomes a place: Expiring soon and Calendar appear in the
-  sidebar only while they hold something.
+  confirmed it becomes a notice in the bell as it approaches, a system
+  notification when the app is not in front, and a place: Expiring soon
+  and Calendar appear in the sidebar only while they hold something.
 - **Albums.** An album is a user-made collection, so it sits in the
   first sidebar group, opens and reveals itself when created, orders by
   recency, and is also a shelf in Photos. Adding to an album shows a toast
