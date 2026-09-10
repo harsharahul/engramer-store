@@ -99,6 +99,29 @@ export interface SyncResponse {
   shared?: SharedFileDto[];
 }
 
+/** Rows one batch request may carry; the server refuses more. */
+export const BATCH_MAX = 500;
+
+export type BatchRequest =
+  | {
+      action: "patch";
+      items: Array<{ id: string; folderId?: string | null; encryptedMeta?: SecretBox }>;
+    }
+  | { action: "trash"; ids: string[] }
+  | { action: "restore"; ids: string[] };
+
+export interface BatchRowResult {
+  id: string;
+  ok: boolean;
+  status?: number;
+  error?: string;
+}
+
+export interface BatchResponse {
+  results: BatchRowResult[];
+  files: FileDto[];
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -432,6 +455,14 @@ export const api = {
     id: string,
     patch: { folderId?: string | null; encryptedMeta?: SecretBox; encryptedKey?: SecretBox },
   ) => request<FileDto>(`/api/files/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  /**
+   * Many files in one request. Each row is answered on its own line; the
+   * rows that changed come back as DTOs. Absent on servers older than the
+   * route, which answer 404: callers fall back to the single routes.
+   */
+  batchFiles: (body: BatchRequest) =>
+    request<BatchResponse>("/api/files/batch", { method: "POST", body: JSON.stringify(body) }),
 
   trashFile: (id: string) => request<void>(`/api/files/${id}`, { method: "DELETE" }),
   restoreFile: (id: string) => request<void>(`/api/trash/${id}/restore`, { method: "POST" }),

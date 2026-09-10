@@ -17,13 +17,17 @@ import {
   secretBoxSeal,
   utf8Encode,
   type FileMetadata,
+  type SecretBox,
 } from "@engramer/crypto";
 import {
   abortPartUpload,
   ApiError,
   api,
+  BATCH_MAX,
   uploadBlob,
   withRetry,
+  type BatchRequest,
+  type BatchResponse,
   type FileDto,
   type FolderDto,
   type SharedFileDto,
@@ -386,7 +390,18 @@ interface StoreState {
   /** Moves many files at once and says exactly which made it. */
   moveFiles: (ids: readonly string[], folderId: string | null) => Promise<BulkResult>;
   trashFile: (id: string) => Promise<void>;
+  trashFiles: (ids: readonly string[]) => Promise<BulkResult>;
   restoreFile: (id: string) => Promise<void>;
+  restoreFiles: (ids: readonly string[]) => Promise<BulkResult>;
+  /**
+   * Re-seals many files' metadata with a change computed per file; a
+   * file whose `patch` returns null is left alone. Favorites and album
+   * edits ride this.
+   */
+  patchFilesMeta: (
+    ids: readonly string[],
+    patch: (file: FileEntry) => Partial<FileMetadata> | null,
+  ) => Promise<BulkResult>;
   deleteForever: (id: string) => Promise<void>;
   clearFinishedUploads: () => void;
   cancelUploads: () => void;
@@ -797,24 +812,99 @@ export const useStore = create<StoreState>((set, get) => {
     set({ folders });
   };
 
-  const applyFile = (dto: FileDto) => {
-    const files = new Map(get().files);
+  /** Folds one reply row into a working copy of the map. */
+  const reduceFile = (files: Map<string, FileEntry>, dto: FileDto) => {
     if (dto.deleted) {
       files.delete(dto.id);
-    } else {
-      const entry = entryFromUpdate(files.get(dto.id), dto, masterKey());
-      // Keep already-warmed search text across metadata updates.
-      const prior = files.get(dto.id);
-      if (entry.text === undefined && entry.hasText && prior?.text !== undefined) {
-        entry.text = prior.text;
-      }
-      if (entry.clip === undefined && entry.hasClip && prior?.clip !== undefined) {
-        entry.clip = prior.clip;
-        entry.clips = prior.clips;
-      }
-      files.set(dto.id, entry);
+      return;
+    }
+    const entry = entryFromUpdate(files.get(dto.id), dto, masterKey());
+    // Keep already-warmed search text across metadata updates.
+    const prior = files.get(dto.id);
+    if (entry.text === undefined && entry.hasText && prior?.text !== undefined) {
+      entry.text = prior.text;
+    }
+    if (entry.clip === undefined && entry.hasClip && prior?.clip !== undefined) {
+      entry.clip = prior.clip;
+      entry.clips = prior.clips;
+    }
+    files.set(dto.id, entry);
+  };
+
+  const applyFile = (dto: FileDto) => {
+    const files = new Map(get().files);
+    reduceFile(files, dto);
+    set({ files });
+  };
+
+  /**
+   * Many reply rows, one map copy, one render. The rows also go into this
+   * device's offline copy: a bulk change applied here and lost from the
+   * cache would show the old folders on the next cold start until a sync
+   * caught up. The cursor is left alone (seq 0): rows from elsewhere may
+   * sit between it and these.
+   */
+  const applyFiles = (dtos: readonly FileDto[]) => {
+    if (dtos.length === 0) {
+      return;
+    }
+    const files = new Map(get().files);
+    for (const dto of dtos) {
+      reduceFile(files, dto);
     }
     set({ files });
+    const account = get().session?.email;
+    if (account) {
+      void storeSyncRows(account, { seq: 0, folders: [], files: [...dtos] });
+    }
+  };
+
+  /**
+   * One request per chunk for a bulk action, or the single route per file
+   * where the server predates the batch route (it answers 404). Either
+   * way the answer names exactly what changed.
+   */
+  const runBatch = async (
+    ids: readonly string[],
+    request: (chunk: string[]) => BatchRequest,
+    single: (id: string) => Promise<void>,
+  ): Promise<BulkResult> => {
+    const result: BulkResult = { done: [], failed: [] };
+    const fallback = async (chunk: string[]) => {
+      await boundedRun(chunk, BULK_LANES, async (id) => {
+        try {
+          await single(id);
+          result.done.push(id);
+        } catch (error) {
+          result.failed.push({ id, error: error instanceof Error ? error.message : String(error) });
+        }
+      });
+    };
+    for (let at = 0; at < ids.length; at += BATCH_MAX) {
+      const chunk = ids.slice(at, at + BATCH_MAX);
+      let reply: BatchResponse;
+      try {
+        reply = await api.batchFiles(request(chunk));
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          await fallback(chunk);
+          continue;
+        }
+        for (const id of chunk) {
+          result.failed.push({ id, error: error instanceof Error ? error.message : String(error) });
+        }
+        continue;
+      }
+      applyFiles(reply.files);
+      for (const row of reply.results) {
+        if (row.ok) {
+          result.done.push(row.id);
+        } else {
+          result.failed.push({ id: row.id, error: row.error ?? `refused (${row.status ?? "?"})` });
+        }
+      }
+    }
+    return result;
   };
 
 
@@ -2019,26 +2109,18 @@ export const useStore = create<StoreState>((set, get) => {
       }
     },
 
+    // Album edits are metadata rewrites, one sealed write per file in one
+    // request; a file already in (or out of) the album is left alone.
     addToAlbum: async (ids, tag) => {
-      // Sequential on purpose: patchFileMeta rewrites the whole metadata
-      // object, so two in-flight writes to one vault race last-write-wins.
-      for (const id of ids) {
-        const file = get().files.get(id);
-        if (!file || file.tags.includes(tag)) {
-          continue;
-        }
-        await patchFileMeta(id, { tags: normalizeTags([...file.tags, tag]) });
-      }
+      await get().patchFilesMeta(ids, (file) =>
+        file.tags.includes(tag) ? null : { tags: normalizeTags([...file.tags, tag]) },
+      );
     },
 
     removeFromAlbum: async (ids, tag) => {
-      for (const id of ids) {
-        const file = get().files.get(id);
-        if (!file || !file.tags.includes(tag)) {
-          continue;
-        }
-        await patchFileMeta(id, { tags: file.tags.filter((t) => t !== tag) });
-      }
+      await get().patchFilesMeta(ids, (file) =>
+        file.tags.includes(tag) ? { tags: file.tags.filter((t) => t !== tag) } : null,
+      );
     },
 
     renameAlbum: async (oldTag, name) => {
@@ -2047,19 +2129,19 @@ export const useStore = create<StoreState>((set, get) => {
         return oldTag;
       }
       const members = [...get().files.values()].filter((f) => f.tags.includes(oldTag));
-      for (const file of members) {
-        await patchFileMeta(file.id, {
-          tags: normalizeTags(file.tags.map((t) => (t === oldTag ? newTag : t))),
-        });
-      }
+      await get().patchFilesMeta(
+        members.map((f) => f.id),
+        (file) => ({ tags: normalizeTags(file.tags.map((t) => (t === oldTag ? newTag : t))) }),
+      );
       return newTag;
     },
 
     deleteAlbum: async (tag) => {
       const members = [...get().files.values()].filter((f) => f.tags.includes(tag));
-      for (const file of members) {
-        await patchFileMeta(file.id, { tags: file.tags.filter((t) => t !== tag) });
-      }
+      await get().patchFilesMeta(
+        members.map((f) => f.id),
+        (file) => ({ tags: file.tags.filter((t) => t !== tag) }),
+      );
     },
 
     confirmFact: async (id, factId, value) =>
@@ -2170,18 +2252,12 @@ export const useStore = create<StoreState>((set, get) => {
       applyFile(dto);
     },
 
-    moveFiles: async (ids, folderId) => {
-      const result: BulkResult = { done: [], failed: [] };
-      await boundedRun([...ids], BULK_LANES, async (id) => {
-        try {
-          await get().moveFile(id, folderId);
-          result.done.push(id);
-        } catch (error) {
-          result.failed.push({ id, error: error instanceof Error ? error.message : String(error) });
-        }
-      });
-      return result;
-    },
+    moveFiles: (ids, folderId) =>
+      runBatch(
+        ids,
+        (chunk) => ({ action: "patch", items: chunk.map((id) => ({ id, folderId })) }),
+        (id) => get().moveFile(id, folderId),
+      ),
 
     trashFile: async (id) => {
       await api.trashFile(id);
@@ -2193,9 +2269,50 @@ export const useStore = create<StoreState>((set, get) => {
       }
     },
 
+    trashFiles: (ids) =>
+      runBatch(
+        ids,
+        (chunk) => ({ action: "trash", ids: chunk }),
+        (id) => get().trashFile(id),
+      ),
+
     restoreFile: async (id) => {
       await api.restoreFile(id);
       await get().refresh();
+    },
+
+    restoreFiles: (ids) =>
+      runBatch(
+        ids,
+        (chunk) => ({ action: "restore", ids: chunk }),
+        (id) => get().restoreFile(id),
+      ),
+
+    patchFilesMeta: (ids, patch) => {
+      // Each file's new metadata is sealed once, here, from what this
+      // device holds now: one write per file, so nothing races itself.
+      const sealed = new Map<string, SecretBox>();
+      for (const id of ids) {
+        const file = get().files.get(id);
+        if (!file) {
+          continue;
+        }
+        const change = patch(file);
+        if (change) {
+          sealed.set(id, encryptFileMetadata({ ...metadataOf(file), ...change }, file.key));
+        }
+      }
+      return runBatch(
+        [...sealed.keys()],
+        (chunk) => ({
+          action: "patch",
+          items: chunk.map((id) => ({ id, encryptedMeta: sealed.get(id)! })),
+        }),
+        async (id) => {
+          const dto = await api.patchFile(id, { encryptedMeta: sealed.get(id)! });
+          applyFile(dto);
+        },
+      );
     },
 
     deleteForever: async (id) => {
