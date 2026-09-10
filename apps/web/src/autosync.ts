@@ -34,11 +34,20 @@ export function installAutoSync(): void {
   installed = true;
   let lastRun = 0;
   let inFlight = false;
+  // A poke that lands mid-refresh is news the running pull may miss;
+  // it is remembered and answered once the pull returns, never dropped.
+  let pendingPush = false;
 
   const kick = (pushed = false) => {
     // A pushed poke IS fresh news, so it skips the cooldown; one
     // refresh at a time still holds.
-    if (inFlight || (!pushed && Date.now() - lastRun < FOREGROUND_COOLDOWN_MS)) {
+    if (inFlight) {
+      if (pushed) {
+        pendingPush = true;
+      }
+      return;
+    }
+    if (!pushed && Date.now() - lastRun < FOREGROUND_COOLDOWN_MS) {
       return;
     }
     const store = useStore.getState();
@@ -75,6 +84,11 @@ export function installAutoSync(): void {
       .finally(() => {
         inFlight = false;
         lastRun = Date.now();
+        if (pendingPush) {
+          // Many pokes during one pull collapse into exactly one more.
+          pendingPush = false;
+          kick(true);
+        }
       });
   };
 

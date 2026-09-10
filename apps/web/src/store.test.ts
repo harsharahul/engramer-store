@@ -13,6 +13,9 @@ const rig = vi.hoisted(() => ({
   blobPuts: [] as string[],
   thumbAttempts: 0,
   stampedSourceIds: [] as (string | undefined)[],
+  /** The batch route's stand-in; null plays an older server (404), so
+   * bulk actions fall back to the single routes the tests stub. */
+  batch: null as null | ((body: unknown) => Promise<unknown>),
 }));
 
 vi.mock("./api", async (importOriginal) => {
@@ -22,6 +25,15 @@ vi.mock("./api", async (importOriginal) => {
     uploadBlob: async (id: string, kind: string, bytes: Uint8Array) => {
       rig.blobPuts.push(`${kind}:${id}`);
       return bytes.length;
+    },
+    api: {
+      ...original.api,
+      batchFiles: async (body: unknown) => {
+        if (!rig.batch) {
+          throw new original.ApiError(404, "not found");
+        }
+        return rig.batch(body);
+      },
     },
   };
 });
@@ -915,8 +927,10 @@ describe("albums in the store", () => {
    * Seeds the store with real-crypto files and stubs api.patchFile to echo
    * the encrypted metadata straight back, so every assertion below reads
    * what would actually have been stored, after the full seal/open cycle.
-   * The stub also measures overlap: album writes must stay sequential,
-   * because each one rewrites the whole metadata blob last-write-wins.
+   * The stub also measures overlap: with the batch route absent (the
+   * suite's default) writes fall back to the single route a few at a
+   * time. Overlap is safe because every file's metadata is sealed once,
+   * before any write, so no two writes ever target the same file.
    */
   const setup = (tagsById: Record<string, string[]>) => {
     const masterKey = generateKey();
@@ -964,7 +978,7 @@ describe("albums in the store", () => {
     return { gauge, spy, tagsOf: (id: string) => useStore.getState().files.get(id)!.tags };
   };
 
-  it("addToAlbum tags every member one write at a time and skips existing members", async () => {
+  it("addToAlbum tags every member once and skips existing members", async () => {
     const { gauge, spy, tagsOf } = setup({
       a: ["sunny"],
       b: ["album:beach"],
@@ -973,8 +987,8 @@ describe("albums in the store", () => {
     await useStore.getState().addToAlbum(["a", "b", "c"], "album:beach");
     expect(tagsOf("a")).toEqual(["sunny", "album:beach"]);
     expect(tagsOf("c")).toEqual(["album:beach"]);
-    expect(gauge.order).toEqual(["a", "c"]);
-    expect(gauge.peak).toBe(1);
+    expect([...gauge.order].sort()).toEqual(["a", "c"]);
+    expect(gauge.peak).toBeLessThanOrEqual(4);
     spy.mockRestore();
   });
 
@@ -996,7 +1010,7 @@ describe("albums in the store", () => {
     expect(tagsOf("a")).toEqual(["album:beach-trip", "sunny"]);
     expect(tagsOf("b")).toEqual(["album:beach-trip"]);
     expect(tagsOf("c")).toEqual(["album:city"]);
-    expect(gauge.peak).toBe(1);
+    expect(gauge.peak).toBeLessThanOrEqual(4);
     spy.mockRestore();
   });
 
@@ -1083,5 +1097,92 @@ describe("moveFiles", () => {
     const files = useStore.getState().files;
     expect(files.get("a")!.folderId).toBe("folder-1");
     expect(files.get("d")!.folderId).toBeNull();
+  });
+});
+
+describe("moveFiles against a server with the batch route", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  it("sends one request per chunk, applies every row in one commit, and reports refusals", async () => {
+    const masterKey = generateKey();
+    const key = generateKey();
+    const entries = ["a", "b", "c"].map((id) => entry({ id, key, name: `${id}.jpg`, mime: "image/jpeg" }));
+    useStore.setState({
+      session: {
+        email: "batch@example.com",
+        token: "t",
+        masterKey,
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      refreshUsage: async () => {},
+      files: new Map(entries.map((e) => [e.id, e])),
+    });
+    const dto = (id: string, folderId: string | null): FileDto => ({
+      id,
+      folderId,
+      encryptedKey: secretBoxSeal(key, masterKey),
+      encryptedMeta: encryptFileMetadata(metadataOf(entries.find((e) => e.id === id)!), key),
+      size: 1024,
+      thumbSize: 0,
+      indexSize: 0,
+      uploaded: true,
+      trashed: false,
+      deleted: false,
+      updateSeq: 9,
+      createdAt: 1,
+      updatedAt: 9,
+    });
+    const requests: unknown[] = [];
+    let singleCalls = 0;
+    const spy = vi.spyOn(api, "patchFile").mockImplementation(async () => {
+      singleCalls++;
+      throw new Error("the single route must not be used when the batch route exists");
+    });
+    rig.batch = async (body) => {
+      requests.push(body);
+      return {
+        results: [
+          { id: "a", ok: true },
+          { id: "b", ok: false, status: 403, error: "only the owner can move this file" },
+          { id: "c", ok: true },
+        ],
+        files: [dto("a", "dest"), dto("c", "dest")],
+      };
+    };
+    let commits = 0;
+    const unsubscribe = useStore.subscribe((state, prior) => {
+      if (state.files !== prior.files) {
+        commits++;
+      }
+    });
+    try {
+      const result = await useStore.getState().moveFiles(["a", "b", "c"], "dest");
+      expect(requests).toEqual([
+        {
+          action: "patch",
+          items: [
+            { id: "a", folderId: "dest" },
+            { id: "b", folderId: "dest" },
+            { id: "c", folderId: "dest" },
+          ],
+        },
+      ]);
+      expect(result.done).toEqual(["a", "c"]);
+      expect(result.failed).toEqual([{ id: "b", error: "only the owner can move this file" }]);
+      expect(singleCalls).toBe(0);
+      // Two rows, one map commit.
+      expect(commits).toBe(1);
+      const files = useStore.getState().files;
+      expect(files.get("a")!.folderId).toBe("dest");
+      expect(files.get("b")!.folderId).toBeNull();
+      expect(files.get("c")!.folderId).toBe("dest");
+    } finally {
+      unsubscribe();
+      spy.mockRestore();
+      rig.batch = null;
+    }
   });
 });

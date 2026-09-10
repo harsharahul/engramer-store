@@ -96,6 +96,38 @@ describe("autosync push", () => {
     expect(rig.signals).toContain("owner@example.com");
   });
 
+  it("pokes that land during a refresh collapse into one follow-up refresh", async () => {
+    // Hold the refresh open so pokes arrive while it is in flight.
+    const { useStore } = await import("./store");
+    let release: (() => void) | null = null;
+    const state = useStore.getState() as { refresh: () => Promise<void>; files: Map<string, unknown> };
+    const original = state.refresh;
+    useStore.setState({
+      refresh: async () => {
+        rig.refreshes += 1;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+    });
+    const before = rig.refreshes;
+    rig.pushed?.({ seq: 100 });
+    await settled();
+    expect(rig.refreshes).toBe(before + 1);
+    rig.pushed?.({ seq: 101 });
+    rig.pushed?.({ seq: 102 });
+    rig.pushed?.({ seq: 103 });
+    await settled();
+    // Still one: the running pull holds them.
+    expect(rig.refreshes).toBe(before + 1);
+    useStore.setState({ refresh: original });
+    release!();
+    await settled();
+    await settled();
+    // Exactly one more, not three.
+    expect(rig.refreshes).toBe(before + 2);
+  });
+
   it("does not poke the drive when extensions are off", async () => {
     rig.handoffOn = false;
     const before = rig.signals.length;

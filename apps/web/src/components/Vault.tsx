@@ -2701,9 +2701,19 @@ export function Vault() {
             count={selection.size}
             total={visibleFiles.length}
             onFavorite={() => {
-              for (const id of selection) {
-                void store.toggleFavorite(id);
-              }
+              // One request flips them all; a mixed selection becomes all
+              // favorites, the Finder's rule for a mixed toggle.
+              const ids = [...selection];
+              const allOn = ids.every((id) => store.files.get(id)?.favorite);
+              void store
+                .patchFilesMeta(ids, (file) =>
+                  file.favorite === !allOn ? null : { favorite: !allOn },
+                )
+                .then((result) => {
+                  if (result.failed.length > 0) {
+                    showToast(`${result.failed.length} could not be updated`);
+                  }
+                });
             }}
             onAlbum={() => setAlbumPickerIds([...selection])}
             onMove={() => setMoveIds([...selection])}
@@ -2716,9 +2726,15 @@ export function Vault() {
               }
             }}
             onTrash={() => {
-              for (const id of selection) {
-                void store.trashFile(id);
-              }
+              const ids = [...selection];
+              void store.trashFiles(ids).then((result) => {
+                const moved = result.done.length;
+                showToast(
+                  result.failed.length === 0
+                    ? `Moved ${moved} item${moved === 1 ? "" : "s"} to trash`
+                    : `Moved ${moved} to trash · ${result.failed.length} could not be moved`,
+                );
+              });
               clearSelection();
             }}
             onSelectAll={selectAll}

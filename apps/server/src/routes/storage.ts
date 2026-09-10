@@ -49,6 +49,27 @@ const patchFileSchema = z.object({
   encryptedKey: secretBoxSchema.optional(),
 });
 
+/** Rows one batch request may touch; a client chunks anything larger. */
+const BATCH_MAX = 500;
+
+const batchSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("patch"),
+    items: z
+      .array(
+        z.object({
+          id: z.string(),
+          folderId: z.string().nullable().optional(),
+          encryptedMeta: secretBoxSchema.optional(),
+        }),
+      )
+      .min(1)
+      .max(BATCH_MAX),
+  }),
+  z.object({ action: z.literal("trash"), ids: z.array(z.string()).min(1).max(BATCH_MAX) }),
+  z.object({ action: z.literal("restore"), ids: z.array(z.string()).min(1).max(BATCH_MAX) }),
+]);
+
 function folderToDto(row: FolderRow) {
   return {
     id: row.id,
@@ -1155,6 +1176,163 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       return { ...forCollaborator, folderId: null };
     }
     return dto;
+  });
+
+  /**
+   * Many files in one request: a move or re-label per item, or a trash or
+   * restore by id. Each row is judged by exactly the rules of its single
+   * route and answered on its own line, so a mixed list never fails as a
+   * whole; the rows that pass change inside one transaction, each with
+   * its own update_seq, so every delta-sync consumer sees the batch as it
+   * would have seen the single writes. The change feed hears about the
+   * batch once, after the commit: a long transaction can outlive the
+   * publisher's coalescing window, and a poke announced mid-transaction
+   * names a sequence the pull cannot see yet.
+   */
+  app.post("/api/files/batch", auth, async (request, reply) => {
+    const body = batchSchema.parse(request.body);
+    const uid = request.user.uid;
+    const now = Date.now();
+    interface RowResult {
+      id: string;
+      ok: boolean;
+      status?: number;
+      error?: string;
+    }
+    const results: RowResult[] = [];
+    const refuse = (id: string, status: number, error: string) => {
+      results.push({ id, ok: false, status, error });
+    };
+    /** Rows to answer with, and the role they were judged under. */
+    const touched: Array<{ id: string; role: "owner" | "editor" }> = [];
+
+    if (body.action === "patch") {
+      // One destination check covers every item that names it.
+      const destinations = new Set(
+        body.items.map((item) => item.folderId).filter((f): f is string => typeof f === "string"),
+      );
+      for (const folderId of destinations) {
+        if (!(await getOwnFolder(folderId, uid))) {
+          return reply.code(404).send({ error: "destination folder not found" });
+        }
+      }
+      const plan: Array<{ item: (typeof body.items)[number]; access: FileAccess }> = [];
+      for (const item of body.items) {
+        const access = await getAccessibleFile(item.id, uid);
+        if (!access) {
+          refuse(item.id, 404, "file not found");
+        } else if (access.role === "viewer") {
+          refuse(item.id, 403, "view access only");
+        } else if (access.role !== "owner" && item.folderId !== undefined) {
+          refuse(item.id, 403, "only the owner can move this file");
+        } else {
+          results.push({ id: item.id, ok: true });
+          plan.push({ item, access });
+        }
+      }
+      await app.db.tx(async (t) => {
+        for (const { item, access } of plan) {
+          await t.run(
+            `UPDATE files SET
+               folder_id = CASE WHEN ? = 1 THEN ? ELSE folder_id END,
+               encrypted_meta = COALESCE(?, encrypted_meta),
+               update_seq = ?, updated_at = ?
+             WHERE id = ?`,
+            item.folderId !== undefined ? 1 : 0,
+            item.folderId ?? null,
+            item.encryptedMeta ? JSON.stringify(item.encryptedMeta) : null,
+            await nextSeq(t, access.file.user_id),
+            now,
+            item.id,
+          );
+          await touchCollaborators(t, item.id, now);
+          touched.push({ id: item.id, role: access.role === "owner" ? "owner" : "editor" });
+        }
+      });
+    } else {
+      const restoring = body.action === "restore";
+      const plan: Array<{ file: FileRow; folderId: string | null }> = [];
+      for (const id of body.ids) {
+        const file = await getOwnFile(id, uid);
+        if (restoring) {
+          if (!file || !file.trashed) {
+            refuse(id, 404, "file not found in trash");
+            continue;
+          }
+          // If the original folder was deleted, the file comes back at the root.
+          const folderAlive = file.folder_id ? Boolean(await getOwnFolder(file.folder_id, uid)) : true;
+          plan.push({ file, folderId: folderAlive ? file.folder_id : null });
+        } else {
+          if (!file) {
+            // A collaborator can see the file; only the owner can trash it.
+            if (await getAccessibleFile(id, uid)) {
+              refuse(id, 403, "only the owner can move this file to trash");
+            } else {
+              refuse(id, 404, "file not found");
+            }
+            continue;
+          }
+          plan.push({ file, folderId: file.folder_id });
+        }
+        results.push({ id, ok: true });
+      }
+      await app.db.tx(async (t) => {
+        for (const { file, folderId } of plan) {
+          if (restoring) {
+            await t.run(
+              "UPDATE files SET trashed = 0, folder_id = ?, update_seq = ?, updated_at = ? WHERE id = ?",
+              folderId,
+              await nextSeq(t, uid),
+              now,
+              file.id,
+            );
+            // Restoring returns the file to its members' vaults too.
+            await touchCollaborators(t, file.id, now);
+          } else {
+            // Members get the tombstone seq first, while their rows still match.
+            await touchCollaborators(t, file.id, now);
+            await t.run(
+              "UPDATE files SET trashed = 1, update_seq = ?, updated_at = ? WHERE id = ?",
+              await nextSeq(t, uid),
+              now,
+              file.id,
+            );
+          }
+          touched.push({ id: file.id, role: "owner" });
+        }
+      });
+    }
+
+    const files: Array<Record<string, unknown>> = [];
+    for (const { id, role } of touched) {
+      const row = await app.db.get<FileRow & { has_collaborators: number | boolean }>(
+        `SELECT files.*, EXISTS(
+           SELECT 1 FROM file_collaborators c WHERE c.file_id = files.id AND c.revoked = 0
+         ) AS has_collaborators
+         FROM files WHERE id = ?`,
+        id,
+      );
+      if (!row) {
+        continue;
+      }
+      const dto = fileToDto(row);
+      if (role !== "owner") {
+        // Same redaction as the single route: the owner's wrapped key and
+        // location are theirs alone.
+        const { encryptedKey, ...forCollaborator } = dto;
+        void encryptedKey;
+        files.push({ ...forCollaborator, folderId: null });
+      } else {
+        files.push(dto);
+      }
+    }
+    if (touched.length > 0) {
+      const seq = await app.db.get<{ last_seq: number }>("SELECT last_seq FROM users WHERE id = ?", uid);
+      if (seq) {
+        app.seqEvents.note(uid, seq.last_seq);
+      }
+    }
+    return { results, files };
   });
 
   app.delete("/api/files/:id", auth, async (request, reply) => {
