@@ -142,7 +142,7 @@ Configuration via environment variables:
 
 The full list, including the storage tiering, cache, and request-budget knobs, is in [docs/storage.md](docs/storage.md) and [docs/backends.md](docs/backends.md).
 
-Run it behind TLS in production; the login key must only ever travel over HTTPS. Storage architecture, the S3-compatible backend, and backup recipes are covered in [docs/storage.md](docs/storage.md). Consumer cloud storage (Drime, pCloud, FileLu, and anything rclone reaches) as the backing store is covered in [docs/backends.md](docs/backends.md), with ready compose recipes in `compose.rclone.yml`. A design for exposing an S3 API lives in [docs/s3-gateway.md](docs/s3-gateway.md), and the reasoning behind the document editor is in [docs/editing.md](docs/editing.md).
+Run it behind TLS in production; the login key must only ever travel over HTTPS. Storage architecture, the S3-compatible backend, and backup recipes are covered in [docs/storage.md](docs/storage.md). Consumer cloud storage (Drime, pCloud, FileLu, and anything rclone reaches) as the backing store is covered in [docs/backends.md](docs/backends.md), with ready compose recipes in `compose.rclone.yml`. A design for exposing an S3 API lives in [docs/s3-gateway.md](docs/s3-gateway.md), and the reasoning behind the document editor is in [docs/editing.md](docs/editing.md). The principles every change is held to are in [docs/principles.md](docs/principles.md), and where each control and state belongs is set out in [docs/information-architecture.md](docs/information-architecture.md).
 
 ## Development
 

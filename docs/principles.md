@@ -2,7 +2,9 @@
 
 Engram Store is built against a short list of principles. Every change is
 held to them; when a change and a principle disagree, the change is wrong
-or the principle needs an explicit, recorded amendment.
+or the principle needs an explicit, recorded amendment. Where a feature's
+controls and states live, and when they are allowed to appear, is decided
+by the [information architecture](information-architecture.md).
 
 ## 1. It just works
 
