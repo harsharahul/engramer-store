@@ -64,7 +64,10 @@ final class EngramFilesEnumerator: NSObject, NSFileProviderEnumerator {
             return
         }
         let since = Int(String(data: anchor.rawValue, encoding: .utf8) ?? "0") ?? 0
-        let changedIds = index.refresh()
+        // A burst of signals (one per poke, per container) costs one pull
+        // per window; a request inside the window answers what the index
+        // holds and the deferred pull re-signals when it brings news.
+        let changedIds = index.refreshCoalesced { [onFreshData] _ in onFreshData() }
         var updated: [EngramFilesItem] = []
         var deleted: [NSFileProviderItemIdentifier] = []
         for id in Set(changedIds) {
