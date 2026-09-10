@@ -40,6 +40,8 @@ import { isEmptySpace, marqueeSelection, useMarquee } from "../marquee";
 import { FILE_DRAG_TYPE, useDropTarget } from "../droptarget";
 import { setFileDragImage } from "../dragghost";
 import type { BulkResult } from "../store";
+import { describeProcessing } from "../activity";
+import { ActivityBell, ActivityPanel } from "./Activity";
 import { installMediaKeyResponder } from "../mediastream";
 import { installHandoffForegroundRefresh } from "../handoff";
 import { idleLockMinutes, installIdleLock } from "../idlelock";
@@ -304,6 +306,7 @@ export function Vault() {
    */
   const [detailsFileId, setDetailsFileId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{
     x: number;
     y: number;
@@ -1336,6 +1339,13 @@ export function Vault() {
   // heartbeat that makes shared documents and phone uploads appear on
   // their own.
   useEffect(() => installAutoSync(), []);
+  // What finished while this account was away, per device.
+  const sessionEmail = store.session?.email;
+  useEffect(() => {
+    if (sessionEmail) {
+      useStore.getState().loadActivity();
+    }
+  }, [sessionEmail]);
 
   // Once the library is in hand this device can see what other paths
   // left unfinished: thumbnails for Files-app arrivals, scanners a
@@ -1573,45 +1583,27 @@ export function Vault() {
             setOcrEnabled(true);
             setOcrOn(true);
           }
-          void store.recognizeAllImages().then((found) => {
-            showToast(
-              found > 0
-                ? `Read text in ${found} image${found === 1 ? "" : "s"}. They are searchable now.`
-                : "No new text found in your images.",
-            );
-          });
+          void store.processLibrary().then((counts) => showToast(describeProcessing(counts).title));
         },
       },
       {
         id: "clip-all",
         label: "Index photos and videos by meaning",
-        hint: "on-device; find media by what is in it",
+        hint: "on-device; find media by what is in it, and label it",
         run: () => {
           if (!semanticEnabled()) {
             setSemanticEnabled(true);
             setSemanticOn(true);
           }
-          void store.embedAllImages().then((indexed) => {
-            showToast(
-              indexed > 0
-                ? `Indexed ${indexed} file${indexed === 1 ? "" : "s"} by meaning.`
-                : "No new photos or videos to index.",
-            );
-          });
+          void store.processLibrary().then((counts) => showToast(describeProcessing(counts).title));
         },
       },
       {
-        id: "thumbs-all",
-        label: "Generate missing thumbnails",
-        hint: "for files added outside this app",
+        id: "fill-in",
+        label: "Fill in everything missing",
+        hint: "previews, tags, text and meaning in one pass",
         run: () => {
-          void store.backfillThumbnails().then((made) => {
-            showToast(
-              made > 0
-                ? `Made thumbnails for ${made} file${made === 1 ? "" : "s"}.`
-                : "Every image and video already has a thumbnail.",
-            );
-          });
+          void store.processLibrary().then((counts) => showToast(describeProcessing(counts).title));
         },
       },
       {
@@ -2145,6 +2137,12 @@ export function Vault() {
             <SparkGlyph size={14} /> <kbd className="mono">⌘K</kbd>
           </button>
           <div className="grow" />
+          <ActivityBell
+            open={activityOpen}
+            onToggle={() => {
+              setActivityOpen((open) => !open);
+            }}
+          />
           <button
             className="btn"
             title="Create a note, document, spreadsheet or folder"
@@ -2650,39 +2648,15 @@ export function Vault() {
             </button>
           </div>
         )}
-        {store.batch && (
-          <div className="ocr-pill">
-            <span className="spinner" />
-            Uploading {store.batch.current || "…"} · {store.batch.done + store.batch.failed} of{" "}
-            {store.batch.total}
-            {store.batch.failed > 0 ? ` · ${store.batch.failed} failed` : ""}
-            {store.batchStop && (
-              <button className="tray-cancel" onClick={() => store.batchStop?.()}>
-                Stop
-              </button>
-            )}
-          </div>
-        )}
-        {store.ocrProgress && (
-          <div className="ocr-pill">
-            <span className="spinner" />
-            Reading {store.ocrProgress.current} · {store.ocrProgress.done + 1} of{" "}
-            {store.ocrProgress.total}
-          </div>
-        )}
-        {store.semanticProgress && (
-          <div className="ocr-pill">
-            <span className="spinner" />
-            Indexing {store.semanticProgress.current} · {store.semanticProgress.done + 1} of{" "}
-            {store.semanticProgress.total}
-          </div>
-        )}
-        {store.thumbProgress && (
-          <div className="ocr-pill">
-            <span className="spinner" />
-            Preparing {store.thumbProgress.current} · {store.thumbProgress.done + 1} of{" "}
-            {store.thumbProgress.total}
-          </div>
+        {activityOpen && (
+          <ActivityPanel
+            sheet={isMobile}
+            onClose={() => setActivityOpen(false)}
+            onOpenProfile={() => {
+              setActivityOpen(false);
+              setView({ kind: "profile" });
+            }}
+          />
         )}
         {toast && <div className="toast">{toast}</div>}
         {store.reveal && (

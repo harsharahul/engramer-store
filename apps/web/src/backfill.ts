@@ -2,9 +2,7 @@ import { isHandheld } from "./analysisslot";
 import { loadPolicy } from "./backuppolicy";
 import { settingChanged } from "./settingsbus";
 import { connectionIsUnmetered } from "./connection";
-import { ocrEnabled } from "./intel/ocr";
 import { factsEnabled } from "./intel/scan";
-import { semanticEnabled } from "./intel/semantic";
 import { useStore } from "./store";
 import { SweepMemory, type SweepKind } from "./sweepmemory";
 
@@ -85,17 +83,13 @@ export function backfillDelayMs(
 }
 
 // Session-long memory of what each pass already attempted, kept per pass:
-// a file the thumbnailer failed on may still OCR fine.
-let attemptedThumbs = new Set<string>();
-let attemptedOcr = new Set<string>();
-let attemptedClip = new Set<string>();
+// the dates pass reads text the main pass may have just produced.
+let attemptedProcess = new Set<string>();
 let attemptedFacts = new Set<string>();
 
 /** Forgets this session's attempts; the persisted record still stands. */
 export function resetBackfillSession(): void {
-  attemptedThumbs = new Set();
-  attemptedOcr = new Set();
-  attemptedClip = new Set();
+  attemptedProcess = new Set();
   attemptedFacts = new Set();
 }
 
@@ -103,17 +97,18 @@ let running = false;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 export interface BackfillResult {
-  thumbs: number;
-  text: number;
-  meaning: number;
+  /** Files the main pass finished: previews, text, meaning, tags in one go. */
+  files: number;
   facts: number;
 }
 
 /**
- * One automatic pass over everything missing. Thumbnails first: they are
- * the visible gap, and a video needs its poster frame stored before it can
- * be indexed by meaning. Each scanner runs only when its preference is on,
- * exactly the gate its inline counterpart honors at upload.
+ * One automatic pass over everything missing: every file that owes a
+ * preview, a text reading, a meaning vector, a category or scene labels
+ * gets all of it in one visit, its original fetched once. The dates pass
+ * follows, over text the library already holds, so it downloads nothing.
+ * Each scanner runs only when its preference is on, exactly the gate its
+ * inline counterpart honors at upload.
  */
 export async function runBackfill(): Promise<BackfillResult | null> {
   if (running || !autoBackfillEnabled()) {
@@ -173,20 +168,12 @@ export async function runBackfill(): Promise<BackfillResult | null> {
 
   try {
     const cap = isHandheld() ? { maxBytes: HANDHELD_AUTO_MAX_BYTES } : {};
-    const thumbs = await store.backfillThumbnails({ ...pass("thumbs", attemptedThumbs), ...cap });
-    const text =
-      !stop() && ocrEnabled()
-        ? await useStore.getState().recognizeAllImages(pass("text", attemptedOcr))
-        : 0;
-    const meaning =
-      !stop() && semanticEnabled()
-        ? await useStore.getState().embedAllImages(pass("meaning", attemptedClip))
-        : 0;
+    const processed = await store.processLibrary({ ...pass("process", attemptedProcess), ...cap });
     const facts =
       !stop() && factsEnabled()
         ? await useStore.getState().scanLibraryForFacts(pass("facts", attemptedFacts))
         : 0;
-    return { thumbs, text, meaning, facts };
+    return { files: processed.files, facts };
   } finally {
     running = false;
   }

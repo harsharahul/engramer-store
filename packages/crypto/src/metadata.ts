@@ -67,6 +67,9 @@ export interface FileMetadata {
    * Vectors from different models never compare, so a model upgrade
    * re-embeds files whose recorded version lags. */
   clipVersion?: number;
+  /** Which scene vocabulary labeled this file's tags from its vector;
+   * absent = never labeled. A vocabulary change re-labels what lags. */
+  scenesVersion?: number;
   /** Auto-assigned category (client-side analysis; opaque to the server). */
   category?: string;
   /** Tags, auto-assigned and user-edited alike. */

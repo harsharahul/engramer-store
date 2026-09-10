@@ -85,6 +85,26 @@ policy would reject a CDN fetch even if one were attempted. Embeddings ride in
 the same encrypted index blob as extracted text, and videos contribute several
 sampled frames so any scene matches, not only the poster.
 
+**Scene labels.** The same vector is scored against a small vocabulary of
+everyday words (beach, food, dog, document, screenshot, and about forty more)
+with the model's text encoder, on the device. The few confident labels become
+tags, so `tag:beach` finds them, they show as chips, and albums can be built
+from them; an unsure picture gets no label rather than a wrong one. Labels are
+stamped with the vocabulary version they came from, so a changed vocabulary
+re-labels what lags. The same score decides whether a photo is worth a text
+reading at all: most photographs carry no words, and skipping the reader for
+them is what makes filling in a large library fast.
+
+**Filling in.** Files can arrive without any of this: the iPhone's Files app
+stores a photo as bytes and a name, because that process cannot decode media.
+Whichever signed-in device is open next takes such files up in one pass, a few
+at a time: each original is downloaded and decrypted once and goes through the
+same analyzer an upload does, producing the preview, the category and basic
+tags, the text reading, the meaning vector and its labels together, with one
+metadata write per file. The pass narrates through the Activity button in the
+toolbar, where it can be stopped, and leaves an entry saying exactly what it
+did; the Profile page shows what is still left.
+
 A licensing note: MobileCLIP is Apple's model, distributed under Apple's own
 license rather than an open-source one. That license permits redistributing
 the model, and its text ships beside the weights in the container image, but

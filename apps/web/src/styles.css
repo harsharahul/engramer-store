@@ -5384,3 +5384,195 @@ span.item-menu {
     display: none;
   }
 }
+
+/* ---------- activity bell and panel ---------- */
+
+.activity-bell {
+  position: relative;
+}
+
+/* A thin ring fills clockwise while a job runs; the button stays a button. */
+.activity-bell.busy::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) calc(var(--progress, 0) * 360deg), color-mix(in srgb, var(--accent) 18%, transparent) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+  pointer-events: none;
+}
+
+.activity-badge {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--ink-0, var(--ink-1));
+}
+
+.activity-panel {
+  position: absolute;
+  top: calc(var(--topbar-h, 65px) + 6px);
+  right: 16px;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(70vh, 640px);
+  display: flex;
+  flex-direction: column;
+  background: var(--ink-1);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-modal);
+  z-index: 300;
+  overflow: hidden;
+  animation: fade-rise 0.18s ease both;
+}
+
+.activity-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 10px 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.activity-jobs {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.activity-job-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.activity-job-head .spinner {
+  width: 13px;
+  height: 13px;
+}
+
+.activity-job-count {
+  color: var(--paper-dim);
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.activity-stop {
+  padding: 2px 10px;
+  height: 26px;
+}
+
+.activity-bar {
+  margin-top: 8px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--ink-2);
+  overflow: hidden;
+}
+
+.activity-bar > div {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.2s ease;
+}
+
+.activity-job-current {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--paper-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-log {
+  overflow-y: auto;
+  padding: 6px 0 8px;
+}
+
+.activity-empty {
+  padding: 14px 16px 12px;
+  font-size: 13px;
+  color: var(--paper-dim);
+  line-height: 1.5;
+}
+
+.activity-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 10px 10px 16px;
+  border-left: 3px solid transparent;
+}
+
+.activity-entry.unread {
+  border-left-color: var(--accent);
+}
+
+.activity-entry-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-entry-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.activity-entry-detail {
+  font-size: 12.5px;
+  color: var(--paper-dim);
+  margin-top: 2px;
+  line-height: 1.45;
+}
+
+.activity-entry-when {
+  font-size: 11px;
+  color: var(--paper-faint);
+  margin-top: 4px;
+}
+
+.activity-clear {
+  margin: 4px 12px 4px auto;
+  display: block;
+}
+
+button.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent-bright);
+  cursor: pointer;
+  font: inherit;
+}
+
+@media (max-width: 760px) {
+  .activity-panel.sheet {
+    position: fixed;
+    top: auto;
+    right: 0;
+    left: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 80vh;
+    border-radius: 18px 18px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    z-index: 320;
+  }
+}
