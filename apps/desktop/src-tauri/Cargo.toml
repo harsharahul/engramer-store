@@ -12,6 +12,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 crypto_secretbox = "0.1"
 blake2 = "0.10"
 engram-core = { path = "../../../crates/engram-core" }

@@ -818,6 +818,56 @@ export async function nativeAssistantCancel(job: string): Promise<void> {
   }
 }
 
+// ----- system notifications (the shell's, or the browser's own) -----
+
+type NotificationPermission = "granted" | "denied" | "prompt";
+
+function browserPermission(): NotificationPermission {
+  if (typeof Notification === "undefined") {
+    return "denied";
+  }
+  return Notification.permission === "default" ? "prompt" : Notification.permission;
+}
+
+export async function nativeNotificationPermission(): Promise<NotificationPermission> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return browserPermission();
+  }
+  try {
+    const granted = await invoke("plugin:notification|is_permission_granted");
+    return granted === true ? "granted" : granted === false ? "denied" : "prompt";
+  } catch {
+    return "denied";
+  }
+}
+
+export async function nativeRequestNotificationPermission(): Promise<NotificationPermission> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    if (typeof Notification === "undefined") {
+      return "denied";
+    }
+    const answer = await Notification.requestPermission();
+    return answer === "default" ? "prompt" : answer;
+  }
+  try {
+    const answer = await invoke("plugin:notification|request_permission");
+    return answer === "granted" ? "granted" : answer === "denied" ? "denied" : "prompt";
+  } catch {
+    return "denied";
+  }
+}
+
+export async function nativeNotify(title: string, body: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    new Notification(title, { body });
+    return;
+  }
+  await invoke("plugin:notification|notify", { options: { title, body } });
+}
+
 // ----- native media path (desktop shell only) -----
 
 /** The shell's media protocol answers range requests locally. */

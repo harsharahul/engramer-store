@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { decryptContent, decryptFileMetadata } from "@engramer/crypto";
 import { api, type FileVersionInfo } from "../api";
-import { FileFacts, LibraryIntel } from "./FactsPanel";
+import { FileFacts } from "./FactsPanel";
 import { useStore, type FileEntry } from "../store";
 import { albumTitle, isAlbumTag, isReservedTag } from "../albums";
 import { useSheetDrag } from "../sheetdrag";
@@ -28,8 +28,6 @@ import {
  */
 export function DetailsPanel(props: {
   file: FileEntry | null;
-  /** Everything live, for the library intelligence shown when nothing is picked. */
-  allFiles: FileEntry[];
   selectionCount: number;
   /** Bytes across the selection, for the summary shown when several are picked. */
   selectionBytes?: number;
@@ -114,11 +112,7 @@ export function DetailsPanel(props: {
       <aside className="details">
         <header>
           <span className="details-title">
-            {props.selectionCount > 1
-              ? `${props.selectionCount} selected`
-              : // Nothing is selected, so the panel is not describing a file
-                // and should not claim to be.
-                "Right now"}
+            {props.selectionCount > 1 ? `${props.selectionCount} selected` : "Details"}
           </span>
           <button className="icon-btn" title="Close" onClick={props.onClose}>
             <XGlyph size={14} />
@@ -133,9 +127,9 @@ export function DetailsPanel(props: {
               Use the bar below to favorite, move, save, or trash them all at once.
             </>
           ) : (
-            // Nothing selected is the panel's usual state, so it is worth
-            // more than a sentence telling you to select something.
-            <LibraryIntel files={props.allFiles} onOpen={props.onOpen} />
+            // This pane is about one thing. What needs attention across the
+            // library lives in the bell, where the phone can reach it too.
+            <p className="panel-quiet">Select a file to inspect it.</p>
           )}
         </div>
       </aside>

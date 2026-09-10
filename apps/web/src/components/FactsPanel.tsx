@@ -15,15 +15,11 @@ import { DATED_KINDS, type Fact, type FactEvidence } from "../intel/facts";
 import { describeFact, shown, sourceLabel, whenLabel } from "../intel/describe";
 import { insightsFor, type Insight } from "../intel/insights";
 import { duplicatesByDigest } from "../intel/duplicates";
-import { daysUntil } from "../intel/dates";
+import { tripTags, upcomingFacts } from "../notices";
 import { factToCalendar } from "../intel/ics";
 import { triggerDownload } from "../download";
 import { TripCard } from "./TripCard";
 import { ClockGlyph, CopyGlyph, InfoGlyph, XGlyph } from "./Icon";
-
-/** Near enough to be worth saying without being asked. */
-const HORIZON_DAYS = 120;
-const RECENTLY_PAST_DAYS = 30;
 
 /** ------------------------------------------------------- the whole library */
 
@@ -45,31 +41,22 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
 
   // Confirmed trips are shared tags; the members' events are the itinerary.
   const tripsByTag = new Map<string, FileEntry[]>();
-  for (const file of live) {
-    for (const tag of file.tags) {
-      if (tag.startsWith("trip:")) {
-        tripsByTag.set(tag, [...(tripsByTag.get(tag) ?? []), file]);
-      }
-    }
+  for (const tag of tripTags(live)) {
+    tripsByTag.set(
+      tag,
+      live.filter((file) => file.tags.includes(tag)),
+    );
   }
   const inTrip = new Set([...tripsByTag.values()].flat().map((file) => file.id));
 
-  const upcoming = live
-    .flatMap((file) =>
-      file.facts
-        .filter((fact) => fact.confirmed && !fact.dismissed && isDated(fact))
-        .map((fact) => ({ file, fact, days: daysUntil(fact.value, now) })),
-    )
-    .filter(
-      (entry) =>
-        entry.days > -RECENTLY_PAST_DAYS &&
-        entry.days < HORIZON_DAYS &&
-        !spokenFor.has(entry.file.id) &&
-        // A trip card already presents its members' events as an itinerary;
-        // repeating them here would say everything twice.
-        !(entry.fact.kind === "event" && inTrip.has(entry.file.id)),
-    )
-    .sort((a, b) => a.days - b.days);
+  // The same computation the bell counts and the notifications read.
+  const upcoming = upcomingFacts(live, now).filter(
+    (entry) =>
+      !spokenFor.has(entry.file.id) &&
+      // A trip card already presents its members' events as an itinerary;
+      // repeating them here would say everything twice.
+      !(entry.fact.kind === "event" && inTrip.has(entry.file.id)),
+  );
 
   const duplicates = duplicatesByDigest(live);
 
@@ -80,9 +67,7 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
     tripsByTag.size === 0
   ) {
     return (
-      <p className="panel-quiet">
-        Nothing needs your attention. Select a file to inspect it.
-      </p>
+      <p className="panel-quiet">Nothing needs your attention.</p>
     );
   }
 

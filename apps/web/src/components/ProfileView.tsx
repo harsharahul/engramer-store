@@ -19,6 +19,7 @@ import {
 } from "../backup";
 import { resetBackupLedger } from "../backupledger";
 import { assistantState, describeAssistantState, type AssistantState } from "../intel/assistant";
+import { notificationsEnabled, setNotificationsEnabled } from "../notifications";
 import { settingsEvents, SETTINGS_APPLIED_EVENT } from "../settingsync";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
 import {
@@ -61,6 +62,7 @@ import {
 import {
   nativeShell,
   nativeFilesProviderAvailable,
+  nativeNotificationPermission,
   nativeUnlockAvailable,
   pickFolder,
   watchedAdd,
@@ -131,6 +133,19 @@ export function ProfileView(props: {
   // Probed fresh on every open: a downloading model becomes ready without
   // any event, and the row must say what is true now.
   const [assistant, setAssistant] = useState<AssistantState | null>(null);
+  const [notifyOn, setNotifyOn] = useState(() => notificationsEnabled());
+  const [notifyPermission, setNotifyPermission] = useState<"granted" | "denied" | "prompt" | null>(null);
+  useEffect(() => {
+    let live = true;
+    void nativeNotificationPermission().then((state) => {
+      if (live) {
+        setNotifyPermission(state);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   useEffect(() => {
     let live = true;
     void assistantState({ refresh: true }).then((state) => {
@@ -1060,6 +1075,34 @@ export function ProfileView(props: {
               {assistant ? describeAssistantState(assistant) : "Checking…"}
             </div>
           </div>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Notifications</b>
+            <div className="profile-row-sub">
+              A date approaching or past reaches you here even when the app is not in front,
+              once per document; the bell in the toolbar holds everything that needs attention.
+              {notifyPermission === "granted"
+                ? " This device allows them."
+                : notifyPermission === "denied"
+                  ? " This device has them turned off in its system settings."
+                  : notifyPermission === "prompt"
+                    ? " This device will be asked the first time there is something to say."
+                    : ""}
+            </div>
+          </div>
+          <button
+            className="profile-switch"
+            role="switch"
+            aria-checked={notifyOn}
+            onClick={() => {
+              const next = !notifyOn;
+              setNotificationsEnabled(next);
+              setNotifyOn(next);
+            }}
+          >
+            <span className={`switch${notifyOn ? " on" : ""}`} />
+          </button>
         </div>
         <div className="profile-row">
           <div className="profile-row-main">

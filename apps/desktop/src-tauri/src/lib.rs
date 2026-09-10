@@ -139,6 +139,7 @@ pub fn run() {
     ));
     builder
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage::<watched::SharedWatchState>(Arc::new(Mutex::new(Default::default())))
         .manage(media::MediaState::default())
         .manage(intel::IntelState::default())

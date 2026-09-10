@@ -179,8 +179,12 @@ document at once:
 - An insurance period that ended with nothing newer stored.
 - A warranty in its last thirty days, or an invoice past its due date.
 
-These appear in the panel beside your files, with the reasoning behind each one
-a click away, and an **Expiring soon** view lists everything being tracked.
+These appear behind the bell in the toolbar, on the Mac and the phone alike,
+with the reasoning behind each one a click away; the badge counts what you
+have not seen yet. A date close enough to matter also reaches you as a system
+notification when the app is not in front, once per document, with a switch
+in Profile under This device. An **Expiring soon** view lists everything
+being tracked.
 Facts read out of a file also appear on the file itself, each naming where it
 came from, since how far to trust a date depends on whether a check digit stood
 behind it.
