@@ -61,14 +61,14 @@ describe("the details panel survives the phone layout", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("still hides the pane on the middling widths it was written for", () => {
-    // The rule must survive, just not reach phones: a tablet-width window has
-    // no room for a third column, and the sheet is not offered there.
-    const hidesPane = mediaBlocks(CSS).some(
-      ([condition, body]) =>
-        !appliesToPhones(condition) &&
-        /\.frame\s*>\s*\.details[^{]*\{[^}]*display:\s*none/.test(body),
+  it("is never hidden at any width: a window with no third column floats it", () => {
+    // The 761-899 px hide rule is gone for good. A window too narrow for a
+    // third column gets the pane as an overlay (layout.ts decides when), so
+    // the info toggle can never read "showing" while nothing shows.
+    const hidesPane = mediaBlocks(CSS).some(([, body]) =>
+      /\.frame\s*>\s*\.details[^{]*\{[^}]*display:\s*none/.test(body),
     );
-    expect(hidesPane).toBe(true);
+    expect(hidesPane).toBe(false);
+    expect(/\.frame\.details-overlay\s*>\s*\.details\s*\{[^}]*position:\s*absolute/.test(CSS)).toBe(true);
   });
 });

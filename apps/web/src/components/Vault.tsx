@@ -26,7 +26,15 @@ import {
 } from "../theme";
 import { mergeSearchHits, searchFiles, highlightParts, type SearchHit } from "../search";
 import { collectDropped, fromDirectoryInput } from "../uploader";
-import { MOBILE_QUERY, useMediaQuery } from "../media";
+import { MOBILE_QUERY, useMediaQuery, useViewportWidth } from "../media";
+import {
+  DETAILS_DEFAULT,
+  SIDEBAR_DEFAULT,
+  planLayout,
+  resizeDetails,
+  resizeSidebar,
+} from "../layout";
+import { useDivider } from "../usedivider";
 import { isGathering, nextSelection } from "../selection";
 import { isEmptySpace, marqueeSelection, useMarquee } from "../marquee";
 import { FILE_DRAG_TYPE, useDropTarget } from "../droptarget";
@@ -135,6 +143,7 @@ import {
   PeopleGlyph,
   LockGlyph,
   MenuGlyph,
+  ChevronRightGlyph,
   MonitorGlyph,
   MoonGlyph,
   MoveGlyph,
@@ -272,6 +281,19 @@ export function Vault() {
   const [albumPickerIds, setAlbumPickerIds] = useState<string[] | null>(null);
   const [photosFavOnly, setPhotosFavOnly] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(() => loadPref("engramer-details", true));
+  // The columns' chosen widths and the sidebar's collapsed state, remembered
+  // like any other layout preference; the plan below fits them to the window.
+  const [sidebarWidth, setSidebarWidth] = useState(() =>
+    loadPref("engramer-sidebar-w", SIDEBAR_DEFAULT),
+  );
+  const [detailsWidth, setDetailsWidth] = useState(() =>
+    loadPref("engramer-details-w", DETAILS_DEFAULT),
+  );
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    loadPref("engramer-sidebar-collapsed", false),
+  );
+  const [albumsOpen, setAlbumsOpen] = useState(() => loadPref("engramer-side-albums", true));
+  const [libraryOpen, setLibraryOpen] = useState(() => loadPref("engramer-side-library", true));
   const [detailsSheet, setDetailsSheet] = useState(false);
   /**
    * The file the phone's Details sheet is showing. It owns this rather
@@ -320,6 +342,112 @@ export function Vault() {
   const [similarTo, setSimilarTo] = useState<FileEntry | null>(null);
   const [similarHits, setSimilarHits] = useState<SearchHit[]>([]);
   const isMobile = useMediaQuery(MOBILE_QUERY);
+  const viewportWidth = useViewportWidth();
+  const plan = planLayout(viewportWidth, {
+    sidebarWidth,
+    detailsWidth,
+    sidebarCollapsed,
+    detailsOpen,
+  });
+  const frameRef = useRef<HTMLDivElement>(null);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((collapsed) => {
+      persist("engramer-sidebar-collapsed", !collapsed);
+      return !collapsed;
+    });
+  }, []);
+  const toggleDetails = useCallback(() => {
+    setDetailsOpen((open) => {
+      persist("engramer-details", !open);
+      return !open;
+    });
+  }, []);
+
+  // Dividers: the sidebar's reads its width from the pointer; pulled well
+  // past its floor it snaps to the rail. The details' does the same and
+  // closes, keeping the width it had before the drag so it reopens as it
+  // was. Every landing is written down as it happens: a drag that ends on
+  // a snap must not be remembered as the last width the pointer crossed.
+  const sidebarDragStart = useRef(SIDEBAR_DEFAULT);
+  const sidebarDivider = useDivider({
+    onStart: () => {
+      sidebarDragStart.current = sidebarWidth;
+    },
+    onDrag: (clientX) => {
+      const left = frameRef.current?.getBoundingClientRect().left ?? 0;
+      const landed = resizeSidebar(clientX - left);
+      if (landed.collapsed) {
+        setSidebarCollapsed(true);
+        setSidebarWidth(sidebarDragStart.current);
+        persist("engramer-sidebar-collapsed", true);
+        persist("engramer-sidebar-w", sidebarDragStart.current);
+      } else {
+        setSidebarCollapsed(false);
+        setSidebarWidth(landed.width);
+        persist("engramer-sidebar-collapsed", false);
+        persist("engramer-sidebar-w", landed.width);
+      }
+    },
+    onEnd: () => {},
+    onReset: () => {
+      setSidebarWidth(SIDEBAR_DEFAULT);
+      setSidebarCollapsed(false);
+      persist("engramer-sidebar-w", SIDEBAR_DEFAULT);
+      persist("engramer-sidebar-collapsed", false);
+    },
+  });
+  const detailsDragStart = useRef(DETAILS_DEFAULT);
+  const detailsDivider = useDivider({
+    onStart: () => {
+      detailsDragStart.current = detailsWidth;
+    },
+    onDrag: (clientX) => {
+      const right = frameRef.current?.getBoundingClientRect().right ?? window.innerWidth;
+      const landed = resizeDetails(right - clientX);
+      if (!landed.open) {
+        setDetailsOpen(false);
+        setDetailsWidth(detailsDragStart.current);
+        persist("engramer-details", false);
+        persist("engramer-details-w", detailsDragStart.current);
+      } else {
+        setDetailsOpen(true);
+        setDetailsWidth(landed.width);
+        persist("engramer-details", true);
+        persist("engramer-details-w", landed.width);
+      }
+    },
+    onEnd: () => {},
+    onReset: () => {
+      setDetailsWidth(DETAILS_DEFAULT);
+      persist("engramer-details-w", DETAILS_DEFAULT);
+    },
+  });
+
+  // A phone drawer left open has no meaning once the window is wide again;
+  // its backdrop would sit over the desktop layout.
+  useEffect(() => {
+    if (!isMobile) {
+      setDrawerOpen(false);
+      setDetailsSheet(false);
+    }
+  }, [isMobile]);
+
+  // The floating details pane starts under the toolbar, so its buttons
+  // (the details toggle among them) stay reachable while it is up.
+  const topbarRef = useRef<HTMLDivElement>(null);
+  const [topbarHeight, setTopbarHeight] = useState(65);
+  useEffect(() => {
+    const bar = topbarRef.current;
+    if (!bar) {
+      return;
+    }
+    const measure = () => setTopbarHeight(bar.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, []);
   const pullToRefresh = usePullToRefresh(() => store.refresh());
   useKeyboardInset();
   // Between phone and full desktop the long placeholder clips mid-word;
@@ -678,6 +806,19 @@ export function Vault() {
     setQuery("");
   };
 
+  // A folder opens on one click. The second click of a double-click lands
+  // on whatever card now sits under the pointer inside that folder, and
+  // used to open it too, two levels down in one gesture.
+  const lastFolderOpen = useRef(0);
+  const openFolder = (id: string) => {
+    const now = Date.now();
+    if (now - lastFolderOpen.current < 350) {
+      return;
+    }
+    lastFolderOpen.current = now;
+    setView({ kind: "folder", id });
+  };
+
   const searchTag = (tag: string) => {
     setQuery(`tag:${tag}`);
     searchInput.current?.focus();
@@ -984,6 +1125,13 @@ export function Vault() {
       } else if (event.key === "/" && !typing && !paletteOpen) {
         event.preventDefault();
         searchInput.current?.focus();
+      } else if ((event.metaKey || event.ctrlKey) && event.altKey && event.code === "KeyS") {
+        // ⌘⌥S, the Finder's own: the sidebar folds to a rail and back.
+        event.preventDefault();
+        toggleSidebar();
+      } else if ((event.metaKey || event.ctrlKey) && event.altKey && event.code === "KeyI") {
+        event.preventDefault();
+        toggleDetails();
       } else if (
         (event.metaKey || event.ctrlKey) &&
         event.key.toLowerCase() === "a" &&
@@ -1022,6 +1170,8 @@ export function Vault() {
     clearSelection,
     selectAll,
     visibleFiles.length,
+    toggleSidebar,
+    toggleDetails,
   ]);
 
   // Meaning search runs beside the lexical index: the query embeds on this
@@ -1326,6 +1476,14 @@ export function Vault() {
       icon: <FolderGlyph size={15} />,
       run: () => setNewFolderOpen(true),
     },
+    // The topbar's Folder upload button folds into this menu when the
+    // content column is narrow, so the action never disappears with it.
+    {
+      id: "upload-folder",
+      label: "Upload a folder…",
+      icon: <UploadGlyph size={15} />,
+      run: () => folderInput.current?.click(),
+    },
   ];
 
   // The tab bar's center [+]: one sheet absorbs every create/upload action
@@ -1398,6 +1556,8 @@ export function Vault() {
       },
       { id: "new-folder", label: "New folder", run: () => setNewFolderOpen(true) },
       { id: "toggle-layout", label: "Toggle grid and list", run: () => toggleLayout() },
+      { id: "toggle-sidebar", label: "Show or hide the sidebar", hint: "⌘⌥S", run: toggleSidebar },
+      { id: "toggle-details", label: "Show or hide details", hint: "⌘⌥I", run: toggleDetails },
       {
         id: "request-files",
         label: "Request files…",
@@ -1619,15 +1779,41 @@ export function Vault() {
         onClick();
       }}
       {...(drop ? drop.props : {})}
+      title={label}
     >
-      {icon} {label}
+      {icon} <span className="nav-label">{label}</span>
       {count !== undefined && count > 0 && <span className="nav-count">{count}</span>}
+    </button>
+  );
+
+  /** A sidebar section heading that folds its list, Finder-style. */
+  const sectionLabel = (
+    icon: React.ReactNode,
+    label: string,
+    open: boolean,
+    onToggle: () => void,
+  ) => (
+    <button className="sidebar-label" aria-expanded={open} onClick={onToggle}>
+      {icon} {label}
+      <span className="disclosure" aria-hidden="true">
+        <ChevronRightGlyph size={11} />
+      </span>
     </button>
   );
 
   return (
     <div
-      className={`frame${dragging ? " dropzone-active" : ""}${detailsOpen ? " with-details" : ""}${drawerOpen ? " drawer" : ""}`}
+      ref={frameRef}
+      className={`frame${dragging ? " dropzone-active" : ""}${plan.details === "pane" ? " with-details" : ""}${
+        plan.details === "overlay" ? " details-overlay" : ""
+      }${plan.sidebar === "rail" ? " sidebar-rail" : ""}${plan.compact ? " compact" : ""}${drawerOpen ? " drawer" : ""}`}
+      style={
+        {
+          "--sidebar-w": `${plan.sidebarWidth}px`,
+          "--details-w": `${plan.detailsWidth}px`,
+          "--topbar-h": `${topbarHeight}px`,
+        } as CSSProperties
+      }
       onDragEnter={(e) => {
         if (e.dataTransfer.types.includes("Files") && !e.dataTransfer.types.includes(DRAG_TYPE)) {
           e.preventDefault();
@@ -1645,6 +1831,22 @@ export function Vault() {
       onDrop={onOsDrop}
     >
       {drawerOpen && <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} />}
+      {/* The dividers belong to the frame, not to the panels they resize:
+          a scrolling panel clips whatever pokes past its edge. */}
+      {!isMobile && (
+        <div
+          className={`divider divider-sidebar${sidebarDivider.active ? " active" : ""}`}
+          title="Drag to resize · double-click to reset"
+          {...sidebarDivider.props}
+        />
+      )}
+      {!isMobile && plan.details === "pane" && (
+        <div
+          className={`divider divider-details${detailsDivider.active ? " active" : ""}`}
+          title="Drag to resize · double-click to reset"
+          {...detailsDivider.props}
+        />
+      )}
       <aside className="sidebar">
         <div className="brand">
           <BrandMark size={26} />
@@ -1695,9 +1897,11 @@ export function Vault() {
 
         {albums.length > 0 && (
           <>
-            <div className="sidebar-label">
-              <BookGlyph size={12} /> Albums
-            </div>
+            {sectionLabel(<BookGlyph size={12} />, "Albums", albumsOpen, () => {
+              setAlbumsOpen(!albumsOpen);
+              persist("engramer-side-albums", !albumsOpen);
+            })}
+            {albumsOpen && (
             <div className="library-list">
               {albums.map((album) => (
                 <button
@@ -1717,14 +1921,17 @@ export function Vault() {
                 </button>
               ))}
             </div>
+            )}
           </>
         )}
 
         {libraryCategories.length > 0 && (
           <>
-            <div className="sidebar-label">
-              <SparkGlyph size={12} /> Library
-            </div>
+            {sectionLabel(<SparkGlyph size={12} />, "Library", libraryOpen, () => {
+              setLibraryOpen(!libraryOpen);
+              persist("engramer-side-library", !libraryOpen);
+            })}
+            {libraryOpen && (
             <div className="library-list">
               {libraryCategories.map((name) => {
                 const CategoryIcon = CATEGORY_ICONS[name] ?? AsteriskGlyph;
@@ -1747,6 +1954,7 @@ export function Vault() {
                 );
               })}
             </div>
+            )}
           </>
         )}
 
@@ -1846,7 +2054,15 @@ export function Vault() {
       </aside>
 
       <main className="main">
-        <div className="topbar">
+        <div className="topbar" ref={topbarRef}>
+          <button
+            className={`icon-btn sidebar-toggle${plan.sidebar === "rail" ? " active" : ""}`}
+            title={plan.sidebar === "rail" ? "Show sidebar (⌘⌥S)" : "Hide sidebar (⌘⌥S)"}
+            aria-label={plan.sidebar === "rail" ? "Show sidebar" : "Hide sidebar"}
+            onClick={toggleSidebar}
+          >
+            <MenuGlyph size={16} />
+          </button>
           <div className="searchbox">
             <span className="search-glyph">
               <SearchGlyph />
@@ -1943,7 +2159,7 @@ export function Vault() {
             <PlusGlyph /> <span className="btn-word">New</span>
           </button>
           <button
-            className="btn"
+            className="btn folder-btn"
             title="Upload a whole folder, structure preserved"
             onClick={() => folderInput.current?.click()}
           >
@@ -1954,11 +2170,8 @@ export function Vault() {
           </button>
           <button
             className={`icon-btn info-toggle${detailsOpen ? " active" : ""}`}
-            title={detailsOpen ? "Hide details" : "Show details"}
-            onClick={() => {
-              setDetailsOpen(!detailsOpen);
-              persist("engramer-details", !detailsOpen);
-            }}
+            title={detailsOpen ? "Hide details (⌘⌥I)" : "Show details (⌘⌥I)"}
+            onClick={toggleDetails}
           >
             <InfoGlyph />
           </button>
@@ -2272,7 +2485,7 @@ export function Vault() {
                       name={folder.name}
                       count={folderCounts.get(folder.id) ?? 0}
                       index={i}
-                      onOpen={() => setView({ kind: "folder", id: folder.id })}
+                      onOpen={() => openFolder(folder.id)}
                       onMenu={(x, y) => openFolderMenu(folder.id, x, y)}
                       onDropFiles={(e) => dropOnFolder(folder.id, e)}
                     />
@@ -2299,7 +2512,7 @@ export function Vault() {
                     name={folder.name}
                     count={folderCounts.get(folder.id) ?? 0}
                     index={i}
-                    onOpen={() => setView({ kind: "folder", id: folder.id })}
+                    onOpen={() => openFolder(folder.id)}
                     onMenu={(x, y) => openFolderMenu(folder.id, x, y)}
                     onDropFiles={(e) => dropOnFolder(folder.id, e)}
                   />
@@ -2324,13 +2537,14 @@ export function Vault() {
         </div>
       </main>
 
-      {(isMobile ? detailsSheet && detailsFile !== null : detailsOpen) &&
+      {(isMobile ? detailsSheet && detailsFile !== null : plan.details === "pane" || plan.details === "overlay") &&
         view.kind !== "trash" &&
         view.kind !== "shared" && (
           <DetailsPanel
             file={detailsFile}
             allFiles={liveFiles}
             selectionCount={selection.size}
+            selectionBytes={[...selection].reduce((sum, id) => sum + (store.files.get(id)?.size ?? 0), 0)}
             onOpen={openFile}
             onEdit={(id) => setEditorId(id)}
             onDownload={download}

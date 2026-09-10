@@ -444,10 +444,15 @@ a {
 
 /* ---------- app frame ---------- */
 
+/* The three columns take the widths the layout plan hands them (layout.ts):
+   the plan narrows, collapses, or floats the side panels so the content
+   column always keeps its floor, and no panel is ever hidden while its
+   button says it is showing. */
 .frame {
   display: grid;
-  grid-template-columns: 232px 1fr;
+  grid-template-columns: var(--sidebar-w, 232px) 1fr;
   height: 100%;
+  position: relative;
 }
 
 /* A column's content must never stretch the frame beyond the viewport:
@@ -458,38 +463,159 @@ a {
 }
 
 .frame.with-details {
-  grid-template-columns: 232px 1fr 300px;
+  grid-template-columns: var(--sidebar-w, 232px) 1fr var(--details-w, 300px);
 }
 
-/* A window at half a screen is an ordinary way to work, so the panel gets
-   narrower there rather than disappearing. */
-@media (max-width: 1100px) {
-  .frame.with-details {
-    grid-template-columns: 232px 1fr 260px;
-  }
+/* No column left for the pane: it floats over the content from the right
+   edge, non-modal, and stays until closed. */
+.frame.details-overlay > .details {
+  position: absolute;
+  /* Under the toolbar, so its buttons stay reachable while the pane is up. */
+  top: var(--topbar-h, 65px);
+  right: 0;
+  bottom: 0;
+  width: var(--details-w, 300px);
+  z-index: 240;
+  border-left: 1px solid var(--hairline-strong);
+  box-shadow: -18px 0 50px rgba(0, 0, 0, 0.35);
 }
 
-/* Narrower than this there is genuinely no room, and the frame drops to two
-   columns. The panel then has no column to sit in, and a grid wraps a spare
-   child under the sidebar: it has to leave the layout, not merely shrink.
+/* ---------- dividers ---------- */
 
-   Specificity matters here rather than being incidental: the plain `.details`
-   rule that lays the panel out lives further down this file, so an equally
-   specific rule here would lose to it and hide nothing at all. */
-@media (max-width: 900px) {
-  .frame.with-details {
-    grid-template-columns: 232px 1fr;
-  }
+/* Children of the frame, straddling a column edge, so no panel's own
+   scrolling can clip them. */
+.divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  cursor: col-resize;
+  z-index: 60;
+  touch-action: none;
 }
 
-/* The floor matters: below it this same element is the bottom sheet, not a
-   pane, and this selector outranks the sheet's own `.details` layout. Without
-   the floor the sheet was display:none on every phone, present in the DOM and
-   invisible, which reads as "the button does nothing". */
-@media (max-width: 900px) and (min-width: 761px) {
-  .frame > .details {
-    display: none;
-  }
+.divider::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+  transition: background 0.12s ease;
+}
+
+.divider:hover::after,
+.divider.active::after {
+  background: var(--accent);
+}
+
+.divider-sidebar {
+  left: calc(var(--sidebar-w, 232px) - 4px);
+}
+
+.divider-details {
+  right: calc(var(--details-w, 300px) - 4px);
+}
+
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ---------- sidebar rail ---------- */
+
+/* Collapsed, the sidebar keeps its icons and drops everything that needs
+   words. Resting the pointer on it brings the full sidebar back as an
+   overlay for as long as the pointer stays. */
+.frame.sidebar-rail > .sidebar {
+  padding: 16px 10px;
+  align-items: center;
+  overflow: visible;
+  transition: width 0.18s ease;
+}
+
+.frame.sidebar-rail > .sidebar:not(:hover) .nav-label,
+.frame.sidebar-rail > .sidebar:not(:hover) .nav-count,
+.frame.sidebar-rail > .sidebar:not(:hover) .sidebar-label,
+.frame.sidebar-rail > .sidebar:not(:hover) .library-list,
+.frame.sidebar-rail > .sidebar:not(:hover) .ocr-toggle,
+.frame.sidebar-rail > .sidebar:not(:hover) .appearance,
+.frame.sidebar-rail > .sidebar:not(:hover) .usage,
+.frame.sidebar-rail > .sidebar:not(:hover) .build-line,
+.frame.sidebar-rail > .sidebar:not(:hover) .account-link,
+.frame.sidebar-rail > .sidebar:not(:hover) .brand .wordmark {
+  display: none;
+}
+
+.frame.sidebar-rail > .sidebar:not(:hover) .nav-item {
+  justify-content: center;
+  width: 44px;
+  padding: 10px 0;
+}
+
+.frame.sidebar-rail > .sidebar:not(:hover) .nav-item.active::before {
+  left: -6px;
+}
+
+.frame.sidebar-rail > .sidebar:not(:hover) .brand {
+  padding: 4px 0 14px;
+}
+
+.frame.sidebar-rail > .sidebar:not(:hover) .account-row {
+  flex-direction: column;
+  align-items: center;
+}
+
+.frame.sidebar-rail > .sidebar:hover {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 232px;
+  z-index: 230;
+  padding: 20px 14px;
+  align-items: stretch;
+  overflow-y: auto;
+  box-shadow: 24px 0 70px rgba(8, 9, 11, 0.45);
+  border-right: 1px solid var(--hairline-strong);
+  transition-delay: 0.25s;
+}
+
+/* ---------- sidebar sections fold ---------- */
+
+.sidebar-label {
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebar-label:hover {
+  color: var(--paper-dim);
+}
+
+.sidebar-label .disclosure {
+  margin-left: auto;
+  display: inline-flex;
+  color: var(--paper-faint);
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+
+.sidebar-label[aria-expanded="false"] .disclosure {
+  transform: rotate(0deg);
+}
+
+/* ---------- compact content column ---------- */
+
+/* With the content at its floor the toolbar keeps verbs, not words, and
+   the folder upload folds into the New menu. */
+.frame.compact .topbar .btn-label,
+.frame.compact .topbar .btn-word,
+.frame.compact .topbar .palette-trigger,
+.frame.compact .topbar .folder-btn {
+  display: none;
 }
 
 :focus-visible {
@@ -517,6 +643,8 @@ a {
   gap: 4px;
   /* Short windows scroll the sidebar itself, never the page. */
   overflow-y: auto;
+  /* The divider on its edge is positioned against it. */
+  position: relative;
 }
 
 .sidebar .brand {
@@ -3209,6 +3337,14 @@ button.tag:hover {
   overflow-y: auto;
   padding: 14px 16px 20px;
   gap: 12px;
+  /* The divider on its edge is positioned against it. */
+  position: relative;
+}
+
+.details-selection-size {
+  font-weight: 600;
+  color: var(--paper);
+  margin-bottom: 6px;
 }
 
 /* A scrolling column has to scroll, not squeeze. These are flex children, so
@@ -3843,7 +3979,8 @@ span.item-menu {
   }
 
   .topbar .btn,
-  .topbar .info-toggle {
+  .topbar .info-toggle,
+  .topbar .sidebar-toggle {
     display: none;
   }
 

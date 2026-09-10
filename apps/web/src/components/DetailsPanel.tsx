@@ -31,6 +31,8 @@ export function DetailsPanel(props: {
   /** Everything live, for the library intelligence shown when nothing is picked. */
   allFiles: FileEntry[];
   selectionCount: number;
+  /** Bytes across the selection, for the summary shown when several are picked. */
+  selectionBytes?: number;
   onOpen: (id: string) => void;
   onEdit: (id: string) => void;
   onDownload: (file: FileEntry) => void;
@@ -124,7 +126,12 @@ export function DetailsPanel(props: {
         </header>
         <div className="details-empty">
           {props.selectionCount > 1 ? (
-            "Use the bar below for bulk actions."
+            <>
+              {props.selectionBytes !== undefined && (
+                <div className="details-selection-size">{formatBytes(props.selectionBytes)} together</div>
+              )}
+              Use the bar below to favorite, move, save, or trash them all at once.
+            </>
           ) : (
             // Nothing selected is the panel's usual state, so it is worth
             // more than a sentence telling you to select something.
