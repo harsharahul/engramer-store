@@ -12,6 +12,58 @@ All notable changes to Engram Store are documented here, following
   future dual licensing. Linked from the contribution guide and the new pull
   request template; submitting a contribution constitutes agreement.
 
+## [0.54.0] - 2026-09-09
+
+### Added
+- **Selection and drag work like the Finder.** Click selects, double-click
+  opens, ⌘-click toggles, ⇧-click extends, and while several items are
+  gathered a plain click adds or removes one. ⌘A selects everything in
+  view. Drag on empty space to rubber-band a selection, with auto-scroll
+  at the edges. Dragged files show their thumbnail with a count badge,
+  every breadcrumb and the sidebar's Files entry take drops, and a folder
+  springs open when a drag lingers on it. Photo tiles select on click and
+  open on double-click, and can be dragged into folders.
+- **The sidebar and details pane adapt to the window.** As a window
+  narrows the details pane narrows, then the sidebar, then the sidebar
+  folds to an icon rail, and finally the details pane floats over the
+  content under the toolbar; it no longer disappears at ordinary widths.
+  Both dividers drag to resize and remember their widths; ⌘⌥S and ⌘⌥I
+  toggle the sidebar and details; Albums and Library fold; a narrow
+  content column folds the toolbar's words.
+- **Scene labels as tags.** With meaning search on, each photo's vector is
+  scored on the device against a small vocabulary (beach, food, dog,
+  document, screenshot and more) and the confident labels become ordinary
+  tags: searchable, shown as chips, usable in albums. Text reading now
+  runs only on pictures that look like they hold words.
+- **An Activity button in the toolbar.** Background work (filling in
+  previews, tags, text and meaning; bulk moves; uploads) shows there with
+  progress and a Stop, and each finished job leaves an entry saying what
+  it did, dismissable and remembered per account. The Profile's Library
+  index gains a Category and tags row and one Fill in now button.
+
+### Changed
+- **Files that arrive without tags get them.** Photos saved through the
+  iPhone's Files app used to stay "Other" with no tags forever, because
+  only the upload analyzer wrote those and the Files extension cannot run
+  it. One pass now takes every such file, downloads it once, and produces
+  its preview, category, basic tags, text, meaning vector and labels
+  together, instead of three separate sweeps each re-downloading the
+  original.
+- **Bulk actions travel as one request.** Moving, trashing, restoring,
+  favoriting or re-labeling many files is one server round trip with a
+  per-row answer, one transaction and one change-feed poke, instead of
+  one request per file. Older servers still work through the single
+  routes. Messages count only what actually changed.
+- **The Finder drive answers a burst of change signals with one pull**
+  and never drops one; the same source serves the iPhone Files extension.
+- The desktop window's minimum size is a desktop size.
+
+### Fixed
+- The second click of a double-click on a folder no longer opens a
+  folder inside it.
+- A change-feed poke that arrived during a refresh was dropped; it is now
+  answered once the refresh returns.
+
 ## [0.53.1] - 2026-08-24
 
 ### Fixed
