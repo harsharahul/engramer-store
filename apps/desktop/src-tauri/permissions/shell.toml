@@ -70,4 +70,7 @@ commands.allow = [
     "server_url_set",
     "server_url_clear",
     "network_status",
+    "intel_available",
+    "intel_generate",
+    "intel_cancel",
 ]

@@ -28,6 +28,7 @@ import {
 } from "./settingsync";
 import { ocrEnabled, setOcrEnabled } from "./intel/ocr";
 import { semanticEnabled } from "./intel/semantic";
+import { assistantEnabled, setAssistantEnabled } from "./intel/assistant";
 import { loadPolicy, savePolicy, DEFAULT_POLICY } from "./backuppolicy";
 
 // Prefs live in localStorage; give the node test env one.
@@ -62,6 +63,21 @@ const account = "s@example.com";
  * device's photo-library permission.
  */
 describe("settings snapshot and apply", () => {
+  it("carries the assistant switch, and an older blob leaves it alone", () => {
+    setAssistantEnabled(false);
+    const snapshot = snapshotSettings();
+    expect(snapshot.assistant).toBe(false);
+    localStorage.clear();
+    expect(assistantEnabled()).toBe(true);
+    applySettings(snapshot);
+    expect(assistantEnabled()).toBe(false);
+    const older = { ...snapshot } as Partial<SyncedSettings>;
+    delete older.assistant;
+    setAssistantEnabled(true);
+    applySettings(older as SyncedSettings);
+    expect(assistantEnabled()).toBe(true);
+  });
+
   it("round-trips every synced switch", () => {
     setOcrEnabled(true);
     savePolicy({ ...DEFAULT_POLICY, enabled: true, includeVideos: false, window: "30d" });

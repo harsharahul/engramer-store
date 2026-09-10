@@ -18,6 +18,7 @@ import {
   type BackupWindow,
 } from "../backup";
 import { resetBackupLedger } from "../backupledger";
+import { assistantState, describeAssistantState, type AssistantState } from "../intel/assistant";
 import { settingsEvents, SETTINGS_APPLIED_EVENT } from "../settingsync";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
 import {
@@ -125,6 +126,20 @@ export function ProfileView(props: {
   // Where this deployment hosts its Mac app; the row shows only in a
   // plain desktop browser, where getting the app is a sensible ask.
   const [macAppUrl, setMacAppUrl] = useState<string | null>(null);
+  // Probed fresh on every open: a downloading model becomes ready without
+  // any event, and the row must say what is true now.
+  const [assistant, setAssistant] = useState<AssistantState | null>(null);
+  useEffect(() => {
+    let live = true;
+    void assistantState({ refresh: true }).then((state) => {
+      if (live) {
+        setAssistant(state);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   const [reconnectNote, setReconnectNote] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   const [backupOk, setBackupOk] = useState(false);
@@ -1013,6 +1028,16 @@ export function ProfileView(props: {
             </div>
           </div>
         )}
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>
+              <SparkGlyph size={13} /> On-device assistant
+            </b>
+            <div className="profile-row-sub">
+              {assistant ? describeAssistantState(assistant) : "Checking…"}
+            </div>
+          </div>
+        </div>
         <div className="profile-row">
           <div className="profile-row-main">
             <b>Resync library</b>
