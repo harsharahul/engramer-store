@@ -13,7 +13,7 @@
  * clears the slate, because asking for it explicitly means "try again".
  */
 
-export type SweepKind = "thumbs" | "text" | "meaning" | "facts" | "backup";
+export type SweepKind = "process" | "thumbs" | "text" | "meaning" | "facts" | "backup";
 
 /**
  * How many automatic attempts a file gets on this device before it is

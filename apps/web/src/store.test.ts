@@ -46,17 +46,39 @@ vi.mock("./transfer", async (importOriginal) => {
       file: File,
       _signal?: AbortSignal,
       _onPhase?: (phase: string) => void,
-      opts?: { defer?: boolean },
+      opts?: { defer?: boolean; skip?: { text?: boolean; meaning?: boolean } },
     ): Promise<PreparedFile> => {
       gauge.analyzeOpts.push(opts);
       gauge.running++;
       gauge.peak = Math.max(gauge.peak, gauge.running);
+      rig.thumbAttempts++;
       await new Promise((resolve) => setTimeout(resolve, 25));
       gauge.running--;
+      // Images thumbnail; the mock cannot decode a video, standing in for
+      // a codec the web layer cannot decode. A text reading finds nothing
+      // (the OCR mock answers undefined) and a meaning reading yields one
+      // vector, each only when not told to skip it.
+      const image = file.type.startsWith("image/");
+      const media = image || file.type.startsWith("video/");
+      const category = image ? "Photos" : file.type.startsWith("video/") ? "Videos" : "Other";
+      const readText = !opts?.defer && opts?.skip?.text !== true && image;
+      const embedded = !opts?.defer && opts?.skip?.meaning !== true && media;
       return {
-        meta: { name: file.name, mime: "image/jpeg", size: file.size, mtime: 1 },
-        analysis: { category: "Photos", tags: [] },
-        thumbnail: null,
+        meta: {
+          name: file.name,
+          mime: file.type || "image/jpeg",
+          size: file.size,
+          mtime: 1,
+          category,
+          tags: [category.toLowerCase()],
+          ...(readText ? { noText: true } : {}),
+          ...(embedded ? { hasClip: true, clipVersion: 1 } : {}),
+        },
+        analysis: { category: category as "Photos", tags: [category.toLowerCase()] },
+        thumbnail: image
+          ? { bytes: new Uint8Array(9), width: 100, height: 80, blur: "bl" }
+          : null,
+        ...(embedded ? { clip: new Float32Array([0.5, 0.5, 0.5, 0.5]) } : {}),
       };
     },
     makeThumbnail: async (_file: File, mime: string) => {
@@ -299,7 +321,7 @@ describe("tidyBackupNames", () => {
   });
 });
 
-describe("backfillThumbnails", () => {
+describe("processLibrary", () => {
   beforeAll(async () => {
     await ready();
   });
@@ -342,42 +364,66 @@ describe("backfillThumbnails", () => {
     rig.thumbAttempts = 0;
   };
 
-  it("stores a thumbnail, its dimensions and blur for an image that has none", async () => {
-    seed([entry({ id: "img1", name: "roll.jpg", mime: "image/jpeg", hasThumb: false })]);
-    const made = await useStore.getState().backfillThumbnails();
-    expect(made).toBe(1);
+  /**
+   * The Files-app shape: name, type, size and time and nothing else. One
+   * visit, one download, and the file has its preview, its category and
+   * its basic tags, the way an upload from this app would.
+   */
+  it("gives a file stored bare its preview, category and tags in one visit", async () => {
+    seed([entry({ id: "img1", name: "roll.jpg", mime: "image/jpeg", hasThumb: false, tags: [] })]);
+    const counts = await useStore.getState().processLibrary();
+    expect(counts.files).toBe(1);
+    expect(counts.previews).toBe(1);
+    expect(counts.tagged).toBe(1);
+    // Exactly one read of the original for everything it owed.
+    expect(rig.thumbAttempts).toBe(1);
     expect(rig.blobPuts).toEqual(["thumbnail:img1"]);
     const after = useStore.getState().files.get("img1")!;
     expect(after.hasThumb).toBe(true);
     expect(after.width).toBe(100);
     expect(after.height).toBe(80);
     expect(after.blur).toBe("bl");
+    expect(after.category).toBe("Photos");
+    expect(after.tags).toEqual(["photos"]);
+    // The pass left one entry saying what it did.
+    const { activity } = useStore.getState();
+    expect(activity.job).toBeNull();
+    expect(activity.log[0]!.title).toBe("Processed 1 file");
+    expect(activity.log[0]!.detail).toContain("1 preview");
   });
 
   it("skips non-candidates, honors the size cap, and never retries a failure", async () => {
     seed([
-      entry({ id: "done", mime: "image/jpeg", hasThumb: true }),
+      entry({ id: "done", mime: "image/jpeg", hasThumb: true, category: "Photos" }),
       entry({ id: "gone", mime: "image/jpeg", trashed: true }),
-      entry({ id: "doc", mime: "application/pdf" }),
-      entry({ id: "huge", mime: "image/jpeg", size: 50 * 1024 * 1024 }),
+      entry({ id: "doc", mime: "application/pdf", category: "Documents" }),
+      entry({ id: "huge", mime: "image/jpeg", size: 50 * 1024 * 1024, category: "Photos" }),
       // The mock cannot thumbnail a video, standing in for a codec the
       // web layer cannot decode: attempted once, then left alone.
-      entry({ id: "clip", mime: "video/mp4" }),
+      entry({ id: "clip", mime: "video/mp4", category: "Videos" }),
     ]);
     const skip = new Set<string>();
-    const made = await useStore
-      .getState()
-      .backfillThumbnails({ skip, maxBytes: 32 * 1024 * 1024 });
-    expect(made).toBe(0);
+    const counts = await useStore.getState().processLibrary({ skip, maxBytes: 32 * 1024 * 1024 });
+    expect(counts.previews).toBe(0);
     expect(rig.blobPuts).toEqual([]);
     expect(rig.thumbAttempts).toBe(1);
     expect(skip.has("clip")).toBe(true);
+    expect(skip.has("huge")).toBe(false);
 
-    const again = await useStore
-      .getState()
-      .backfillThumbnails({ skip, maxBytes: 32 * 1024 * 1024 });
-    expect(again).toBe(0);
+    const again = await useStore.getState().processLibrary({ skip, maxBytes: 32 * 1024 * 1024 });
+    expect(again.files).toBe(0);
     expect(rig.thumbAttempts).toBe(1);
+  });
+
+  it("gives a file that only lacks a category its category without a download", async () => {
+    seed([entry({ id: "pdf1", name: "notes.pdf", mime: "application/pdf", hasThumb: false, tags: [] })]);
+    const counts = await useStore.getState().processLibrary();
+    expect(counts.tagged).toBe(1);
+    expect(rig.thumbAttempts).toBe(0);
+    const after = useStore.getState().files.get("pdf1")!;
+    expect(after.category).toBe("Documents");
+    expect(after.tags).toContain("documents");
+    expect(after.tags).toContain("pdf");
   });
 });
 
@@ -392,47 +438,30 @@ describe("sweeps remember what they attempted", () => {
     await ready();
   });
 
-  it("embedAllImages skips ids in the given set and records new attempts", async () => {
+  it("processLibrary skips ids in the given set, records attempts, and names failures", async () => {
     const calls: string[] = [];
-    const original = useStore.getState().embedFile;
+    const original = useStore.getState().processFile;
     useStore.setState({
-      files: new Map([["p1", entry({ id: "p1", mime: "image/jpeg", hasClip: false })]]),
-      embedFile: async (id: string) => {
+      files: new Map([["p1", entry({ id: "p1", name: "p1.jpg", mime: "image/jpeg", hasClip: false })]]),
+      processFile: async (id: string) => {
         calls.push(id);
         throw new Error("unreadable");
       },
     });
     try {
       const skip = new Set<string>();
-      await useStore.getState().embedAllImages({ skip });
+      const outcomes: Array<[string, boolean]> = [];
+      const counts = await useStore
+        .getState()
+        .processLibrary({ skip, onOutcome: (id, ok) => outcomes.push([id, ok]) });
       expect(calls).toEqual(["p1"]);
       expect(skip.has("p1")).toBe(true);
-      await useStore.getState().embedAllImages({ skip });
+      expect(outcomes).toEqual([["p1", false]]);
+      expect(counts.failed).toEqual(["p1.jpg"]);
+      await useStore.getState().processLibrary({ skip });
       expect(calls).toEqual(["p1"]);
     } finally {
-      useStore.setState({ embedFile: original });
-    }
-  });
-
-  it("recognizeAllImages skips ids in the given set and records new attempts", async () => {
-    const calls: string[] = [];
-    const original = useStore.getState().recognizeFile;
-    useStore.setState({
-      files: new Map([["s1", entry({ id: "s1", mime: "image/jpeg", hasText: false })]]),
-      recognizeFile: async (id: string) => {
-        calls.push(id);
-        return false;
-      },
-    });
-    try {
-      const skip = new Set<string>();
-      await useStore.getState().recognizeAllImages({ skip });
-      expect(calls).toEqual(["s1"]);
-      expect(skip.has("s1")).toBe(true);
-      await useStore.getState().recognizeAllImages({ skip });
-      expect(calls).toEqual(["s1"]);
-    } finally {
-      useStore.setState({ recognizeFile: original });
+      useStore.setState({ processFile: original });
     }
   });
 
@@ -444,13 +473,14 @@ describe("sweeps remember what they attempted", () => {
     });
     const totals: number[] = [];
     const unsub = useStore.subscribe((s) => {
-      if (s.ocrProgress) {
-        totals.push(s.ocrProgress.total);
+      if (s.activity.job?.title === "Reading dates") {
+        totals.push(s.activity.job.total);
       }
     });
     const skip = new Set<string>();
     await useStore.getState().scanLibraryForFacts({ skip });
-    expect(totals).toEqual([1]);
+    expect(totals.length).toBeGreaterThan(0);
+    expect(totals.every((t) => t === 1)).toBe(true);
     expect(skip.has("d1")).toBe(true);
     totals.length = 0;
     await useStore.getState().scanLibraryForFacts({ skip });
@@ -473,59 +503,46 @@ describe("sweeps stop when asked", () => {
     };
   };
 
-  it("backfillThumbnails stops between files", async () => {
+  it("processLibrary stops between files, and the bell's Stop ends it too", async () => {
     const gate = stopAfter(1);
+    const original = useStore.getState().processFile;
     useStore.setState({
       files: new Map([
         ["t1", entry({ id: "t1", name: "a.jpg", mime: "image/jpeg" })],
         ["t2", entry({ id: "t2", name: "b.jpg", mime: "image/jpeg" })],
+        ["t3", entry({ id: "t3", name: "c.jpg", mime: "image/jpeg" })],
+        ["t4", entry({ id: "t4", name: "d.jpg", mime: "image/jpeg" })],
       ]),
-      backfillThumbnail: async () => {
+      processFile: async () => {
         gate.count();
-        return true;
-      },
-    });
-    const made = await useStore.getState().backfillThumbnails({ stop: gate.probe });
-    expect(made).toBe(1);
-  });
-
-  it("recognizeAllImages stops between files", async () => {
-    const gate = stopAfter(1);
-    const original = useStore.getState().recognizeFile;
-    useStore.setState({
-      files: new Map([
-        ["s1", entry({ id: "s1", name: "a.jpg", mime: "image/jpeg" })],
-        ["s2", entry({ id: "s2", name: "b.jpg", mime: "image/jpeg" })],
-      ]),
-      recognizeFile: async () => {
-        gate.count();
-        return true;
+        return { previews: 1, text: 0, meaning: 0, tagged: 0, facts: 0 };
       },
     });
     try {
-      expect(await useStore.getState().recognizeAllImages({ stop: gate.probe })).toBe(1);
-    } finally {
-      useStore.setState({ recognizeFile: original });
-    }
-  });
+      const counts = await useStore.getState().processLibrary({ stop: gate.probe });
+      // Two lanes may already hold a file each when the stop lands.
+      expect(counts.files).toBeLessThanOrEqual(2);
+      expect(counts.files).toBeLessThan(4);
+      expect(counts.stopped).toBe(true);
+      expect(counts.remaining).toBeGreaterThan(0);
+      expect(useStore.getState().activity.log[0]!.title).toMatch(/^Stopped after/);
 
-  it("embedAllImages stops between files", async () => {
-    const gate = stopAfter(1);
-    const original = useStore.getState().embedFile;
-    useStore.setState({
-      files: new Map([
-        ["e1", entry({ id: "e1", name: "a.jpg", mime: "image/jpeg", hasClip: false })],
-        ["e2", entry({ id: "e2", name: "b.jpg", mime: "image/jpeg", hasClip: false })],
-      ]),
-      embedFile: async () => {
-        gate.count();
-        return true;
-      },
-    });
-    try {
-      expect(await useStore.getState().embedAllImages({ stop: gate.probe })).toBe(1);
+      // The job's own Stop, the one the bell shows.
+      let seen = 0;
+      useStore.setState({
+        processFile: async () => {
+          seen++;
+          if (seen === 1) {
+            useStore.getState().activity.job?.stop?.();
+          }
+          return { previews: 1, text: 0, meaning: 0, tagged: 0, facts: 0 };
+        },
+      });
+      const viaBell = await useStore.getState().processLibrary();
+      expect(viaBell.stopped).toBe(true);
+      expect(seen).toBeLessThan(4);
     } finally {
-      useStore.setState({ embedFile: original });
+      useStore.setState({ processFile: original });
     }
   });
 
@@ -538,8 +555,8 @@ describe("sweeps stop when asked", () => {
     });
     const totals: number[] = [];
     const unsub = useStore.subscribe((s) => {
-      if (s.ocrProgress) {
-        totals.push(s.ocrProgress.done);
+      if (s.activity.job?.title === "Reading dates" && s.activity.job.current) {
+        totals.push(s.activity.job.done);
       }
     });
     let iterations = 0;
@@ -649,9 +666,11 @@ describe("embedding model version", () => {
     );
     // "a" needs all three; "c" needs text; "d" needs a thumb but cannot
     // embed until its poster frame exists; "b" is done; "e" is trash.
-    expect(pendingDerivatives(files, 1)).toEqual({ thumbs: 2, text: 2, meaning: 1 });
+    expect(pendingDerivatives(files, 1)).toMatchObject({ thumbs: 2, text: 2, meaning: 1 });
     // A model bump re-opens the already-embedded file.
-    expect(pendingDerivatives(files, 2)).toEqual({ thumbs: 2, text: 2, meaning: 2 });
+    expect(pendingDerivatives(files, 2)).toMatchObject({ thumbs: 2, text: 2, meaning: 2 });
+    // None of these were ever categorized; every live one owes that too.
+    expect(pendingDerivatives(files, 1).tags).toBe(4);
   });
 
   /**
@@ -669,12 +688,12 @@ describe("embedding model version", () => {
         ] as FileEntry[]
       ).map((f) => [f.id, f]),
     );
-    expect(pendingDerivatives(files, 1, { ocr: false, semantic: true })).toEqual({
+    expect(pendingDerivatives(files, 1, { ocr: false, semantic: true })).toMatchObject({
       thumbs: 1,
       text: 0,
       meaning: 1,
     });
-    expect(pendingDerivatives(files, 1, { ocr: true, semantic: false })).toEqual({
+    expect(pendingDerivatives(files, 1, { ocr: true, semantic: false })).toMatchObject({
       thumbs: 1,
       text: 2,
       meaning: 0,

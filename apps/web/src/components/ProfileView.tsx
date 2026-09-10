@@ -39,6 +39,8 @@ import {
   stopBackfill,
 } from "../backfill";
 import { CLIP_MODEL_VERSION } from "../intel/semantic";
+import { SCENES_VERSION } from "../intel/scenes";
+import { describeProcessing } from "../activity";
 import { SweepMemory, type SweepKind } from "../sweepmemory";
 import { publicKeyFingerprint } from "@engramer/crypto";
 import { api } from "../api";
@@ -276,11 +278,16 @@ export function ProfileView(props: {
   // second count excludes kinds whose switch is off: that is what the
   // automatic sweeps will actually take up, and it is what the summary
   // line answers for.
-  const pending = pendingDerivatives(store.files, CLIP_MODEL_VERSION);
+  const pending = pendingDerivatives(store.files, CLIP_MODEL_VERSION, {
+    scenesVersion: SCENES_VERSION,
+  });
   const autoPending = pendingDerivatives(store.files, CLIP_MODEL_VERSION, {
     ocr: props.ocrOn,
     semantic: props.semanticOn,
+    scenesVersion: SCENES_VERSION,
   });
+  // The pass in hand, as the bell shows it: one object, one truth.
+  const processing = store.activity.job?.kind === "processing" ? store.activity.job : null;
   const [autoFill, setAutoFill] = useState(autoBackfillEnabled);
   /**
    * Asking for a pass by hand means "try again", including the files
@@ -293,12 +300,14 @@ export function ProfileView(props: {
       new SweepMemory(email, kind).forgetAll();
     }
   };
-  // One stop covers a hand-run sweep and the automatic one alike: the
-  // button that started the work is the button that ends it.
+  // One stop covers a hand-run pass and the automatic one alike: the
+  // button that started the work is the button that ends it, and the
+  // job's own Stop (the bell's) ends the file in hand too.
   const indexStop = useRef(false);
   const stopIndexing = () => {
     indexStop.current = true;
     stopBackfill();
+    store.activity.job?.stop?.();
   };
   const indexStopProbe = () => indexStop.current;
 
@@ -1378,7 +1387,11 @@ export function ProfileView(props: {
               Thumbnails, search text, and meaning vectors are made on your devices, never on
               the server. Anything a device could not produce at upload fills in automatically
               while a vault is open somewhere; these numbers are what is left right now.
-              {autoPending.thumbs === 0 && autoPending.text === 0 && autoPending.meaning === 0 && (
+              {autoPending.thumbs === 0 &&
+                autoPending.text === 0 &&
+                autoPending.meaning === 0 &&
+                autoPending.tags === 0 &&
+                autoPending.scenes === 0 && (
                 <>
                   {" "}
                   <b>
@@ -1423,40 +1436,64 @@ export function ProfileView(props: {
         </div>
         <div className="profile-row">
           <div className="profile-row-main">
+            <b>Fill in now</b>
+            <div className="profile-row-sub">
+              One pass over every file below: its contents come down once and every missing
+              piece is made from that one read.
+            </div>
+            {processing && (
+              <div className="profile-row-sub">
+                {processing.title}
+                {processing.current ? ` · ${processing.current}` : ""} · {processing.done} of{" "}
+                {processing.total}
+              </div>
+            )}
+          </div>
+          <button
+            className="btn"
+            disabled={
+              !processing &&
+              autoPending.thumbs === 0 &&
+              autoPending.text === 0 &&
+              autoPending.meaning === 0 &&
+              autoPending.tags === 0 &&
+              autoPending.scenes === 0
+            }
+            onClick={() => {
+              if (processing) {
+                stopIndexing();
+                return;
+              }
+              indexStop.current = false;
+              retryEverything("process");
+              void store.processLibrary({ stop: indexStopProbe }).then((counts) => {
+                const said = describeProcessing(counts);
+                props.onToast(said.detail ? `${said.title} · ${said.detail}` : said.title);
+              });
+            }}
+          >
+            {processing ? "Stop" : "Fill in now"}
+          </button>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
             <b>Previews</b>
             <div className="profile-row-sub">
               {pending.thumbs === 0
                 ? "Every image and video has a thumbnail."
                 : `${pending.thumbs} media file${pending.thumbs === 1 ? "" : "s"} without a thumbnail, usually added from outside this app.`}
             </div>
-            {store.thumbProgress && (
-              <div className="profile-row-sub">
-                Preparing {store.thumbProgress.current} · {store.thumbProgress.done + 1} of{" "}
-                {store.thumbProgress.total}
-              </div>
-            )}
           </div>
-          <button
-            className="btn"
-            disabled={pending.thumbs === 0 && store.thumbProgress === null}
-            onClick={() => {
-              if (store.thumbProgress) {
-                stopIndexing();
-                return;
-              }
-              indexStop.current = false;
-              retryEverything("thumbs");
-              void store.backfillThumbnails({ stop: indexStopProbe }).then((made) => {
-                props.onToast(
-                  made > 0
-                    ? `Made thumbnails for ${made} file${made === 1 ? "" : "s"}.`
-                    : "No thumbnails could be made right now.",
-                );
-              });
-            }}
-          >
-            {store.thumbProgress ? "Stop" : "Generate"}
-          </button>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Category and tags</b>
+            <div className="profile-row-sub">
+              {pending.tags === 0
+                ? "Every file has a category and its basic tags."
+                : `${pending.tags} file${pending.tags === 1 ? "" : "s"} stored without a category or tags, usually added from the Files app.`}
+            </div>
+          </div>
         </div>
         <div className="profile-row">
           <div className="profile-row-main">
@@ -1467,78 +1504,24 @@ export function ProfileView(props: {
                   ? "Reading is off on this device."
                   : `Reading is off on this device (the switch above), so ${pending.text} image${pending.text === 1 ? "" : "s"} will only be read by hand.`
                 : pending.text === 0
-                  ? "Every image and scan has been read."
+                  ? "Every image and scan has been read, or judged to hold no text."
                   : `${pending.text} image${pending.text === 1 ? "" : "s"} and scan${pending.text === 1 ? "" : "s"} not yet read for search, on-device.`}
             </div>
-            {store.ocrProgress && (
-              <div className="profile-row-sub">
-                Reading {store.ocrProgress.current} · {store.ocrProgress.done + 1} of{" "}
-                {store.ocrProgress.total}
-              </div>
-            )}
           </div>
-          <button
-            className="btn"
-            disabled={pending.text === 0 && store.ocrProgress === null}
-            onClick={() => {
-              if (store.ocrProgress) {
-                stopIndexing();
-                return;
-              }
-              indexStop.current = false;
-              retryEverything("text");
-              void store.recognizeAllImages({ stop: indexStopProbe }).then((found) => {
-                props.onToast(
-                  found > 0
-                    ? `Read text in ${found} file${found === 1 ? "" : "s"}.`
-                    : "No new text found.",
-                );
-              });
-            }}
-          >
-            {store.ocrProgress ? "Stop" : "Read"}
-          </button>
         </div>
         <div className="profile-row">
           <div className="profile-row-main">
-            <b>Meaning</b>
+            <b>Meaning and scene labels</b>
             <div className="profile-row-sub">
               {!props.semanticOn
-                ? pending.meaning === 0
+                ? pending.meaning + pending.scenes === 0
                   ? "Meaning search is off on this device."
-                  : `Meaning search is off on this device (the switch above), so ${pending.meaning} file${pending.meaning === 1 ? "" : "s"} will only be indexed by hand.`
-                : pending.meaning === 0
-                  ? "Every photo and video is searchable by meaning."
-                  : `${pending.meaning} file${pending.meaning === 1 ? "" : "s"} not yet searchable by meaning, or indexed by an older model.`}
+                  : `Meaning search is off on this device (the switch above), so ${pending.meaning + pending.scenes} file${pending.meaning + pending.scenes === 1 ? "" : "s"} will only be indexed by hand.`
+                : pending.meaning + pending.scenes === 0
+                  ? "Every photo and video is searchable by meaning and labeled by what is in it."
+                  : `${pending.meaning} file${pending.meaning === 1 ? "" : "s"} not yet searchable by meaning${pending.scenes > 0 ? `, ${pending.scenes} not yet labeled` : ""}.`}
             </div>
-            {store.semanticProgress && (
-              <div className="profile-row-sub">
-                Indexing {store.semanticProgress.current} · {store.semanticProgress.done + 1} of{" "}
-                {store.semanticProgress.total}
-              </div>
-            )}
           </div>
-          <button
-            className="btn"
-            disabled={pending.meaning === 0 && store.semanticProgress === null}
-            onClick={() => {
-              if (store.semanticProgress) {
-                stopIndexing();
-                return;
-              }
-              indexStop.current = false;
-              retryEverything("meaning");
-              void store.embedAllImages({ stop: indexStopProbe }).then((indexed) => {
-                props.onToast(
-                  indexed > 0
-                    ? `Indexed ${indexed} file${indexed === 1 ? "" : "s"} by meaning.`
-                    : "Nothing new to index.",
-                );
-              });
-            }}
-          >
-            {store.semanticProgress ? "Stop" : "Index"}
-          </button>
         </div>
       </section>
 

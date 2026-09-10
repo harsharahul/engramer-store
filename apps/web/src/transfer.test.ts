@@ -65,6 +65,10 @@ vi.mock("./intel/ocr", () => ({
 vi.mock("./intel/semantic", () => ({
   semanticEnabled: () => true,
   embedImage: vi.fn(async () => new Float32Array(4)),
+  // No vocabulary can be embedded here, so scene labeling stays out of
+  // these tests: the reader answers null and the file stays a candidate.
+  embedQuery: vi.fn(async () => undefined),
+  cosine: (a: Float32Array, b: Float32Array) => a.reduce((s, x, i) => s + x * (b[i] ?? 0), 0),
   CLIP_MODEL_VERSION: 1,
 }));
 

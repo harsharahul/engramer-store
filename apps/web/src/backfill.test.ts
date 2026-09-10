@@ -64,29 +64,31 @@ interface SweepCall {
   onOutcome?: (id: string, ok: boolean) => void;
 }
 
-/** Replaces every sweep with a recorder so runs are observable. */
+const counts = (files: number) => ({
+  files,
+  previews: files,
+  text: 0,
+  meaning: 0,
+  tagged: 0,
+  facts: 0,
+  failed: [] as string[],
+  stopped: false,
+  remaining: 0,
+});
+
+/** Replaces both passes with recorders so runs are observable. */
 const install = () => {
   const calls = {
-    thumbs: [] as SweepCall[],
-    ocr: [] as SweepCall[],
-    clip: [] as SweepCall[],
+    process: [] as SweepCall[],
     facts: [] as SweepCall[],
   };
   useStore.setState({
     session,
     synced: true,
     uploads: [],
-    backfillThumbnails: async (o?: SweepCall) => {
-      calls.thumbs.push(o ?? {});
-      return 1;
-    },
-    recognizeAllImages: async (o?: SweepCall) => {
-      calls.ocr.push(o ?? {});
-      return 2;
-    },
-    embedAllImages: async (o?: SweepCall) => {
-      calls.clip.push(o ?? {});
-      return 3;
+    processLibrary: async (o?: SweepCall) => {
+      calls.process.push(o ?? {});
+      return counts(1);
     },
     scanLibraryForFacts: async (o?: SweepCall) => {
       calls.facts.push(o ?? {});
@@ -119,7 +121,7 @@ describe("the automatic backfill on a bad network", () => {
     Object.defineProperty(navigator, "onLine", { value: false, configurable: true });
     try {
       expect(await runBackfill()).toBeNull();
-      expect(calls.thumbs).toHaveLength(0);
+      expect(calls.process).toHaveLength(0);
     } finally {
       Object.defineProperty(navigator, "onLine", { value: true, configurable: true });
     }
@@ -131,8 +133,8 @@ describe("the automatic backfill on a bad network", () => {
     const calls = install();
     const attempted: string[] = [];
     useStore.setState({
-      backfillThumbnails: async (o?: SweepCall) => {
-        calls.thumbs.push(o ?? {});
+      processLibrary: async (o?: SweepCall) => {
+        calls.process.push(o ?? {});
         // Ten candidates, every one failing the way a dead connection
         // fails; the breaker should cut this far short of ten.
         for (let i = 0; i < 10; i++) {
@@ -142,22 +144,21 @@ describe("the automatic backfill on a bad network", () => {
           attempted.push(`f${i}`);
           o?.onOutcome?.(`f${i}`, false);
         }
-        return 0;
+        return counts(0);
       },
     });
     await runBackfill();
     expect(attempted.length).toBeLessThanOrEqual(4);
-    // And the later passes never ran: the connection, not the file, was
+    // And the dates pass never ran: the connection, not the file, was
     // the problem.
-    expect(calls.ocr).toHaveLength(0);
-    expect(calls.clip).toHaveLength(0);
+    expect(calls.facts).toHaveLength(0);
   });
 
   it("remembers failures across passes so the next open skips them", async () => {
     install();
     const seen: string[][] = [];
     useStore.setState({
-      backfillThumbnails: async (o?: SweepCall) => {
+      processLibrary: async (o?: SweepCall) => {
         const round: string[] = [];
         for (const id of ["a", "b"]) {
           if (o?.skip?.has(id)) {
@@ -167,7 +168,7 @@ describe("the automatic backfill on a bad network", () => {
           o?.onOutcome?.(id, false);
         }
         seen.push(round);
-        return 0;
+        return counts(0);
       },
     });
     // Three passes exhaust the retry budget; the fourth finds nothing
@@ -188,7 +189,7 @@ describe("the automatic backfill can be declined and stopped", () => {
     setAutoBackfillEnabled(false);
     expect(autoBackfillEnabled()).toBe(false);
     expect(await runBackfill()).toBeNull();
-    expect(calls.thumbs).toHaveLength(0);
+    expect(calls.process).toHaveLength(0);
     setAutoBackfillEnabled(true);
     expect(await runBackfill()).not.toBeNull();
   });
@@ -196,18 +197,16 @@ describe("the automatic backfill can be declined and stopped", () => {
   it("hands every sweep a stop probe and halts between passes once told", async () => {
     const calls = install();
     useStore.setState({
-      backfillThumbnails: async (o?: SweepCall) => {
-        calls.thumbs.push(o ?? {});
+      processLibrary: async (o?: SweepCall) => {
+        calls.process.push(o ?? {});
         expect(o?.stop?.()).toBe(false);
         stopBackfill();
         expect(o?.stop?.()).toBe(true);
-        return 1;
+        return counts(1);
       },
     });
     const stopped = await runBackfill();
-    expect(stopped).toEqual({ thumbs: 1, text: 0, meaning: 0, facts: 0 });
-    expect(calls.ocr).toHaveLength(0);
-    expect(calls.clip).toHaveLength(0);
+    expect(stopped).toEqual({ files: 1, facts: 0 });
     expect(calls.facts).toHaveLength(0);
     // The stop is one pass's decision, not a permanent switch.
     install();
@@ -225,31 +224,27 @@ describe("backfillDelayMs", () => {
 });
 
 describe("runBackfill", () => {
-  it("runs every pass, each with its own remembered attempts, uncapped on desktop", async () => {
+  it("runs both passes, each with its own remembered attempts, uncapped on desktop", async () => {
     const calls = install();
     const first = await runBackfill();
-    expect(first).toEqual({ thumbs: 1, text: 2, meaning: 3, facts: 4 });
-    expect(calls.thumbs[0]!.maxBytes).toBeUndefined();
+    expect(first).toEqual({ files: 1, facts: 4 });
+    expect(calls.process[0]!.maxBytes).toBeUndefined();
     // Attempts are remembered per pass, not shared between passes.
-    expect(calls.thumbs[0]!.skip).not.toBe(calls.ocr[0]!.skip);
+    expect(calls.process[0]!.skip).not.toBe(calls.facts[0]!.skip);
 
     // The same session-long memory rides into the next run: what one
     // pass attempted, the next one skips.
-    calls.thumbs[0]!.skip!.add("seen-this-session");
+    calls.process[0]!.skip!.add("seen-this-session");
     await runBackfill();
-    expect(calls.thumbs[1]!.skip!.has("seen-this-session")).toBe(true);
-    expect(calls.ocr[1]!.skip!.has("seen-this-session")).toBe(false);
+    expect(calls.process[1]!.skip!.has("seen-this-session")).toBe(true);
+    expect(calls.facts[1]!.skip!.has("seen-this-session")).toBe(false);
   });
 
-  it("leaves a scanner off when its preference is off", async () => {
+  it("leaves the dates pass off when its preference is off", async () => {
     const calls = install();
-    knobs.ocr = false;
-    knobs.semantic = false;
     knobs.facts = false;
     const result = await runBackfill();
-    expect(result).toEqual({ thumbs: 1, text: 0, meaning: 0, facts: 0 });
-    expect(calls.ocr).toHaveLength(0);
-    expect(calls.clip).toHaveLength(0);
+    expect(result).toEqual({ files: 1, facts: 0 });
     expect(calls.facts).toHaveLength(0);
   });
 
@@ -257,7 +252,7 @@ describe("runBackfill", () => {
     const calls = install();
     knobs.handheld = true;
     await runBackfill();
-    expect(calls.thumbs[0]!.maxBytes).toBe(HANDHELD_AUTO_MAX_BYTES);
+    expect(calls.process[0]!.maxBytes).toBe(HANDHELD_AUTO_MAX_BYTES);
   });
 
   it("does nothing signed out, before sync, or while an upload is running", async () => {
@@ -271,26 +266,26 @@ describe("runBackfill", () => {
       uploads: [{ id: "u1", name: "a.jpg", progress: 0, status: "uploading" }],
     });
     expect(await runBackfill()).toBeNull();
-    expect(calls.thumbs).toHaveLength(0);
+    expect(calls.process).toHaveLength(0);
   });
 
   it("runs once at a time", async () => {
     const calls = install();
     let release = () => {};
     useStore.setState({
-      backfillThumbnails: async (o?: SweepCall) => {
-        calls.thumbs.push(o ?? {});
+      processLibrary: async (o?: SweepCall) => {
+        calls.process.push(o ?? {});
         await new Promise<void>((resolve) => {
           release = resolve;
         });
-        return 1;
+        return counts(1);
       },
     });
     const first = runBackfill();
     expect(await runBackfill()).toBeNull();
     release();
     expect(await first).not.toBeNull();
-    expect(calls.thumbs).toHaveLength(1);
+    expect(calls.process).toHaveLength(1);
   });
 });
 
@@ -302,6 +297,6 @@ describe("scheduleBackfill", () => {
     scheduleBackfill();
     scheduleBackfill();
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(calls.thumbs).toHaveLength(1);
+    expect(calls.process).toHaveLength(1);
   });
 });

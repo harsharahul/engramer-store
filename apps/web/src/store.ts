@@ -35,7 +35,7 @@ import {
 import { albumTag, isReservedTag } from "./albums";
 import { openSharedFileKey, sealFileKeyFor } from "./collab";
 import { SaveConflictError, copyName } from "./conflict";
-import { uploadLanes, withAnalysisSlot } from "./analysisslot";
+import { analysisLanes, uploadLanes, withAnalysisSlot } from "./analysisslot";
 import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { activateSession, clearSession, suspendSession, type Session } from "./session";
@@ -72,9 +72,22 @@ import {
 } from "./resumeupload";
 import { resumableUpload, type UploadJournal } from "./transfer";
 import { openWithFreshEntry } from "./freshen";
-import { recognizeImage, recognizePdf } from "./intel/ocr";
+import { ocrEnabled } from "./intel/ocr";
+import { categorize } from "./intel/categorize";
+import { SCENES_VERSION, readScenes } from "./intel/scenes";
+import {
+  describeProcessing,
+  loadActivityLog,
+  saveActivityLog,
+  clearActivityLog,
+  withEntry,
+  type ActivityEntry,
+  type ActivityJob,
+  type ActivityKind,
+  type ProcessingCounts,
+} from "./activity";
 import { isPdf } from "./intel/extract";
-import { CLIP_MODEL_VERSION, embedImage } from "./intel/semantic";
+import { CLIP_MODEL_VERSION, embedImage, semanticEnabled } from "./intel/semantic";
 import { asFacts, mergeFacts, reconcileFacts, type Fact, type FactEvidence } from "./intel/facts";
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import { EXACT_SOURCES, tripTag, type TripSuggestion } from "./intel/trips";
@@ -115,6 +128,8 @@ export interface FileEntry {
   hasClip: boolean;
   /** Which embedding model made the vector; absent = the first model. */
   clipVersion?: number;
+  /** Which scene vocabulary labeled the tags from the vector; absent = never. */
+  scenesVersion?: number;
   /** Legacy row still carrying text inside its metadata. */
   inlineText: boolean;
   category?: string;
@@ -190,10 +205,34 @@ export interface Reveal {
   at: number;
 }
 
-export interface OcrProgress {
-  done: number;
-  total: number;
-  current: string;
+/** The background work in hand and what earlier work did. */
+export interface ActivityState {
+  job: ActivityJob | null;
+  log: ActivityEntry[];
+}
+
+/** What one file still owes, or is forced to redo. */
+export interface ProcessNeeds {
+  thumb: boolean;
+  text: boolean;
+  meaning: boolean;
+  category: boolean;
+  scenes: boolean;
+}
+
+export interface ProcessOptions {
+  signal?: AbortSignal;
+  /** Redo these kinds whether or not the file already carries them. */
+  force?: Partial<ProcessNeeds>;
+}
+
+/** What one pass over one file produced, in whole derivatives. */
+export interface ProcessOutcome {
+  previews: number;
+  text: number;
+  meaning: number;
+  tagged: number;
+  facts: number;
 }
 
 /**
@@ -281,9 +320,18 @@ interface StoreState {
   /** Cancels every transfer in flight; a fresh batch gets a fresh scope. */
   uploadAbort: AbortController | null;
   reveal: Reveal | null;
-  ocrProgress: OcrProgress | null;
-  semanticProgress: OcrProgress | null;
-  thumbProgress: OcrProgress | null;
+  /** The bell: one running job with its Stop, and the entries it left. */
+  activity: ActivityState;
+  /** Starts narrating a job; the previous one, if any, is replaced. */
+  beginActivity: (job: Omit<ActivityJob, "startedAt">) => void;
+  updateActivity: (patch: Partial<ActivityJob>) => void;
+  /** Ends the job and records what it did; empty outcomes are entries too. */
+  finishActivity: (kind: ActivityKind, title: string, detail?: string) => void;
+  dismissActivity: (id: string) => void;
+  clearActivity: () => void;
+  markActivityRead: () => void;
+  /** Brings this account's remembered entries into view after sign-in. */
+  loadActivity: () => void;
   batch: BatchProgress | null;
   /** Stops whatever the batch pill is narrating; set by the pass that owns it. */
   batchStop: (() => void) | null;
@@ -416,15 +464,22 @@ interface StoreState {
   refreshPendingClaims: () => Promise<void>;
   /** Releases the file key to the account that claimed this invitation. */
   approveClaim: (token: string, options?: { trustNewKey?: boolean }) => Promise<void>;
+  /**
+   * Everything one stored file still owes, in one go: its original is
+   * downloaded and decrypted once (when anything needs it) and goes
+   * through the same analyzer every upload does. Null when nothing was owed.
+   */
+  processFile: (id: string, opts?: ProcessOptions) => Promise<ProcessOutcome | null>;
+  /** The pass over every file that owes something, a few at a time. */
+  processLibrary: (opts?: SweepOptions & { maxBytes?: number }) => Promise<ProcessingCounts>;
+  /** Reads (or re-reads) the text of one stored image or scan. */
   recognizeFile: (id: string) => Promise<boolean>;
-  recognizeAllImages: (opts?: SweepOptions) => Promise<number>;
   /** Reads dates out of documents stored before this feature existed. */
   scanLibraryForFacts: (opts?: SweepOptions) => Promise<number>;
+  /** Computes (or recomputes) one file's meaning vector. */
   embedFile: (id: string) => Promise<boolean>;
-  embedAllImages: (opts?: SweepOptions) => Promise<number>;
   /** Generates and stores the missing thumbnail for one stored image or video. */
   backfillThumbnail: (id: string) => Promise<boolean>;
-  backfillThumbnails: (opts?: SweepOptions & { maxBytes?: number }) => Promise<number>;
   restoreVersion: (id: string, generation: number) => Promise<void>;
   warmSearchIndex: () => Promise<void>;
 }
@@ -460,6 +515,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array, prior?: FileEntry): Fi
     ...(meta.noText ? { noText: true } : {}),
     hasClip: meta.hasClip === true,
     clipVersion: meta.clipVersion,
+    scenesVersion: meta.scenesVersion,
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -510,6 +566,7 @@ export function entryFromUpdate(
     ...(meta.noText ? { noText: true } : {}),
     hasClip: meta.hasClip === true,
     clipVersion: meta.clipVersion,
+    scenesVersion: meta.scenesVersion,
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -549,6 +606,7 @@ export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEnt
     ...(meta.noText ? { noText: true } : {}),
     hasClip: meta.hasClip === true,
     clipVersion: meta.clipVersion,
+    scenesVersion: meta.scenesVersion,
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -595,6 +653,7 @@ export function metadataOf(file: FileEntry): FileMetadata {
     // Provenance of the vector; losing it would make a model upgrade
     // unable to tell fresh embeddings from stale ones.
     ...(file.clipVersion !== undefined ? { clipVersion: file.clipVersion } : {}),
+    ...(file.scenesVersion !== undefined ? { scenesVersion: file.scenesVersion } : {}),
     category: file.category,
     tags: file.tags,
     ...(file.facts.length > 0 ? { facts: file.facts } : {}),
@@ -642,25 +701,72 @@ export function needsText(file: FileEntry): boolean {
 }
 
 /**
- * What each sweep still has to do, counted with the sweeps' own
- * predicates so the numbers a person reads are exactly the work the
- * sweeps would take up. Facts are deliberately absent: a file with
- * unanswered facts stays rescan-eligible by design, so its "remaining"
- * count would never reach zero and would read as a stuck queue. Pass the
- * reading/meaning preferences to exclude kinds the automatic sweeps skip:
- * with a kind off, its count describes work nothing will ever take up,
- * and it read as a permanently pending queue the size of the library.
+ * Whether the file was stored without ever being categorized: the iOS
+ * Files provider writes name, type, size and time and nothing else, so a
+ * photo from there has no category and no tags until a device that can
+ * run the analyzer takes it up.
+ */
+export function needsCategory(file: FileEntry): boolean {
+  return !file.trashed && file.category === undefined;
+}
+
+/** Whether the pass owes this file anything at all, under the current switches. */
+export function needsProcessing(file: FileEntry): boolean {
+  return (
+    needsThumb(file) ||
+    needsCategory(file) ||
+    (ocrEnabled() && needsText(file)) ||
+    (semanticEnabled() &&
+      (needsClip(file, CLIP_MODEL_VERSION) || needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION)))
+  );
+}
+
+/** Whether serving this file's needs means downloading its original. */
+export function wantsOriginal(file: FileEntry): boolean {
+  const isImage = file.mime.startsWith("image/");
+  return (
+    needsThumb(file) ||
+    (ocrEnabled() && needsText(file)) ||
+    (semanticEnabled() && isImage && needsClip(file, CLIP_MODEL_VERSION)) ||
+    (isImage && needsCategory(file))
+  );
+}
+
+/**
+ * Whether the file's meaning vector has not yet been read for scene
+ * labels with the current vocabulary. Needs a vector from the current
+ * model first; a stale vector re-embeds and then labels in one go.
+ */
+export function needsScenes(file: FileEntry, clipVersion: number, scenesVersion: number): boolean {
+  if (file.trashed || !file.hasClip || (file.clipVersion ?? 1) !== clipVersion) {
+    return false;
+  }
+  return (file.scenesVersion ?? 0) < scenesVersion;
+}
+
+/**
+ * What the pass still has to do, counted with the pass's own predicates
+ * so the numbers a person reads are exactly the work it would take up.
+ * Facts are deliberately absent: a file with unanswered facts stays
+ * rescan-eligible by design, so its "remaining" count would never reach
+ * zero and would read as a stuck queue. Pass the reading/meaning
+ * preferences to exclude kinds the automatic pass skips: with a kind
+ * off, its count describes work nothing will ever take up, and it read
+ * as a permanently pending queue the size of the library.
  */
 export function pendingDerivatives(
   files: Map<string, FileEntry>,
   clipVersion: number,
-  opts: { ocr?: boolean; semantic?: boolean } = {},
-): { thumbs: number; text: number; meaning: number } {
+  opts: { ocr?: boolean; semantic?: boolean; scenesVersion?: number } = {},
+): { thumbs: number; text: number; meaning: number; tags: number; scenes: number } {
   const countText = opts.ocr !== false;
   const countMeaning = opts.semantic !== false;
+  const scenesVersion = opts.scenesVersion ?? 0;
   let thumbs = 0;
   let text = 0;
   let meaning = 0;
+  let tags = 0;
+  let scenes = 0;
   for (const file of files.values()) {
     if (needsThumb(file)) {
       thumbs++;
@@ -671,8 +777,14 @@ export function pendingDerivatives(
     if (countMeaning && needsClip(file, clipVersion)) {
       meaning++;
     }
+    if (needsCategory(file)) {
+      tags++;
+    }
+    if (countMeaning && scenesVersion > 0 && needsScenes(file, clipVersion, scenesVersion)) {
+      scenes++;
+    }
   }
-  return { thumbs, text, meaning };
+  return { thumbs, text, meaning, tags, scenes };
 }
 
 /**
@@ -1042,9 +1154,63 @@ export const useStore = create<StoreState>((set, get) => {
     offline: [],
     uploadAbort: null,
     reveal: null,
-    ocrProgress: null,
-    semanticProgress: null,
-    thumbProgress: null,
+    activity: { job: null, log: [] },
+    beginActivity: (job) =>
+      set({ activity: { ...get().activity, job: { ...job, startedAt: Date.now() } } }),
+    updateActivity: (patch) => {
+      const job = get().activity.job;
+      if (job) {
+        set({ activity: { ...get().activity, job: { ...job, ...patch } } });
+      }
+    },
+    finishActivity: (kind, title, detail) => {
+      const entry: ActivityEntry = {
+        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        at: Date.now(),
+        kind,
+        title,
+        ...(detail ? { detail } : {}),
+        unread: true,
+      };
+      const log = withEntry(get().activity.log, entry);
+      set({ activity: { job: null, log } });
+      const account = get().session?.email;
+      if (account) {
+        saveActivityLog(account, log);
+      }
+    },
+    dismissActivity: (id) => {
+      const log = get().activity.log.filter((e) => e.id !== id);
+      set({ activity: { ...get().activity, log } });
+      const account = get().session?.email;
+      if (account) {
+        saveActivityLog(account, log);
+      }
+    },
+    clearActivity: () => {
+      set({ activity: { ...get().activity, log: [] } });
+      const account = get().session?.email;
+      if (account) {
+        clearActivityLog(account);
+      }
+    },
+    loadActivity: () => {
+      const account = get().session?.email;
+      if (account) {
+        set({ activity: { ...get().activity, log: loadActivityLog(account) } });
+      }
+    },
+    markActivityRead: () => {
+      if (!get().activity.log.some((e) => e.unread)) {
+        return;
+      }
+      const log = get().activity.log.map((e) => (e.unread ? { ...e, unread: false } : e));
+      set({ activity: { ...get().activity, log } });
+      const account = get().session?.email;
+      if (account) {
+        saveActivityLog(account, log);
+      }
+    },
     batch: null,
     batchStop: null,
     backupHold: null,
@@ -1114,6 +1280,7 @@ export const useStore = create<StoreState>((set, get) => {
         session: null,
         synced: false,
         serverSynced: false,
+        activity: { job: null, log: [] },
         folders: new Map(),
         files: new Map(),
         usage: null,
@@ -1132,6 +1299,7 @@ export const useStore = create<StoreState>((set, get) => {
         session: null,
         synced: false,
         serverSynced: false,
+        activity: { job: null, log: [] },
         folders: new Map(),
         files: new Map(),
         usage: null,
@@ -2461,84 +2629,337 @@ export const useStore = create<StoreState>((set, get) => {
       await get().refreshPendingClaims();
     },
 
-    /** Runs OCR over one already-stored image or scanned PDF and files the
-     * text into its encrypted metadata. Returns whether any text was found. */
-    recognizeFile: async (id) => {
+    processFile: async (id, opts) => {
       const file = get().files.get(id);
-      const scannable =
-        file && (file.mime.startsWith("image/") || isPdf(file.name, file.mime));
-      if (!file || !scannable) {
-        return false;
+      if (!file || file.trashed) {
+        return null;
       }
-      // A stale shared entry must read as "refresh and retry", never as a
-      // damaged file: a sweep marking a co-edited file corrupt poisons the
-      // library for everyone. openWithFreshEntry directly, because the
-      // shared adapter imports this store.
-      const bytes = await openWithFreshEntry(
-        file,
-        (entry) =>
-          downloadAndDecrypt(entry.id, entry.key, entry.digest, { timeoutMs: SWEEP_DOWNLOAD_MS }),
-        async () => {
-          await get().refresh();
-          return get().files.get(id) ?? null;
-        },
-      );
-      const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime });
-      // Throwing on a lapse, deliberately: a reading that never came back
-      // must not be recorded as a reading that found nothing.
-      const text = await withDeadlineOrThrow(
-        file.mime.startsWith("image/") ? recognizeImage(blob) : recognizePdf(blob),
-        SWEEP_READ_MS,
-        "text recognition",
-      );
-      if (!text) {
-        // Record the empty reading, or this file would be re-read on
-        // every device, every session, forever.
-        await patchFileMeta(id, { noText: true });
-        return false;
+      const isImage = file.mime.startsWith("image/");
+      const isVideo = file.mime.startsWith("video/");
+      const force = opts?.force ?? {};
+      const needs: ProcessNeeds = {
+        thumb: force.thumb ?? needsThumb(file),
+        text: force.text ?? (ocrEnabled() && needsText(file)),
+        meaning: force.meaning ?? (semanticEnabled() && needsClip(file, CLIP_MODEL_VERSION)),
+        category: force.category ?? needsCategory(file),
+        scenes:
+          force.scenes ?? (semanticEnabled() && needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION)),
+      };
+      if (!needs.thumb && !needs.text && !needs.meaning && !needs.category && !needs.scenes) {
+        return null;
       }
-      await uploadBlob(
-        id,
-        "index",
-        encryptBytes(encodeIndexPayload({ text, clip: file.clip, clips: file.clips }), file.key),
-      );
-      await patchFileMeta(id, { hasText: true, text: undefined });
-      setEntryText(id, text, false);
-      return true;
+      const signal = opts?.signal;
+      const outcome: ProcessOutcome = { previews: 0, text: 0, meaning: 0, tagged: 0, facts: 0 };
+      const meta: Partial<FileMetadata> = {};
+      const tags = new Set(file.tags);
+
+      /** The text the index blob already holds, so a rewrite keeps it. */
+      const keptText = async (current: FileEntry): Promise<string | undefined> => {
+        if (current.text !== undefined) {
+          return current.text;
+        }
+        if (!current.hasText || current.inlineText) {
+          return undefined;
+        }
+        try {
+          const bytes = await api.downloadBlob(current.id, "index", { timeoutMs: SWEEP_DOWNLOAD_MS });
+          return decodeIndexPayload(decryptBytes(bytes, current.key)).text;
+        } catch {
+          // The rewrite still lands; text warms on demand later.
+          return undefined;
+        }
+      };
+
+      /** Files the labels read off a vector into the tags. */
+      const labelFrom = (reading: Awaited<ReturnType<typeof readScenes>>) => {
+        if (!reading) {
+          return;
+        }
+        for (const label of reading.labels) {
+          tags.add(label);
+        }
+        meta.scenesVersion = SCENES_VERSION;
+      };
+
+      // The original is worth fetching for a preview, a text reading, an
+      // image's meaning, or an image's EXIF (which its category reads).
+      const wantsOriginal =
+        needs.thumb || needs.text || (needs.meaning && isImage) || (needs.category && isImage);
+      // A video already showing a poster embeds from that poster.
+      const wantsPoster = !wantsOriginal && needs.meaning && isVideo && file.hasThumb;
+
+      if (wantsOriginal) {
+        // A stale shared entry must read as "refresh and retry", never as
+        // a damaged file: marking a co-edited file corrupt poisons the
+        // library for everyone. openWithFreshEntry directly, because the
+        // shared adapter imports this store.
+        const bytes = await openWithFreshEntry(
+          file,
+          (entry) =>
+            downloadAndDecrypt(entry.id, entry.key, entry.digest, { timeoutMs: SWEEP_DOWNLOAD_MS }),
+          async () => {
+            await get().refresh();
+            return get().files.get(id) ?? null;
+          },
+        );
+        if (signal?.aborted) {
+          throw new Error("stopped");
+        }
+        const source = new File([bytes.slice().buffer as ArrayBuffer], file.name, {
+          type: file.mime,
+          lastModified: file.mtime,
+        });
+        // The one analyzer every upload goes through, told what this file
+        // already holds so nothing is computed twice. The slot serializes
+        // the decode with every other analysis; a phone holds one decoded
+        // original at a time, no matter who asks.
+        const prepared = await withAnalysisSlot(() =>
+          analyzeFile(source, signal, undefined, {
+            skip: {
+              text: !needs.text,
+              meaning: !(needs.meaning || needs.scenes),
+              facts: !factsEnabled(),
+            },
+            gateTextByMeaning: true,
+          }),
+        );
+        const current = get().files.get(id);
+        if (!current) {
+          return null;
+        }
+        // Another device may have finished the preview while the bytes
+        // were downloading; sync will have flipped the flag, and a second
+        // write is pure waste.
+        if (needs.thumb && prepared.thumbnail && !current.hasThumb) {
+          await uploadBlob(id, "thumbnail", encryptBytes(prepared.thumbnail.bytes, current.key));
+          meta.width = prepared.thumbnail.width;
+          meta.height = prepared.thumbnail.height;
+          if (prepared.thumbnail.blur) {
+            meta.blur = prepared.thumbnail.blur;
+          }
+          outcome.previews = 1;
+        }
+        const readText = needs.text && prepared.text !== undefined;
+        const madeClip = (needs.meaning || needs.scenes) && prepared.clip !== undefined;
+        const facts = asFacts(prepared.meta.facts);
+        if (readText || madeClip || (prepared.evidence?.length ?? 0) > 0) {
+          const text = readText ? prepared.text : await keptText(current);
+          await uploadBlob(
+            id,
+            "index",
+            encryptBytes(
+              encodeIndexPayload({
+                text,
+                clip: prepared.clip ?? current.clip,
+                clips: prepared.clips ?? current.clips,
+                ...(prepared.evidence?.length ? { evidence: prepared.evidence } : {}),
+              }),
+              current.key,
+            ),
+          );
+        }
+        if (readText) {
+          meta.hasText = true;
+          meta.text = undefined;
+          outcome.text = 1;
+        } else if (needs.text && prepared.meta.noText) {
+          // Read, or judged wordless by its meaning: finished either way,
+          // or the file would be re-read on every device, forever.
+          meta.noText = true;
+        }
+        if (madeClip) {
+          meta.hasClip = true;
+          meta.clipVersion = CLIP_MODEL_VERSION;
+          outcome.meaning = 1;
+        }
+        if (needs.category && current.category === undefined) {
+          meta.category = prepared.meta.category;
+          for (const tag of prepared.analysis.tags) {
+            tags.add(tag);
+          }
+          outcome.tagged = 1;
+        }
+        labelFrom(prepared.scenes ?? null);
+        if (facts.length > 0) {
+          meta.facts = mergeFacts(
+            current.facts,
+            facts.map((fact) => ({ ...fact, digest: current.digest })),
+          );
+          outcome.facts = facts.length;
+        }
+        if (tags.size !== current.tags.length) {
+          meta.tags = normalizeTags([...tags]);
+        }
+        if (Object.keys(meta).length > 0) {
+          await patchFileMeta(id, meta);
+        }
+        if (readText) {
+          setEntryText(id, prepared.text, false);
+        }
+        if (madeClip && prepared.clip) {
+          setEntryClip(id, prepared.clip, prepared.clips);
+        }
+        return outcome;
+      }
+
+      if (wantsPoster) {
+        const bytes = await downloadThumbnail(file.id, file.key, { timeoutMs: SWEEP_DOWNLOAD_MS });
+        const clip = await withDeadlineOrThrow(
+          embedImage(new Blob([bytes.slice().buffer as ArrayBuffer], { type: "image/jpeg" })),
+          SWEEP_READ_MS,
+          "meaning embedding",
+        );
+        if (!clip) {
+          return outcome;
+        }
+        const current = get().files.get(id);
+        if (!current) {
+          return null;
+        }
+        const text = await keptText(current);
+        await uploadBlob(id, "index", encryptBytes(encodeIndexPayload({ text, clip }), current.key));
+        meta.hasClip = true;
+        meta.clipVersion = CLIP_MODEL_VERSION;
+        outcome.meaning = 1;
+        labelFrom(await readScenes(clip));
+        if (needs.category && current.category === undefined) {
+          const analysis = categorize({ name: current.name, mime: current.mime, mtime: current.mtime });
+          meta.category = analysis.category;
+          for (const tag of analysis.tags) {
+            tags.add(tag);
+          }
+          outcome.tagged = 1;
+        }
+        if (tags.size !== current.tags.length) {
+          meta.tags = normalizeTags([...tags]);
+        }
+        await patchFileMeta(id, meta);
+        setEntryClip(id, clip);
+        return outcome;
+      }
+
+      // Nothing to fetch: a category from the name and type, and labels
+      // from the vector the index already holds.
+      let clip = file.clip;
+      if (needs.scenes && !clip && file.hasClip) {
+        try {
+          const bytes = await api.downloadBlob(file.id, "index", { timeoutMs: SWEEP_DOWNLOAD_MS });
+          const payload = decodeIndexPayload(decryptBytes(bytes, file.key));
+          clip = payload.clip;
+          if (payload.text !== undefined) {
+            setEntryText(id, payload.text);
+          }
+          if (clip) {
+            setEntryClip(id, clip, payload.clips);
+          }
+        } catch {
+          // No vector to read; the file stays a candidate for later.
+        }
+      }
+      if (needs.category) {
+        const analysis = categorize({ name: file.name, mime: file.mime, mtime: file.mtime, text: file.text });
+        meta.category = analysis.category;
+        for (const tag of analysis.tags) {
+          tags.add(tag);
+        }
+        outcome.tagged = 1;
+      }
+      if (needs.scenes && clip) {
+        labelFrom(await readScenes(clip));
+      }
+      if (tags.size !== file.tags.length) {
+        meta.tags = normalizeTags([...tags]);
+      }
+      if (Object.keys(meta).length > 0) {
+        await patchFileMeta(id, meta);
+      }
+      return outcome;
     },
 
-    /**
-     * Makes the whole library of images and scanned PDFs searchable: every
-     * candidate without text goes through OCR, one at a time so the tab
-     * stays responsive.
-     */
-    recognizeAllImages: async (opts) => {
-      const candidates = [...get().files.values()].filter(
-        (f) => needsText(f) && !opts?.skip?.has(f.id),
-      );
-      let found = 0;
-      for (let i = 0; i < candidates.length; i++) {
-        if (opts?.stop?.()) {
-          break;
+    processLibrary: async (opts) => {
+      const counts: ProcessingCounts = {
+        files: 0,
+        previews: 0,
+        text: 0,
+        meaning: 0,
+        tagged: 0,
+        facts: 0,
+        failed: [],
+        stopped: false,
+        remaining: 0,
+      };
+      const candidates = [...get().files.values()]
+        .filter(
+          (f) =>
+            !opts?.skip?.has(f.id) &&
+            needsProcessing(f) &&
+            (opts?.maxBytes === undefined || !wantsOriginal(f) || f.size <= opts.maxBytes),
+        )
+        // Smallest first: many quick wins before one large video.
+        .sort((a, b) => a.size - b.size);
+      if (candidates.length === 0) {
+        return counts;
+      }
+      // Stop ends the file in hand too: the signal reaches the analyzer.
+      const abort = new AbortController();
+      let stopped = false;
+      const stop = () => {
+        stopped = true;
+        abort.abort();
+      };
+      const halted = () => stopped || opts?.stop?.() === true;
+      get().beginActivity({
+        kind: "processing",
+        title: "Filling in",
+        done: 0,
+        total: candidates.length,
+        failed: 0,
+        stop,
+      });
+      let done = 0;
+      await boundedRun(candidates, analysisLanes(), async (file) => {
+        if (halted()) {
+          return;
         }
-        const file = candidates[i]!;
-        set({ ocrProgress: { done: i, total: candidates.length, current: file.name } });
+        get().updateActivity({ current: file.name });
         opts?.skip?.add(file.id);
         try {
-          const ok = await get().recognizeFile(file.id);
-          if (ok) {
-            found++;
+          const outcome = await get().processFile(file.id, { signal: abort.signal });
+          if (outcome) {
+            counts.files++;
+            counts.previews += outcome.previews;
+            counts.text += outcome.text;
+            counts.meaning += outcome.meaning;
+            counts.tagged += outcome.tagged;
+            counts.facts += outcome.facts;
           }
-          // A reading that found nothing SUCCEEDED: it recorded that
-          // fact, and the file leaves the queue by its own marker.
           opts?.onOutcome?.(file.id, true);
         } catch {
-          // One unreadable image never stops the sweep.
+          if (abort.signal.aborted) {
+            return;
+          }
+          // One unreadable file never stops the pass, but it is
+          // remembered, so this device stops paying for it.
+          counts.failed.push(file.name);
           opts?.onOutcome?.(file.id, false);
+        } finally {
+          done++;
+          get().updateActivity({ done, failed: counts.failed.length });
         }
-      }
-      set({ ocrProgress: null });
-      return found;
+      });
+      counts.stopped = halted();
+      // Whatever did not finish, including files cut off mid-flight, is
+      // still owed; the summary's total must match the running count.
+      counts.remaining = candidates.length - counts.files - counts.failed.length;
+      const said = describeProcessing(counts);
+      get().finishActivity("processing", said.title, said.detail);
+      return counts;
+    },
+
+    // The single-file actions are the pass over one file, told what to redo.
+    recognizeFile: async (id) => {
+      const outcome = await get().processFile(id, { force: { text: true } });
+      return (outcome?.text ?? 0) > 0;
     },
 
     /**
@@ -2563,12 +2984,28 @@ export const useStore = create<StoreState>((set, get) => {
           (file.hasText || file.text !== undefined),
       );
       let found = 0;
+      if (candidates.length === 0) {
+        return found;
+      }
+      // Narrates through the bell like the main pass; a pass that found
+      // nothing leaves no entry, or every app open would say so.
+      let stopAsked = false;
+      get().beginActivity({
+        kind: "processing",
+        title: "Reading dates",
+        done: 0,
+        total: candidates.length,
+        failed: 0,
+        stop: () => {
+          stopAsked = true;
+        },
+      });
       for (let i = 0; i < candidates.length; i++) {
-        if (opts?.stop?.()) {
+        if (stopAsked || opts?.stop?.()) {
           break;
         }
         const file = candidates[i]!;
-        set({ ocrProgress: { done: i, total: candidates.length, current: file.name } });
+        get().updateActivity({ done: i, current: file.name });
         opts?.skip?.add(file.id);
         try {
           // Whatever is already in memory, else the file's own index blob.
@@ -2623,194 +3060,34 @@ export const useStore = create<StoreState>((set, get) => {
           opts?.onOutcome?.(file.id, false);
         }
       }
-      set({ ocrProgress: null });
+      if (found > 0) {
+        get().finishActivity(
+          "processing",
+          `Found dates in ${found} file${found === 1 ? "" : "s"}`,
+          "Confirm them from the file's details",
+        );
+      } else {
+        set({ activity: { ...get().activity, job: null } });
+      }
       return found;
     },
 
-    /** Computes this file's semantic embedding on-device and files it into
-     * the encrypted index blob alongside any search text already there.
-     * Images embed from their full content; videos embed from their stored
-     * poster frame, so the sweep never downloads a whole video. */
     embedFile: async (id) => {
       const file = get().files.get(id);
-      if (!file) {
+      if (!file || !(file.mime.startsWith("image/") || file.mime.startsWith("video/"))) {
         return false;
       }
-      const isImage = file.mime.startsWith("image/");
-      const isVideo = file.mime.startsWith("video/") && file.hasThumb;
-      if (!isImage && !isVideo) {
-        return false;
-      }
-      const bytes = isImage
-        ? await openWithFreshEntry(
-            file,
-            (entry) =>
-              downloadAndDecrypt(entry.id, entry.key, entry.digest, {
-                timeoutMs: SWEEP_DOWNLOAD_MS,
-              }),
-            async () => {
-              await get().refresh();
-              return get().files.get(id) ?? null;
-            },
-          )
-        : await downloadThumbnail(file.id, file.key, { timeoutMs: SWEEP_DOWNLOAD_MS });
-      const clip = await withDeadlineOrThrow(
-        embedImage(
-          new Blob([bytes.slice().buffer as ArrayBuffer], {
-            type: isImage ? file.mime : "image/jpeg",
-          }),
-        ),
-        SWEEP_READ_MS,
-        "meaning embedding",
-      );
-      if (!clip) {
-        return false;
-      }
-      // Merge with whatever the index blob already holds so text survives.
-      let text = file.text;
-      if (text === undefined && file.hasText && !file.inlineText) {
-        try {
-          const indexBytes = await api.downloadBlob(file.id, "index", {
-            timeoutMs: SWEEP_DOWNLOAD_MS,
-          });
-          text = decodeIndexPayload(decryptBytes(indexBytes, file.key)).text;
-        } catch {
-          // The embedding still lands; text warms on demand later.
-        }
-      }
-      await uploadBlob(
-        id,
-        "index",
-        encryptBytes(encodeIndexPayload({ text, clip }), file.key),
-      );
-      await patchFileMeta(id, {
-        hasClip: true,
-        clipVersion: CLIP_MODEL_VERSION,
-        ...(file.inlineText && text !== undefined ? { hasText: true, text: undefined } : {}),
-      });
-      if (file.inlineText && text !== undefined) {
-        setEntryText(id, text, false);
-      }
-      setEntryClip(id, clip);
-      return true;
+      const outcome = await get().processFile(id, { force: { meaning: true } });
+      return (outcome?.meaning ?? 0) > 0;
     },
 
-    /** Makes photos and videos searchable by meaning, one file at a time. */
-    embedAllImages: async (opts) => {
-      const candidates = [...get().files.values()].filter(
-        (f) => needsClip(f, CLIP_MODEL_VERSION) && !opts?.skip?.has(f.id),
-      );
-      let indexed = 0;
-      for (let i = 0; i < candidates.length; i++) {
-        if (opts?.stop?.()) {
-          break;
-        }
-        const file = candidates[i]!;
-        set({ semanticProgress: { done: i, total: candidates.length, current: file.name } });
-        opts?.skip?.add(file.id);
-        try {
-          const ok = await get().embedFile(file.id);
-          if (ok) {
-            indexed++;
-          }
-          opts?.onOutcome?.(file.id, ok);
-        } catch {
-          // One unreadable image never stops the sweep.
-          opts?.onOutcome?.(file.id, false);
-        }
-      }
-      set({ semanticProgress: null });
-      return indexed;
-    },
-
-    /**
-     * Makes the missing thumbnail for one stored image or video. Files
-     * ingested through the iOS Files app arrive without one, because the
-     * provider process has no way to decode media and the server never
-     * sees pixels; whichever signed-in device runs this closes the gap.
-     */
     backfillThumbnail: async (id) => {
       const file = get().files.get(id);
-      const wantsThumb =
-        file &&
-        !file.trashed &&
-        !file.hasThumb &&
-        (file.mime.startsWith("image/") || file.mime.startsWith("video/"));
-      if (!file || !wantsThumb) {
+      if (!file || file.hasThumb) {
         return false;
       }
-      const bytes = await openWithFreshEntry(
-        file,
-        (entry) =>
-          downloadAndDecrypt(entry.id, entry.key, entry.digest, { timeoutMs: SWEEP_DOWNLOAD_MS }),
-        async () => {
-          await get().refresh();
-          return get().files.get(id) ?? null;
-        },
-      );
-      const source = new File([bytes.slice().buffer as ArrayBuffer], file.name, {
-        type: file.mime,
-      });
-      // The slot serializes the decode with every other analysis; a phone
-      // holds one decoded original at a time, no matter who asks. The
-      // deadline is what keeps a video that never fires its events from
-      // wedging the pass for the rest of the session.
-      const thumbnail = await withAnalysisSlot(() =>
-        withDeadlineOrThrow(makeThumbnail(source, file.mime), SWEEP_READ_MS, "thumbnail"),
-      );
-      if (!thumbnail) {
-        return false;
-      }
-      // Another device may have finished while the bytes were downloading;
-      // sync will have flipped the flag, and a second write is pure waste.
-      const current = get().files.get(id);
-      if (!current || current.hasThumb) {
-        return false;
-      }
-      await uploadBlob(id, "thumbnail", encryptBytes(thumbnail.bytes, current.key));
-      // The patch reply carries the row as it stands after the thumbnail
-      // landed, so hasThumb flips here without a separate refresh.
-      await patchFileMeta(id, {
-        width: thumbnail.width,
-        height: thumbnail.height,
-        blur: thumbnail.blur,
-      });
-      return true;
-    },
-
-    /** Fills every missing thumbnail, smallest file first. */
-    backfillThumbnails: async (opts) => {
-      const candidates = [...get().files.values()]
-        .filter(
-          (f) =>
-            needsThumb(f) &&
-            !opts?.skip?.has(f.id) &&
-            (opts?.maxBytes === undefined || f.size <= opts.maxBytes),
-        )
-        // Smallest first: many quick wins before one large video.
-        .sort((a, b) => a.size - b.size);
-      let made = 0;
-      for (let i = 0; i < candidates.length; i++) {
-        if (opts?.stop?.()) {
-          break;
-        }
-        const file = candidates[i]!;
-        set({ thumbProgress: { done: i, total: candidates.length, current: file.name } });
-        opts?.skip?.add(file.id);
-        try {
-          const ok = await get().backfillThumbnail(file.id);
-          if (ok) {
-            made++;
-          }
-          opts?.onOutcome?.(file.id, ok);
-        } catch {
-          // One undecodable file never stops the sweep, but it is
-          // remembered, so this device stops paying for it.
-          opts?.onOutcome?.(file.id, false);
-        }
-      }
-      set({ thumbProgress: null });
-      return made;
+      const outcome = await get().processFile(id, { force: { thumb: true } });
+      return (outcome?.previews ?? 0) > 0;
     },
 
     /**

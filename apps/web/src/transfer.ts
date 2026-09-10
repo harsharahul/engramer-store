@@ -32,6 +32,7 @@ import { categorize, type Analysis } from "./intel/categorize";
 import { extractExif, extractText, isPdf } from "./intel/extract";
 import { ocrEnabled, recognizeImage, recognizePdf, renderPdfPage } from "./intel/ocr";
 import { CLIP_MODEL_VERSION, embedImage, semanticEnabled } from "./intel/semantic";
+import { SCENES_VERSION, readScenes, type SceneReading } from "./intel/scenes";
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import type { Fact, FactEvidence } from "./intel/facts";
 import { encodeIndexPayload } from "./indexblob";
@@ -500,27 +501,47 @@ export interface PreparedFile {
   clips?: Float32Array[];
   /** Where each fact came from; rides in the same index blob. */
   evidence?: FactEvidence[];
+  /** Scene labels read from the meaning vector; null when unavailable. */
+  scenes?: SceneReading | null;
 }
 
 /**
  * Client-side analysis phase: search text, EXIF, category, tags, thumbnail.
  * Everything computed here ships only inside encrypted metadata.
  */
+export interface AnalyzeOptions {
+  /**
+   * Skip the heavy scanners (text recognition, meaning embedding, fact
+   * scanning) and leave their flags unset, so the backfill pass finds
+   * this file later. Thumbnail, blur and EXIF still happen here: the
+   * grid must look right the moment the upload lands.
+   */
+  defer?: boolean;
+  /**
+   * Work the file already carries, which the pass over stored files
+   * hands in so nothing is computed twice. A skipped kind leaves its
+   * result undefined and its flag untouched.
+   */
+  skip?: { text?: boolean; meaning?: boolean; facts?: boolean };
+  /**
+   * Read text only when the picture's meaning says it holds words. Text
+   * recognition is by far the costliest step and most photographs carry
+   * none; the meaning vector, computed first, is a cheap judge. A picture
+   * judged wordless is recorded as read-and-empty, so it leaves the queue.
+   */
+  gateTextByMeaning?: boolean;
+}
+
 export async function analyzeFile(
   file: UploadSource,
   signal?: AbortSignal,
   onPhase?: (phase: string) => void,
-  opts?: {
-    /**
-     * Skip the heavy scanners (text recognition, meaning embedding, fact
-     * scanning) and leave their flags unset, so the backfill sweeps find
-     * this file later. Thumbnail, blur and EXIF still happen here: the
-     * grid must look right the moment the upload lands.
-     */
-    defer?: boolean;
-  },
+  opts?: AnalyzeOptions,
 ): Promise<PreparedFile> {
   const defer = opts?.defer === true;
+  const wantText = !defer && opts?.skip?.text !== true;
+  const wantMeaning = !defer && opts?.skip?.meaning !== true;
+  const wantFacts = !defer && opts?.skip?.facts !== true;
   const cancelled = () => {
     if (signal?.aborted) {
       throw new ApiError(UPLOAD_CANCELLED, "upload cancelled");
@@ -531,42 +552,29 @@ export async function analyzeFile(
   // knows, and every branch below keys off the mime.
   const mime = normalizeImageMime(file.type, file.name);
   let [text, exif, thumbnail] = await Promise.all([
-    withDeadline(extractText(file), ANALYSIS_DEADLINE_MS, signal),
+    wantText ? withDeadline(extractText(file), ANALYSIS_DEADLINE_MS, signal) : Promise.resolve(undefined),
     withDeadline(extractExif(file), ANALYSIS_DEADLINE_MS, signal),
     withDeadline(makeThumbnail(file, mime), THUMB_DEADLINE_MS + 2_000, signal).then(
       (t) => t ?? null,
     ),
   ]);
   cancelled();
-  // Opt-in OCR: screenshots and scans become searchable, and the recognized
-  // text sharpens categorization (a photographed invoice files as a receipt).
   // Everything that READS the image works from the bounded copy: the
   // original is decoded once, for the thumbnail, and never again.
   // Readers below take Blobs; image sources are materialized before
   // analysis, so a non-Blob here is a video and every reader is gated off.
   const readable = thumbnail?.readable ?? (file instanceof File ? file : null);
-  let ocrRan = false;
-  if (!defer && text === undefined && mime.startsWith("image/") && readable && ocrEnabled()) {
-    onPhase?.("reading text");
-    ocrRan = true;
-    text = await withDeadline(recognizeImage(readable), ANALYSIS_DEADLINE_MS * 3, signal);
-  }
-  // A PDF with no text layer is a scan; its pages read like photos.
-  if (!defer && text === undefined && isPdf(file.name, file.type) && file instanceof Blob && ocrEnabled()) {
-    onPhase?.("reading scanned pages");
-    ocrRan = true;
-    text = await withDeadline(recognizePdf(file), ANALYSIS_DEADLINE_MS * 6, signal);
-  }
-  cancelled();
   // Opt-in semantic indexing: photos become findable by what is in them,
   // and videos by their poster frame, which the thumbnail step already
   // extracted; decoding the video a second time would be wasted work.
+  // It runs before text reading because it is cheap and, when asked, it
+  // decides whether reading is worth its cost at all.
   let clip: Float32Array | undefined;
   let clips: Float32Array[] | undefined;
-  if (!defer && semanticEnabled() && (mime.startsWith("image/") || mime.startsWith("video/"))) {
+  if (wantMeaning && semanticEnabled() && (mime.startsWith("image/") || mime.startsWith("video/"))) {
     onPhase?.("indexing by meaning");
   }
-  if (!defer && semanticEnabled()) {
+  if (wantMeaning && semanticEnabled()) {
     if (mime.startsWith("image/") && readable) {
       clip = await withDeadline(embedImage(readable), 45_000, signal);
     } else if (mime.startsWith("video/") && thumbnail) {
@@ -599,12 +607,38 @@ export async function analyzeFile(
     }
   }
   cancelled();
+  // Scene labels, read off the vector just computed: nothing is decoded
+  // again for them. Null when the vocabulary cannot be embedded, in which
+  // case the file simply stays a labeling candidate.
+  const scenes = clip ? await readScenes(clip) : null;
+  // Opt-in OCR: screenshots and scans become searchable, and the recognized
+  // text sharpens categorization (a photographed invoice files as a receipt).
+  let ocrRan = false;
+  const textWorthReading =
+    opts?.gateTextByMeaning !== true || scenes === null || scenes.textBearing;
+  if (wantText && text === undefined && mime.startsWith("image/") && readable && ocrEnabled()) {
+    if (textWorthReading) {
+      onPhase?.("reading text");
+      ocrRan = true;
+      text = await withDeadline(recognizeImage(readable), ANALYSIS_DEADLINE_MS * 3, signal);
+    } else {
+      // Judged wordless by its meaning: read, in effect, and empty.
+      ocrRan = true;
+    }
+  }
+  // A PDF with no text layer is a scan; its pages read like photos.
+  if (wantText && text === undefined && isPdf(file.name, file.type) && file instanceof Blob && ocrEnabled()) {
+    onPhase?.("reading scanned pages");
+    ocrRan = true;
+    text = await withDeadline(recognizePdf(file), ANALYSIS_DEADLINE_MS * 6, signal);
+  }
+  cancelled();
   // Opt-in: dates and reference numbers read out of the document itself.
   // Scanning must never fail an upload, so a failure here is swallowed the
   // same way extraction's already is; the file stores without facts.
   let facts: Fact[] = [];
   let evidence: FactEvidence[] = [];
-  if (!defer && factsEnabled()) {
+  if (wantFacts && factsEnabled()) {
     onPhase?.("reading dates");
     // Bytes worth scanning for a barcode: an image as it is; for a PDF, its
     // first page rendered at recognition width, because a printed pass's
@@ -653,13 +687,15 @@ export async function analyzeFile(
     text,
     exif,
   });
+  // Scene labels join the tags: search, chips and albums need nothing new.
+  const tags = scenes ? [...new Set([...analysis.tags, ...scenes.labels])] : analysis.tags;
   const meta: FileMetadata = {
     name: file.name,
     mime: mime || "application/octet-stream",
     size: file.size,
     mtime: file.lastModified,
     category: analysis.category,
-    tags: analysis.tags,
+    tags,
     ...(thumbnail ? { width: thumbnail.width, height: thumbnail.height } : {}),
     ...(thumbnail?.blur ? { blur: thumbnail.blur } : {}),
     ...(text !== undefined ? { hasText: true } : {}),
@@ -667,9 +703,10 @@ export async function analyzeFile(
     // reading that actually ran may say so.
     ...(text === undefined && ocrRan ? { noText: true } : {}),
     ...(clip ? { hasClip: true, clipVersion: CLIP_MODEL_VERSION } : {}),
+    ...(scenes ? { scenesVersion: SCENES_VERSION } : {}),
     ...(facts.length > 0 ? { facts } : {}),
   };
-  return { meta, analysis, thumbnail, text, clip, clips, evidence };
+  return { meta, analysis: { ...analysis, tags }, thumbnail, text, clip, clips, evidence, scenes };
 }
 
 export interface UploadResult {
