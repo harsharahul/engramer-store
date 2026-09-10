@@ -20,7 +20,11 @@ export function SelectionBar(props: {
   const none = props.count === 0;
   return (
     <div className="bulk-bar">
-      <span>{none ? "Select items" : `${props.count} selected`}</span>
+      <span>
+        {none ? "Select items" : `${props.count} selected`}
+        {/* The promise this bar makes on a Mac; hidden where fingers tap. */}
+        <small className="bulk-hint">Click adds or removes · ⌘-click too · Esc clears</small>
+      </span>
       {props.count < props.total && (
         <button className="btn btn-ghost" onClick={props.onSelectAll}>
           All {props.total}

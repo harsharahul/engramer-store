@@ -1,16 +1,17 @@
-import { useMemo } from "react";
-import { useStore } from "../store";
+import { useMemo, useState } from "react";
+import { useStore, type BulkResult } from "../store";
 import { FolderGlyph } from "./Icon";
 
 /** Pick a destination folder for one or more files. */
 export function MoveDialog(props: {
   fileIds: string[];
-  onMoved: () => void;
+  onMoved: (result: BulkResult, destination: string | null) => void;
   onClose: () => void;
 }) {
   const folders = useStore((s) => s.folders);
   const files = useStore((s) => s.files);
-  const moveFile = useStore((s) => s.moveFile);
+  const moveFiles = useStore((s) => s.moveFiles);
+  const [moving, setMoving] = useState(false);
 
   const tree = useMemo(() => {
     const list: Array<{ id: string | null; name: string; depth: number }> = [
@@ -32,10 +33,16 @@ export function MoveDialog(props: {
   const currentFolders = new Set(props.fileIds.map((id) => files.get(id)?.folderId ?? null));
 
   const move = async (destination: string | null) => {
-    for (const id of props.fileIds) {
-      await moveFile(id, destination);
+    if (moving) {
+      return;
     }
-    props.onMoved();
+    setMoving(true);
+    try {
+      const result = await moveFiles(props.fileIds, destination);
+      props.onMoved(result, destination);
+    } finally {
+      setMoving(false);
+    }
     props.onClose();
   };
 
@@ -52,7 +59,7 @@ export function MoveDialog(props: {
               key={node.id ?? "root"}
               className="move-node"
               style={{ paddingLeft: 12 + node.depth * 18 }}
-              disabled={currentFolders.size === 1 && currentFolders.has(node.id)}
+              disabled={moving || (currentFolders.size === 1 && currentFolders.has(node.id))}
               onClick={() => void move(node.id)}
             >
               <FolderGlyph size={14} /> {node.name}

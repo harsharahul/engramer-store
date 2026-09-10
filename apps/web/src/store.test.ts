@@ -1017,3 +1017,71 @@ describe("albums in the store", () => {
     spy.mockRestore();
   });
 });
+
+describe("moveFiles", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  it("moves every file a few at a time and reports exactly what failed", async () => {
+    const masterKey = generateKey();
+    const key = generateKey();
+    const entries = ["a", "b", "c", "d", "e", "f"].map((id) =>
+      entry({ id, key, name: `${id}.jpg`, mime: "image/jpeg" }),
+    );
+    useStore.setState({
+      session: {
+        email: "t@example.com",
+        token: "t",
+        masterKey,
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      refreshUsage: async () => {},
+      files: new Map(entries.map((e) => [e.id, e])),
+    });
+    let inFlight = 0;
+    let peak = 0;
+    (api as unknown as Record<string, unknown>).patchFile = async (
+      id: string,
+      patch: { folderId?: string | null },
+    ): Promise<FileDto> => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight--;
+      if (id === "d") {
+        throw new Error("boom");
+      }
+      return {
+        id,
+        folderId: patch.folderId ?? null,
+        encryptedKey: secretBoxSeal(key, masterKey),
+        encryptedMeta: encryptFileMetadata(metadataOf(entries.find((e) => e.id === id)!), key),
+        size: 1024,
+        thumbSize: 0,
+        indexSize: 0,
+        uploaded: true,
+        trashed: false,
+        deleted: false,
+        updateSeq: 3,
+        createdAt: 1,
+        updatedAt: 3,
+      };
+    };
+
+    const result = await useStore.getState().moveFiles(
+      entries.map((e) => e.id),
+      "folder-1",
+    );
+
+    expect([...result.done].sort()).toEqual(["a", "b", "c", "e", "f"]);
+    expect(result.failed).toEqual([{ id: "d", error: "boom" }]);
+    // Bounded: more than one in flight, never more than the lane count.
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(4);
+    const files = useStore.getState().files;
+    expect(files.get("a")!.folderId).toBe("folder-1");
+    expect(files.get("d")!.folderId).toBeNull();
+  });
+});

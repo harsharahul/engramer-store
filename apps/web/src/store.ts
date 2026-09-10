@@ -383,6 +383,8 @@ interface StoreState {
   markVerified: (id: string) => void;
   toggleFavorite: (id: string) => Promise<void>;
   moveFile: (id: string, folderId: string | null) => Promise<void>;
+  /** Moves many files at once and says exactly which made it. */
+  moveFiles: (ids: readonly string[], folderId: string | null) => Promise<BulkResult>;
   trashFile: (id: string) => Promise<void>;
   restoreFile: (id: string) => Promise<void>;
   deleteForever: (id: string) => Promise<void>;
@@ -592,6 +594,16 @@ export function metadataOf(file: FileEntry): FileMetadata {
     ...(file.sourceId ? { sourceId: file.sourceId } : {}),
   };
 }
+
+/** What a bulk action did, item by item, so the message afterwards can be
+ * honest: which moved, which did not, and why. */
+export interface BulkResult {
+  done: string[];
+  failed: Array<{ id: string; error: string }>;
+}
+
+/** Requests a bulk action keeps in flight at once. */
+const BULK_LANES = 4;
 
 /** Whether the thumbnail sweep still owes this file a preview. */
 export function needsThumb(file: FileEntry): boolean {
@@ -2156,6 +2168,19 @@ export const useStore = create<StoreState>((set, get) => {
     moveFile: async (id, folderId) => {
       const dto = await api.patchFile(id, { folderId });
       applyFile(dto);
+    },
+
+    moveFiles: async (ids, folderId) => {
+      const result: BulkResult = { done: [], failed: [] };
+      await boundedRun([...ids], BULK_LANES, async (id) => {
+        try {
+          await get().moveFile(id, folderId);
+          result.done.push(id);
+        } catch (error) {
+          result.failed.push({ id, error: error instanceof Error ? error.message : String(error) });
+        }
+      });
+      return result;
     },
 
     trashFile: async (id) => {

@@ -27,6 +27,11 @@ import {
 import { mergeSearchHits, searchFiles, highlightParts, type SearchHit } from "../search";
 import { collectDropped, fromDirectoryInput } from "../uploader";
 import { MOBILE_QUERY, useMediaQuery } from "../media";
+import { isGathering, nextSelection } from "../selection";
+import { isEmptySpace, marqueeSelection, useMarquee } from "../marquee";
+import { FILE_DRAG_TYPE, useDropTarget } from "../droptarget";
+import { setFileDragImage } from "../dragghost";
+import type { BulkResult } from "../store";
 import { installMediaKeyResponder } from "../mediastream";
 import { installHandoffForegroundRefresh } from "../handoff";
 import { idleLockMinutes, installIdleLock } from "../idlelock";
@@ -190,7 +195,21 @@ const CATEGORY_ICONS: Record<string, (props: { size?: number }) => React.ReactNo
   Other: AsteriskGlyph,
 };
 
-const DRAG_TYPE = "application/x-engramer-files";
+const DRAG_TYPE = FILE_DRAG_TYPE;
+
+/** A breadcrumb that takes a drop and springs open when a drag lingers. */
+function Crumb(props: {
+  label: string;
+  onOpen: () => void;
+  onDropFiles: (event: DragEvent) => void;
+}) {
+  const drop = useDropTarget(props.onDropFiles, { springLoad: props.onOpen });
+  return (
+    <button className={drop.dropping ? "drop-target" : undefined} onClick={props.onOpen} {...drop.props}>
+      {props.label}
+    </button>
+  );
+}
 
 function loadPref<T>(key: string, fallback: T): T {
   try {
@@ -521,34 +540,55 @@ export function Vault() {
 
   // ----- selection -----
 
+  // The bulk bar shows exactly while this holds, and clicks toggle exactly
+  // while the bar shows: one predicate for what is seen and what happens.
+  const gathering = isGathering(selectMode, selection.size);
+
   const select = useCallback(
     (id: string, event: React.MouseEvent) => {
       setSelection((prev) => {
-        if (event.metaKey || event.ctrlKey) {
-          const next = new Set(prev);
-          if (next.has(id)) {
-            next.delete(id);
-          } else {
-            next.add(id);
-          }
-          lastSelected.current = id;
-          return next;
-        }
-        if (event.shiftKey && lastSelected.current) {
-          const order = visibleFiles.map((f) => f.id);
-          const from = order.indexOf(lastSelected.current);
-          const to = order.indexOf(id);
-          if (from >= 0 && to >= 0) {
-            const [lo, hi] = from < to ? [from, to] : [to, from];
-            return new Set(order.slice(lo, hi + 1));
-          }
-        }
-        lastSelected.current = id;
-        return new Set([id]);
+        const next = nextSelection(
+          { selection: prev, anchor: lastSelected.current },
+          id,
+          visibleFiles.map((f) => f.id),
+          {
+            meta: event.metaKey || event.ctrlKey,
+            shift: event.shiftKey,
+            gathering: isGathering(selectMode, prev.size),
+          },
+        );
+        lastSelected.current = next.anchor;
+        return next.selection;
       });
     },
-    [visibleFiles],
+    [visibleFiles, selectMode],
   );
+
+  const selectAll = useCallback(() => {
+    setSelection(new Set(visibleFiles.map((f) => f.id)));
+    // Everything picked is a gathering, whichever button asked for it.
+    setSelectMode(true);
+  }, [visibleFiles]);
+
+  // Rubber band on empty space. The band replaces the selection as it is
+  // drawn, or adds to what was selected when ⇧ or ⌘ was held at the start.
+  const contentRef = useRef<HTMLDivElement>(null);
+  const bandBase = useRef<ReadonlySet<string>>(new Set());
+  const bandStarted = useRef(false);
+  const band = useMarquee(contentRef, {
+    onChange: (ids, extend) => {
+      if (!bandStarted.current) {
+        bandStarted.current = true;
+        bandBase.current = selection;
+      }
+      setSelection(marqueeSelection(bandBase.current, ids, extend));
+    },
+  });
+  useEffect(() => {
+    if (!band) {
+      bandStarted.current = false;
+    }
+  }, [band]);
 
   const clearSelection = useCallback(() => {
     setSelection(new Set());
@@ -887,22 +927,44 @@ export function Vault() {
     const ids = selection.has(id) ? [...selection] : [id];
     event.dataTransfer.setData(DRAG_TYPE, JSON.stringify(ids));
     event.dataTransfer.effectAllowed = "move";
+    // The ghost says what travels: this card's picture and how many more.
+    const img = (event.currentTarget as HTMLElement).querySelector("img");
+    setFileDragImage(event.dataTransfer, {
+      thumb: img?.currentSrc || img?.src || null,
+      label: store.files.get(id)?.name ?? "",
+      count: ids.length,
+    });
+  };
+
+  /** What a move did, in words that count only what actually moved. */
+  const describeMove = (result: BulkResult, destination: string | null) => {
+    const where = destination === null ? "All files" : (store.folders.get(destination)?.name ?? "the folder");
+    const moved = result.done.length;
+    const head =
+      moved === 0
+        ? "Nothing moved"
+        : `Moved ${moved} item${moved === 1 ? "" : "s"} to ${where}`;
+    return result.failed.length === 0
+      ? head
+      : `${head} · ${result.failed.length} could not be moved`;
   };
 
   const dropOnFolder = (folderId: string | null, event: React.DragEvent) => {
     try {
       const ids = JSON.parse(event.dataTransfer.getData(DRAG_TYPE)) as string[];
-      void (async () => {
-        for (const id of ids) {
-          await store.moveFile(id, folderId);
-        }
-        showToast(`Moved ${ids.length} item${ids.length === 1 ? "" : "s"}`);
+      void store.moveFiles(ids, folderId).then((result) => {
+        showToast(describeMove(result, folderId));
         clearSelection();
-      })();
+      });
     } catch {
       // Not an internal drag.
     }
   };
+
+  // Drop targets that are not folder cards: the sidebar's Files entry is the
+  // root, and every breadcrumb is an ancestor. Crumbs spring open on hover
+  // like folder cards; the root entry does not, it is already where you are.
+  const rootDrop = useDropTarget((event) => dropOnFolder(null, event));
 
   // ----- global keys and paste -----
 
@@ -922,6 +984,18 @@ export function Vault() {
       } else if (event.key === "/" && !typing && !paletteOpen) {
         event.preventDefault();
         searchInput.current?.focus();
+      } else if (
+        (event.metaKey || event.ctrlKey) &&
+        event.key.toLowerCase() === "a" &&
+        !typing &&
+        !paletteOpen &&
+        !previewId &&
+        !editorId &&
+        !ctxMenu &&
+        visibleFiles.length > 0
+      ) {
+        event.preventDefault();
+        selectAll();
       } else if (event.key === "Escape" && drawerOpen) {
         setDrawerOpen(false);
       } else if (
@@ -937,7 +1011,18 @@ export function Vault() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [paletteOpen, selection, selectMode, previewId, editorId, ctxMenu, drawerOpen, clearSelection]);
+  }, [
+    paletteOpen,
+    selection,
+    selectMode,
+    previewId,
+    editorId,
+    ctxMenu,
+    drawerOpen,
+    clearSelection,
+    selectAll,
+    visibleFiles.length,
+  ]);
 
   // Meaning search runs beside the lexical index: the query embeds on this
   // device and warmed photo vectors rank by similarity. Operator queries
@@ -1524,14 +1609,16 @@ export function Vault() {
     icon: React.ReactNode,
     label: string,
     count?: number,
+    drop?: typeof rootDrop,
   ) => (
     <button
-      className={`nav-item${active && !searching ? " active" : ""}`}
+      className={`nav-item${active && !searching ? " active" : ""}${drop?.dropping ? " drop-target" : ""}`}
       onClick={() => {
         setQuery("");
         setDrawerOpen(false);
         onClick();
       }}
+      {...(drop ? drop.props : {})}
     >
       {icon} {label}
       {count !== undefined && count > 0 && <span className="nav-count">{count}</span>}
@@ -1563,7 +1650,14 @@ export function Vault() {
           <BrandMark size={26} />
           <Wordmark />
         </div>
-        {navButton(view.kind === "folder", () => setView({ kind: "folder", id: null }), <FolderGlyph />, "Files")}
+        {navButton(
+          view.kind === "folder",
+          () => setView({ kind: "folder", id: null }),
+          <FolderGlyph />,
+          "Files",
+          undefined,
+          rootDrop,
+        )}
         {navButton(view.kind === "recent", () => setView({ kind: "recent" }), <ClockGlyph />, "Recent")}
         {navButton(view.kind === "photos", () => setView({ kind: "photos" }), <PhotoGlyph />, "Photos")}
         {navButton(
@@ -1923,26 +2017,22 @@ export function Vault() {
           <div className="crumbs">
             {view.kind === "folder" && !searching && !similarActive ? (
               <>
-                <button
-                  onClick={() => setView({ kind: "folder", id: null })}
-                  onDragOver={(e) => {
-                    if (e.dataTransfer.types.includes(DRAG_TYPE)) {
-                      e.preventDefault();
-                    }
-                  }}
-                  onDrop={(e) => dropOnFolder(null, e)}
-                >
-                  All files
-                </button>
+                <Crumb
+                  label="All files"
+                  onOpen={() => setView({ kind: "folder", id: null })}
+                  onDropFiles={(e) => dropOnFolder(null, e)}
+                />
                 {breadcrumbs.map((crumb, i) => (
                   <span key={crumb.id} style={{ display: "contents" }}>
                     <span className="sep">/</span>
                     {i === breadcrumbs.length - 1 ? (
                       <span className="current">{crumb.name}</span>
                     ) : (
-                      <button onClick={() => setView({ kind: "folder", id: crumb.id })}>
-                        {crumb.name}
-                      </button>
+                      <Crumb
+                        label={crumb.name}
+                        onOpen={() => setView({ kind: "folder", id: crumb.id })}
+                        onDropFiles={(e) => dropOnFolder(crumb.id, e)}
+                      />
                     )}
                   </span>
                 ))}
@@ -2045,10 +2135,23 @@ export function Vault() {
         </div>
 
         <div
+          ref={contentRef}
           className="content"
-          onClick={(e) => e.target === e.currentTarget && clearSelection()}
+          onClick={(e) => isEmptySpace(e.target) && clearSelection()}
           {...(isMobile ? pullToRefresh.containerProps : {})}
         >
+          {band && (
+            <div
+              className="marquee"
+              aria-hidden="true"
+              style={{
+                left: band.rect.left,
+                top: band.rect.top,
+                width: band.rect.right - band.rect.left,
+                height: band.rect.bottom - band.rect.top,
+              }}
+            />
+          )}
           {(pullToRefresh.pulling || pullToRefresh.refreshing) && (
             <div className="ptr-indicator" aria-live="polite">
               {pullToRefresh.refreshing ? "Refreshing…" : "Release to refresh"}
@@ -2153,10 +2256,11 @@ export function Vault() {
               files={visibleFiles}
               selection={selection}
               selectMode={selectMode}
-              onSelect={(id, e) => (selectMode ? toggleSelect(id) : select(id, e))}
+              onSelect={select}
               onOpen={openFile}
               onMenu={openFileMenu}
               onEnterSelect={enterSelect}
+              onDragStart={startFileDrag}
             />
           ) : layout === "list" && view.kind !== "recent" ? (
             <>
@@ -2378,7 +2482,7 @@ export function Vault() {
         )}
         <UploadTray />
         <SaveOverlay />
-        {(selectMode || selection.size > 1) && (
+        {gathering && (
           <SelectionBar
             count={selection.size}
             total={visibleFiles.length}
@@ -2403,7 +2507,7 @@ export function Vault() {
               }
               clearSelection();
             }}
-            onSelectAll={() => setSelection(new Set(visibleFiles.map((f) => f.id)))}
+            onSelectAll={selectAll}
             onDone={clearSelection}
           />
         )}
@@ -2412,8 +2516,8 @@ export function Vault() {
       {moveIds && (
         <MoveDialog
           fileIds={moveIds}
-          onMoved={() => {
-            showToast("Moved.");
+          onMoved={(result, destination) => {
+            showToast(describeMove(result, destination));
             clearSelection();
           }}
           onClose={() => setMoveIds(null)}
