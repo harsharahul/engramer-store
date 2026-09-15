@@ -90,6 +90,29 @@ Preferences and follows the account; Profile's This device section states
 whether the model is available here and, when it is not, why. Nothing about
 the request leaves the device, and nothing is stored.
 
+## Summaries and tags from the assistant
+
+On the same devices, every text-bearing document (a PDF, a note, a scan
+with text, a spreadsheet's cells) gets one sentence saying what it is and
+what it is for, and a few tags for finding it later, read by Apple's
+on-device model from the document's opening pages. The reading rides the
+same one pass that fills in previews and labels, narrated through the bell
+where it can be stopped, and whichever signed-in device can run the model
+does the reading; every other device sees the result, because it lives in
+the encrypted metadata like every other signal. Files that are already
+summarized are never read again until the model changes.
+
+What is stored is checked before it is stored: one sentence under a hard
+cap, with reference numbers and addresses masked to their last four
+characters, because metadata is decrypted on every device on every sync.
+The summary appears in the details pane with where it came from and a
+Remove button, search matches it (so "insurance policy" finds a scan named
+`scan-0042.pdf`), and the tags are ordinary tags. A document the model
+declined, could not read, or that was too short is recorded as such rather
+than tried again forever; Profile's Library index says how many documents
+are waiting, and for which device. "Summarize now" in a file's menu reads
+one file on request.
+
 ## Library views
 
 The sidebar's Library section lists auto-categories with live counts (Photos, Screenshots, Documents, Receipts, and any other non-empty category) plus Favorites. These are smart views computed from tags, independent of physical folder location.

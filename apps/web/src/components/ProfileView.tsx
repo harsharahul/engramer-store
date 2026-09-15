@@ -41,6 +41,7 @@ import {
   stopBackfill,
 } from "../backfill";
 import { CLIP_MODEL_VERSION } from "../intel/semantic";
+import { ASSIST_VERSION } from "../intel/summarize";
 import { SCENES_VERSION } from "../intel/scenes";
 import { describeProcessing } from "../activity";
 import { SweepMemory, type SweepKind } from "../sweepmemory";
@@ -312,6 +313,7 @@ export function ProfileView(props: {
   // line answers for.
   const pending = pendingDerivatives(store.files, CLIP_MODEL_VERSION, {
     scenesVersion: SCENES_VERSION,
+    assistVersion: ASSIST_VERSION,
   });
   const autoPending = pendingDerivatives(store.files, CLIP_MODEL_VERSION, {
     ocr: props.ocrOn,
@@ -1583,6 +1585,22 @@ export function ProfileView(props: {
               {pending.tags === 0
                 ? "Every file has a category and its basic tags."
                 : `${pending.tags} file${pending.tags === 1 ? "" : "s"} stored without a category or tags, usually added from the Files app.`}
+            </div>
+          </div>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Summaries</b>
+            <div className="profile-row-sub">
+              {!props.assistantOn
+                ? pending.summaries === 0
+                  ? "The on-device assistant is off (the switch under Preferences)."
+                  : `The on-device assistant is off (the switch under Preferences), so ${pending.summaries} document${pending.summaries === 1 ? "" : "s"} will not be summarized.`
+                : pending.summaries === 0
+                  ? "Every document has been summarized, or judged too short to need it."
+                  : assistant?.state === "available"
+                    ? `${pending.summaries} document${pending.summaries === 1 ? "" : "s"} not yet summarized, on this device.`
+                    : `${pending.summaries} document${pending.summaries === 1 ? "" : "s"} wait for a device that can summarize (a Mac or iPhone on macOS 26 or iOS 26).`}
             </div>
           </div>
         </div>

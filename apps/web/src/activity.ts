@@ -80,6 +80,9 @@ export interface ProcessingCounts {
   meaning: number;
   tagged: number;
   facts: number;
+  summaries: number;
+  /** Summaries the model would not read now (app in the background). */
+  summaryPaused: number;
   failed: string[];
   stopped: boolean;
   remaining: number;
@@ -106,6 +109,9 @@ export function describeProcessing(counts: ProcessingCounts): { title: string; d
   if (counts.facts > 0) {
     parts.push(`${plural(counts.facts, "date", "dates")} found`);
   }
+  if (counts.summaries > 0) {
+    parts.push(`${counts.summaries} summarized`);
+  }
   const title = counts.stopped
     ? `Stopped after ${counts.files} of ${counts.files + counts.remaining}`
     : `Processed ${plural(counts.files, "file")}`;
@@ -115,7 +121,11 @@ export function describeProcessing(counts: ProcessingCounts): { title: string; d
           counts.failed.length > 3 ? "…" : ""
         }`
       : null;
+  const paused =
+    counts.summaryPaused > 0
+      ? `${plural(counts.summaryPaused, "summary", "summaries")} wait for the app to be in front`
+      : null;
   const tail = counts.stopped ? "continues next time the app is open" : null;
-  const detail = [parts.join(" · "), failed, tail].filter(Boolean).join(" · ");
+  const detail = [parts.join(" · "), failed, paused, tail].filter(Boolean).join(" · ");
   return detail ? { title, detail } : { title };
 }

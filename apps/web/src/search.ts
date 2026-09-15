@@ -250,12 +250,14 @@ function scoreFile(file: FileEntry, context: Context): SearchHit | null {
 
   const name = file.name.toLowerCase();
   const text = file.text?.toLowerCase();
+  const summary = file.summary?.toLowerCase();
   const chain = folderChain(file, folders);
   const category = file.category?.toLowerCase() ?? "";
 
   let total = 0;
   const nameRanges: Highlight[] = [];
   let firstTextIndex = -1;
+  let firstSummaryIndex = -1;
   let matchedFolder: string | null = null;
 
   for (const term of parsed.terms) {
@@ -298,6 +300,17 @@ function scoreFile(file: FileEntry, context: Context): SearchHit | null {
       matchedFolder = matchedFolder ?? folderHit;
     }
 
+    // What the assistant said the document is: between a tag and the text.
+    if (summary) {
+      const at = summary.indexOf(term);
+      if (at >= 0) {
+        best = Math.max(best, 1.6);
+        if (firstSummaryIndex < 0) {
+          firstSummaryIndex = at;
+        }
+      }
+    }
+
     // Content, including OCR text.
     if (text) {
       const at = text.indexOf(term);
@@ -319,6 +332,10 @@ function scoreFile(file: FileEntry, context: Context): SearchHit | null {
   let textRanges: Highlight[] = [];
   if (firstTextIndex >= 0 && file.text) {
     const built = buildSnippet(file.text, firstTextIndex, parsed.terms);
+    matchedText = built.snippet;
+    textRanges = built.ranges;
+  } else if (firstSummaryIndex >= 0 && file.summary) {
+    const built = buildSnippet(file.summary, firstSummaryIndex, parsed.terms);
     matchedText = built.snippet;
     textRanges = built.ranges;
   }

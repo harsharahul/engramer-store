@@ -515,7 +515,7 @@ describe("sweeps stop when asked", () => {
       ]),
       processFile: async () => {
         gate.count();
-        return { previews: 1, text: 0, meaning: 0, tagged: 0, facts: 0 };
+        return { previews: 1, text: 0, meaning: 0, tagged: 0, facts: 0, summaries: 0, summaryPaused: 0 };
       },
     });
     try {
@@ -535,7 +535,7 @@ describe("sweeps stop when asked", () => {
           if (seen === 1) {
             useStore.getState().activity.job?.stop?.();
           }
-          return { previews: 1, text: 0, meaning: 0, tagged: 0, facts: 0 };
+          return { previews: 1, text: 0, meaning: 0, tagged: 0, facts: 0, summaries: 0, summaryPaused: 0 };
         },
       });
       const viaBell = await useStore.getState().processLibrary();

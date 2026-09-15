@@ -155,6 +155,7 @@ export class AssistantError extends Error {
 // ----- availability -----
 
 let cached: Promise<AssistantState> | null = null;
+let lastKnown: AssistantState = NOT_NATIVE;
 
 /** Whether the model is here. Probed once per session; `refresh` asks
  * again (the Profile page does, and so does a return to the foreground,
@@ -167,13 +168,28 @@ export async function assistantState(
     cached = transport
       .available()
       .then(parseAssistantState)
-      .catch(() => NOT_NATIVE);
+      .catch(() => NOT_NATIVE)
+      .then((state) => {
+        lastKnown = state;
+        return state;
+      });
   }
   return cached;
 }
 
+/** The last probe's answer, for code that cannot wait (a predicate the
+ * pass and the Profile counts share). False until the first probe lands. */
+export function assistantAvailableNow(): boolean {
+  return lastKnown.state === "available";
+}
+
+export function lastAssistantState(): AssistantState {
+  return lastKnown;
+}
+
 export function resetAssistantCache(): void {
   cached = null;
+  lastKnown = NOT_NATIVE;
 }
 
 // ----- generation -----
