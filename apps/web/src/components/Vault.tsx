@@ -52,6 +52,8 @@ import { setFileDragImage } from "../dragghost";
 import type { BulkResult } from "../store";
 import { describeProcessing } from "../activity";
 import { ActivityBell, ActivityPanel } from "./Activity";
+import { dueNotices } from "../notices";
+import { notifyDue } from "../notifications";
 import { installMediaKeyResponder } from "../mediastream";
 import { installHandoffForegroundRefresh } from "../handoff";
 import { idleLockMinutes, installIdleLock } from "../idlelock";
@@ -1334,6 +1336,25 @@ export function Vault() {
       clearTimeout(timer);
     };
   }, [query, assistantReady, assistantOn, literalHits.length, interpretDismissed]);
+
+  // What is due reaches the system's notifications once the library has
+  // settled, one notification per fact, never twice; the pass is a few
+  // seconds behind the last change so a sync in progress does not fire it
+  // several times.
+  useEffect(() => {
+    const account = store.session?.email;
+    if (!account) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      void notifyDue(account, dueNotices(liveFiles, Date.now())).then((sent) => {
+        if (sent > 0) {
+          diag("notices", `${sent} notification${sent === 1 ? "" : "s"} sent`);
+        }
+      });
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [liveFiles, store.session?.email]);
 
   // Similar-items mode is a transient lens; leaving it for any other view
   // should not require finding the close button.
@@ -2722,7 +2743,6 @@ export function Vault() {
         view.kind !== "shared" && (
           <DetailsPanel
             file={detailsFile}
-            allFiles={liveFiles}
             selectionCount={selection.size}
             selectionBytes={[...selection].reduce((sum, id) => sum + (store.files.get(id)?.size ?? 0), 0)}
             onOpen={openFile}
@@ -2834,6 +2854,10 @@ export function Vault() {
           <ActivityPanel
             sheet={isMobile}
             onClose={() => setActivityOpen(false)}
+            onOpen={(id) => {
+              setActivityOpen(false);
+              openFile(id);
+            }}
             onOpenProfile={() => {
               setActivityOpen(false);
               setView({ kind: "profile" });

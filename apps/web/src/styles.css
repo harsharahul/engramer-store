@@ -5460,6 +5460,25 @@ span.item-menu {
   animation: fade-rise 0.18s ease both;
 }
 
+/* The bell's two sections: what needs attention, then what is running. */
+.activity-section-label {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--paper-faint);
+  margin: 10px 12px 4px;
+}
+
+.activity-notices {
+  padding: 0 4px;
+}
+
+.activity-notices .panel-quiet {
+  padding: 6px 8px 10px;
+  margin: 0;
+}
+
 .activity-panel header {
   display: flex;
   align-items: center;
