@@ -22,6 +22,7 @@ import { api } from "./api";
 import { autoBackfillEnabled, setAutoBackfillEnabled } from "./backfill";
 import { loadPolicy, savePolicy, type BackupWindow } from "./backuppolicy";
 import { diag } from "./diag";
+import { assistantEnabled, setAssistantEnabled } from "./intel/assistant";
 import { entitiesEnabled, setEntitiesEnabled } from "./intel/entities";
 import { ocrEnabled, setOcrEnabled } from "./intel/ocr";
 import { factsEnabled, setFactsEnabled } from "./intel/scan";
@@ -46,6 +47,8 @@ export interface SyncedSettings {
   };
   /** Lock after this many quiet minutes; 0 or absent means off. */
   idleLockMinutes?: number;
+  /** The on-device assistant's switch; absent means the blob predates it. */
+  assistant?: boolean;
   /** The account public key last released to, per email address. */
   contacts?: Record<string, string>;
 }
@@ -93,6 +96,7 @@ export function snapshotSettings(): SyncedSettings {
       wifiOnly: policy.wifiOnly,
     },
     idleLockMinutes: idleLockMinutes(),
+    assistant: assistantEnabled(),
     contacts: pinnedKeys(),
   };
 }
@@ -133,6 +137,9 @@ function applyInner(values: SyncedSettings): void {
   // "no word on it", not "off", so such a blob leaves the local value be.
   if (values.idleLockMinutes !== undefined) {
     setIdleLockMinutes(values.idleLockMinutes);
+  }
+  if (values.assistant !== undefined) {
+    setAssistantEnabled(values.assistant);
   }
   mergePins(values.contacts);
 }

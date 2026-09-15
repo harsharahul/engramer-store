@@ -85,6 +85,34 @@ if (!spec.includes("- target: EngramShare")) {
   spec = head + tail;
 }
 
+// 1b. The on-device assistant's Swift shim is compiled into the Rust
+// library by src-tauri/build.rs for every Apple target, so the app link
+// here only has to weak-link the framework it talks to (the app still
+// launches on iOS 16 and answers "unavailable" there) and add the OS's
+// Swift run path, which Xcode adds on its own only for targets with Swift
+// sources. A generated project that once listed the shim's sources
+// directly would compile them twice, so that line is removed wherever it
+// is found. Anchored to the app target's own blocks, after the extensions.
+spec = spec.replace(/^\s*- path: \.\.\/\.\.\/apple\/Intel\n/gm, "");
+{
+  const appAt = spec.indexOf("engram-store-desktop_iOS:");
+  const head = spec.slice(0, appAt);
+  let tail = spec.slice(appAt);
+  if (!tail.includes("FoundationModels.framework")) {
+    tail = tail.replace(
+      /^(\s*)dependencies:\s*$/m,
+      `$1dependencies:\n$1  - sdk: FoundationModels.framework\n$1    weak: true`,
+    );
+  }
+  if (!tail.includes("LD_RUNPATH_SEARCH_PATHS: $(inherited) /usr/lib/swift")) {
+    tail = tail.replace(
+      /^(\s*)settings:\s*\n(\s*)base:\s*$/m,
+      `$1settings:\n$2base:\n$2  LD_RUNPATH_SEARCH_PATHS: $(inherited) /usr/lib/swift`,
+    );
+  }
+  spec = head + tail;
+}
+
 // 2 + 3. Version stamp and floor, across everything now in the spec.
 // App Store Connect refuses a second upload with the same build
 // number, so a re-upload of the SAME version names a higher build in

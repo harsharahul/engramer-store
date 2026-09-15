@@ -24,6 +24,7 @@ mod pushsync;
 mod ranges;
 mod saveout;
 mod serverurl;
+mod intel;
 mod unlock;
 mod watched;
 
@@ -140,6 +141,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage::<watched::SharedWatchState>(Arc::new(Mutex::new(Default::default())))
         .manage(media::MediaState::default())
+        .manage(intel::IntelState::default())
         .register_asynchronous_uri_scheme_protocol("stream", media::handle)
         .register_asynchronous_uri_scheme_protocol("picked", pickedstream::handle)
         .invoke_handler(tauri::generate_handler![
@@ -194,6 +196,9 @@ pub fn run() {
             serverurl::server_url_set,
             serverurl::server_url_clear,
             network::network_status,
+            intel::intel_available,
+            intel::intel_generate,
+            intel::intel_cancel,
         ])
         .setup(|app| {
             watched::rebuild_watchers(app.handle());

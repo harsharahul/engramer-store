@@ -78,6 +78,7 @@ import {
 } from "../intel/semantic";
 import { factsEnabled, setFactsEnabled } from "../intel/scan";
 import { entitiesEnabled, setEntitiesEnabled } from "../intel/entities";
+import { assistantState, describeAssistantState, generate as assistantGenerate } from "../intel/assistant";
 import { DATED_KINDS, soonestDated } from "../intel/facts";
 import { extractText } from "../intel/extract";
 import { CalendarView } from "./CalendarView";
@@ -1550,6 +1551,45 @@ export function Vault() {
 
   const paletteActions = useMemo<PaletteAction[]>(
     () => [
+      // Development builds only: one round trip through the on-device
+      // assistant, so a shell build can be checked without any feature
+      // that uses it.
+      ...(import.meta.env.DEV
+        ? [
+            {
+              id: "assistant-self-test",
+              label: "Assistant self-test",
+              hint: "one short answer from the on-device model",
+              run: () => {
+                void assistantState({ refresh: true }).then(async (state) => {
+                  if (state.state !== "available") {
+                    showToast(describeAssistantState(state));
+                    return;
+                  }
+                  try {
+                    const answer = await assistantGenerate({
+                      instructions: "Answer with the requested structure only.",
+                      prompt: "Name one everyday object and its color.",
+                      priority: "interactive",
+                      schema: {
+                        type: "object",
+                        properties: {
+                          object: { type: "string", description: "the object" },
+                          color: { type: "string", enum: ["red", "green", "blue", "other"] },
+                        },
+                        required: ["object", "color"],
+                        order: ["object", "color"],
+                      },
+                    });
+                    showToast(`Assistant answered: ${JSON.stringify(answer)}`);
+                  } catch (err) {
+                    showToast(`Assistant refused: ${err instanceof Error ? err.message : String(err)}`);
+                  }
+                });
+              },
+            },
+          ]
+        : []),
       { id: "upload", label: "Upload files", hint: "encrypt and store", run: () => fileInput.current?.click() },
       { id: "new-note", label: "New note", hint: "write, encrypted", run: () => setNewNoteOpen(true) },
       {

@@ -780,6 +780,44 @@ export async function nativeListen<T>(
   return shell.event.listen(event, (ev) => handler(ev.payload));
 }
 
+// ----- on-device assistant (Apple silicon shells on macOS 26 / iOS 26) -----
+
+/** The shell's own answer about the assistant, or null outside the shell
+ * (and in an older shell that has no such command). */
+export async function nativeAssistantAvailable(): Promise<unknown> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+  try {
+    return await invoke("intel_available");
+  } catch {
+    return null;
+  }
+}
+
+/** One generation. Rejects with the shell's typed refusal `{code, detail}`;
+ * outside the shell it rejects as unavailable. */
+export async function nativeAssistantGenerate(request: Record<string, unknown>): Promise<unknown> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    throw { code: "unavailable", detail: "not-native" };
+  }
+  return invoke("intel_generate", { request });
+}
+
+export async function nativeAssistantCancel(job: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return;
+  }
+  try {
+    await invoke("intel_cancel", { job });
+  } catch {
+    // A job that already ended has nothing to cancel.
+  }
+}
+
 // ----- native media path (desktop shell only) -----
 
 /** The shell's media protocol answers range requests locally. */
