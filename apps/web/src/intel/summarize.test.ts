@@ -7,8 +7,10 @@ import {
   needsSummary,
   outcomeFor,
   sanitizeSummary,
+  readingSchema,
   summarize,
   summarySchema,
+  summaryWithFactsSchema,
   SUMMARY_MAX,
 } from "./summarize";
 
@@ -117,9 +119,12 @@ describe("summarize", () => {
       summary: "An Acme Hardware invoice for tools, account …6789.",
       tags: ["invoice", "hardware"],
       kind: "Receipts",
+      facts: [],
     });
     expect(calls[0]!.priority).toBe("background");
     expect(calls[0]!.schema).toBe(summarySchema);
+    expect(readingSchema(true)).toBe(summaryWithFactsSchema);
+    expect(Object.keys(summaryWithFactsSchema.properties)).toEqual(["summary", "tags", "kind", "document", "facts"]);
     expect(String(calls[0]!.prompt)).toContain("acme.pdf");
   });
 
@@ -146,5 +151,35 @@ describe("summarize", () => {
     ).rejects.toMatchObject({ code: "context-too-long" });
     expect(attempts).toBe(2);
     expect(lengths[1]!).toBeLessThan(lengths[0]!);
+  });
+});
+
+describe("summarize with facts", () => {
+  it("asks for dates in the same reading and keeps only the grounded ones", async () => {
+    const text = "Home insurance policy. Coverage to 5 October 2026. Premium due 30 September 2025. ".repeat(4);
+    const answer = await summarize(
+      { text, name: "policy.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true },
+      async (request) => {
+        expect(request.schema).toBe(summaryWithFactsSchema);
+        expect(request.maxTokens).toBe(600);
+        expect(request.instructions).toContain("never invent one");
+        return {
+          summary: "A home insurance policy.",
+          tags: ["insurance"],
+          kind: "Documents",
+          document: "insurance",
+          facts: [
+            { kind: "expiry", label: "Coverage to", value: "2026-10-05" },
+            { kind: "due", label: "Premium due", value: "2025-09-30" },
+            { kind: "expiry", label: "Invented", value: "2031-01-01" },
+          ],
+        };
+      },
+    );
+    expect(answer?.document).toBe("insurance");
+    expect(answer?.facts.map((f) => [f.kind, f.value, f.source])).toEqual([
+      ["expiry", "2026-10-05", "model"],
+      ["due", "2025-09-30", "model"],
+    ]);
   });
 });

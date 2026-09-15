@@ -466,6 +466,42 @@ mod tests {
         assert!(answer["object"].is_string(), "no object in {answer}");
         assert!(["red", "green", "blue", "other"].contains(&answer["color"].as_str().unwrap_or("")));
 
+        // A nested shape: an array of objects with an enum inside, the form
+        // the document reading uses for dates.
+        let nested = GenerateRequest {
+            job: "live-1b".into(),
+            prompt: "The policy expires on 2026-10-05 and the premium of 412.50 is due on 2025-09-30.".into(),
+            schema: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "facts": {
+                        "type": "array",
+                        "maxItems": 4,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": { "type": "string", "enum": ["expiry", "due", "amount"] },
+                                "value": { "type": "string", "description": "YYYY-MM-DD or a decimal" }
+                            },
+                            "required": ["kind", "value"],
+                            "order": ["kind", "value"]
+                        }
+                    }
+                },
+                "required": ["facts"],
+                "order": ["facts"]
+            })),
+            // Structured answers need room: a cap that fits one word
+            // truncates the JSON and the framework cannot decode it.
+            max_tokens: 400,
+            ..request.clone()
+        };
+        let raw = apple::generate(&serde_json::to_string(&nested).unwrap(), None);
+        let answer = decode_answer(&raw).unwrap_or_else(|err| panic!("shim refused nested: {err:?}"));
+        let facts = answer["facts"].as_array().expect("facts array");
+        assert!(!facts.is_empty(), "no facts in {answer}");
+        assert!(facts.iter().all(|f| ["expiry", "due", "amount"].contains(&f["kind"].as_str().unwrap_or(""))));
+
         // A plain streamed answer arrives as cumulative chunks and ends
         // with the same text the call returns.
         let chunks = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));

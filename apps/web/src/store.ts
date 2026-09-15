@@ -2727,6 +2727,9 @@ export const useStore = create<StoreState>((set, get) => {
             name: current.name,
             categories: CATEGORIES,
             contextSize: state.state === "available" ? state.contextSize : 4096,
+            // Date reading is its own switch; when it is on, the same
+            // reading proposes the document's dates, grounded and offered.
+            withFacts: factsEnabled(),
             signal,
           });
           meta.assistVersion = ASSIST_VERSION;
@@ -2744,6 +2747,11 @@ export const useStore = create<StoreState>((set, get) => {
           const category = meta.category ?? current.category;
           if (reading.kind && (category === "Documents" || category === "Other") && reading.kind !== category) {
             meta.category = reading.kind;
+          }
+          if (reading.facts.length > 0) {
+            const fresh = reading.facts.map((fact) => ({ ...fact, digest: current.digest }));
+            meta.facts = mergeFacts(meta.facts ? asFacts(meta.facts) : current.facts, fresh);
+            outcome.facts += fresh.length;
           }
           outcome.summaries = 1;
         } catch (error) {

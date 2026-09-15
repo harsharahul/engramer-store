@@ -179,6 +179,14 @@ metadata and index blob like every other derived signal.
   is almost always a print date.
 - **Amounts and reference numbers**, at low confidence, from any document,
   including kinds no rule anticipated.
+- **The assistant's proposals**, at the lowest confidence of all, on the Mac
+  and iPhone apps where the on-device model runs. While it reads a document
+  for its summary, the model also names the kind of document and the dates
+  and amounts it states. Each proposal is typed by the same vocabulary the
+  rules use and then held to the same test: a value the text does not state,
+  in some rendering, is dropped rather than lowered. What survives is
+  offered like every other reading, marked "proposed and checked against
+  the document", and confirmed by you or not at all.
 
 **Nothing is acted on until you confirm it.** Facts arrive as suggestions in a
 single line above your files and move into the library once accepted. A date
