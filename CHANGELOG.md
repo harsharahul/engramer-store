@@ -5,12 +5,61 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-09-15
+
 ### Added
+- **An on-device assistant.** The Mac and iPhone apps on macOS 26 and iOS 26
+  reach Apple's on-device language model through a small bridge compiled into
+  the app. The model runs on the device, reads only what the app hands it,
+  and nothing leaves. On any other device or in a browser the app is exactly
+  what it was, and Profile's This device section says why the assistant is
+  absent. One switch in Profile under Preferences follows the account.
+- **Search in plain words.** A search written as a sentence ("receipts from
+  last december") is read into the filters search already understands and
+  run by the ordinary engine. The model is handed only the library's own
+  vocabulary and today's date; anything it invents is dropped before it
+  reaches the search, and a reading it is unsure of is not shown. The line
+  beside the results says "interpreted as" with the filters as chips, and
+  the words as typed stay one click away.
+- **A one-line summary of every document.** Each text-bearing document gets
+  one sentence saying what it is and a few tags, read from its opening pages
+  inside the same pass that fills in previews and labels, on whichever
+  signed-in device can run the model; every device sees the result. The
+  sentence is capped and reference numbers are masked before anything is
+  stored. It appears in the details pane with a Remove button, search
+  matches it, and a file's menu offers "Summarize now".
+- **Dates and amounts proposed by the assistant.** With date reading on, the
+  same reading names the kind of document and the dates and amounts it
+  states. Each proposal is held to the rule-based readers' test, dropped
+  unless the document's own text states it, and offered for confirmation
+  like every other reading.
+- **Ask your files.** A question typed into the search field adds a row that
+  answers it from your own documents: a handful of sources is picked from
+  what is already known about every file, short excerpts are cut around the
+  words asked about, and the model answers only from those, naming the
+  files, above results that stay where they were. Nothing about the question
+  or the answer is stored.
+- **A notice center behind the bell.** Everything that needs attention
+  (dates coming up, what the rules noticed, files stored twice, trips) sits
+  beside what the app is doing, on the Mac and the phone alike, with a badge
+  for what has not been seen. A date close enough to matter also arrives as
+  a system notification when the app is not in front, once per document,
+  with permission asked the first time there is something to say and a
+  switch in Profile.
+- **Information architecture.** `docs/information-architecture.md` names the
+  surfaces the app is made of, what each is for, when it may speak, and how
+  device-derived results are labelled and corrected; new features are placed
+  by it.
 - **Contributor License Agreement.** `CLA.md` sets the terms for outside
   contributions: contributors keep ownership of their work and license it
   broadly enough that the project can stay consistently licensable, including
   future dual licensing. Linked from the contribution guide and the new pull
   request template; submitting a contribution constitutes agreement.
+
+### Changed
+- The details pane is about one thing: with nothing selected it invites a
+  selection instead of showing the library digest, which now lives behind the
+  bell where the phone can reach it.
 
 ## [0.54.0] - 2026-09-09
 
