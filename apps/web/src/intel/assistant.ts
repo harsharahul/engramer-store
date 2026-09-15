@@ -194,15 +194,28 @@ export function resetAssistantCache(): void {
 
 // ----- generation -----
 
-/** The JSON-schema subset the shell turns into guided generation. */
-export interface JsonSchemaProperty {
-  type: "string" | "number" | "integer" | "boolean" | "array";
-  description?: string;
-  enum?: string[];
-  items?: JsonSchemaProperty;
-  minItems?: number;
-  maxItems?: number;
-}
+/** The JSON-schema subset the shell turns into guided generation: scalars,
+ * string enums, arrays, and nested objects of the same. */
+export type JsonSchemaProperty =
+  | {
+      type: "string" | "number" | "integer" | "boolean";
+      description?: string;
+      enum?: string[];
+    }
+  | {
+      type: "array";
+      description?: string;
+      items?: JsonSchemaProperty;
+      minItems?: number;
+      maxItems?: number;
+    }
+  | {
+      type: "object";
+      description?: string;
+      properties: Record<string, JsonSchemaProperty>;
+      required?: string[];
+      order?: string[];
+    };
 
 export interface JsonSchema {
   type: "object";
