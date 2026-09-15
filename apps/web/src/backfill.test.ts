@@ -71,6 +71,8 @@ const counts = (files: number) => ({
   meaning: 0,
   tagged: 0,
   facts: 0,
+  summaries: 0,
+  summaryPaused: 0,
   failed: [] as string[],
   stopped: false,
   remaining: 0,

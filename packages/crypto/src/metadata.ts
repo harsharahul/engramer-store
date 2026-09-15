@@ -70,6 +70,16 @@ export interface FileMetadata {
   /** Which scene vocabulary labeled this file's tags from its vector;
    * absent = never labeled. A vocabulary change re-labels what lags. */
   scenesVersion?: number;
+  /** One sentence the on-device assistant read from the opening of a
+   * text-bearing document; capped and masked before it is stored. */
+  summary?: string;
+  /** Which assistant model last had its turn at this file, whatever the
+   * outcome; absent = never. A model change re-reads what lags. */
+  assistVersion?: number;
+  /** Why there is no summary at that version: too short, declined by
+   * the model, an unsupported language, unreadable, or removed by the
+   * user. Recorded so the file is not re-read on every device forever. */
+  noSummary?: string;
   /** Auto-assigned category (client-side analysis; opaque to the server). */
   category?: string;
   /** Tags, auto-assigned and user-edited alike. */

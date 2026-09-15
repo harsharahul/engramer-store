@@ -17,6 +17,7 @@ import {
   PencilGlyph,
   RestoreGlyph,
   ShareGlyph,
+  SparkGlyph,
   StarGlyph,
   TrashGlyph,
   XGlyph,
@@ -49,6 +50,7 @@ export function DetailsPanel(props: {
     file ? s.offline.find((entry) => entry.fileId === file.id) : undefined,
   );
   const setTags = useStore((s) => s.setTags);
+  const removeSummary = useStore((s) => s.removeSummary);
   const removeFromAlbum = useStore((s) => s.removeFromAlbum);
   const panelRef = useRef<HTMLElement>(null);
   const isSheet = useMediaQuery(MOBILE_QUERY);
@@ -175,6 +177,21 @@ export function DetailsPanel(props: {
           </button>
         )}
       </div>
+
+      {file.summary && (
+        <div className="details-summary">
+          <span className="details-label">
+            <SparkGlyph size={12} /> Summary
+          </span>
+          <p>{file.summary}</p>
+          <div className="details-provenance">
+            Read by the on-device assistant from the opening pages.
+            <button className="linky quiet" title="Remove this summary" onClick={() => void removeSummary(file.id)}>
+              Remove
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="details-actions">
         <button className="btn" onClick={() => props.onOpen(file.id)}>

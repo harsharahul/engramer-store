@@ -63,6 +63,8 @@ describe("describeProcessing", () => {
         meaning: 500,
         tagged: 500,
         facts: 0,
+        summaries: 0,
+        summaryPaused: 0,
         failed: ["a.jpg", "b.jpg"],
         stopped: false,
         remaining: 0,
@@ -79,6 +81,8 @@ describe("describeProcessing", () => {
         meaning: 213,
         tagged: 213,
         facts: 0,
+        summaries: 0,
+        summaryPaused: 0,
         failed: [],
         stopped: true,
         remaining: 287,
@@ -95,10 +99,32 @@ describe("describeProcessing", () => {
         meaning: 0,
         tagged: 0,
         facts: 0,
+        summaries: 0,
+        summaryPaused: 0,
         failed: [],
         stopped: false,
         remaining: 0,
       }),
     ).toEqual({ title: "Nothing to fill in" });
+  });
+});
+
+describe("describeProcessing with the assistant", () => {
+  it("counts summaries and says when the model would not read in the background", () => {
+    const described = describeProcessing({
+      files: 12,
+      previews: 0,
+      text: 0,
+      meaning: 0,
+      tagged: 0,
+      facts: 0,
+      summaries: 9,
+      summaryPaused: 3,
+      failed: [],
+      stopped: false,
+      remaining: 0,
+    });
+    expect(described.title).toBe("Processed 12 files");
+    expect(described.detail).toBe("9 summarized · 3 summaries wait for the app to be in front");
   });
 });

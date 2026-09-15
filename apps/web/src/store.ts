@@ -90,6 +90,9 @@ import { isPdf } from "./intel/extract";
 import { CLIP_MODEL_VERSION, embedImage, semanticEnabled } from "./intel/semantic";
 import { asFacts, mergeFacts, reconcileFacts, type Fact, type FactEvidence } from "./intel/facts";
 import { factsEnabled, scanForFacts } from "./intel/scan";
+import { assistantAvailableNow, assistantEnabled, lastAssistantState } from "./intel/assistant";
+import { CATEGORIES } from "./intel/categorize";
+import { ASSIST_VERSION, MIN_TEXT, cleanTags, needsSummary, outcomeFor, summarize } from "./intel/summarize";
 import { EXACT_SOURCES, tripTag, type TripSuggestion } from "./intel/trips";
 import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
@@ -130,6 +133,12 @@ export interface FileEntry {
   clipVersion?: number;
   /** Which scene vocabulary labeled the tags from the vector; absent = never. */
   scenesVersion?: number;
+  /** One sentence the assistant read from the opening; absent = none. */
+  summary?: string;
+  /** Which assistant model last had its turn, whatever the outcome. */
+  assistVersion?: number;
+  /** Why there is no summary at that version. */
+  noSummary?: string;
   /** Legacy row still carrying text inside its metadata. */
   inlineText: boolean;
   category?: string;
@@ -218,6 +227,7 @@ export interface ProcessNeeds {
   meaning: boolean;
   category: boolean;
   scenes: boolean;
+  summary: boolean;
 }
 
 export interface ProcessOptions {
@@ -233,6 +243,10 @@ export interface ProcessOutcome {
   meaning: number;
   tagged: number;
   facts: number;
+  summaries: number;
+  /** A summary the model would not read now (the app was in the
+   * background); the file stays owed. */
+  summaryPaused: number;
 }
 
 /**
@@ -470,6 +484,8 @@ interface StoreState {
    * through the same analyzer every upload does. Null when nothing was owed.
    */
   processFile: (id: string, opts?: ProcessOptions) => Promise<ProcessOutcome | null>;
+  /** Drops the assistant's summary and remembers the choice for this model. */
+  removeSummary: (id: string) => Promise<void>;
   /** The pass over every file that owes something, a few at a time. */
   processLibrary: (opts?: SweepOptions & { maxBytes?: number }) => Promise<ProcessingCounts>;
   /** Reads (or re-reads) the text of one stored image or scan. */
@@ -516,6 +532,9 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array, prior?: FileEntry): Fi
     hasClip: meta.hasClip === true,
     clipVersion: meta.clipVersion,
     scenesVersion: meta.scenesVersion,
+    summary: meta.summary,
+    assistVersion: meta.assistVersion,
+    noSummary: meta.noSummary,
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -567,6 +586,9 @@ export function entryFromUpdate(
     hasClip: meta.hasClip === true,
     clipVersion: meta.clipVersion,
     scenesVersion: meta.scenesVersion,
+    summary: meta.summary,
+    assistVersion: meta.assistVersion,
+    noSummary: meta.noSummary,
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -607,6 +629,9 @@ export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEnt
     hasClip: meta.hasClip === true,
     clipVersion: meta.clipVersion,
     scenesVersion: meta.scenesVersion,
+    summary: meta.summary,
+    assistVersion: meta.assistVersion,
+    noSummary: meta.noSummary,
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -654,6 +679,9 @@ export function metadataOf(file: FileEntry): FileMetadata {
     // unable to tell fresh embeddings from stale ones.
     ...(file.clipVersion !== undefined ? { clipVersion: file.clipVersion } : {}),
     ...(file.scenesVersion !== undefined ? { scenesVersion: file.scenesVersion } : {}),
+    ...(file.summary !== undefined ? { summary: file.summary } : {}),
+    ...(file.assistVersion !== undefined ? { assistVersion: file.assistVersion } : {}),
+    ...(file.noSummary !== undefined ? { noSummary: file.noSummary } : {}),
     category: file.category,
     tags: file.tags,
     ...(file.facts.length > 0 ? { facts: file.facts } : {}),
@@ -717,7 +745,8 @@ export function needsProcessing(file: FileEntry): boolean {
     needsCategory(file) ||
     (ocrEnabled() && needsText(file)) ||
     (semanticEnabled() &&
-      (needsClip(file, CLIP_MODEL_VERSION) || needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION)))
+      (needsClip(file, CLIP_MODEL_VERSION) || needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION))) ||
+    (assistantEnabled() && assistantAvailableNow() && needsSummary(file, ASSIST_VERSION))
   );
 }
 
@@ -757,17 +786,22 @@ export function needsScenes(file: FileEntry, clipVersion: number, scenesVersion:
 export function pendingDerivatives(
   files: Map<string, FileEntry>,
   clipVersion: number,
-  opts: { ocr?: boolean; semantic?: boolean; scenesVersion?: number } = {},
-): { thumbs: number; text: number; meaning: number; tags: number; scenes: number } {
+  opts: { ocr?: boolean; semantic?: boolean; scenesVersion?: number; assistVersion?: number } = {},
+): { thumbs: number; text: number; meaning: number; tags: number; scenes: number; summaries: number } {
   const countText = opts.ocr !== false;
   const countMeaning = opts.semantic !== false;
   const scenesVersion = opts.scenesVersion ?? 0;
+  const assistVersion = opts.assistVersion ?? 0;
   let thumbs = 0;
   let text = 0;
   let meaning = 0;
   let tags = 0;
   let scenes = 0;
+  let summaries = 0;
   for (const file of files.values()) {
+    if (assistVersion > 0 && needsSummary(file, assistVersion)) {
+      summaries++;
+    }
     if (needsThumb(file)) {
       thumbs++;
     }
@@ -784,7 +818,7 @@ export function pendingDerivatives(
       scenes++;
     }
   }
-  return { thumbs, text, meaning, tags, scenes };
+  return { thumbs, text, meaning, tags, scenes, summaries };
 }
 
 /**
@@ -2644,14 +2678,88 @@ export const useStore = create<StoreState>((set, get) => {
         category: force.category ?? needsCategory(file),
         scenes:
           force.scenes ?? (semanticEnabled() && needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION)),
+        summary:
+          force.summary ??
+          (assistantEnabled() && assistantAvailableNow() && needsSummary(file, ASSIST_VERSION)),
       };
-      if (!needs.thumb && !needs.text && !needs.meaning && !needs.category && !needs.scenes) {
+      if (
+        !needs.thumb &&
+        !needs.text &&
+        !needs.meaning &&
+        !needs.category &&
+        !needs.scenes &&
+        !needs.summary
+      ) {
         return null;
       }
       const signal = opts?.signal;
-      const outcome: ProcessOutcome = { previews: 0, text: 0, meaning: 0, tagged: 0, facts: 0 };
+      const outcome: ProcessOutcome = {
+        previews: 0,
+        text: 0,
+        meaning: 0,
+        tagged: 0,
+        facts: 0,
+        summaries: 0,
+        summaryPaused: 0,
+      };
       const meta: Partial<FileMetadata> = {};
       const tags = new Set(file.tags);
+
+      /**
+       * The assistant's turn at a text-bearing file: one sentence and a few
+       * tags into the metadata, or the honest reason there is none. Every
+       * outcome except a pause stamps the model version, so the file is
+       * never re-read until the model changes.
+       */
+      const readSummary = async (current: FileEntry, text: string | undefined) => {
+        if (!needs.summary) {
+          return;
+        }
+        if (!text || text.length < MIN_TEXT) {
+          meta.assistVersion = ASSIST_VERSION;
+          meta.noSummary = "short";
+          return;
+        }
+        const state = lastAssistantState();
+        try {
+          const reading = await summarize({
+            text,
+            name: current.name,
+            categories: CATEGORIES,
+            contextSize: state.state === "available" ? state.contextSize : 4096,
+            signal,
+          });
+          meta.assistVersion = ASSIST_VERSION;
+          if (!reading) {
+            meta.noSummary = "unsupported";
+            return;
+          }
+          meta.summary = reading.summary;
+          meta.noSummary = undefined;
+          for (const tag of cleanTags(reading.tags, [...tags])) {
+            tags.add(tag);
+          }
+          // The model's kind may sharpen a bare Documents or Other, never
+          // override a category a stronger signal chose.
+          const category = meta.category ?? current.category;
+          if (reading.kind && (category === "Documents" || category === "Other") && reading.kind !== category) {
+            meta.category = reading.kind;
+          }
+          outcome.summaries = 1;
+        } catch (error) {
+          if (signal?.aborted) {
+            throw error;
+          }
+          const verdict = outcomeFor(error);
+          if (verdict === "paused") {
+            outcome.summaryPaused = 1;
+          } else if (verdict) {
+            meta.assistVersion = ASSIST_VERSION;
+            meta.noSummary = verdict;
+          }
+          // Anything else is transient: the file stays owed.
+        }
+      };
 
       /** The text the index blob already holds, so a rewrite keeps it. */
       const keptText = async (current: FileEntry): Promise<string | undefined> => {
@@ -2787,6 +2895,7 @@ export const useStore = create<StoreState>((set, get) => {
           );
           outcome.facts = facts.length;
         }
+        await readSummary(current, readText ? prepared.text : await keptText(current));
         if (tags.size !== current.tags.length) {
           meta.tags = normalizeTags([...tags]);
         }
@@ -2867,6 +2976,7 @@ export const useStore = create<StoreState>((set, get) => {
       if (needs.scenes && clip) {
         labelFrom(await readScenes(clip));
       }
+      await readSummary(file, file.text ?? (await keptText(file)));
       if (tags.size !== file.tags.length) {
         meta.tags = normalizeTags([...tags]);
       }
@@ -2874,6 +2984,14 @@ export const useStore = create<StoreState>((set, get) => {
         await patchFileMeta(id, meta);
       }
       return outcome;
+    },
+
+    removeSummary: async (id) => {
+      const file = get().files.get(id);
+      if (!file) {
+        return;
+      }
+      await patchFileMeta(id, { summary: undefined, noSummary: "user", assistVersion: ASSIST_VERSION });
     },
 
     processLibrary: async (opts) => {
@@ -2884,6 +3002,8 @@ export const useStore = create<StoreState>((set, get) => {
         meaning: 0,
         tagged: 0,
         facts: 0,
+        summaries: 0,
+        summaryPaused: 0,
         failed: [],
         stopped: false,
         remaining: 0,
@@ -2932,6 +3052,8 @@ export const useStore = create<StoreState>((set, get) => {
             counts.meaning += outcome.meaning;
             counts.tagged += outcome.tagged;
             counts.facts += outcome.facts;
+            counts.summaries += outcome.summaries;
+            counts.summaryPaused += outcome.summaryPaused;
           }
           opts?.onOutcome?.(file.id, true);
         } catch {

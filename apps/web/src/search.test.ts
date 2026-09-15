@@ -51,6 +51,7 @@ function file(partial: Partial<FileEntry>): FileEntry {
     hasText: partial.text !== undefined,
     inlineText: partial.text !== undefined,
     category: partial.category,
+    summary: partial.summary,
     key: new Uint8Array(),
     hasThumb: false,
     trashed: partial.trashed ?? false,
@@ -225,5 +226,20 @@ describe("helpers", () => {
       { text: "hello ", hit: false },
       { text: "world", hit: true },
     ]);
+  });
+});
+
+describe("summaries", () => {
+  it("finds a file by what its summary says, and shows the summary as the snippet", () => {
+    const summarized = file({
+      id: "s1",
+      name: "scan-0042.pdf",
+      tags: [],
+      summary: "A home insurance policy for the flat, renewed each October.",
+    } as Partial<FileEntry>);
+    const hits = searchFiles([summarized], "insurance policy");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.matchedText).toContain("insurance policy");
+    expect(searchFiles([summarized], "mortgage")).toHaveLength(0);
   });
 });

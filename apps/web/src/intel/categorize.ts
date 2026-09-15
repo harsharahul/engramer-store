@@ -20,6 +20,24 @@ export type Category =
   | "Books"
   | "Other";
 
+/** Every category, in the order the Library shows them. */
+export const CATEGORIES: readonly Category[] = [
+  "Photos",
+  "Screenshots",
+  "Videos",
+  "Audio",
+  "Documents",
+  "Receipts",
+  "Notes",
+  "Code",
+  "Spreadsheets",
+  "Presentations",
+  "Design",
+  "Archives",
+  "Books",
+  "Other",
+];
+
 export interface AnalysisInput {
   name: string;
   mime: string;

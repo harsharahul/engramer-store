@@ -3419,6 +3419,26 @@ button.tag:hover {
   object-fit: cover;
 }
 
+/* The assistant's one sentence about the file, with where it came from. */
+.details-summary {
+  padding: 2px 14px 8px;
+}
+
+.details-summary p {
+  margin: 4px 0 2px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.details-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--paper-faint);
+}
+
 .details-name {
   font-weight: 600;
   font-size: 15px;

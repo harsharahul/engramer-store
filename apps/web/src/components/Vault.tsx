@@ -938,6 +938,33 @@ export function Vault() {
           },
         ]
       : []),
+    // The assistant reads text-bearing files on request too, where it is
+    // present; the automatic pass does the same in the background.
+    ...(assistantReady &&
+    assistantOn &&
+    !/^(image|video|audio)\//.test(file.mime) &&
+    (file.hasText || file.inlineText)
+      ? [
+          {
+            id: "summarize",
+            label: file.summary ? "Summarize again" : "Summarize now",
+            icon: <SparkGlyph size={13} />,
+            run: () => {
+              showToast("Reading on this device…");
+              void store
+                .processFile(file.id, { force: { summary: true } })
+                .then((outcome) =>
+                  showToast(
+                    outcome && outcome.summaries > 0
+                      ? "Summary added; see the details pane."
+                      : "The assistant could not summarize this file.",
+                  ),
+                )
+                .catch(() => showToast("The assistant could not summarize this file."));
+            },
+          },
+        ]
+      : []),
     { id: "download", label: "Download", icon: <DownloadGlyph size={13} />, run: () => download(file) },
     // Offline access is a shell promise: the store on disk does not
     // exist in a plain browser, so the choice only appears where it can
