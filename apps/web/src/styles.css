@@ -2072,6 +2072,29 @@ body.resizing {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
+/* A sentence the assistant read into filters shows beside its results,
+   each token in the chip style the operator hints already use, with the
+   words as typed one click away. */
+.crumb-note .interpreted-token {
+  display: inline-block;
+  margin-left: 5px;
+  vertical-align: baseline;
+}
+
+.crumb-note .interpret-off {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: var(--paper-faint);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.crumb-note .interpret-off:hover {
+  color: var(--paper);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
 .search-panel-note {
   font-size: 11px;
   color: var(--paper-faint);

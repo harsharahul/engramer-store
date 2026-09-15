@@ -70,6 +70,26 @@ One engine serves the top bar and the command palette (Cmd+K or Ctrl+K):
 
 Search never issues a network request; the index is the decrypted metadata already in memory.
 
+## Search in plain words
+
+In the Mac and iPhone apps on macOS 26 and iOS 26, a search written as a
+sentence is read by Apple's on-device language model and turned into the
+filters above. "Receipts from last december" becomes `tag:receipt
+after:2025-12 before:2025-12`, and the ordinary engine runs it. The model
+only proposes: it is handed the library's own vocabulary (categories, scene
+labels, the most-used tags, folder names) and today's date, and whatever it
+answers is kept only where that vocabulary or the calendar confirms it. A
+tag it invents is dropped, a date it misreads is dropped, and a reading it
+is unsure of is not shown at all.
+
+The line beside the results says what was searched: "interpreted as" and
+the filters as chips, with the words as typed one click away. A query that
+already finds something, contains an operator, looks like a file name or a
+code, or is a question is never rewritten. The switch is in Profile under
+Preferences and follows the account; Profile's This device section states
+whether the model is available here and, when it is not, why. Nothing about
+the request leaves the device, and nothing is stored.
+
 ## Library views
 
 The sidebar's Library section lists auto-categories with live counts (Photos, Screenshots, Documents, Receipts, and any other non-empty category) plus Favorites. These are smart views computed from tags, independent of physical folder location.

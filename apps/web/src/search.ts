@@ -60,6 +60,12 @@ const KIND_SYNONYMS: Record<string, string> = {
   notes: "text",
 };
 
+/** Every word `type:` understands, canonical kinds and their synonyms; the
+ * vocabulary handed to anything that writes a query on the user's behalf. */
+export const TYPE_WORDS: readonly string[] = [
+  ...new Set(["image", "video", "doc", "audio", "text", ...Object.keys(KIND_SYNONYMS)]),
+];
+
 /**
  * Query grammar: free text plus `tag:receipts`, `type:image`, `in:folder`,
  * `is:favorite`, `before:2026-03`, `after:2025`. Filters narrow; free text

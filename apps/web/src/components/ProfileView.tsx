@@ -103,6 +103,8 @@ export function ProfileView(props: {
   onToggleFacts: () => void;
   entitiesOn: boolean;
   onToggleEntities: () => void;
+  assistantOn: boolean;
+  onToggleAssistant: () => void;
   theme: ThemeMode;
   onToggleTheme: () => void;
   accent: string;
@@ -947,6 +949,27 @@ export function ProfileView(props: {
             onClick={props.onToggleEntities}
           >
             <span className={`switch${props.entitiesOn ? " on" : ""}`} />
+          </button>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>
+              <SparkGlyph size={13} /> On-device assistant
+            </b>
+            <div className="profile-row-sub">
+              Reads a search written in plain words, such as receipts from last december, and
+              turns it into the filters search already understands; the words as typed stay one
+              click away. Uses Apple's model on this device, in the Mac and iPhone apps on macOS
+              26 and iOS 26; nothing leaves the device.
+            </div>
+          </div>
+          <button
+            className="profile-switch"
+            role="switch"
+            aria-checked={props.assistantOn}
+            onClick={props.onToggleAssistant}
+          >
+            <span className={`switch${props.assistantOn ? " on" : ""}`} />
           </button>
         </div>
       </section>

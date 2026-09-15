@@ -25,6 +25,16 @@ import {
   type ThemeMode,
 } from "../theme";
 import { mergeSearchHits, searchFiles, highlightParts, type SearchHit } from "../search";
+import {
+  interpretationSchema,
+  promptFor,
+  shouldInterpret,
+  toQueryString,
+  topTags,
+  validateInterpretation,
+  type Vocabulary,
+} from "../search/natural";
+import { SCENES } from "../intel/scenes";
 import { collectDropped, fromDirectoryInput } from "../uploader";
 import { MOBILE_QUERY, useMediaQuery, useViewportWidth } from "../media";
 import {
@@ -78,7 +88,13 @@ import {
 } from "../intel/semantic";
 import { factsEnabled, setFactsEnabled } from "../intel/scan";
 import { entitiesEnabled, setEntitiesEnabled } from "../intel/entities";
-import { assistantState, describeAssistantState, generate as assistantGenerate } from "../intel/assistant";
+import {
+  assistantEnabled,
+  assistantState,
+  describeAssistantState,
+  generate as assistantGenerate,
+  setAssistantEnabled,
+} from "../intel/assistant";
 import { DATED_KINDS, soonestDated } from "../intel/facts";
 import { extractText } from "../intel/extract";
 import { CalendarView } from "./CalendarView";
@@ -342,6 +358,14 @@ export function Vault() {
   const [semanticOn, setSemanticOn] = useState(() => semanticEnabled());
   const [factsOn, setFactsOn] = useState(() => factsEnabled());
   const [entitiesOn, setEntitiesOn] = useState(() => entitiesEnabled());
+  const [assistantOn, setAssistantOn] = useState(() => assistantEnabled());
+  // Whether the on-device model is here, probed on mount and on every
+  // return to the foreground (a downloading model becomes ready silently).
+  const [assistantReady, setAssistantReady] = useState(false);
+  // A sentence the assistant read into filters, keyed by the exact query it
+  // read; "×" on the line remembers the query the user wants as typed.
+  const [interpretation, setInterpretation] = useState<{ literal: string; rewritten: string } | null>(null);
+  const [interpretDismissed, setInterpretDismissed] = useState<string | null>(null);
   const [semanticHits, setSemanticHits] = useState<SearchHit[]>([]);
   const [similarTo, setSimilarTo] = useState<FileEntry | null>(null);
   const [similarHits, setSimilarHits] = useState<SearchHit[]>([]);
@@ -638,9 +662,20 @@ export function Vault() {
     return sortFiles(files, sort);
   }, [view, liveFiles, store.files, currentFolderId, sort, photosFavOnly]);
 
-  const hits = useMemo(
+  const literalHits = useMemo(
     () => (searching ? searchFiles(store.files.values(), query, store.folders) : []),
     [store.files, store.folders, query, searching],
+  );
+  const interpretedActive =
+    interpretation !== null && interpretation.literal === query && interpretDismissed !== query;
+  // The engine runs the assistant's rewrite when there is one for exactly
+  // this query; the words as typed are one click away on the line above.
+  const hits = useMemo(
+    () =>
+      interpretedActive && interpretation
+        ? searchFiles(store.files.values(), interpretation.rewritten, store.folders)
+        : literalHits,
+    [interpretedActive, interpretation, literalHits, store.files, store.folders],
   );
 
   // THE search result list. Every consumer — the headline count, the
@@ -1232,6 +1267,74 @@ export function Vault() {
     };
   }, [query, semanticOn, store.files]);
 
+  useEffect(() => {
+    let live = true;
+    const probe = () => {
+      void assistantState({ refresh: true }).then((state) => {
+        if (live) {
+          setAssistantReady(state.state === "available");
+        }
+      });
+    };
+    probe();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        probe();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      live = false;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
+  // A sentence the literal search cannot serve goes to the on-device model
+  // once it settles; the answer is kept only if the vocabulary and the
+  // calendar confirm it, and only for this exact query.
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (
+      !shouldInterpret(trimmed, {
+        available: assistantReady,
+        enabled: assistantOn,
+        literalHits: literalHits.length,
+      }) ||
+      interpretDismissed === query
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      const { instructions, prompt } = promptFor(trimmed, vocabularyRef.current, new Date());
+      void assistantGenerate({
+        instructions,
+        prompt,
+        priority: "interactive",
+        schema: interpretationSchema,
+        signal: controller.signal,
+      })
+        .then((raw) => {
+          if (controller.signal.aborted) {
+            return;
+          }
+          const parsed = validateInterpretation(raw, vocabularyRef.current, new Date(), trimmed);
+          if (parsed) {
+            const rewritten = toQueryString(parsed);
+            diag("search", `interpreted "${trimmed}" as "${rewritten}"`);
+            setInterpretation({ literal: query, rewritten });
+          }
+        })
+        .catch((err: unknown) => {
+          diag("search", `interpretation declined: ${err instanceof Error ? err.message : String(err)}`);
+        });
+    }, 350);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [query, assistantReady, assistantOn, literalHits.length, interpretDismissed]);
+
   // Similar-items mode is a transient lens; leaving it for any other view
   // should not require finding the close button.
   useEffect(() => {
@@ -1399,6 +1502,7 @@ export function Vault() {
       setSemanticOn(semanticEnabled());
       setFactsOn(factsEnabled());
       setEntitiesOn(entitiesEnabled());
+      setAssistantOn(assistantEnabled());
     };
     settingsEvents.addEventListener(SETTINGS_APPLIED_EVENT, refresh);
     return () => settingsEvents.removeEventListener(SETTINGS_APPLIED_EVENT, refresh);
@@ -1749,6 +1853,18 @@ export function Vault() {
     : 0;
 
   const libraryCategories = CATEGORY_ORDER.filter((c) => (categoryCounts.get(c) ?? 0) > 0);
+
+  // The vocabulary the assistant may use, read at the moment of a request
+  // rather than tracked as a dependency: the library changes constantly and
+  // must not re-run an interpretation under a query the user has settled.
+  const vocabularyRef = useRef<Vocabulary>({ categories: [], scenes: [], tags: [], folders: [] });
+  vocabularyRef.current = {
+    categories: libraryCategories,
+    scenes: SCENES.map((scene) => scene.label),
+    tags: topTags(liveFiles, 50),
+    folders: [...store.folders.values()].map((folder) => folder.name),
+  };
+
 
   // The entry appears only once something is being tracked, so a vault that
   // has never used this never sees a view that would always be empty.
@@ -2292,13 +2408,33 @@ export function Vault() {
               <span className="current">{similarActive ? "Similar items" : viewTitle}</span>
             )}
             <span className="crumb-note">
-              {searching
-                ? `for “${query}”${
+              {searching ? (
+                <>
+                  {`for “${query}”${
                     store.indexWarm
                       ? ` · indexing ${store.indexWarm.done} of ${store.indexWarm.total}`
                       : ""
-                  }`
-                : similarActive
+                  }`}
+                  {interpretedActive && interpretation && (
+                    <>
+                      {" · interpreted as "}
+                      {interpretation.rewritten.split(" ").map((token, i) => (
+                        <span key={`${token}-${i}`} className="search-op mono interpreted-token">
+                          {token}
+                        </span>
+                      ))}
+                      <button
+                        className="interpret-off"
+                        title="Search these words as typed instead"
+                        aria-label="Search these words as typed instead"
+                        onClick={() => setInterpretDismissed(query)}
+                      >
+                        ×
+                      </button>
+                    </>
+                  )}
+                </>
+              ) : similarActive
                   ? `like “${similarTo!.name}”`
                   : view.kind === "shared"
                   ? "links and file requests"
@@ -2463,6 +2599,12 @@ export function Vault() {
                 const next = !entitiesOn;
                 setEntitiesEnabled(next);
                 setEntitiesOn(next);
+              }}
+              assistantOn={assistantOn}
+              onToggleAssistant={() => {
+                const next = !assistantOn;
+                setAssistantEnabled(next);
+                setAssistantOn(next);
               }}
               theme={theme}
               onToggleTheme={toggleTheme}
