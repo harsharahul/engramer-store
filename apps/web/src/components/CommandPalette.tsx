@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { searchFiles, highlightParts, type Highlight } from "../search";
 import { extension, formatBytes } from "../format";
+import { isQuestionShaped } from "../search/natural";
 import { SearchGlyph } from "./Icon";
 
 export interface PaletteAction {
@@ -41,6 +42,9 @@ export function CommandPalette(props: {
   actions: PaletteAction[];
   onOpenFile: (id: string) => void;
   onClose: () => void;
+  /** Present where the on-device assistant can answer: a question typed
+   * here is handed to the search field's Ask, the one home of answers. */
+  onAsk?: (question: string) => void;
 }) {
   const files = useStore((s) => s.files);
   const folders = useStore((s) => s.folders);
@@ -60,6 +64,20 @@ export function CommandPalette(props: {
     if (!trimmed) {
       return actionRows;
     }
+    const askRows: Row[] =
+      props.onAsk && isQuestionShaped(trimmed)
+        ? [
+            {
+              kind: "action",
+              action: {
+                id: "ask",
+                label: `Ask your files: “${trimmed}”`,
+                hint: "answered on this device",
+                run: () => props.onAsk?.(trimmed),
+              },
+            },
+          ]
+        : [];
     const fileRows: Row[] = searchFiles(files.values(), trimmed, folders)
       .slice(0, 20)
       .map((hit) => {
@@ -74,8 +92,8 @@ export function CommandPalette(props: {
           snippetRanges: hit.textRanges,
         };
       });
-    return [...fileRows, ...actionRows];
-  }, [query, files, folders, props.actions]);
+    return [...askRows, ...fileRows, ...actionRows];
+  }, [query, files, folders, props.actions, props.onAsk]);
 
   useEffect(() => setCursor(0), [query]);
 

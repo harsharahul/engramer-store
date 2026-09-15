@@ -27,6 +27,7 @@ import {
 import { mergeSearchHits, searchFiles, highlightParts, type SearchHit } from "../search";
 import {
   interpretationSchema,
+  isQuestionShaped,
   promptFor,
   shouldInterpret,
   toQueryString,
@@ -52,6 +53,9 @@ import { setFileDragImage } from "../dragghost";
 import type { BulkResult } from "../store";
 import { describeProcessing } from "../activity";
 import { ActivityBell, ActivityPanel } from "./Activity";
+import { AskCard, type AskStatus } from "./AskCard";
+import { buildAskPrompt, excerpts, rankSources, retrievalTerms } from "../intel/ask";
+import { AssistantError, lastAssistantState } from "../intel/assistant";
 import { dueNotices } from "../notices";
 import { notifyDue } from "../notifications";
 import { installMediaKeyResponder } from "../mediastream";
@@ -368,6 +372,10 @@ export function Vault() {
   // read; "×" on the line remembers the query the user wants as typed.
   const [interpretation, setInterpretation] = useState<{ literal: string; rewritten: string } | null>(null);
   const [interpretDismissed, setInterpretDismissed] = useState<string | null>(null);
+  // A question in the search field, and where its answer stands. Keyed by
+  // the exact question; a changed query is a new question. Never stored.
+  const [ask, setAsk] = useState<{ question: string; status: AskStatus } | null>(null);
+  const askAbort = useRef<AbortController | null>(null);
   const [semanticHits, setSemanticHits] = useState<SearchHit[]>([]);
   const [similarTo, setSimilarTo] = useState<FileEntry | null>(null);
   const [similarHits, setSimilarHits] = useState<SearchHit[]>([]);
@@ -670,6 +678,7 @@ export function Vault() {
   );
   const interpretedActive =
     interpretation !== null && interpretation.literal === query && interpretDismissed !== query;
+  const askable = searching && assistantReady && assistantOn && isQuestionShaped(query.trim());
   // The engine runs the assistant's rewrite when there is one for exactly
   // this query; the words as typed are one click away on the line above.
   const hits = useMemo(
@@ -840,7 +849,9 @@ export function Vault() {
   };
 
   const openFile = (id: string) => {
-    if (query.trim()) {
+    // A search is remembered; a question asked of the assistant is not,
+    // and the answer's sources open through here too.
+    if (query.trim() && !isQuestionShaped(query.trim())) {
       setRecentSearches(rememberSearch(query));
     }
     setPreviewId(id);
@@ -1382,6 +1393,89 @@ export function Vault() {
     }, 3000);
     return () => clearTimeout(timer);
   }, [liveFiles, store.session?.email]);
+
+  const stopAsk = useCallback(() => {
+    askAbort.current?.abort();
+    askAbort.current = null;
+    setAsk((current) => (current ? { question: current.question, status: { kind: "offer" } } : null));
+  }, []);
+
+  // A new query is a new question: whatever was being answered stops.
+  useEffect(() => {
+    askAbort.current?.abort();
+    askAbort.current = null;
+    setAsk(null);
+  }, [query]);
+
+  /**
+   * Answers the question from the few files that can: the retrieval reads
+   * what is already known about every file (names, tags, summaries, text)
+   * plus the meaning matches, fetches the text of the picked sources on
+   * demand, and hands the model excerpts only. Nothing is persisted.
+   */
+  const runAsk = useCallback(
+    async (question: string) => {
+      askAbort.current?.abort();
+      const controller = new AbortController();
+      askAbort.current = controller;
+      setAsk({ question, status: { kind: "running", answer: "", sources: [] } });
+      const terms = retrievalTerms(question);
+      const boosts = new Map(semanticHits.map((hit) => [hit.file.id, 1.5]));
+      const ranked = rankSources(liveFiles, terms, boosts);
+      if (ranked.length === 0) {
+        setAsk({ question, status: { kind: "empty" } });
+        return;
+      }
+      const sources = [];
+      for (const file of ranked) {
+        const text = file.text ?? (file.hasText ? await store.loadText(file.id) : undefined);
+        if (controller.signal.aborted) {
+          return;
+        }
+        sources.push({ id: file.id, name: file.name, summary: file.summary, excerpts: text ? excerpts(text, terms) : [] });
+      }
+      const state = lastAssistantState();
+      const built = buildAskPrompt(question, sources, state.state === "available" ? state.contextSize : 4096);
+      const used = sources.filter((source) => built.used.includes(source.id)).map(({ id, name }) => ({ id, name }));
+      diag("ask", `${used.length} source${used.length === 1 ? "" : "s"}`);
+      try {
+        const answer = await assistantGenerate({
+          instructions: built.instructions,
+          prompt: built.prompt,
+          priority: "interactive",
+          maxTokens: 350,
+          deadlineMs: 25_000,
+          signal: controller.signal,
+          onChunk: (text) => setAsk({ question, status: { kind: "running", answer: text, sources: used } }),
+        });
+        if (!controller.signal.aborted) {
+          setAsk({ question, status: { kind: "done", answer: typeof answer === "string" ? answer : String(answer ?? ""), sources: used } });
+        }
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        const code = error instanceof AssistantError ? error.code : "other";
+        setAsk({
+          question,
+          status: {
+            kind: "error",
+            message:
+              code === "guardrail"
+                ? "The assistant declined to answer this."
+                : code === "timeout"
+                  ? "The assistant took too long; try a shorter question."
+                  : "The assistant could not answer right now.",
+          },
+        });
+      } finally {
+        if (askAbort.current === controller) {
+          askAbort.current = null;
+        }
+      }
+    },
+    [liveFiles, semanticHits, store],
+  );
 
   // Similar-items mode is a transient lens; leaving it for any other view
   // should not require finding the close button.
@@ -2290,6 +2384,10 @@ export function Vault() {
                 } else if (e.key === "Enter" && shownHits[searchCursor]) {
                   e.preventDefault();
                   openFile(shownHits[searchCursor]!.file.id);
+                } else if (e.key === "Enter" && askable && shownHits.length === 0) {
+                  // Nothing to open, and the query is a question: ask it.
+                  e.preventDefault();
+                  void runAsk(query.trim());
                 } else if (e.key === "Escape") {
                   setQuery("");
                   (e.target as HTMLInputElement).blur();
@@ -2595,6 +2693,15 @@ export function Vault() {
           {/* Above the files, and only when it has something to say. It is
               deliberately not shown while searching or in trash: both are
               places you arrived at with a question of your own. */}
+          {askable && (
+            <AskCard
+              question={query.trim()}
+              status={ask && ask.question === query.trim() ? ask.status : { kind: "offer" }}
+              onAsk={() => void runAsk(query.trim())}
+              onStop={stopAsk}
+              onOpen={openFile}
+            />
+          )}
           {!searching && (view.kind === "folder" || view.kind === "expiring") && (
             <>
               <HeadsUp
@@ -2969,7 +3076,21 @@ export function Vault() {
         />
       )}
       {paletteOpen && (
-        <CommandPalette actions={paletteActions} onOpenFile={openFile} onClose={() => setPaletteOpen(false)} />
+        <CommandPalette
+          actions={paletteActions}
+          onOpenFile={openFile}
+          onClose={() => setPaletteOpen(false)}
+          onAsk={
+            assistantReady && assistantOn
+              ? (question) => {
+                  // The palette mirrors; the search field is the home.
+                  setQuery(question);
+                  searchInput.current?.focus();
+                  void runAsk(question);
+                }
+              : undefined
+          }
+        />
       )}
       {previewFile && !editorFile && (
         <Preview

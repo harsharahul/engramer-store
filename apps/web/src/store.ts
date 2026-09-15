@@ -486,6 +486,8 @@ interface StoreState {
   processFile: (id: string, opts?: ProcessOptions) => Promise<ProcessOutcome | null>;
   /** Drops the assistant's summary and remembers the choice for this model. */
   removeSummary: (id: string) => Promise<void>;
+  /** The file's extracted text, fetched and decrypted on demand. */
+  loadText: (id: string) => Promise<string | undefined>;
   /** The pass over every file that owes something, a few at a time. */
   processLibrary: (opts?: SweepOptions & { maxBytes?: number }) => Promise<ProcessingCounts>;
   /** Reads (or re-reads) the text of one stored image or scan. */
@@ -2992,6 +2994,29 @@ export const useStore = create<StoreState>((set, get) => {
         await patchFileMeta(id, meta);
       }
       return outcome;
+    },
+
+    loadText: async (id) => {
+      const file = get().files.get(id);
+      if (!file || file.trashed) {
+        return undefined;
+      }
+      if (file.text !== undefined || !file.hasText || file.inlineText) {
+        return file.text;
+      }
+      try {
+        const bytes = await api.downloadBlob(id, "index", { timeoutMs: SWEEP_DOWNLOAD_MS });
+        const payload = decodeIndexPayload(decryptBytes(bytes, file.key));
+        if (payload.text !== undefined) {
+          setEntryText(id, payload.text);
+        }
+        if (payload.clip) {
+          setEntryClip(id, payload.clip, payload.clips);
+        }
+        return payload.text;
+      } catch {
+        return undefined;
+      }
     },
 
     removeSummary: async (id) => {

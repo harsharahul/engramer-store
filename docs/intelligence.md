@@ -113,6 +113,23 @@ than tried again forever; Profile's Library index says how many documents
 are waiting, and for which device. "Summarize now" in a file's menu reads
 one file on request.
 
+## Ask your files
+
+On the same devices, a question typed into the search field ("what did I
+pay Acme for the drill?") adds a row above the results: Ask your files.
+Pressing it, or Enter when nothing else matched, has the on-device model
+answer from your own documents. The model reads only a few thousand words
+at a time, so it never reads the library: what is already known about every
+file (names, tags, summaries, extracted text, meaning matches) picks a
+handful of sources, short excerpts are cut around the words asked about,
+and the model answers only from those, saying when they do not contain the
+answer. The answer appears above the ordinary results, which stay exactly
+where they were, with the files it came from as rows that open them.
+Nothing about the question, the excerpts, or the answer is stored or leaves
+the device. When no file mentions the question, the card says so without
+asking the model. The command palette offers the same row and hands the
+question to the search field.
+
 ## Library views
 
 The sidebar's Library section lists auto-categories with live counts (Photos, Screenshots, Documents, Receipts, and any other non-empty category) plus Favorites. These are smart views computed from tags, independent of physical folder location.
