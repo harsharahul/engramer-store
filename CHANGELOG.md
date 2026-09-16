@@ -5,6 +5,37 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+## [0.55.1] - 2026-09-16
+
+### Added
+- **One library, one state.** Principle 7 joins the product principles:
+  every signed-in device shows the same library in the same state. What
+  you decide about the library now follows the account: a notice
+  dismissed, a trip refused, a notice read in the bell, and your recent
+  searches are the same on every device. They travel inside the sealed
+  settings blob, so the server still reads nothing, and they merge by
+  union, so nothing you dismissed comes back because another device had
+  not heard yet. Only what belongs to a device stays on it: appearance,
+  notification permission, offline copies, the drive extension, caches.
+- **Settings land while the app is open.** A switch flipped or a
+  decision made on another device reaches an open window right away,
+  instead of at its next launch.
+
+### Fixed
+- **A file saved through the drive could take minutes to appear.** The
+  server announced a change before the write carrying it had finished,
+  so a device that looked at that moment saw the old state and was not
+  told again. Announcements now wait for the write to complete, and a
+  change that is rolled back is never announced. Creating a file or a
+  folder and renaming or moving a folder record their change and its
+  sequence together, so a device can no longer skip past a row that did
+  not exist yet. The app also pulls again if a pull returns short of
+  what it was told to expect.
+- **The Notices panel scrolls as one.** The Needs attention section and
+  a running job no longer overflow the panel and get cut off on a laptop
+  window; rows keep their card, padding and clipping, and long file
+  names are clipped rather than spilling over.
+
 ## [0.55.0] - 2026-09-15
 
 ### Added
