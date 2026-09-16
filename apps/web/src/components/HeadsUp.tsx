@@ -33,6 +33,7 @@ import {
 } from "../intel/trips";
 import { entitiesEnabled, extractEntities } from "../intel/entities";
 import { lookupAirport } from "../intel/airports";
+import { DECISIONS_EVENT, decisionEvents } from "../decisions";
 import { PlaneGlyph, SparkGlyph, XGlyph } from "./Icon";
 
 /** More than this and the bar stays shut until asked; one is not a queue. */
@@ -151,8 +152,16 @@ export function HeadsUp(props: {
 export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string) => void }) {
   const confirmTrip = useStore((s) => s.confirmTrip);
   const warmSearchIndex = useStore((s) => s.warmSearchIndex);
+  const account = useStore((s) => s.session?.email ?? "");
   const [trips, setTrips] = useState<TripSuggestion[]>([]);
-  const [refused, setRefused] = useState<Set<string>>(dismissedTrips);
+  // The account's refusals, re-read when a decision lands from anywhere.
+  const [refused, setRefused] = useState<Set<string>>(() => dismissedTrips(account));
+  useEffect(() => {
+    const reread = () => setRefused(dismissedTrips(account));
+    reread();
+    decisionEvents.addEventListener(DECISIONS_EVENT, reread);
+    return () => decisionEvents.removeEventListener(DECISIONS_EVENT, reread);
+  }, [account]);
   const [busy, setBusy] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
   const [linked, setLinked] = useState<Map<string, Set<string>> | null>(null);
@@ -288,10 +297,7 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
               </button>
               <button
                 className="btn btn-small btn-quiet"
-                onClick={() => {
-                  rememberTripDismissal(trip.id);
-                  setRefused((prior) => new Set(prior).add(trip.id));
-                }}
+                onClick={() => rememberTripDismissal(account, trip.id)}
               >
                 <XGlyph size={12} /> Ignore
               </button>

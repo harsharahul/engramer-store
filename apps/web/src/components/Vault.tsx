@@ -57,6 +57,7 @@ import { AskCard, type AskStatus } from "./AskCard";
 import { buildAskPrompt, excerpts, rankSources, retrievalTerms } from "../intel/ask";
 import { AssistantError, lastAssistantState } from "../intel/assistant";
 import { dueNotices } from "../notices";
+import { DECISIONS_EVENT, decisionEvents, recentSearches as accountRecentSearches, rememberSearch } from "../decisions";
 import { notifyDue } from "../notifications";
 import { installMediaKeyResponder } from "../mediastream";
 import { installHandoffForegroundRefresh } from "../handoff";
@@ -254,22 +255,6 @@ function loadPref<T>(key: string, fallback: T): T {
   }
 }
 
-const RECENT_SEARCHES_KEY = "engram-recent-searches";
-
-function loadRecentSearches(): string[] {
-  return loadPref<string[]>(RECENT_SEARCHES_KEY, []);
-}
-
-function rememberSearch(query: string): string[] {
-  const trimmed = query.trim();
-  const next = [trimmed, ...loadRecentSearches().filter((q) => q !== trimmed)].slice(0, 6);
-  try {
-    localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(next));
-  } catch {
-    // Best-effort.
-  }
-  return next;
-}
 
 /** "Work / Taxes 2025" for a file, walking up the folder tree. */
 function folderPath(
@@ -359,7 +344,18 @@ export function Vault() {
   const [accent, setAccent] = useState<string>(() => currentAccent());
   const [searchFocused, setSearchFocused] = useState(false);
   const [searchCursor, setSearchCursor] = useState(0);
-  const [recentSearches, setRecentSearches] = useState<string[]>(() => loadRecentSearches());
+  // The account's recent searches, re-read when a decision lands from
+  // any device.
+  const [recentSearches, setRecentSearches] = useState<string[]>(() =>
+    accountRecentSearches(store.session?.email ?? ""),
+  );
+  useEffect(() => {
+    const account = store.session?.email ?? "";
+    const reread = () => setRecentSearches(accountRecentSearches(account));
+    reread();
+    decisionEvents.addEventListener(DECISIONS_EVENT, reread);
+    return () => decisionEvents.removeEventListener(DECISIONS_EVENT, reread);
+  }, [store.session?.email]);
   const [ocrOn, setOcrOn] = useState(() => ocrEnabled());
   const [semanticOn, setSemanticOn] = useState(() => semanticEnabled());
   const [factsOn, setFactsOn] = useState(() => factsEnabled());
@@ -852,7 +848,7 @@ export function Vault() {
     // A search is remembered; a question asked of the assistant is not,
     // and the answer's sources open through here too.
     if (query.trim() && !isQuestionShaped(query.trim())) {
-      setRecentSearches(rememberSearch(query));
+      setRecentSearches(rememberSearch(store.session?.email ?? "", query));
     }
     setPreviewId(id);
     setQuery("");

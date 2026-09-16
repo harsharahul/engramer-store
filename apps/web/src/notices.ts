@@ -2,11 +2,14 @@
  * What needs attention, as the notice center and system notifications
  * see it. One computation feeds both: the keys the bell counts as unseen,
  * and the few dated items close enough to interrupt for when the app is
- * not in front. Pure functions over the library, plus two small per-account
- * memories in local storage: what the bell has shown, and what has already
- * been notified, so nothing is ever said twice.
+ * not in front. Pure functions over the library, plus two memories: what
+ * the bell has shown, which is the account's record (decisions.ts) so a
+ * notice read anywhere is read everywhere; and what this device has
+ * already notified, kept on the device because a notification is for
+ * wherever the user might be looking, so nothing is ever said twice here.
  */
 
+import { decide, decided, DECISIONS_EVENT, decisionEvents } from "./decisions";
 import { daysUntil } from "./intel/dates";
 import { describeFact } from "./intel/describe";
 import { duplicatesByDigest } from "./intel/duplicates";
@@ -143,24 +146,24 @@ function writeSet(key: string, values: Set<string>): void {
   }
 }
 
-const seenKey = (account: string) => `engram-notices-seen:${account}`;
 const notifiedKey = (account: string) => `engram-notified:${account}`;
 
+/** Which notices the user has read: the account's record, so a notice
+ * opened on one device is not new again on the next. */
 export function loadSeen(account: string): Set<string> {
-  return readSet(seenKey(account));
+  return decided(account, "noticesSeen");
 }
 
-/** Fires after the bell marks notices seen, so its badge re-reads. */
+/** Fires after the seen record changes, here or on another device, so
+ * the bell's badge re-reads. */
 export const NOTICES_SEEN_EVENT = "engram-notices-seen";
 export const noticeEvents = new EventTarget();
+decisionEvents.addEventListener(DECISIONS_EVENT, () => {
+  noticeEvents.dispatchEvent(new Event(NOTICES_SEEN_EVENT));
+});
 
 export function markSeen(account: string, keys: readonly string[]): void {
-  const seen = loadSeen(account);
-  for (const key of keys) {
-    seen.add(key);
-  }
-  writeSet(seenKey(account), seen);
-  noticeEvents.dispatchEvent(new Event(NOTICES_SEEN_EVENT));
+  decide(account, "noticesSeen", keys);
 }
 
 export function unseenCount(keys: readonly string[], seen: ReadonlySet<string>): number {

@@ -37,6 +37,7 @@ import { openSharedFileKey, sealFileKeyFor } from "./collab";
 import { SaveConflictError, copyName } from "./conflict";
 import { analysisLanes, uploadLanes, withAnalysisSlot } from "./analysisslot";
 import { clearCache, loadCache, storeSyncRows } from "./cache";
+import { clearDecisions } from "./decisions";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { activateSession, clearSession, suspendSession, type Session } from "./session";
 import { checkPin, KeyChangedError, pinKey, pinnedKey } from "./keypins";
@@ -1317,12 +1318,12 @@ export const useStore = create<StoreState>((set, get) => {
       void nativeOfflineClear();
       moveCursor(0);
       clearSession(account);
-      try {
-        // Recent searches are plaintext fragments of the library; they
-        // must not outlive the session on a shared device.
-        localStorage.removeItem("engram-recent-searches");
-      } catch {
-        // Storage may be unavailable; nothing else to do.
+      // The device's mirror of the account's decisions holds plaintext
+      // fragments of the library (search terms, notice keys); it must
+      // not outlive the session on a shared device. The account's copy
+      // comes back with the next sign-in.
+      if (account) {
+        clearDecisions(account);
       }
       set({
         session: null,

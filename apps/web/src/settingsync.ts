@@ -11,16 +11,19 @@
  * to that device's photo-library permission), the failure memories and
  * the upload ledger (per-device by design), and the theme.
  *
- * Conflict rule: last write wins, ordered by the server's stamp. A
- * device applies a remote blob only when the stamp is beyond what it has
- * already seen, so applying is idempotent and a device's own push never
- * bounces back onto it.
+ * Conflict rule: last write wins for the switches, ordered by the
+ * server's stamp. A device applies a remote blob only when the stamp is
+ * beyond what it has already seen, so applying is idempotent and a
+ * device's own push never bounces back onto it. The account's decisions
+ * (see decisions.ts) are the exception: they merge by union, and a
+ * device that knew more pushes the union straight back.
  */
 
 import { secretBoxOpen, secretBoxSeal, utf8Encode, type SecretBox } from "@engramer/crypto";
 import { api } from "./api";
 import { autoBackfillEnabled, setAutoBackfillEnabled } from "./backfill";
 import { loadPolicy, savePolicy, type BackupWindow } from "./backuppolicy";
+import { applyDecisions, loadDecisions, type Decisions } from "./decisions";
 import { diag } from "./diag";
 import { assistantEnabled, setAssistantEnabled } from "./intel/assistant";
 import { entitiesEnabled, setEntitiesEnabled } from "./intel/entities";
@@ -51,6 +54,10 @@ export interface SyncedSettings {
   assistant?: boolean;
   /** The account public key last released to, per email address. */
   contacts?: Record<string, string>;
+  /** What the user decided about the library: dismissed notices and
+   * trips, notices read, recent searches. Merged by union, never
+   * overwritten; absent means the blob predates them. */
+  decisions?: Decisions;
 }
 
 /** Fires after a remote blob is applied, so open views re-read the
@@ -79,9 +86,13 @@ function writeMark(account: string, updatedAt: number): void {
   }
 }
 
-export function snapshotSettings(): SyncedSettings {
+/** This device's switches, plus the account's decisions when the
+ * account is known (a snapshot taken without one carries no decisions,
+ * so it can never wipe them). */
+export function snapshotSettings(account?: string): SyncedSettings {
   const policy = loadPolicy();
   return {
+    ...(account ? { decisions: loadDecisions(account) } : {}),
     version: 1,
     ocr: ocrEnabled(),
     semantic: semanticEnabled(),
@@ -105,14 +116,24 @@ export function snapshotSettings(): SyncedSettings {
  * their announcements do not echo straight back as a push. */
 let applying = false;
 
-export function applySettings(values: SyncedSettings): void {
+/**
+ * Writes a remote blob into the local setters. Returns whether this
+ * device held decisions the blob lacked, in which case the caller pushes
+ * the union so the account converges on it.
+ */
+export function applySettings(values: SyncedSettings, account?: string): boolean {
+  let knewMore = false;
   applying = true;
   try {
     applyInner(values);
+    if (account) {
+      knewMore = applyDecisions(account, values.decisions);
+    }
   } finally {
     applying = false;
   }
   settingsEvents.dispatchEvent(new Event(SETTINGS_APPLIED_EVENT));
+  return knewMore;
 }
 
 function applyInner(values: SyncedSettings): void {
@@ -162,7 +183,7 @@ function open(blob: string, masterKey: Uint8Array): SyncedSettings | null {
 
 /** Pushes this device's switches; the account's newest word is now ours. */
 export async function pushSettings(account: string, masterKey: Uint8Array): Promise<void> {
-  const { updatedAt } = await api.putSettings(seal(snapshotSettings(), masterKey));
+  const { updatedAt } = await api.putSettings(seal(snapshotSettings(account), masterKey));
   writeMark(account, updatedAt);
 }
 
@@ -185,8 +206,13 @@ export async function pullSettings(account: string, masterKey: Uint8Array): Prom
     diag("settings", "the account blob is unreadable here; keeping local switches");
     return;
   }
-  applySettings(values);
+  const knewMore = applySettings(values, account);
   writeMark(account, remote.updatedAt);
+  if (knewMore) {
+    // Decisions merge by union: what this device knew and the account
+    // did not goes back up, so every device ends on the same record.
+    await pushSettings(account, masterKey);
+  }
 }
 
 /** How long a flurry of toggle flips coalesces before one push. */

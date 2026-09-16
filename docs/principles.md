@@ -56,3 +56,22 @@ pending. Failures are named, never silent, and never retried forever
 without a record. Storing the wrong bytes is the one unforgivable bug;
 byte counts are verified at ingest and digests recorded so later checks
 have something to compare against.
+
+## 7. One library, one state
+
+Every signed-in device shows the same library in the same state. What
+the user decides on one device (a date tracked or ignored, a notice
+dismissed or read, a summary removed, a pin) is the decision on every
+device, and what one device has worked out (text, previews, tags,
+dates, summaries) is read by the others, never derived again. Work
+already done on a device is stamped in the encrypted metadata, so a
+second device finds it finished. Decisions live in the account's
+sealed settings and merge by union across devices, so nothing a user
+dismissed comes back because another device had not heard yet.
+
+The only state that stays on a device is state that belongs to the
+device: its appearance, its notification permission, which files it
+keeps offline, whether its drive extension is on, and its caches. A
+notice fires on every device, because each device is where the user
+might be looking. Anything else that differs between two devices of
+one account is a defect.

@@ -82,6 +82,21 @@ describe("account settings", () => {
     expect(got.json().blob).toBe("newer");
   });
 
+  it("advances the account's change sequence, so other devices are poked to pull", async () => {
+    const before = (await app.inject({ method: "GET", url: "/api/sync?since=0", headers: auth() })).json()
+      .seq as number;
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      headers: auth(),
+      payload: { blob: "a decision made here" },
+    });
+    expect(put.statusCode).toBe(200);
+    const after = (await app.inject({ method: "GET", url: "/api/sync?since=0", headers: auth() })).json()
+      .seq as number;
+    expect(after).toBeGreaterThan(before);
+  });
+
   it("keeps accounts apart", async () => {
     const other = await registerAccount("other-settings@example.com");
     const got = await app.inject({ method: "GET", url: "/api/settings", headers: auth(other) });

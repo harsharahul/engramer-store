@@ -7,6 +7,7 @@ import {
   nativeOutboxDrain,
   type FeedState,
 } from "./native";
+import { pullSettings } from "./settingsync";
 import { useStore } from "./store";
 
 /**
@@ -85,6 +86,12 @@ export function installAutoSync(): void {
       const foldersBefore = useStore.getState().folders;
       await useStore.getState().refresh();
       const after = useStore.getState();
+      if (after.session) {
+        // The account's settings and decisions ride the same poke: a
+        // switch flipped or a notice dismissed on another device lands
+        // here with the refresh, not at the next launch.
+        await pullSettings(after.session.email, after.session.masterKey).catch(() => {});
+      }
       if (
         after.session &&
         (after.files !== filesBefore || after.folders !== foldersBefore) &&
