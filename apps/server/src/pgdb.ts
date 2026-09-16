@@ -2,6 +2,7 @@ import pg from "pg";
 import {
   COLUMN_MIGRATIONS,
   COMMON_SCHEMA,
+  HeldSeqs,
   type Db,
   type DbRunResult,
 } from "./db.js";
@@ -88,10 +89,15 @@ export class PostgresDb implements Db {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      // Bumps made inside the transaction are announced only once it
+      // has committed; a pull triggered by an earlier announcement
+      // would read the old state and never hear about the row again.
+      const held = new HeldSeqs();
       const handle = new PgClientDb(client);
-      handle.onSeq = this.onSeq;
+      handle.onSeq = (userId, seq) => held.note(userId, seq);
       const result = await fn(handle);
       await client.query("COMMIT");
+      held.release(this.onSeq);
       return result;
     } catch (err) {
       await client.query("ROLLBACK").catch(() => {});

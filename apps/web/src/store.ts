@@ -299,6 +299,10 @@ export interface BatchProgress {
 interface StoreState {
   session: Session | null;
   synced: boolean;
+  /** The server sequence the last pull reached (the sync cursor). Zero
+   * before any pull. Autosync compares it with the sequence a change
+   * poke announced to know whether the pull actually saw the change. */
+  syncSeq: number;
   /** True once a sync round-trip has landed this session. `synced` alone
    * can come from the on-device cache, which is a stale ledger for any
    * pass that decides what still needs uploading. */
@@ -886,6 +890,13 @@ export const useStore = create<StoreState>((set, get) => {
 
   /** The last sync sequence applied in this tab; 0 forces a full sync. */
   let syncCursor = 0;
+  /** Every move of the cursor is mirrored into state as `syncSeq`, so
+   * autosync can tell a pull that reached an announced change from one
+   * that ran before it committed. */
+  const moveCursor = (seq: number) => {
+    syncCursor = seq;
+    set({ syncSeq: seq });
+  };
   let autoReleasing = false;
 
   /** Decrypts a complete row set into fresh maps, skipping tombstones and
@@ -1179,6 +1190,7 @@ export const useStore = create<StoreState>((set, get) => {
     autoReleasedNote: null,
     consumeAutoReleaseNote: () => set({ autoReleasedNote: null }),
     synced: false,
+    syncSeq: 0,
     serverSynced: false,
     syncError: null,
     folders: new Map(),
@@ -1257,7 +1269,7 @@ export const useStore = create<StoreState>((set, get) => {
     // session (and its keys) are kept, the error is surfaced, and the UI
     // offers a retry.
     startSession: async (session) => {
-      syncCursor = 0;
+      moveCursor(0);
       set({
         session,
         synced: false,
@@ -1303,7 +1315,7 @@ export const useStore = create<StoreState>((set, get) => {
       // Signing out empties the shell's offline store, pins included:
       // kept files belong to a signed-in account, not the device.
       void nativeOfflineClear();
-      syncCursor = 0;
+      moveCursor(0);
       clearSession(account);
       try {
         // Recent searches are plaintext fragments of the library; they
@@ -1327,7 +1339,7 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     lockVault: () => {
-      syncCursor = 0;
+      moveCursor(0);
       suspendSession();
       // The offline store keeps its ciphertext through a lock: without
       // the keys it is unreadable, and unlocking should not redownload.
@@ -1356,7 +1368,7 @@ export const useStore = create<StoreState>((set, get) => {
         const cached = await loadCache(account);
         if (cached) {
           const { folders, files } = buildLibrary(cached.folders, cached.files, cached.shared);
-          syncCursor = cached.seq;
+          moveCursor(cached.seq);
           set({ folders, files, synced: true, syncError: null });
         }
       }
@@ -1454,7 +1466,7 @@ export const useStore = create<StoreState>((set, get) => {
       } else {
         set({ synced: true, syncError: null });
       }
-      syncCursor = response.seq;
+      moveCursor(response.seq);
       if (staleOffline.length > 0) {
         // Fire and forget: dropping stale copies and renewing pins is
         // background housekeeping, never something a sync waits on.
@@ -1482,7 +1494,7 @@ export const useStore = create<StoreState>((set, get) => {
       }
       const response = await api.sync(0);
       const { folders, files } = buildLibrary(response.folders, response.files, response.shared);
-      syncCursor = response.seq;
+      moveCursor(response.seq);
       set({ folders, files, synced: true, syncError: null });
       await storeSyncRows(account, response, true);
       await get().refreshUsage();

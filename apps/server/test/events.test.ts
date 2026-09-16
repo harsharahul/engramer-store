@@ -10,11 +10,13 @@ import {
   secretBoxSeal,
   encryptBytes,
   encryptFileMetadata,
+  encryptFolderMetadata,
   sealToPublicKey,
   utf8Encode,
   type AccountKeys,
 } from "@engramer/crypto";
 import { buildApp } from "../src/app.js";
+import { nextSeq } from "../src/db.js";
 
 /**
  * The change feed holds connections, so like the relay these tests run
@@ -133,6 +135,14 @@ class Feed {
     this.events.length = 0;
     await new Promise((resolve) => setTimeout(resolve, windowMs));
     expect(this.events).toHaveLength(0);
+  }
+
+  /** Waits the window, then asserts nothing above the mark was received.
+   * Unlike none(), the queue is not purged first: this catches a poke
+   * that fired early, not only one that fired late. */
+  async quietAbove(mark: number, windowMs = 400): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, windowMs));
+    expect(this.events.filter((event) => event.seq > mark)).toHaveLength(0);
   }
 
   async heartbeat(timeoutMs = 3000): Promise<void> {
@@ -378,5 +388,130 @@ describe("the change feed", () => {
     expect(Date.now() - started).toBeLessThan(3000);
     await feed.closedByServer();
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+/**
+ * A poke is a promise that a pull will find the change. The allocator
+ * runs inside the mutation's transaction, so the announcement has to
+ * wait for the commit: a client that pulls between the two reads the
+ * old state, moves its cursor nowhere new, and then hears nothing more
+ * about the row until an unrelated change or the slow poll. That is how
+ * a file dropped on the drive stayed invisible in the app for minutes.
+ */
+describe("pokes announce committed data", () => {
+  const ownerId = async () =>
+    (await app.db.get<{ id: number }>("SELECT id FROM users WHERE email = ?", owner.email))!.id;
+
+  it("holds a poke made inside a transaction until it commits", async () => {
+    const uid = await ownerId();
+    const feed = await new Feed().open(base, owner.token);
+    const before = (await feed.next()).seq;
+    await app.db.tx(async (t) => {
+      await nextSeq(t, uid);
+      // Deliberately slower than the flush interval, so an early poke
+      // would already be on the wire. Nothing else touches the database
+      // while this test runs, which is why the wait is allowed here.
+      await feed.quietAbove(before);
+    });
+    const poked = await feed.nextAbove(before);
+    expect(poked.seq).toBeGreaterThan(before);
+    feed.close();
+  });
+
+  it("drops the pokes of a transaction that rolls back", async () => {
+    const uid = await ownerId();
+    const feed = await new Feed().open(base, owner.token);
+    const before = (await feed.next()).seq;
+    await expect(
+      app.db.tx(async (t) => {
+        await nextSeq(t, uid);
+        throw new Error("abandoned");
+      }),
+    ).rejects.toThrow("abandoned");
+    await feed.quietAbove(before);
+    feed.close();
+  });
+
+  /**
+   * Observes, at the instant each poke is handed to the publisher,
+   * whether a row carrying that sequence already exists. The store is
+   * SQLite here and every query runs synchronously when called, so the
+   * snapshot is exact: a poke that fires before its row is written
+   * observes zero rows.
+   */
+  async function rowsPresentAtPoke(
+    table: "files" | "folders",
+    act: () => Promise<void>,
+  ): Promise<boolean[]> {
+    const original = app.db.onSeq!;
+    const observations: Array<Promise<boolean>> = [];
+    app.db.onSeq = (userId, seq) => {
+      observations.push(
+        app.db
+          .get<{ n: number }>(
+            `SELECT count(*) AS n FROM ${table} WHERE user_id = ? AND update_seq = ?`,
+            userId,
+            seq,
+          )
+          .then((row) => (row?.n ?? 0) > 0),
+      );
+      original(userId, seq);
+    };
+    try {
+      await act();
+    } finally {
+      app.db.onSeq = original;
+    }
+    return Promise.all(observations);
+  }
+
+  it("announces a new file only once its row is readable", async () => {
+    const present = await rowsPresentAtPoke("files", async () => {
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/files",
+        headers: auth(owner),
+        payload: {
+          folderId: null,
+          encryptedKey: secretBoxSeal(generateKey(), owner.keys.masterKey),
+          encryptedMeta: encryptFileMetadata(
+            { name: "dropped.bin", mime: "application/octet-stream", size: 1, mtime: 1 },
+            fileKey,
+          ),
+        },
+      });
+      expect(created.statusCode).toBe(201);
+    });
+    expect(present).toEqual([true]);
+  });
+
+  it("announces a new or moved folder only once its row is readable", async () => {
+    let folderId = "";
+    const created = await rowsPresentAtPoke("folders", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/folders",
+        headers: auth(owner),
+        payload: {
+          parentId: null,
+          encryptedKey: secretBoxSeal(generateKey(), owner.keys.masterKey),
+          encryptedMeta: encryptFolderMetadata({ name: "Inbox" }, fileKey),
+        },
+      });
+      expect(response.statusCode).toBe(201);
+      folderId = response.json().id as string;
+    });
+    expect(created).toEqual([true]);
+    const renamed = await rowsPresentAtPoke("folders", async () => {
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/folders/${folderId}`,
+        headers: auth(owner),
+        payload: { encryptedMeta: encryptFolderMetadata({ name: "Archive" }, fileKey) },
+      });
+      expect(response.statusCode).toBe(200);
+    });
+    expect(renamed).toEqual([true]);
   });
 });
