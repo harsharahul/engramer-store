@@ -149,6 +149,10 @@ export function ActivityPanel(props: {
           <XGlyph size={14} />
         </button>
       </header>
+      {/* One scrolling body under the fixed header: notices, the running
+          jobs, and the log scroll together, so nothing is ever cut off
+          below the panel's edge. */}
+      <div className="activity-body">
       <section className="activity-notices">
         <div className="activity-section-label">Needs attention</div>
         <LibraryIntel files={live} onOpen={props.onOpen} />
@@ -208,6 +212,7 @@ export function ActivityPanel(props: {
           </button>
         )}
       </section>
+      </div>
     </div>
   );
 }

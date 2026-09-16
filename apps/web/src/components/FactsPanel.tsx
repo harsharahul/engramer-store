@@ -84,7 +84,7 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
             <ClockGlyph size={12} /> Coming up
           </h4>
           {upcoming.slice(0, 6).map(({ file, fact, days }) => (
-            <div key={`${file.id}:${fact.id}`} className={`intel-row${days < 0 ? " overdue" : ""}`}>
+            <div key={`${file.id}:${fact.id}`} className={`intel-row intel-row-wrap${days < 0 ? " overdue" : ""}`}>
               <button className="intel-row-open" onClick={() => props.onOpen(file.id)}>
                 <span className="intel-when">{whenLabel(fact.value, now)}</span>
                 <span className="intel-what">{describeFact(fact)}</span>

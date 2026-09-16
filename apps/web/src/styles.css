@@ -4806,6 +4806,9 @@ span.item-menu {
   flex-direction: column;
   gap: 1px;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   padding: 7px 8px;
   border: 0;
   border-radius: var(--radius);
@@ -5060,12 +5063,17 @@ span.item-menu {
 
 /* The intel row grew a trailing action, so the row is a shell and the
    clickable body is its own element. */
-.intel-row {
+/* The Coming up row: an opening button beside a small Done link. Scoped
+   to its own class; the plain .intel-row (Stored twice, trip legs) keeps
+   its padded column layout. */
+.intel-row-wrap {
   cursor: default;
   display: flex;
+  flex-direction: row;
   align-items: baseline;
   gap: 8px;
   padding: 0;
+  overflow: visible;
 }
 
 .intel-row-open {
@@ -5584,16 +5592,33 @@ span.item-menu {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--paper-faint);
-  margin: 10px 12px 4px;
+  margin: 12px 16px 6px;
 }
 
 .activity-notices {
-  padding: 0 4px;
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.activity-notices .intel {
+  gap: 12px;
+}
+
+.activity-notices .intel-group h4 {
+  margin: 0 8px 2px;
+}
+
+/* Inside the notices section the label sits over rows padded 8px within
+   an 8px section, so it aligns with their text at 16px from the edge. */
+.activity-notices .activity-section-label {
+  margin-left: 8px;
 }
 
 .activity-notices .panel-quiet {
-  padding: 6px 8px 10px;
+  padding: 2px 8px 10px;
   margin: 0;
+  font-size: 13px;
+  color: var(--paper-dim);
 }
 
 .activity-panel header {
@@ -5660,8 +5685,14 @@ span.item-menu {
   text-overflow: ellipsis;
 }
 
-.activity-log {
+.activity-body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.activity-log {
   padding: 6px 0 8px;
 }
 
