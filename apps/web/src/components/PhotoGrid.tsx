@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { Album } from "../albums";
 import type { FileEntry } from "../store";
 import { byMonth } from "../timeline";
 import { blurUrl } from "../intel/blur";
@@ -36,6 +37,12 @@ export function PhotoGrid(props: {
   onEnterSelect?: (id: string) => void;
   /** Pointer drag of a tile, to move it (or the selection) into a folder. */
   onDragStart?: (id: string, event: React.DragEvent) => void;
+  /** The Photos place carries its albums as a shelf above the months, so
+   * an album is reachable without the sidebar (IA §4.6). Absent inside
+   * an album or wherever the grid is not the Photos place itself. */
+  albums?: readonly ShelfAlbum[];
+  onOpenAlbum?: (tag: string) => void;
+  onNewAlbum?: () => void;
 }) {
   const sections = useMemo(() => byMonth(props.files), [props.files]);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -95,6 +102,9 @@ export function PhotoGrid(props: {
 
   return (
     <div className="photo-grid" ref={gridRef}>
+      {props.albums && props.onOpenAlbum && (
+        <AlbumShelf albums={props.albums} onOpen={props.onOpenAlbum} onNew={props.onNewAlbum} />
+      )}
       {sections.map((section) => {
         const rows = Math.ceil(section.files.length / columns);
         const width = gridRef.current?.clientWidth ?? 0;
@@ -129,6 +139,65 @@ export function PhotoGrid(props: {
       })}
       {sections.length === 0 && <div className="photo-empty">No photos or videos here yet.</div>}
     </div>
+  );
+}
+
+export interface ShelfAlbum {
+  album: Album;
+  /** The newest member, shown as the cover when it has a thumbnail. */
+  cover?: FileEntry;
+}
+
+/**
+ * Albums as content: a row of covers with title and count, the order
+ * the sidebar uses (pinned, then most recently changed), and a tile to
+ * start a new one.
+ */
+function AlbumShelf(props: {
+  albums: readonly ShelfAlbum[];
+  onOpen: (tag: string) => void;
+  onNew?: () => void;
+}) {
+  return (
+    <section className="album-shelf" aria-label="Albums">
+      <header className="photo-month">Albums</header>
+      <div className="album-shelf-row">
+        {props.albums.map(({ album, cover }) => (
+          <button
+            key={album.tag}
+            className="album-cover"
+            title={album.title}
+            onClick={() => props.onOpen(album.tag)}
+          >
+            {cover ? <AlbumCoverImage file={cover} /> : <span className="album-cover-blank" />}
+            <span className="album-cover-title">{album.title}</span>
+            <span className="album-cover-count">{album.count}</span>
+          </button>
+        ))}
+        {props.onNew && (
+          <button className="album-cover album-cover-new" onClick={props.onNew} title="New album">
+            <span className="album-cover-blank">+</span>
+            <span className="album-cover-title">New album</span>
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AlbumCoverImage(props: { file: FileEntry }) {
+  const { ref, thumb } = usePhotoThumb<HTMLSpanElement>(props.file);
+  const placeholder = !thumb && props.file.blur ? blurUrl(props.file.blur) : null;
+  return (
+    <span className="album-cover-image" ref={ref}>
+      {thumb ? (
+        <img src={thumb} alt="" loading="lazy" />
+      ) : placeholder ? (
+        <img src={placeholder} alt="" className="blur-placeholder" />
+      ) : (
+        <span className="album-cover-blank" />
+      )}
+    </span>
   );
 }
 

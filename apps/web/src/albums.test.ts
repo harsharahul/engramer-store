@@ -60,8 +60,8 @@ describe("albumsFrom", () => {
 
   it("counts members, picks the newest cover, sorts by title", () => {
     expect(albumsFrom(files)).toEqual([
-      { tag: "album:beach", title: "Beach", count: 2, coverFileId: "b" },
-      { tag: "album:city", title: "City", count: 2, coverFileId: "b" },
+      { tag: "album:beach", title: "Beach", count: 2, coverFileId: "b", changedAt: 30 },
+      { tag: "album:city", title: "City", count: 2, coverFileId: "b", changedAt: 30 },
     ]);
   });
 

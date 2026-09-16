@@ -8,8 +8,10 @@ import {
   decisionEvents,
   loadDecisions,
   mergeDecisions,
+  pinned,
   recentSearches,
   rememberSearch,
+  setPin,
   type Decisions,
 } from "./decisions";
 
@@ -122,6 +124,34 @@ describe("account decisions", () => {
     expect(localStorage.getItem(`engram-notices-seen:${account}`)).toBeNull();
     expect(localStorage.getItem("engram-trips-dismissed")).toBeNull();
     expect(localStorage.getItem("engram-recent-searches")).toBeNull();
+  });
+
+  it("keeps pins as the account's, and the newest word on a pin wins across devices", () => {
+    setPin(account, "album:alps", true, 10);
+    expect(pinned(account).has("album:alps")).toBe(true);
+    setPin(account, "album:alps", false, 20);
+    expect(pinned(account).has("album:alps")).toBe(false);
+    // Another device pinned it later than this device unpinned it.
+    const knewMore = applyDecisions(account, {
+      dismissedInsights: [],
+      dismissedTrips: [],
+      noticesSeen: [],
+      recentSearches: [],
+      pins: { "album:alps": { on: true, at: 30 }, "album:coast": { on: true, at: 5 } },
+    });
+    expect([...pinned(account)].sort()).toEqual(["album:alps", "album:coast"]);
+    expect(knewMore).toBe(false);
+    // A pin this device made that the account has not heard of is news.
+    setPin(account, "album:zurich", true, 40);
+    expect(
+      applyDecisions(account, {
+        dismissedInsights: [],
+        dismissedTrips: [],
+        noticesSeen: [],
+        recentSearches: [],
+        pins: { "album:alps": { on: true, at: 30 } },
+      }),
+    ).toBe(true);
   });
 
   it("forgets the device's copy at sign-out", () => {

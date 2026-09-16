@@ -56,6 +56,9 @@ export interface Album {
   count: number;
   /** The most recently taken member, the natural cover. */
   coverFileId?: string;
+  /** When the album last changed: its newest member's time. Recency is
+   * how the sidebar orders user-made collections. */
+  changedAt: number;
 }
 
 /** Every album present across `files`, counted, covered, sorted by title. */
@@ -79,6 +82,12 @@ export function albumsFrom(
     }
   }
   return [...byTag.entries()]
-    .map(([tag, { count, coverFileId }]) => ({ tag, title: albumTitle(tag), count, coverFileId }))
+    .map(([tag, { count, coverFileId, coverMtime }]) => ({
+      tag,
+      title: albumTitle(tag),
+      count,
+      coverFileId,
+      changedAt: Number.isFinite(coverMtime) ? coverMtime : 0,
+    }))
     .sort((a, b) => a.title.localeCompare(b.title));
 }
