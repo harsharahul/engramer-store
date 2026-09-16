@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { decide, decided, DECISIONS_EVENT, decisionEvents } from "../decisions";
 import { useStore, type FileEntry } from "../store";
 import { DATED_KINDS, type Fact, type FactEvidence } from "../intel/facts";
 import { describeFact, shown, sourceLabel, whenLabel } from "../intel/describe";
@@ -24,7 +25,17 @@ import { ClockGlyph, CopyGlyph, InfoGlyph, XGlyph } from "./Icon";
 /** ------------------------------------------------------- the whole library */
 
 export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) => void }) {
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const account = useStore((s) => s.session?.email ?? "");
+  // What the user dismissed is the account's record: a notice dismissed
+  // here stays dismissed on every device, and one dismissed elsewhere
+  // disappears here as soon as the decision lands.
+  const [hidden, setHidden] = useState<Set<string>>(() => decided(account, "dismissedInsights"));
+  useEffect(() => {
+    const reread = () => setHidden(decided(account, "dismissedInsights"));
+    reread();
+    decisionEvents.addEventListener(DECISIONS_EVENT, reread);
+    return () => decisionEvents.removeEventListener(DECISIONS_EVENT, reread);
+  }, [account]);
   const dismissFact = useStore((s) => s.dismissFact);
   const now = Date.now();
   const live = props.files.filter((file) => !file.trashed);
@@ -121,7 +132,7 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
               // The panel is where they now live, so it has to say which file.
               fileName={live.find((file) => file.id === insight.fileId)?.name}
               onOpen={insight.fileId ? () => props.onOpen(insight.fileId!) : undefined}
-              onHide={() => setHidden((prior) => new Set(prior).add(insight.id))}
+              onHide={() => decide(account, "dismissedInsights", [insight.id])}
             />
           ))}
         </div>

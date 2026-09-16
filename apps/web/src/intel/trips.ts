@@ -16,6 +16,7 @@
  * references, because full identifiers never leave the evidence blob.
  */
 
+import { decide, decided } from "../decisions";
 import { lookupAirport } from "./airports";
 import type { Fact } from "./facts";
 
@@ -509,27 +510,14 @@ export function tripTitle(tag: string): string {
   return `${words}, ${MONTHS[Number(match[3]) - 1]} ${match[2]}`;
 }
 
-const DISMISSED_KEY = "engram-trips-dismissed";
-
 /**
- * Per-device memory of refused groupings. A dismissal is a view preference
- * rather than vault data; the worst case of keeping it local is that another
- * device asks the same question once.
+ * Refused groupings, as the account's record: a trip refused on one
+ * device is not proposed again on another.
  */
-export function dismissedTrips(): Set<string> {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? "[]") as string[]);
-  } catch {
-    return new Set();
-  }
+export function dismissedTrips(account: string): Set<string> {
+  return decided(account, "dismissedTrips");
 }
 
-export function rememberTripDismissal(id: string): void {
-  try {
-    const all = dismissedTrips();
-    all.add(id);
-    localStorage.setItem(DISMISSED_KEY, JSON.stringify([...all]));
-  } catch {
-    // Best-effort; the worst case is asking again.
-  }
+export function rememberTripDismissal(account: string, id: string): void {
+  decide(account, "dismissedTrips", [id]);
 }

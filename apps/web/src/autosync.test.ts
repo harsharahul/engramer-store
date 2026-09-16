@@ -7,6 +7,7 @@ const rig = vi.hoisted(() => ({
   signals: [] as string[],
   handoffOn: true,
   reachedSeq: 1_000_000,
+  settingsPulls: [] as string[],
 }));
 
 vi.mock("./handoff", () => ({
@@ -30,13 +31,19 @@ vi.mock("./native", () => ({
   },
 }));
 
+vi.mock("./settingsync", () => ({
+  pullSettings: async (account: string) => {
+    rig.settingsPulls.push(account);
+  },
+}));
+
 vi.mock("./backfill", () => ({
   scheduleBackfill: () => {},
 }));
 
 vi.mock("./store", () => {
   const state = {
-    session: { email: "owner@example.com" },
+    session: { email: "owner@example.com", masterKey: new Uint8Array(32) },
     synced: true,
     syncSeq: 0,
     files: new Map(),
@@ -179,6 +186,14 @@ describe("autosync push", () => {
       rig.reachedSeq = 1_000_000;
       vi.useRealTimers();
     }
+  });
+
+  it("pulls the account's settings with every refresh, so a decision made elsewhere lands here", async () => {
+    const before = rig.settingsPulls.length;
+    rig.pushed?.({ seq: 1_000_001 });
+    await settled();
+    expect(rig.settingsPulls.length).toBe(before + 1);
+    expect(rig.settingsPulls.at(-1)).toBe("owner@example.com");
   });
 
   it("does not poke the drive when extensions are off", async () => {

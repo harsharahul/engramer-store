@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { loginKeyDigest, sealToPublicKey, type KeyAttributes } from "@engramer/crypto";
-import { storageUsed, userQuota, type UserRow } from "../db.js";
+import { nextSeq, storageUsed, userQuota, type UserRow } from "../db.js";
 import { AuthThrottle } from "../ratelimit.js";
 import { generateTotpSecret, otpauthUri, verifyTotp } from "../totp.js";
 import { consumeChallenge, issueChallenge, peekChallenge } from "../challenges.js";
@@ -783,12 +783,18 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   app.put("/api/settings", auth, async (request) => {
     const body = z.object({ blob: z.string().max(16_384) }).parse(request.body);
     const updatedAt = Date.now();
-    await app.db.run(
-      "UPDATE users SET settings_blob = ?, settings_updated_ms = ? WHERE id = ?",
-      body.blob,
-      updatedAt,
-      request.user.uid,
-    );
+    // The write advances the account's change sequence too, so the
+    // change feed pokes the account's other devices and a switch or a
+    // decision made here reaches them now, not at their next launch.
+    await app.db.tx(async (t) => {
+      await t.run(
+        "UPDATE users SET settings_blob = ?, settings_updated_ms = ? WHERE id = ?",
+        body.blob,
+        updatedAt,
+        request.user.uid,
+      );
+      await nextSeq(t, request.user.uid);
+    });
     return { updatedAt };
   });
 

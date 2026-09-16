@@ -143,6 +143,42 @@ describe("pull and push", () => {
     expect(ocrEnabled()).toBe(true);
   });
 
+  it("carries the account's decisions and merges them by union, pushing what this device knew more of", async () => {
+    const { decide, decided } = await import("./decisions");
+    const key = generateKey();
+    // Another device dismissed one notice and pushed.
+    decide("other-device", "dismissedInsights", ["dup:remote"]);
+    rig.remote = {
+      blob: JSON.stringify(
+        (await import("@engramer/crypto")).secretBoxSeal(
+          new TextEncoder().encode(
+            JSON.stringify({
+              ...snapshotSettings("other-device"),
+            }),
+          ),
+          key,
+        ),
+      ),
+      updatedAt: 50,
+    };
+    // This device dismissed a different one before hearing about it.
+    decide(account, "dismissedInsights", ["dup:local"]);
+    rig.puts.length = 0;
+    await pullSettings(account, key);
+    const mine = decided(account, "dismissedInsights");
+    expect(mine.has("dup:remote")).toBe(true);
+    expect(mine.has("dup:local")).toBe(true);
+    // The union went back up, so the account converges on it.
+    expect(rig.puts).toHaveLength(1);
+    const pushed = JSON.parse(
+      new TextDecoder().decode(secretBoxOpen(JSON.parse(rig.puts[0]!), key)),
+    ) as SyncedSettings;
+    expect([...(pushed.decisions?.dismissedInsights ?? [])].sort()).toEqual(["dup:local", "dup:remote"]);
+    // Pulling the same blob again is quiet.
+    await pullSettings(account, key);
+    expect(rig.puts).toHaveLength(1);
+  });
+
   it("announces an applied change so open views re-read their switches", async () => {
     const key = generateKey();
     setOcrEnabled(true);
