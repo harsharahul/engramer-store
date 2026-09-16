@@ -24,6 +24,10 @@ import { useStore } from "./store";
 
 const FOREGROUND_COOLDOWN_MS = 15_000;
 const POLL_INTERVAL_MS = 60_000;
+/** Waits before the follow-up pulls made when a pull stops short of the
+ * sequence a poke announced. Finite by design: a stale announcement is
+ * allowed to cost a few empty pulls, never a loop. */
+export const RECHECK_DELAYS_MS = [1_000, 3_000, 10_000] as const;
 
 let installed = false;
 
@@ -37,6 +41,24 @@ export function installAutoSync(): void {
   // A poke that lands mid-refresh is news the running pull may miss;
   // it is remembered and answered once the pull returns, never dropped.
   let pendingPush = false;
+  // The highest sequence any poke has announced. A pull that returns
+  // short of it read the server before the announced change landed,
+  // so the pull is repeated after a growing wait until it catches up
+  // or the delays run out.
+  let announced = 0;
+  let recheckAttempt = 0;
+  let recheck: ReturnType<typeof setTimeout> | null = null;
+
+  const scheduleRecheck = () => {
+    if (recheck || recheckAttempt >= RECHECK_DELAYS_MS.length) {
+      return;
+    }
+    recheck = setTimeout(() => {
+      recheck = null;
+      recheckAttempt += 1;
+      kick(true);
+    }, RECHECK_DELAYS_MS[recheckAttempt]);
+  };
 
   const kick = (pushed = false) => {
     // A pushed poke IS fresh news, so it skips the cooldown; one
@@ -88,6 +110,12 @@ export function installAutoSync(): void {
           // Many pokes during one pull collapse into exactly one more.
           pendingPush = false;
           kick(true);
+          return;
+        }
+        if (useStore.getState().syncSeq >= announced) {
+          recheckAttempt = 0;
+        } else {
+          scheduleRecheck();
         }
       });
   };
@@ -106,7 +134,15 @@ export function installAutoSync(): void {
   // Desktop shell only; no-op unsubscribes everywhere else. The feed's
   // state rides its own event so Profile shows the holder as it is;
   // the query covers a window that loaded after the last transition.
-  void nativeListen("vault-changed", () => kick(true));
+  void nativeListen<{ seq?: number }>("vault-changed", (event) => {
+    const seq = Number(event?.seq);
+    if (Number.isFinite(seq) && seq > announced) {
+      // Fresh news restarts the follow-up ladder.
+      announced = seq;
+      recheckAttempt = 0;
+    }
+    kick(true);
+  });
   void nativeListen<{ state: FeedState }>("vault-feed-state", (event) => {
     useStore.setState({ liveFeed: event.state });
   });

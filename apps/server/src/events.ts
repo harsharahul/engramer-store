@@ -7,12 +7,12 @@ import type { Writable } from "node:stream";
  * carries only the sequence number, which the sync feed already hands
  * every client, so the channel adds no server knowledge.
  *
- * Bumps are recorded synchronously (the allocator may be inside a
- * database transaction, which must never wait on foreign I/O) and
- * flushed a beat later, coalescing a burst of writes into one poke.
- * The flush can therefore race a commit or announce a rolled-back
- * bump; both cost the listener one empty pull and nothing else, since
- * correctness lives in the cursor pull, not here.
+ * Bumps are recorded synchronously and flushed a beat later,
+ * coalescing a burst of writes into one poke. A bump made inside a
+ * database transaction reaches this publisher only after the commit
+ * (the transaction handle holds it), so a poke is always a promise
+ * that the pull it triggers will find the change. Correctness still
+ * lives in the cursor pull: a duplicate poke costs one empty pull.
  */
 const FLUSH_MS = 150;
 

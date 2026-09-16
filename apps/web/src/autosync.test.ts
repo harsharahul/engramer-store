@@ -6,6 +6,7 @@ const rig = vi.hoisted(() => ({
   refreshes: 0,
   signals: [] as string[],
   handoffOn: true,
+  reachedSeq: 1_000_000,
 }));
 
 vi.mock("./handoff", () => ({
@@ -37,6 +38,7 @@ vi.mock("./store", () => {
   const state = {
     session: { email: "owner@example.com" },
     synced: true,
+    syncSeq: 0,
     files: new Map(),
     folders: new Map(),
     liveFeed: "off" as string,
@@ -44,6 +46,9 @@ vi.mock("./store", () => {
       rig.refreshes += 1;
       // A changed map reference is autosync's "something arrived".
       state.files = new Map(state.files);
+      // The cursor the pull reached; a test lowers it to play a pull
+      // that read the server before the announced change had landed.
+      state.syncSeq = rig.reachedSeq;
     },
   };
   return {
@@ -54,7 +59,7 @@ vi.mock("./store", () => {
   };
 });
 
-import { installAutoSync } from "./autosync";
+import { installAutoSync, RECHECK_DELAYS_MS } from "./autosync";
 
 // The suite runs in node; autosync only needs listener registration
 // from its globals, so two stubs stand in for a DOM.
@@ -126,6 +131,54 @@ describe("autosync push", () => {
     await settled();
     // Exactly one more, not three.
     expect(rig.refreshes).toBe(before + 2);
+  });
+
+  it("pulls again, backing off, until the pull reaches the announced sequence", async () => {
+    // Real time is faked for this case alone: the follow-up pulls are
+    // scheduled seconds apart and the test walks the clock to them.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const before = rig.refreshes;
+      // The server announced 500, but the pull it triggered read the
+      // state from before that change committed and stopped at 480.
+      rig.reachedSeq = 480;
+      rig.pushed?.({ seq: 500 });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(rig.refreshes).toBe(before + 1);
+      // Not immediately: the first follow-up waits a beat.
+      await vi.advanceTimersByTimeAsync(RECHECK_DELAYS_MS[0] - 1);
+      expect(rig.refreshes).toBe(before + 1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(rig.refreshes).toBe(before + 2);
+      // Still short: the next wait is longer.
+      await vi.advanceTimersByTimeAsync(RECHECK_DELAYS_MS[0]);
+      expect(rig.refreshes).toBe(before + 2);
+      rig.reachedSeq = 500;
+      await vi.advanceTimersByTimeAsync(RECHECK_DELAYS_MS[1] - RECHECK_DELAYS_MS[0]);
+      expect(rig.refreshes).toBe(before + 3);
+      // Caught up: nothing more is scheduled.
+      await vi.advanceTimersByTimeAsync(RECHECK_DELAYS_MS[2] * 2);
+      expect(rig.refreshes).toBe(before + 3);
+    } finally {
+      rig.reachedSeq = 1_000_000;
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up re-pulling after the last delay so a bad announcement cannot loop", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const before = rig.refreshes;
+      rig.reachedSeq = 10;
+      rig.pushed?.({ seq: 900 });
+      await vi.advanceTimersByTimeAsync(0);
+      const total = RECHECK_DELAYS_MS.reduce((sum, delay) => sum + delay, 0);
+      await vi.advanceTimersByTimeAsync(total * 3);
+      expect(rig.refreshes).toBe(before + 1 + RECHECK_DELAYS_MS.length);
+    } finally {
+      rig.reachedSeq = 1_000_000;
+      vi.useRealTimers();
+    }
   });
 
   it("does not poke the drive when extensions are off", async () => {

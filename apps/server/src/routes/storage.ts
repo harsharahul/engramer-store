@@ -200,19 +200,22 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     }
     const now = Date.now();
     const id = randomUUID();
-    const seq = await nextSeq(app.db, uid);
-    await app.db.run(
-      `INSERT INTO folders (id, user_id, parent_id, encrypted_key, encrypted_meta, update_seq, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      id,
-      uid,
-      body.parentId ?? null,
-      JSON.stringify(body.encryptedKey),
-      JSON.stringify(body.encryptedMeta),
-      seq,
-      now,
-      now,
-    );
+    // The sequence and the row it names land together, so the change
+    // feed can never announce a folder before it can be read.
+    await app.db.tx(async (t) => {
+      await t.run(
+        `INSERT INTO folders (id, user_id, parent_id, encrypted_key, encrypted_meta, update_seq, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        id,
+        uid,
+        body.parentId ?? null,
+        JSON.stringify(body.encryptedKey),
+        JSON.stringify(body.encryptedMeta),
+        await nextSeq(t, uid),
+        now,
+        now,
+      );
+    });
     const row = (await app.db.get<FolderRow>("SELECT * FROM folders WHERE id = ?", id))!;
     return reply.code(201).send(folderToDto(row));
   });
@@ -233,19 +236,20 @@ export function registerStorageRoutes(app: FastifyInstance): void {
         return reply.code(400).send({ error: "cannot move a folder into its own subtree" });
       }
     }
-    const seq = await nextSeq(app.db, uid);
-    await app.db.run(
-      `UPDATE folders SET
-         parent_id = COALESCE(?, parent_id),
-         encrypted_meta = COALESCE(?, encrypted_meta),
-         update_seq = ?, updated_at = ?
-       WHERE id = ?`,
-      body.parentId !== undefined ? body.parentId : null,
-      body.encryptedMeta ? JSON.stringify(body.encryptedMeta) : null,
-      seq,
-      Date.now(),
-      id,
-    );
+    await app.db.tx(async (t) => {
+      await t.run(
+        `UPDATE folders SET
+           parent_id = COALESCE(?, parent_id),
+           encrypted_meta = COALESCE(?, encrypted_meta),
+           update_seq = ?, updated_at = ?
+         WHERE id = ?`,
+        body.parentId !== undefined ? body.parentId : null,
+        body.encryptedMeta ? JSON.stringify(body.encryptedMeta) : null,
+        await nextSeq(t, uid),
+        Date.now(),
+        id,
+      );
+    });
     const row = (await app.db.get<FolderRow>("SELECT * FROM folders WHERE id = ?", id))!;
     return folderToDto(row);
   });
@@ -293,20 +297,21 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     }
     const now = Date.now();
     const id = randomUUID();
-    const seq = await nextSeq(app.db, uid);
-    await app.db.run(
-      `INSERT INTO files (id, user_id, folder_id, encrypted_key, encrypted_meta, seekable, update_seq, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      id,
-      uid,
-      body.folderId ?? null,
-      JSON.stringify(body.encryptedKey),
-      JSON.stringify(body.encryptedMeta),
-      body.seekable ? 1 : 0,
-      seq,
-      now,
-      now,
-    );
+    await app.db.tx(async (t) => {
+      await t.run(
+        `INSERT INTO files (id, user_id, folder_id, encrypted_key, encrypted_meta, seekable, update_seq, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id,
+        uid,
+        body.folderId ?? null,
+        JSON.stringify(body.encryptedKey),
+        JSON.stringify(body.encryptedMeta),
+        body.seekable ? 1 : 0,
+        await nextSeq(t, uid),
+        now,
+        now,
+      );
+    });
     const row = (await app.db.get<FileRow>("SELECT * FROM files WHERE id = ?", id))!;
     return reply.code(201).send(fileToDto(row));
   });

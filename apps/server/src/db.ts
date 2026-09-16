@@ -178,9 +178,34 @@ export interface Db {
    * bumps a mutation makes on OTHER accounts (collaborator fan-out).
    * Must stay synchronous and I/O-free; it may be called from inside
    * a transaction, and anything slow or awaited here would break the
-   * tx contract above. Transaction handles inherit it.
+   * tx contract above. A transaction handle holds every bump made
+   * through it and releases them to this observer only after COMMIT;
+   * a rolled-back transaction releases nothing. An observer therefore
+   * never announces a change a pull could fail to find.
    */
   onSeq?: (userId: number, seq: number) => void;
+}
+
+/**
+ * The bumps of one open transaction. Handles record into it; the
+ * transaction owner releases the record to the real observer once the
+ * commit has landed, or discards it on rollback.
+ */
+export class HeldSeqs {
+  private readonly bumps: Array<[number, number]> = [];
+
+  note(userId: number, seq: number): void {
+    this.bumps.push([userId, seq]);
+  }
+
+  release(to: ((userId: number, seq: number) => void) | undefined): void {
+    if (to) {
+      for (const [userId, seq] of this.bumps) {
+        to(userId, seq);
+      }
+    }
+    this.bumps.length = 0;
+  }
 }
 
 /** Additive column migrations, shared by both backends. BIGINT is accepted
@@ -448,10 +473,13 @@ export class SqliteDb implements Db {
 
   tx<T>(fn: (t: Db) => Promise<T>): Promise<T> {
     const task = this.txQueue.then(async () => {
+      const held = new HeldSeqs();
+      const handle = new SqliteTxDb(this.db, held);
       this.db.exec("BEGIN IMMEDIATE");
       try {
-        const result = await fn(this);
+        const result = await fn(handle);
         this.db.exec("COMMIT");
+        held.release(this.onSeq);
         return result;
       } catch (err) {
         this.db.exec("ROLLBACK");
@@ -464,6 +492,41 @@ export class SqliteDb implements Db {
 
   async close(): Promise<void> {
     this.db.close();
+  }
+}
+
+/** The transaction handle: the same connection, with its sequence bumps
+ * held back until the owning transaction commits. Nested tx() calls join
+ * the open transaction. */
+class SqliteTxDb implements Db {
+  readonly onSeq: (userId: number, seq: number) => void;
+
+  constructor(
+    private readonly db: Database.Database,
+    held: HeldSeqs,
+  ) {
+    this.onSeq = (userId, seq) => held.note(userId, seq);
+  }
+
+  async get<T = unknown>(sql: string, ...params: unknown[]): Promise<T | undefined> {
+    return this.db.prepare(sql).get(...params) as T | undefined;
+  }
+
+  async all<T = unknown>(sql: string, ...params: unknown[]): Promise<T[]> {
+    return this.db.prepare(sql).all(...params) as T[];
+  }
+
+  async run(sql: string, ...params: unknown[]): Promise<DbRunResult> {
+    const result = this.db.prepare(sql).run(...params);
+    return { changes: result.changes };
+  }
+
+  async tx<T>(fn: (t: Db) => Promise<T>): Promise<T> {
+    return fn(this);
+  }
+
+  async close(): Promise<void> {
+    // The owning database manages the connection.
   }
 }
 
