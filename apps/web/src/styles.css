@@ -2565,6 +2565,17 @@ body.resizing {
   inset: 0;
   z-index: 300;
   background: rgba(8, 9, 11, 0.92);
+  /* The backdrop is dark in both themes, so the overlay carries the dark
+     palette: in the light theme the file name, the toolbars and every
+     viewer control were the day's ink on a night background, unreadable. */
+  --ink-1: #0f1626;
+  --ink-2: #15203a;
+  --hairline: rgba(191, 219, 254, 0.08);
+  --hairline-strong: rgba(191, 219, 254, 0.16);
+  --paper: #e9f0fb;
+  --paper-dim: #a2b3cf;
+  --paper-faint: #647694;
+  color: var(--paper);
   backdrop-filter: blur(10px);
   display: flex;
   flex-direction: column;
@@ -3619,8 +3630,14 @@ button.tag:hover {
   position: fixed;
   left: 50%;
   bottom: 22px;
-  transform: translateX(-50%);
+  /* Centred with the translate property, which the entrance animation's
+     transform cannot override: animated, the bar hung from the centre to
+     the right and its last buttons left the viewport. */
+  translate: -50% 0;
+  max-width: calc(100vw - 32px);
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 6px;
   background: var(--ink-2);
