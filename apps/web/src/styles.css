@@ -2204,6 +2204,8 @@ body.resizing {
   align-items: flex-start;
   padding-top: 10px;
   padding-bottom: 10px;
+  /* A result opens on one click, and the pointer says so. */
+  cursor: pointer;
 }
 
 .row.result.cursor {

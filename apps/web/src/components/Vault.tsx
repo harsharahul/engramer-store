@@ -24,7 +24,7 @@ import {
   currentTheme,
   type ThemeMode,
 } from "../theme";
-import { mergeSearchHits, searchFiles, highlightParts, type SearchHit } from "../search";
+import { mergeSearchHits, searchFiles, type SearchHit } from "../search";
 import {
   interpretationSchema,
   isQuestionShaped,
@@ -63,7 +63,7 @@ import { installMediaKeyResponder } from "../mediastream";
 import { installHandoffForegroundRefresh } from "../handoff";
 import { idleLockMinutes, installIdleLock } from "../idlelock";
 import { installAutoSync } from "../autosync";
-import { useLongPress } from "../longpress";
+import { folderPath, SearchResults } from "./SearchResults";
 import {
   clearNativeUnlock,
   deviceUnlockSupported,
@@ -106,8 +106,7 @@ import { DATED_KINDS, soonestDated } from "../intel/facts";
 import { extractText } from "../intel/extract";
 import { CalendarView } from "./CalendarView";
 import { HeadsUp, TripHeadsUp } from "./HeadsUp";
-import { thumbnailUrl } from "../thumbs";
-import { extension, fileKind, formatBytes, formatDate } from "../format";
+import { extension, fileKind, formatBytes } from "../format";
 import { albumTitle, albumsFrom } from "../albums";
 import { PhotoGrid } from "./PhotoGrid";
 import { AlbumPicker } from "./AlbumPicker";
@@ -255,26 +254,6 @@ function loadPref<T>(key: string, fallback: T): T {
   }
 }
 
-
-/** "Work / Taxes 2025" for a file, walking up the folder tree. */
-function folderPath(
-  folderId: string | null,
-  folders: ReadonlyMap<string, FolderEntry>,
-): string | null {
-  const names: string[] = [];
-  let cursor = folderId;
-  let guard = 0;
-  while (cursor && guard < 32) {
-    const folder = folders.get(cursor);
-    if (!folder) {
-      break;
-    }
-    names.unshift(folder.name);
-    cursor = folder.parentId;
-    guard++;
-  }
-  return names.length > 0 ? names.join(" / ") : null;
-}
 
 const OPERATOR_HINTS = ["tag:", "type:", "in:", "before:", "after:", "is:favorite"];
 
@@ -3401,145 +3380,6 @@ function RevealToast(props: { onOpen: (folderId: string | null) => void }) {
       >
         <XGlyph size={14} />
       </button>
-    </div>
-  );
-}
-
-function Highlighted(props: { value: string; ranges: SearchHit["nameRanges"] }) {
-  return (
-    <>
-      {highlightParts(props.value, props.ranges).map((part, i) =>
-        part.hit ? <mark key={i}>{part.text}</mark> : <span key={i}>{part.text}</span>,
-      )}
-    </>
-  );
-}
-
-function ResultThumb(props: { file: FileEntry }) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    if (props.file.hasThumb) {
-      void thumbnailUrl(props.file.id, props.file.key).then((u) => {
-        if (!cancelled) {
-          setUrl(u);
-        }
-      });
-    } else {
-      setUrl(null);
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [props.file.id, props.file.hasThumb, props.file.key]);
-
-  if (url) {
-    return <img className="result-thumb" src={url} alt="" />;
-  }
-  return <span className="row-glyph">{extension(props.file.name) || "FILE"}</span>;
-}
-
-function ResultRow(props: {
-  hit: SearchHit;
-  path: string | null;
-  index: number;
-  cursor: boolean;
-  selected: boolean;
-  onSelect: (event: React.MouseEvent) => void;
-  onOpen: () => void;
-  onMenu: (x: number, y: number) => void;
-}) {
-  const { hit } = props;
-  const longPress = useLongPress(props.onMenu);
-  const coarse = window.matchMedia("(pointer: coarse)").matches;
-
-  return (
-    <div
-      className={`row result${props.selected ? " selected" : ""}${props.cursor ? " cursor" : ""}`}
-      data-cursor={props.cursor}
-      style={{ "--i": Math.min(props.index, 20) } as CSSProperties}
-      onClick={(e) => (coarse ? props.onOpen() : props.onSelect(e))}
-      onDoubleClick={props.onOpen}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        props.onMenu(e.clientX, e.clientY);
-      }}
-      {...longPress}
-    >
-      <ResultThumb file={hit.file} />
-      <div className="row-main">
-        <div className="name">
-          <Highlighted value={hit.file.name} ranges={hit.nameRanges} />
-        </div>
-        <div className="result-where">
-          {props.path ? (
-            <span className={hit.matchedFolder ? "result-folder hit" : "result-folder"}>
-              <FolderGlyph size={11} /> {props.path}
-            </span>
-          ) : (
-            <span className="result-folder">
-              <FolderGlyph size={11} /> All files
-            </span>
-          )}
-          <span className="result-date">{formatDate(hit.file.mtime)}</span>
-        </div>
-        {hit.matchedText && (
-          <div className="snippet">
-            <Highlighted value={hit.matchedText} ranges={hit.textRanges} />
-          </div>
-        )}
-      </div>
-      {hit.semantic && <span className="row-tag meaning">meaning</span>}
-      {hit.file.category && <span className="row-tag">{hit.file.category}</span>}
-      <span className="row-meta">{formatBytes(hit.file.size)}</span>
-    </div>
-  );
-}
-
-function SearchResults(props: {
-  hits: SearchHit[];
-  folders: ReadonlyMap<string, FolderEntry>;
-  cursor: number;
-  selection: ReadonlySet<string>;
-  onSelect: (id: string, event: React.MouseEvent) => void;
-  onOpen: (id: string) => void;
-  onMenu: (id: string, x: number, y: number) => void;
-}) {
-  const listRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const active = listRef.current?.querySelector<HTMLElement>("[data-cursor='true']");
-    active?.scrollIntoView({ block: "nearest" });
-  }, [props.cursor]);
-
-  if (props.hits.length === 0) {
-    return (
-      <div className="empty">
-        <span className="empty-mark">∅</span>
-        <h3>No matches</h3>
-        <p>
-          Search covers names, tags, folder names, and text inside documents, decrypted only on
-          this device. Try <code>tag:receipts</code>, <code>type:image</code>,{" "}
-          <code>before:2026</code>, or a folder's name; one-letter typos are forgiven.
-        </p>
-      </div>
-    );
-  }
-  return (
-    <div className="rows" ref={listRef}>
-      {props.hits.map((hit, i) => (
-        <ResultRow
-          key={hit.file.id}
-          hit={hit}
-          path={folderPath(hit.file.folderId, props.folders)}
-          index={i}
-          cursor={i === props.cursor}
-          selected={props.selection.has(hit.file.id)}
-          onSelect={(e) => props.onSelect(hit.file.id, e)}
-          onOpen={() => props.onOpen(hit.file.id)}
-          onMenu={(x, y) => props.onMenu(hit.file.id, x, y)}
-        />
-      ))}
     </div>
   );
 }
