@@ -5,6 +5,59 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-09-17
+
+### Added
+- **PDFs you can read, search, mark up, fill and re-page.** The PDF preview
+  is a real viewer: every page on demand, text you can select and copy,
+  find with a match count, zoom modes, a page indicator you can type into,
+  thumbnails, the document's outline, rotation. Markup adds highlight,
+  drawing, text and an image; forms fill in; both save into the document as
+  a new version. Pages mode turns, reorders and removes pages in one save,
+  or extracts chosen pages to a new file. Selecting several PDFs offers to
+  combine them into one.
+- **More kinds of files open, edit and leave the app.** Text, Markdown and
+  code open in an editor with highlighting, line numbers and search, and
+  Markdown gets a preview beside the text. Pictures have an editor: rotate,
+  flip, crop to a shape, boxes, arrows, text and blur, saved as a new
+  version. Archives (zip, tar, tar.gz) show what is inside and extract
+  into the vault, folders included. OpenDocument text and sheets open like
+  Word and Excel files; presentations are recognised and say honestly that
+  they do not open here yet. On the Mac, any file can be opened in another
+  app, and a kind the app cannot show names its extension and offers that
+  or a download.
+- **A shared web page becomes a PDF.** The share sheet on iOS now lists the
+  app for web pages, addresses and text, not only for files. A page is
+  rendered to a PDF inside the extension so the article is stored and
+  searchable; a page that will not render in time is kept as a link file
+  the app opens in the browser; shared text becomes a text file.
+- **Every place is reachable.** The information architecture states how
+  the same places are laid out on the Mac and the phone. The sidebar rail
+  keeps an icon for every group, so no group ever disappears; adding to an
+  album opens the group, scrolls the row into view and lights it, and the
+  toast opens the album; albums order pinned first, then most recently
+  changed, and a pin follows the account. Photos carries an albums shelf,
+  so an album is content as well as a place. The phone's tabs are Files,
+  Photos, Search, Notices and More, with Add in the top bar.
+- **Delete your own account.** Profile > Security > Delete account removes
+  the account and every file in it for good, after the password is proved
+  again on the device and a second factor when one is on.
+
+### Changed
+- A search result opens on one click; a modifier click selects it for a
+  batch action. The information architecture records the rule for every
+  list of results.
+- The sidebar foot holds state only; the switches and the appearance live
+  in Profile.
+
+### Fixed
+- A real click on a search result did nothing: the band selection
+  swallowed it. Result rows are files to the selection now.
+- The preview overlay was unreadable in the light theme, and the selection
+  bar could run off the right edge of the window.
+- The iOS and Mac apps declare their privacy manifest and encryption use,
+  as App Store Connect expects.
+
 ## [0.55.1] - 2026-09-16
 
 ### Added
