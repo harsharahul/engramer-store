@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { blobKey } from "../blobs.js";
+import { deleteUserCascade } from "../accounts.js";
 import { storageUsed, type InviteRow, type UserRow } from "../db.js";
 
 const DEFAULT_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -136,45 +136,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (!user) {
       return;
     }
-    // Collect blob keys before the rows disappear.
-    const files = await app.db.all<{ id: string; generation: number }>(
-      "SELECT id, generation FROM files WHERE user_id = ?",
-      user.id,
-    );
-    const versions = await app.db.all<{ file_id: string; generation: number }>(
-      "SELECT file_id, generation FROM file_versions WHERE user_id = ?",
-      user.id,
-    );
-    const uploads = await app.db.all<{ id: string }>(
-      "SELECT id FROM request_uploads WHERE user_id = ?",
-      user.id,
-    );
-    await app.db.tx(async (t) => {
-      await t.run("DELETE FROM shares WHERE user_id = ?", user.id);
-      await t.run("DELETE FROM file_versions WHERE user_id = ?", user.id);
-      await t.run("DELETE FROM request_uploads WHERE user_id = ?", user.id);
-      await t.run("DELETE FROM file_requests WHERE user_id = ?", user.id);
-      await t.run("DELETE FROM files WHERE user_id = ?", user.id);
-      await t.run("DELETE FROM folders WHERE user_id = ?", user.id);
-      await t.run("DELETE FROM invites WHERE created_by = ?", user.id);
-      await t.run("DELETE FROM session_keys WHERE user_id = ?", user.id);
-      await t.run("DELETE FROM users WHERE id = ?", user.id);
-    });
-    // Ciphertext cleanup is best-effort; a leftover blob is unreferenced
-    // garbage, not data anyone can read or reach.
-    for (const file of files) {
-      await app.blobs.remove(blobKey(file.id, "data", file.generation)).catch(() => {});
-      await app.blobs.remove(blobKey(file.id, "thumb")).catch(() => {});
-      await app.blobs.remove(blobKey(file.id, "index")).catch(() => {});
-    }
-    for (const version of versions) {
-      await app.blobs.remove(blobKey(version.file_id, "data", version.generation)).catch(() => {});
-    }
-    for (const upload of uploads) {
-      await app.blobs.remove(blobKey(upload.id, "data")).catch(() => {});
-      await app.blobs.remove(blobKey(upload.id, "thumb")).catch(() => {});
-      await app.blobs.remove(blobKey(upload.id, "index")).catch(() => {});
-    }
+    await deleteUserCascade(app, user.id);
     return reply.code(204).send();
   });
 }

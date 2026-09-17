@@ -38,6 +38,7 @@ import { SaveConflictError, copyName } from "./conflict";
 import { analysisLanes, uploadLanes, withAnalysisSlot } from "./analysisslot";
 import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { clearDecisions } from "./decisions";
+import { deletionProof } from "./accountdeletion";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import { activateSession, clearSession, suspendSession, type Session } from "./session";
 import { checkPin, KeyChangedError, pinKey, pinnedKey } from "./keypins";
@@ -369,6 +370,10 @@ interface StoreState {
   lockVault: () => void;
   /** Signs every other device out; this tab carries on with a fresh token. */
   signOutEverywhere: () => Promise<void>;
+  /** Deletes the account for good after proving the password here (and
+   * a second factor when one is on), then leaves this device signed out
+   * with nothing of the account kept. */
+  deleteAccount: (password: string, code?: string) => Promise<void>;
   /** Installs a renewed token (after a password change) everywhere a
    * sign-in would, so this tab's reload record and unlock record follow. */
   adoptToken: (token: string) => void;
@@ -1301,6 +1306,19 @@ export const useStore = create<StoreState>((set, get) => {
       }
       const { token } = await api.revokeAllSessions();
       get().adoptToken(token);
+    },
+
+    deleteAccount: async (password, code) => {
+      if (!get().session) {
+        throw new Error("not signed in");
+      }
+      const { keyAttributes } = await api.keyAttributes();
+      // The password is checked on this device first; the server only
+      // ever sees the login key it already holds the digest of.
+      const proof = deletionProof(password, keyAttributes);
+      await api.deleteAccount(proof, code);
+      // Everything of the account on this device goes with it.
+      get().logout();
     },
 
     adoptToken: (token) => {

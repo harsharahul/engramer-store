@@ -7,6 +7,7 @@ import { AuthThrottle } from "../ratelimit.js";
 import { generateTotpSecret, otpauthUri, verifyTotp } from "../totp.js";
 import { consumeChallenge, issueChallenge, peekChallenge } from "../challenges.js";
 import { ForbiddenKeyChange, mergeKeyAttributes } from "../keyattrs.js";
+import { deleteUserCascade } from "../accounts.js";
 
 const secretBoxSchema = z.object({ ciphertext: z.string(), nonce: z.string() });
 
@@ -796,6 +797,41 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       await nextSeq(t, request.user.uid);
     });
     return { updatedAt };
+  });
+
+  /**
+   * The account deletes itself. The request proves the password again
+   * (the login key, throttled like a sign-in) and, when two-factor is
+   * on, a current code; then every row and blob goes through the same
+   * cascade the operator's delete uses. There is no soft state: after
+   * this the email is free to register again and nothing is recoverable.
+   */
+  app.delete("/api/user", auth, async (request, reply) => {
+    const body = z
+      .object({ loginKey: base64Key, code: z.string().min(1).max(64).optional() })
+      .parse(request.body);
+    const user = await getUser(request.user.uid);
+    const retryAfter = await gate(request, user.email);
+    if (retryAfter !== null) {
+      return reply.code(429).header("retry-after", retryAfter).send({ error: "too many attempts" });
+    }
+    if (!digestsMatch(loginKeyDigest(body.loginKey), user.login_key_digest)) {
+      await throttle.fail(throttleKey(request, user.email));
+      return reply.code(401).send({ error: "wrong password" });
+    }
+    if (user.totp_enabled === 1) {
+      if (!body.code) {
+        return reply.code(401).send({ error: "two-factor code required", twoFactorRequired: true });
+      }
+      const second = await verifySecondFactor(user, body.code);
+      if (!second.ok) {
+        await throttle.fail(throttleKey(request, user.email));
+        return reply.code(401).send({ error: "wrong two-factor code", twoFactorRequired: true });
+      }
+    }
+    await throttle.succeed(throttleKey(request, user.email));
+    await deleteUserCascade(app, user.id);
+    return reply.code(204).send();
   });
 
   app.get("/api/user", auth, async (request) => {

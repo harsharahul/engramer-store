@@ -31,6 +31,9 @@
       "minimumSystemVersion": "14.0",
       "hardenedRuntime": true
     },
+    "resources": {
+      "apple/PrivacyInfo.xcprivacy": "PrivacyInfo.xcprivacy"
+    },
     "iOS": {
       "minimumSystemVersion": "16.0"
     },

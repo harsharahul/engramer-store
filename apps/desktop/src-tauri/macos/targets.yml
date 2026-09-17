@@ -29,6 +29,7 @@ targets:
       - path: ../apple/FilesProvider
       - path: ../apple/Shared
       - path: ../ios/Generated
+      - path: ../apple/PrivacyInfo.xcprivacy
       # Finder shows the extension's own icon beside the drive in the
       # sidebar; without one it falls back to a plain folder. Both icon
       # mechanisms are served: the classic icns resource and the asset

@@ -98,6 +98,14 @@ spec = spec.replace(/^\s*- path: \.\.\/\.\.\/apple\/Intel\n/gm, "");
   const appAt = spec.indexOf("engram-store-desktop_iOS:");
   const head = spec.slice(0, appAt);
   let tail = spec.slice(appAt);
+  // 1c. The privacy manifest App Store Connect checks for: a resource of
+  // the app target (the extensions list it in ios/targets.yml).
+  if (!tail.includes("PrivacyInfo.xcprivacy")) {
+    tail = tail.replace(
+      /^(\s*)sources:\s*$/m,
+      `$1sources:\n$1  - path: ../../apple/PrivacyInfo.xcprivacy`,
+    );
+  }
   if (!tail.includes("FoundationModels.framework")) {
     tail = tail.replace(
       /^(\s*)dependencies:\s*$/m,

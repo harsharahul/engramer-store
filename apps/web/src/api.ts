@@ -296,6 +296,12 @@ export const api = {
   /** Signs every device out; the caller gets a fresh token and stays in. */
   revokeAllSessions: () =>
     request<{ token: string }>("/api/auth/sessions/revoke-all", { method: "POST" }),
+  /** Deletes the signed-in account for good; the proof is the login key. */
+  deleteAccount: (loginKey: string, code?: string) =>
+    request<void>("/api/user", {
+      method: "DELETE",
+      body: JSON.stringify(code ? { loginKey, code } : { loginKey }),
+    }),
 
   changePassword: (
     currentLoginKey: string,

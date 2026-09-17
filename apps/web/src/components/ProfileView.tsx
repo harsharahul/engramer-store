@@ -164,6 +164,12 @@ export function ProfileView(props: {
   const [policy, setPolicy] = useState<BackupPolicy>(() => loadPolicy());
   const [backupRun, setBackupRun] = useState<BackupProgress | null>(null);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [delConfirm, setDelConfirm] = useState("");
+  const [delPassword, setDelPassword] = useState("");
+  const [delCode, setDelCode] = useState("");
+  const [delBusy, setDelBusy] = useState(false);
+  const [delError, setDelError] = useState<string | null>(null);
   const [pwCurrent, setPwCurrent] = useState("");
   const [pwNext, setPwNext] = useState("");
   const [pwConfirm, setPwConfirm] = useState("");
@@ -761,6 +767,18 @@ export function ProfileView(props: {
           </div>
           <button className="btn" onClick={props.onOpenTwoFactor}>
             <KeyGlyph size={13} /> Manage
+          </button>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Delete account</b>
+            <div className="profile-row-sub">
+              Removes your account and every file in it from the server, for good. Download
+              anything you want to keep first.
+            </div>
+          </div>
+          <button className="btn danger" onClick={() => setDeletingAccount(true)}>
+            Delete…
           </button>
         </div>
         <div className="profile-row">
@@ -1682,6 +1700,86 @@ export function ProfileView(props: {
         </section>
       )}
 
+      {deletingAccount && (
+        <div
+          className="overlay"
+          onClick={() => {
+            if (!delBusy) {
+              setDeletingAccount(false);
+            }
+          }}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Delete your account</h2>
+            <p className="modal-sub">
+              Every file, folder, share and setting on the server goes, along with the account
+              itself. Nothing can be recovered afterwards, not with the recovery key either. Your
+              other devices are signed out. Files you shared with others disappear for them too.
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (delConfirm.trim().toLowerCase() !== (store.session?.email ?? "").toLowerCase()) {
+                  setDelError("Type your email address exactly to confirm.");
+                  return;
+                }
+                setDelBusy(true);
+                setDelError(null);
+                void store
+                  .deleteAccount(delPassword, delCode.trim() || undefined)
+                  .then(() => props.onToast("Your account has been deleted."))
+                  .catch((err: unknown) => {
+                    const message = err instanceof Error ? err.message : "Could not delete the account.";
+                    setDelError(/two-factor/i.test(message) ? "Enter the current two-factor code." : message);
+                  })
+                  .finally(() => setDelBusy(false));
+              }}
+            >
+              <label className="field">
+                <span>Type your email address to confirm</span>
+                <input
+                  value={delConfirm}
+                  onChange={(e) => setDelConfirm(e.target.value)}
+                  placeholder={store.session?.email ?? ""}
+                  autoComplete="off"
+                  autoFocus
+                />
+              </label>
+              <label className="field">
+                <span>Your password</span>
+                <input
+                  type="password"
+                  value={delPassword}
+                  onChange={(e) => setDelPassword(e.target.value)}
+                  autoComplete="current-password"
+                />
+              </label>
+              <label className="field">
+                <span>Two-factor code, if you have it on</span>
+                <input
+                  value={delCode}
+                  onChange={(e) => setDelCode(e.target.value)}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                />
+              </label>
+              {delError && <div className="error-text">{delError}</div>}
+              <div className="modal-actions">
+                <button type="button" className="btn" onClick={() => setDeletingAccount(false)} disabled={delBusy}>
+                  Keep my account
+                </button>
+                <button
+                  type="submit"
+                  className="btn danger"
+                  disabled={delBusy || !delPassword || !delConfirm}
+                >
+                  {delBusy ? "Deleting…" : "Delete everything"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       {changingPassword && (
         <div
           className="overlay"
