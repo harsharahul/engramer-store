@@ -62,6 +62,12 @@ const KIND_SYNONYMS: Record<string, string> = {
   links: "link",
   bookmark: "link",
   bookmarks: "link",
+  slides: "slides",
+  presentation: "slides",
+  presentations: "slides",
+  deck: "slides",
+  zip: "archive",
+  archives: "archive",
 };
 
 /** Every word `type:` understands, canonical kinds and their synonyms; the

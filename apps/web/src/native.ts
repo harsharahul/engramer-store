@@ -418,6 +418,38 @@ function keyB64(key: Uint8Array): string {
  * command but fails throws: the in-page path holds whole files in
  * memory, and retrying a large one there is the crash this exists to end.
  */
+/**
+ * Opens a vault file in whatever app the Mac has for it: the shell
+ * decrypts it into its private staging area and asks the system to open
+ * the copy. Desktop shell only; null where the command does not exist.
+ */
+export async function nativeOpenWith(
+  file: { id: string; name: string; key: Uint8Array; digest?: string },
+  token: string,
+): Promise<boolean> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    return false;
+  }
+  try {
+    await invoke("file_open_with", {
+      fileId: file.id,
+      key: keyB64(file.key),
+      token,
+      base: location.origin,
+      name: file.name,
+      digest: file.digest ?? null,
+    });
+    return true;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    if (/not allowed|not found/i.test(reason)) {
+      return false;
+    }
+    throw new Error(reason);
+  }
+}
+
 export async function nativeExportFile(
   file: { id: string; name: string; key: Uint8Array; digest?: string },
   token: string,

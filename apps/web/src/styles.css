@@ -6156,3 +6156,202 @@ button.link {
   word-break: break-all;
   user-select: all;
 }
+
+/* ---------- text editor, image editor, archives ---------- */
+
+.editor-body.split {
+  gap: 16px;
+}
+
+.editor-code {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--ink-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.editor-code .cm-editor {
+  height: 100%;
+}
+
+.editor-code .cm-editor.cm-focused {
+  outline: none;
+}
+
+.editor-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 24px 28px;
+  background: var(--ink-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  line-height: 1.55;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin: 1.2em 0 0.4em;
+}
+
+.markdown pre {
+  background: var(--ink-2);
+  padding: 10px 12px;
+  border-radius: 8px;
+  overflow: auto;
+}
+
+.markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+.markdown img {
+  max-width: 100%;
+}
+
+.markdown table {
+  border-collapse: collapse;
+}
+
+.markdown td,
+.markdown th {
+  border: 1px solid var(--hairline);
+  padding: 4px 8px;
+}
+
+@media (max-width: 760px) {
+  .editor-body.split {
+    flex-direction: column;
+  }
+}
+
+.imgedit-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 20px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.imgedit-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--hairline);
+  margin: 0 4px;
+}
+
+.imgedit-colors {
+  display: inline-flex;
+  gap: 6px;
+  margin: 0 6px;
+}
+
+.imgedit-color {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.imgedit-color.on {
+  border-color: var(--paper);
+}
+
+.imgedit-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 24px 24px;
+}
+
+.imgedit-stage {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+}
+
+.imgedit-canvas {
+  max-width: 100%;
+  max-height: calc(100vh - 170px);
+  object-fit: contain;
+  border-radius: 6px;
+  touch-action: none;
+}
+
+.imgedit-canvas.drawing {
+  cursor: crosshair;
+}
+
+.imgedit-frame {
+  position: absolute;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.archive-body {
+  width: 100%;
+  max-width: 720px;
+  align-self: flex-start;
+  color: var(--paper);
+}
+
+.archive-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0 12px;
+  color: var(--paper-dim);
+  font-size: 13px;
+}
+
+.archive-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--ink-1);
+  overflow: hidden;
+}
+
+.archive-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 13px;
+}
+
+.archive-list li:last-child {
+  border-bottom: 0;
+}
+
+.archive-list li.dir .archive-name {
+  color: var(--paper-dim);
+  font-weight: 600;
+}
+
+.archive-size {
+  color: var(--paper-faint);
+  white-space: nowrap;
+}
+
+.preview-fallback-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 14px;
+}

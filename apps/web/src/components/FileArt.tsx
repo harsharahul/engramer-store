@@ -16,6 +16,7 @@ export const KIND_ACCENTS: Record<FileKind | "folder", string> = {
   doc: "#5b8def",
   sheet: "#3fb984",
   archive: "#93a4c3",
+  slides: "#f59e0b",
   link: "#6ea8fe",
   other: "#8593ab",
 };

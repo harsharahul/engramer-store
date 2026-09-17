@@ -257,6 +257,46 @@ pub async fn file_export(
         .unwrap_or(name))
 }
 
+/// Opens a vault file in the app the system has for it. The file is
+/// exported to the private staging area exactly as a share would be, and
+/// the system opens that copy; the next export sweeps it. Desktop only:
+/// on the phone the share sheet is the way to another app.
+#[tauri::command]
+pub async fn file_open_with(
+    app: tauri::AppHandle,
+    file_id: String,
+    key: String,
+    token: String,
+    base: String,
+    name: String,
+    digest: Option<String>,
+) -> Result<(), String> {
+    use tauri::Manager;
+    let landed = file_export(app.clone(), file_id, key, token, base, name, digest).await?;
+    let exports = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("no data directory: {err}"))?
+        .join("exports");
+    let path = exports.join(landed);
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("open")
+            .arg(&path)
+            .status()
+            .map_err(|err| err.to_string())?;
+        if !status.success() {
+            return Err("the system could not open the file".to_string());
+        }
+        return Ok(());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        Err("opening in another app is a Mac feature".to_string())
+    }
+}
+
 /// Presents the share sheet on the exported file; its completion removes
 /// the decrypted staging copy, however the person finished.
 #[cfg(target_os = "ios")]
