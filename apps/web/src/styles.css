@@ -6355,3 +6355,23 @@ button.link {
   justify-content: center;
   margin-top: 14px;
 }
+
+/* ---------- the Mac shell's title bar ---------- */
+
+/* The system title bar is hidden and the traffic lights sit inset at the
+   top left, so the sidebar begins below them and the brand row and the
+   top bar are the strip that drags the window. */
+.frame.shell-mac > .sidebar,
+.frame.shell-mac.sidebar-rail > .sidebar {
+  padding-top: 52px;
+}
+
+.frame.shell-mac.sidebar-rail > .sidebar:hover {
+  padding-top: 52px;
+}
+
+.frame.shell-mac .sidebar .brand,
+.frame.shell-mac .topbar {
+  -webkit-user-select: none;
+  user-select: none;
+}
