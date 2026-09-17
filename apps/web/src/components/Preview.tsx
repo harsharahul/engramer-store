@@ -6,7 +6,9 @@ import { bridgeMediaUrl, mediaBridgeAvailable, mediaUrl, onMediaProgress, regist
 import { nativeMediaPace, nativeMediaRelease, nativeShell } from "../native";
 import { linkStarved } from "../streamhealth";
 import { swipeStep } from "../neighbors";
-import { fileKind, formatBytes } from "../format";
+import { extension, fileKind, formatBytes } from "../format";
+import type { ExtractedEntry } from "../archive";
+import { ArchiveBody } from "./ArchiveBody";
 import { displayableImage } from "../intel/heic";
 import { saveDecryptedFile } from "../download";
 import { offlineExcuse } from "../offlinefiles";
@@ -36,6 +38,7 @@ interface Loaded {
   docx: Uint8Array | null;
   sheet: Uint8Array | null;
   pdf: Uint8Array | null;
+  archive: Uint8Array | null;
 }
 
 /**
@@ -228,6 +231,10 @@ export function Preview(props: {
    * absent, the document is read only. */
   onSavePdf?: (bytes: Uint8Array) => Promise<void>;
   onSavePdfCopy?: (bytes: Uint8Array, name: string) => Promise<void>;
+  /** Extracts an archive's entries into the vault through the upload path. */
+  onExtract?: (entries: ExtractedEntry[]) => Promise<void>;
+  /** Opens the decrypted file in another app on this Mac. */
+  onOpenElsewhere?: () => void;
   /** Star toggle; double-tap now belongs to zoom, so the button is explicit. */
   onFavorite?: () => void;
   /** Move to the next or previous file in the view; null when at an end. */
@@ -386,7 +393,7 @@ export function Preview(props: {
     // native path on exactly the platform that needed it most.
     if ((kind === "video" || kind === "audio") && (nativeShell() || mediaBridgeAvailable())) {
       registerMediaKey(file.id);
-      setLoaded({ url: mediaUrl(file.id), text: null, docx: null, sheet: null, pdf: null });
+      setLoaded({ url: mediaUrl(file.id), text: null, docx: null, sheet: null, pdf: null, archive: null });
       const stopProgress = onMediaProgress(file.id, (done, total) =>
         setProgress(done < total ? { loaded: done, total } : null),
       );
@@ -440,7 +447,7 @@ export function Preview(props: {
         setProgress(null);
         // Reading it through was the check; record that it passed.
         useStore.getState().markVerified(file.id);
-        const empty = { url: null, text: null, docx: null, sheet: null, pdf: null };
+        const empty = { url: null, text: null, docx: null, sheet: null, pdf: null, archive: null };
         if (kind === "text" || kind === "link") {
           setLoaded({ ...empty, text: new TextDecoder().decode(bytes) });
           return;
@@ -455,6 +462,10 @@ export function Preview(props: {
         }
         if (kind === "pdf") {
           setLoaded({ ...empty, pdf: bytes });
+          return;
+        }
+        if (kind === "archive") {
+          setLoaded({ ...empty, archive: bytes });
           return;
         }
         const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: file.mime });
@@ -773,15 +784,26 @@ export function Preview(props: {
           <DocxBody bytes={loaded.docx} name={file.name} />
         ) : kind === "link" && loaded.text !== null ? (
           <LinkBody body={loaded.text} name={file.name} />
+        ) : kind === "archive" && loaded.archive ? (
+          <ArchiveBody bytes={loaded.archive} name={file.name} onExtract={props.onExtract} />
         ) : loaded.text !== null ? (
           <pre>{loaded.text}</pre>
         ) : (
           <div className="preview-fallback">
-            No inline preview for this type.
+            {kind === "slides"
+              ? "Presentations do not open in the app yet."
+              : `No preview for ${extension(file.name) ? `.${extension(file.name).toLowerCase()}` : "this kind of"} files.`}
             <br />
-            <button className="btn" style={{ marginTop: 14 }} onClick={download}>
-              <DownloadGlyph /> Download decrypted copy
-            </button>
+            <div className="preview-fallback-actions">
+              {props.onOpenElsewhere && (
+                <button className="btn" onClick={props.onOpenElsewhere}>
+                  Open in another app
+                </button>
+              )}
+              <button className="btn" onClick={download}>
+                <DownloadGlyph /> Download decrypted copy
+              </button>
+            </div>
           </div>
         )}
       </div>

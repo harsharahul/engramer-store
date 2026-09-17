@@ -29,6 +29,7 @@ commands.allow = [
     "picked_sweep",
     "video_poster",
     "file_export",
+    "file_open_with",
     "offline_pin",
     "offline_unpin",
     "offline_remove",

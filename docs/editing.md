@@ -73,8 +73,21 @@ pivot tables, charts, complex conditional formatting, embedded vector images,
 and precise pagination. Only the native-model engines (OnlyOffice client-side,
 LibreOffice WASM) preserve them.
 
-Presentations (PPTX) come with the OnlyOffice path for free and are otherwise
-deferred.
+Presentations (PPTX) would come with the OnlyOffice presentation editor, which
+this build does not vendor; a presentation is recognised as one, says so, and
+offers Open in another app on the Mac and Download everywhere. OpenDocument
+text (ODT) and spreadsheets (ODS) take the Word and Excel paths, since the
+converter reads and writes both.
+
+Text, Markdown and code open in a CodeMirror editor: highlighting by file
+type, line numbers, search inside the document, and for Markdown a preview
+beside the text rendered through a sanitizer. Pictures have an editor of
+their own: rotate, flip, crop to a shape, boxes, arrows, text and blur, saved
+as a new version (a HEIC becomes a JPEG beside the original). Archives (zip,
+tar, tar.gz) preview as their listing and extract into the vault through the
+ordinary upload path, folders included. PDFs are covered in the viewer:
+selection, find, zoom, thumbnails, outline, markup, forms and page
+operations, all saved as new versions.
 
 ## What was chosen
 

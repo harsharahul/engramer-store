@@ -156,6 +156,7 @@ pub fn run() {
             photos::picked_sweep,
             photos::video_poster,
             saveout::file_export,
+            saveout::file_open_with,
             offline::offline_pin,
             offline::offline_unpin,
             offline::offline_remove,

@@ -35,7 +35,7 @@ import {
   type Vocabulary,
 } from "../search/natural";
 import { SCENES } from "../intel/scenes";
-import { collectDropped, fromDirectoryInput } from "../uploader";
+import { collectDropped, fromDirectoryInput, type TreeFile } from "../uploader";
 import { MOBILE_QUERY, useMediaQuery, useViewportWidth } from "../media";
 import {
   DETAILS_DEFAULT,
@@ -79,7 +79,7 @@ import {
   markUnlockDeclined,
   unlockDeclined,
 } from "../unlock";
-import { nativeShell, nativeUnlockAvailable, pickPhotos } from "../native";
+import { nativeOpenWith, nativeShell, nativeUnlockAvailable, pickPhotos } from "../native";
 import {
   installSettingsSync,
   pullSettings,
@@ -131,6 +131,9 @@ import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { MoveDialog } from "./MoveDialog";
 import { Preview } from "./Preview";
 import { Editor } from "./Editor";
+import { ImageEditor } from "./ImageEditor";
+import type { ExtractedEntry } from "../archive";
+import { isHandheld } from "../analysisslot";
 
 // The Word editor is heavy (SuperDoc); it loads only when a .docx is opened.
 /** Word and Excel open in the full editor; everything else does not. */
@@ -789,6 +792,39 @@ export function Vault() {
     });
   }, []);
 
+  /** An archive's entries into the vault, in a folder named after it,
+   * through the tree upload so nested folders come along. */
+  const extractInto = async (entries: ExtractedEntry[], archive: FileEntry) => {
+    const base = archive.name.replace(/\.(zip|tar|tgz|tar\.gz)$/i, "") || "Extracted";
+    const items: TreeFile[] = entries.map((entry) => {
+      const parts = entry.path.split("/");
+      const name = parts.pop() ?? "file";
+      return {
+        file: new File([entry.data.slice().buffer as ArrayBuffer], name),
+        path: [base, ...parts],
+      };
+    });
+    setPreviewId(null);
+    await store.uploadTree(items, archive.shared ? null : archive.folderId);
+    showToast(`Extracted ${items.length === 1 ? "1 file" : `${items.length} files`} into ${base}`);
+  };
+
+  /** Hands a decrypted copy to whatever app the Mac has for it. */
+  const openElsewhere = async (file: FileEntry) => {
+    const token = store.session?.token;
+    if (!token) {
+      return;
+    }
+    try {
+      const opened = await nativeOpenWith(file, token);
+      if (!opened) {
+        showToast("This shell cannot open files in other apps; use Download.");
+      }
+    } catch (err) {
+      showToast(err instanceof Error && err.message ? `Could not open: ${err.message}` : "Could not open the file.");
+    }
+  };
+
   /** One PDF from several, in the order the view shows them; a new file
    * beside the first, with the Activity log saying what was combined. */
   const combinePdfs = async (ids: string[]) => {
@@ -1028,6 +1064,11 @@ export function Vault() {
         ]
       : []),
     { id: "download", label: "Download", icon: <DownloadGlyph size={13} />, run: () => download(file) },
+    // The Mac's other apps: the shell decrypts a private copy and asks
+    // the system to open it. Where there is no shell, Download is the way.
+    ...(nativeShell() && !isHandheld()
+      ? [{ id: "open-with", label: "Open in another app", run: () => void openElsewhere(file) }]
+      : []),
     // Offline access is a shell promise: the store on disk does not
     // exist in a plain browser, so the choice only appears where it can
     // be kept.
@@ -3210,10 +3251,25 @@ export function Vault() {
             inspect(previewFile.id);
           }}
           onEdit={
-            ["text", "doc", "sheet"].includes(fileKind(previewFile.mime, previewFile.name))
+            ["text", "doc", "sheet", "image"].includes(fileKind(previewFile.mime, previewFile.name)) &&
+            !previewFile.shared
               ? () => {
                   setEditorId(previewFile.id);
                   setPreviewId(null);
+                }
+              : undefined
+          }
+          onExtract={
+            previewFile.shared
+              ? undefined
+              : async (entries) => {
+                  await extractInto(entries, previewFile);
+                }
+          }
+          onOpenElsewhere={
+            nativeShell() && !isHandheld()
+              ? () => {
+                  void openElsewhere(previewFile);
                 }
               : undefined
           }
@@ -3279,6 +3335,24 @@ export function Vault() {
             onClose={() => setEditorId(null)}
           />
         </Suspense>
+      ) : editorFile && fileKind(editorFile.mime, editorFile.name) === "image" ? (
+        <ImageEditor
+          file={editorFile}
+          onSave={async (bytes, mime, name) => {
+            if (name === editorFile.name) {
+              // Same type: a new version of the same picture.
+              await store.saveFileBinary(editorFile.id, bytes);
+              store.finishActivity("processing", `Saved ${editorFile.name}`, "A new version with your edits.");
+            } else {
+              // A HEIC (or another type the browser cannot write) becomes a
+              // JPEG beside the original, which stays as it was.
+              const id = await store.saveFileCopy(editorFile.id, bytes, undefined, { name });
+              store.finishActivity("processing", `Saved ${name}`, `Edited from ${editorFile.name}.`);
+              showToast(`Saved ${name}`, () => setPreviewId(id));
+            }
+          }}
+          onClose={() => setEditorId(null)}
+        />
       ) : editorFile ? (
         <Editor
           file={editorFile}

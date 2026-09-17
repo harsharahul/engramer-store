@@ -12,6 +12,13 @@ describe("fileKind", () => {
   const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
+  it("recognises presentations and OpenDocument files", () => {
+    expect(fileKind("", "deck.pptx")).toBe("slides");
+    expect(fileKind("application/vnd.oasis.opendocument.presentation", "talk.odp")).toBe("slides");
+    expect(fileKind("", "letter.odt")).toBe("doc");
+    expect(fileKind("", "budget.ods")).toBe("sheet");
+  });
+
   it("recognises a saved link, the file a shared web page becomes when it cannot be rendered", () => {
     expect(fileKind("", "How to file taxes.url")).toBe("link");
     expect(fileKind("application/octet-stream", "Apple.webloc")).toBe("link");

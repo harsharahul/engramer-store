@@ -33,6 +33,7 @@ export type FileKind =
   | "sheet"
   | "archive"
   | "link"
+  | "slides"
   | "other";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -43,8 +44,11 @@ export function fileKind(mime: string, name: string): FileKind {
   if (mime.startsWith("video/")) return "video";
   if (mime.startsWith("audio/")) return "audio";
   if (mime === "application/pdf" || /\.pdf$/i.test(name)) return "pdf";
-  if (mime === DOCX_MIME || /\.docx$/i.test(name)) return "doc";
-  if (mime === XLSX_MIME || /\.xlsx$/i.test(name)) return "sheet";
+  // OpenDocument text and sheets take the same paths as Word and Excel
+  // files: the converter reads and writes both.
+  if (mime === DOCX_MIME || /\.(docx|odt)$/i.test(name)) return "doc";
+  if (mime === XLSX_MIME || /\.(xlsx|ods)$/i.test(name)) return "sheet";
+  if (/\.(pptx|ppt|key|odp)$/i.test(name) || /presentation/i.test(mime)) return "slides";
   // A saved web page address, before the text rule: a .url file arrives
   // as plain text from the share extension.
   if (/\.(url|webloc)$/i.test(name)) return "link";
