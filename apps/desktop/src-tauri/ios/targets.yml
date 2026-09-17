@@ -16,6 +16,7 @@ targets:
       - path: ../../ios/ShareExtension
       - path: ../../apple/Shared
       - path: ../../ios/Generated
+      - path: ../../apple/PrivacyInfo.xcprivacy
     info:
       path: EngramShare/Info.plist
       properties:
@@ -57,6 +58,7 @@ targets:
       - path: ../../apple/FilesProvider
       - path: ../../apple/Shared
       - path: ../../ios/Generated
+      - path: ../../apple/PrivacyInfo.xcprivacy
     info:
       path: EngramFiles/Info.plist
       properties:
