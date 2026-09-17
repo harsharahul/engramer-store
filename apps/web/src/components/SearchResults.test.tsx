@@ -96,8 +96,12 @@ describe("a search result row", () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
-  it("reads as clickable", () => {
+  it("reads as clickable, and as a file to the marquee so a real click is not swallowed", () => {
     const row = mount({ onOpen: () => {}, onSelect: () => {} });
     expect(row.getAttribute("role")).toBe("button");
+    // The band selection starts on any pointerdown outside a file and
+    // swallows the click that follows; without this the row's click
+    // never arrived from a real mouse, only from a synthetic event.
+    expect(row.dataset.fileId).toBe("f1");
   });
 });

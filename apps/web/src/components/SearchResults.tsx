@@ -86,6 +86,9 @@ export function ResultRow(props: {
     <div
       className={`row result${props.selected ? " selected" : ""}${props.cursor ? " cursor" : ""}`}
       role="button"
+      // The marquee treats anything without a file id as empty space and
+      // swallows the click that ends its band; a result is a file.
+      data-file-id={hit.file.id}
       data-cursor={props.cursor}
       style={{ "--i": Math.min(props.index, 20) } as CSSProperties}
       onClick={(e) => {
