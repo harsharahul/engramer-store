@@ -6026,16 +6026,23 @@ button.link {
 }
 
 /* pdf.js requires an absolutely positioned, scrolling container. */
-.pdfv-container {
+/* pdf.js requires an absolutely positioned, scrolling container; the
+   stage is the flex child that gives it a box to fill. */
+.pdfv-stage {
   position: relative;
   flex: 1;
   min-width: 0;
-  overflow: auto;
   background: var(--ink-2);
 }
 
-.pdfv-container.pdfv-hidden {
+.pdfv-stage.pdfv-hidden {
   display: none;
+}
+
+.pdfv-container {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
 }
 
 .pdfv-container .pdfViewer .page {

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import type { EventBus, PDFViewer as PdfJsViewer } from "pdfjs-dist/web/pdf_viewer.mjs";
-import "pdfjs-dist/web/pdf_viewer.css";
+import viewerCss from "pdfjs-dist/web/pdf_viewer.css?inline";
 import { diag } from "../../diag";
 import { applyPagePlan, extractPages, type PagePlan } from "../../pdf/pages";
+import { ensureScopedStylesheet } from "../../pdf/scopedcss";
 import { ChevronLeftGlyph, ChevronRightGlyph, PencilGlyph, SearchGlyph, XGlyph } from "../Icon";
 import { PdfThumbnails } from "./PdfThumbnails";
 
@@ -101,6 +102,9 @@ export function PdfViewer(props: {
 
   // ----- load the document and mount pdf.js's viewer -----
   useEffect(() => {
+    // pdf.js's stylesheet names generic classes (.sidebar among them);
+    // it is confined to this viewer's root so it reaches nothing else.
+    ensureScopedStylesheet("pdfjs-viewer", viewerCss, ".pdfv");
     let cancelled = false;
     let loading: { destroy: () => Promise<void> } | null = null;
     let viewer: PdfJsViewer | null = null;
@@ -339,15 +343,16 @@ export function PdfViewer(props: {
       return { ...current, rotations };
     });
 
-  const removePicked = () =>
-    setPlan((current) => {
-      const order = current.order.filter((n) => !picked.has(n));
-      if (order.length === 0) {
-        props.onToast?.("A document keeps at least one page.");
-        return current;
-      }
-      return { ...current, order };
-    });
+  const removePicked = () => {
+    const order = plan.order.filter((n) => !picked.has(n));
+    if (order.length === 0) {
+      props.onToast?.("A document keeps at least one page.");
+      return;
+    }
+    setPlan((current) => ({ ...current, order }));
+    // The removed pages are no longer there to be selected.
+    setPicked(new Set());
+  };
 
   const movePicked = (by: -1 | 1) =>
     setPlan((current) => {
@@ -629,10 +634,13 @@ export function PdfViewer(props: {
             large
           />
         )}
-        {/* pdf.js owns everything inside: the container must be positioned
-            and scroll, and the viewer div must be its first child. */}
-        <div className={`pdfv-container${mode === "pages" ? " pdfv-hidden" : ""}`} ref={container}>
-          <div className="pdfViewer" />
+        {/* pdf.js owns everything inside: it requires an absolutely
+            positioned, scrolling container with the viewer div as its
+            first child, so the stage supplies the box it fills. */}
+        <div className={`pdfv-stage${mode === "pages" ? " pdfv-hidden" : ""}`}>
+          <div className="pdfv-container" ref={container}>
+            <div className="pdfViewer" />
+          </div>
         </div>
       </div>
     </div>
