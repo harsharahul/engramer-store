@@ -22,11 +22,20 @@ export interface RecentSearch {
   at: number;
 }
 
+/** A pin is a switch, not a dismissal: it can go both ways, so each key
+ * keeps the time of its last word and the newest word wins on merge. */
+export interface PinState {
+  on: boolean;
+  at: number;
+}
+
 export interface Decisions {
   dismissedInsights: string[];
   dismissedTrips: string[];
   noticesSeen: string[];
   recentSearches: RecentSearch[];
+  /** Pinned collections by tag; absent in blobs from before pins travelled. */
+  pins?: Record<string, PinState>;
 }
 
 /** Newest entries kept per set; the sets are memory, not an archive. */
@@ -49,7 +58,37 @@ const LEGACY_TRIPS = "engram-trips-dismissed";
 const LEGACY_RECENTS = "engram-recent-searches";
 
 function empty(): Decisions {
-  return { dismissedInsights: [], dismissedTrips: [], noticesSeen: [], recentSearches: [] };
+  return { dismissedInsights: [], dismissedTrips: [], noticesSeen: [], recentSearches: [], pins: {} };
+}
+
+function pinsOf(value: unknown): Record<string, PinState> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const out: Record<string, PinState> = {};
+  for (const [key, state] of Object.entries(value as Record<string, unknown>)) {
+    const candidate = state as PinState;
+    if (candidate && typeof candidate.on === "boolean" && typeof candidate.at === "number") {
+      out[key] = { on: candidate.on, at: candidate.at };
+    }
+  }
+  return out;
+}
+
+function mergePins(
+  local: Record<string, PinState> | undefined,
+  remote: Record<string, PinState> | undefined,
+): { merged: Record<string, PinState>; localKnewMore: boolean } {
+  const merged: Record<string, PinState> = { ...(remote ?? {}) };
+  let localKnewMore = false;
+  for (const [key, state] of Object.entries(local ?? {})) {
+    const held = merged[key];
+    if (!held || state.at > held.at) {
+      merged[key] = state;
+      localKnewMore = true;
+    }
+  }
+  return { merged, localKnewMore };
 }
 
 function strings(value: unknown): string[] {
@@ -86,6 +125,7 @@ function normalize(value: unknown): Decisions {
     dismissedTrips: strings(record.dismissedTrips),
     noticesSeen: strings(record.noticesSeen),
     recentSearches: searches(record.recentSearches),
+    pins: pinsOf(record.pins),
   };
 }
 
@@ -179,7 +219,32 @@ export function mergeDecisions(
   ) {
     localKnewMore = true;
   }
+  const pins = mergePins(local.pins, remote.pins);
+  merged.pins = pins.merged;
+  if (pins.localKnewMore) {
+    localKnewMore = true;
+  }
   return { merged, localKnewMore };
+}
+
+/** The collections the user pinned, as tags. */
+export function pinned(account: string): Set<string> {
+  return new Set(
+    Object.entries(loadDecisions(account).pins ?? {})
+      .filter(([, state]) => state.on)
+      .map(([tag]) => tag),
+  );
+}
+
+export function setPin(account: string, tag: string, on: boolean, at = Date.now()): void {
+  const current = loadDecisions(account);
+  const held = current.pins?.[tag];
+  if (held && held.on === on) {
+    return;
+  }
+  current.pins = { ...(current.pins ?? {}), [tag]: { on, at } };
+  write(account, current);
+  announce();
 }
 
 export function decided(account: string, set: DecisionSet): Set<string> {
@@ -237,7 +302,8 @@ function hasAny(decisions: Decisions): boolean {
     decisions.dismissedInsights.length > 0 ||
     decisions.dismissedTrips.length > 0 ||
     decisions.noticesSeen.length > 0 ||
-    decisions.recentSearches.length > 0
+    decisions.recentSearches.length > 0 ||
+    Object.keys(decisions.pins ?? {}).length > 0
   );
 }
 

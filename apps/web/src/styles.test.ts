@@ -72,3 +72,26 @@ describe("the details panel survives the phone layout", () => {
     expect(/\.frame\.details-overlay\s*>\s*\.details\s*\{[^}]*position:\s*absolute/.test(CSS)).toBe(true);
   });
 });
+
+/**
+ * The sidebar rail keeps a footprint for every group. An album the owner
+ * had just made vanished with its whole group when the sidebar railed on a
+ * laptop window, because the rail hid the group header outright. A group
+ * header may lose its words in the rail, never its icon.
+ */
+describe("the sidebar rail never hides a group", () => {
+  /** Every selector list whose rule turns display off. */
+  function hiddenSelectors(css: string): string[] {
+    return [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+      .filter((rule) => /display:\s*none/.test(rule[2]!))
+      .flatMap((rule) => rule[1]!.split(",").map((s) => s.trim()));
+  }
+
+  it("hides a group header's words, not the header", () => {
+    const railHidden = hiddenSelectors(CSS).filter((s) => s.includes(".sidebar-rail"));
+    expect(railHidden.length).toBeGreaterThan(0);
+    const hidesHeader = railHidden.filter((s) => /\.sidebar-label\s*$/.test(s));
+    expect(hidesHeader).toEqual([]);
+    expect(railHidden.some((s) => s.endsWith(".sidebar-label-text"))).toBe(true);
+  });
+});

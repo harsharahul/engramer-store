@@ -97,7 +97,41 @@ reachable.
 6. **A collection that is a place is also content.** Photos shows an
    albums shelf, so albums are reachable without the sidebar at all.
 
-## 5. Placing a new feature
+## 5. Platform layout
+
+The same jobs, placed per platform. Benchmarks: the Finder and Files
+sidebars, Photos on macOS 26 (pinned collections in a floating sidebar),
+Files and Photos on iOS 26 (a floating tab bar with a search tab).
+
+- **Mac, window 900 px and wider.** A source-list sidebar with three
+  groups in this order: Places (Files, Recent, Photos, Favorites, Shared,
+  Trash, and the attention places while they hold something), Albums
+  (user-made collections: pinned first, then most recently changed, then
+  by title), Library (derived categories, by count). Two levels, never
+  three. A collapsed group header shows its count. The toolbar holds this
+  view's actions (New, Upload, Select, sort, layout, the details and
+  sidebar toggles, Notices). The sidebar foot holds state only: storage
+  used, the version, the account row; every switch lives in Profile.
+  In rail mode each group header keeps its icon, so no group ever has
+  zero footprint, and resting the pointer on the rail brings the full
+  sidebar back.
+- **iPad and wide phone, 700 px and wider.** The Mac layout with the
+  sidebar as a drawer that starts open.
+- **iPhone.** Five tabs, the iOS 26 shape: Files, Photos, Search,
+  Notices, More. Tabs are places, never actions, so Add is the plus in
+  the top bar as in Files and Photos. Search is a tab because finding is
+  a primary job here, the convention Photos, Files and the App Store
+  follow. Notices is a tab so the bell has the same footprint on the
+  phone as on the Mac. More is the sidebar as a list: Recent, Favorites,
+  Shared, Trash, Albums, Library, Profile.
+- **Collections are content too.** The Photos place carries an albums
+  shelf above the months, so an album is reachable without the sidebar
+  at all, on the Mac and on the phone alike.
+- **One icon per concept**, identical on the Mac and the phone, drawn
+  from the existing glyph set; a pinned collection is marked by a pin
+  label, never by a second album icon.
+
+## 6. Placing a new feature
 
 A plan for a new capability answers these before any code is written:
 

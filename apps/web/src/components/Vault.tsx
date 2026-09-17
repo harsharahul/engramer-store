@@ -17,7 +17,6 @@ import { scheduleBackfill } from "../backfill";
 import { installAutoBackup } from "../backup";
 import { api } from "../api";
 import {
-  ACCENTS,
   applyAccent,
   applyTheme,
   currentAccent,
@@ -57,7 +56,14 @@ import { AskCard, type AskStatus } from "./AskCard";
 import { buildAskPrompt, excerpts, rankSources, retrievalTerms } from "../intel/ask";
 import { AssistantError, lastAssistantState } from "../intel/assistant";
 import { dueNotices } from "../notices";
-import { DECISIONS_EVENT, decisionEvents, recentSearches as accountRecentSearches, rememberSearch } from "../decisions";
+import {
+  DECISIONS_EVENT,
+  decisionEvents,
+  pinned,
+  recentSearches as accountRecentSearches,
+  rememberSearch,
+  setPin,
+} from "../decisions";
 import { notifyDue } from "../notifications";
 import { installMediaKeyResponder } from "../mediastream";
 import { installHandoffForegroundRefresh } from "../handoff";
@@ -107,7 +113,8 @@ import { extractText } from "../intel/extract";
 import { CalendarView } from "./CalendarView";
 import { HeadsUp, TripHeadsUp } from "./HeadsUp";
 import { extension, fileKind, formatBytes } from "../format";
-import { albumTitle, albumsFrom } from "../albums";
+import { albumTitle, albumsFrom, type Album } from "../albums";
+import { orderCollections } from "../sidebar";
 import { PhotoGrid } from "./PhotoGrid";
 import { AlbumPicker } from "./AlbumPicker";
 import { SelectionBar } from "./SelectionBar";
@@ -170,7 +177,6 @@ import {
   MenuGlyph,
   ChevronRightGlyph,
   MonitorGlyph,
-  MoonGlyph,
   MoveGlyph,
   NoteGlyph,
   OfflineGlyph,
@@ -185,7 +191,6 @@ import {
   ShareGlyph,
   SparkGlyph,
   StarGlyph,
-  SunGlyph,
   TagGlyph,
   TrashGlyph,
   UploadGlyph,
@@ -317,7 +322,8 @@ export function Vault() {
   const [adminOpen, setAdminOpen] = useState(false);
   const [unlockPromptOpen, setUnlockPromptOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  // A toast that created or moved something carries the way there.
+  const [toast, setToast] = useState<{ text: string; action?: () => void } | null>(null);
   const [updateReady, setUpdateReady] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => currentTheme());
   const [accent, setAccent] = useState<string>(() => currentAccent());
@@ -330,7 +336,10 @@ export function Vault() {
   );
   useEffect(() => {
     const account = store.session?.email ?? "";
-    const reread = () => setRecentSearches(accountRecentSearches(account));
+    const reread = () => {
+      setRecentSearches(accountRecentSearches(account));
+      setPins(pinned(account));
+    };
     reread();
     decisionEvents.addEventListener(DECISIONS_EVENT, reread);
     return () => decisionEvents.removeEventListener(DECISIONS_EVENT, reread);
@@ -483,12 +492,13 @@ export function Vault() {
     }
   };
 
-  const showToast = useCallback((message: string) => {
-    setToast(message);
+  const showToast = useCallback((message: string, action?: () => void) => {
+    setToast({ text: message, action });
     if (toastTimer.current) {
       clearTimeout(toastTimer.current);
     }
-    toastTimer.current = setTimeout(() => setToast(null), 3200);
+    // One with somewhere to go stays a little longer.
+    toastTimer.current = setTimeout(() => setToast(null), action ? 5000 : 3200);
   }, []);
 
   const currentFolderId = view.kind === "folder" ? view.id : null;
@@ -550,6 +560,17 @@ export function Vault() {
     () => albumsFrom(liveFiles.filter((f) => !f.shared)),
     [liveFiles],
   );
+  // What the user pinned follows the account (decisions.ts); the sidebar
+  // leads with it, then with what changed most recently.
+  const [pins, setPins] = useState<Set<string>>(() => pinned(store.session?.email ?? ""));
+  const orderedAlbums = useMemo(() => orderCollections(albums, pins), [albums, pins]);
+  const albumCovers = useMemo(() => {
+    const byId = new Map(liveFiles.map((f) => [f.id, f]));
+    return orderedAlbums.map((album) => ({
+      album,
+      cover: album.coverFileId ? byId.get(album.coverFileId) : undefined,
+    }));
+  }, [orderedAlbums, liveFiles]);
 
   const sharedWithMeCount = useMemo(
     () => liveFiles.reduce((n, f) => n + (f.shared ? 1 : 0), 0),
@@ -768,11 +789,39 @@ export function Vault() {
     });
   }, []);
 
+  /** The album a change just touched: its sidebar row shows itself. */
+  const [revealTag, setRevealTag] = useState<string | null>(null);
+  const revealAlbum = (tag: string) => {
+    // A group the user just added to opens, whatever its remembered
+    // state, and the row is scrolled into view and lit for a moment.
+    setAlbumsOpen(true);
+    persist("engramer-side-albums", true);
+    setRevealTag(tag);
+    setTimeout(() => {
+      document
+        .querySelector<HTMLElement>(`[data-album="${tag}"]`)
+        ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 60);
+    setTimeout(() => setRevealTag((current) => (current === tag ? null : current)), 1800);
+  };
+
+  const openAlbum = (tag: string) => {
+    setQuery("");
+    setDrawerOpen(false);
+    setView({ kind: "album", tag });
+  };
+
   const addSelectionToAlbum = (ids: string[], tag: string) => {
     setAlbumPickerIds(null);
     void store
       .addToAlbum(ids, tag)
-      .then(() => showToast(`Added ${ids.length === 1 ? "1 item" : `${ids.length} items`} to ${albumTitle(tag)}`))
+      .then(() => {
+        revealAlbum(tag);
+        showToast(
+          `Added ${ids.length === 1 ? "1 item" : `${ids.length} items`} to ${albumTitle(tag)}`,
+          () => openAlbum(tag),
+        );
+      })
       .catch(() => showToast("Could not add to the album."));
   };
 
@@ -2052,14 +2101,18 @@ export function Vault() {
   );
 
   /** A sidebar section heading that folds its list, Finder-style. */
+  // A group header keeps its icon in the rail (only the words go), so a
+  // group is never without a footprint; collapsed, it shows its count.
   const sectionLabel = (
     icon: React.ReactNode,
     label: string,
     open: boolean,
     onToggle: () => void,
+    count?: number,
   ) => (
-    <button className="sidebar-label" aria-expanded={open} onClick={onToggle}>
-      {icon} {label}
+    <button className="sidebar-label" aria-expanded={open} onClick={onToggle} title={label}>
+      {icon} <span className="sidebar-label-text">{label}</span>
+      {!open && count !== undefined && count > 0 && <span className="nav-count">{count}</span>}
       <span className="disclosure" aria-hidden="true">
         <ChevronRightGlyph size={11} />
       </span>
@@ -2162,26 +2215,47 @@ export function Vault() {
 
         {albums.length > 0 && (
           <>
-            {sectionLabel(<BookGlyph size={12} />, "Albums", albumsOpen, () => {
-              setAlbumsOpen(!albumsOpen);
-              persist("engramer-side-albums", !albumsOpen);
-            })}
+            {sectionLabel(
+              <BookGlyph size={12} />,
+              "Albums",
+              albumsOpen,
+              () => {
+                setAlbumsOpen(!albumsOpen);
+                persist("engramer-side-albums", !albumsOpen);
+              },
+              albums.length,
+            )}
             {albumsOpen && (
-            <div className="library-list">
-              {albums.map((album) => (
+            <div className="library-list" data-group="albums">
+              {orderedAlbums.map((album) => (
                 <button
                   key={album.tag}
+                  data-album={album.tag}
                   className={`nav-item small${
                     view.kind === "album" && view.tag === album.tag && !searching ? " active" : ""
-                  }`}
-                  onClick={() => {
-                    setQuery("");
-                    setDrawerOpen(false);
-                    setView({ kind: "album", tag: album.tag });
+                  }${revealTag === album.tag ? " reveal" : ""}`}
+                  onClick={() => openAlbum(album.tag)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    const isPinned = pins.has(album.tag);
+                    setCtxMenu({
+                      x: event.clientX,
+                      y: event.clientY,
+                      title: album.title,
+                      items: [
+                        { id: "open", label: "Open", run: () => openAlbum(album.tag) },
+                        {
+                          id: "pin",
+                          label: isPinned ? "Unpin" : "Pin to the top",
+                          run: () => setPin(store.session?.email ?? "", album.tag, !isPinned),
+                        },
+                      ],
+                    });
                   }}
                 >
                   <PhotoGlyph size={14} />
                   {album.title}
+                  {pins.has(album.tag) && <span className="nav-pin">pinned</span>}
                   <span className="nav-count">{album.count}</span>
                 </button>
               ))}
@@ -2192,10 +2266,16 @@ export function Vault() {
 
         {libraryCategories.length > 0 && (
           <>
-            {sectionLabel(<SparkGlyph size={12} />, "Library", libraryOpen, () => {
-              setLibraryOpen(!libraryOpen);
-              persist("engramer-side-library", !libraryOpen);
-            })}
+            {sectionLabel(
+              <SparkGlyph size={12} />,
+              "Library",
+              libraryOpen,
+              () => {
+                setLibraryOpen(!libraryOpen);
+                persist("engramer-side-library", !libraryOpen);
+              },
+              libraryCategories.length,
+            )}
             {libraryOpen && (
             <div className="library-list">
               {libraryCategories.map((name) => {
@@ -2224,45 +2304,8 @@ export function Vault() {
         )}
 
         <div className="spacer" />
-        <button
-          className={`ocr-toggle${ocrOn ? " on" : ""}`}
-          title="OCR runs entirely on this device; recognized text is stored encrypted"
-          onClick={toggleOcr}
-        >
-          <ScanTextGlyph size={14} />
-          <span>Read text in images</span>
-          <span className={`switch${ocrOn ? " on" : ""}`} />
-        </button>
-        <button
-          className={`ocr-toggle${semanticOn ? " on" : ""}`}
-          title="A small on-device model makes photos and videos findable by what is in them; nothing leaves this device"
-          onClick={toggleSemantic}
-        >
-          <SparkGlyph size={14} />
-          <span>Find media by meaning</span>
-          <span className={`switch${semanticOn ? " on" : ""}`} />
-        </button>
-        <div className="appearance">
-          <button className="theme-toggle" title="Toggle day and night" onClick={toggleTheme}>
-            {theme === "dark" ? <SunGlyph size={15} /> : <MoonGlyph size={15} />}
-            {theme === "dark" ? "Day" : "Night"}
-          </button>
-          <div className="accent-dots">
-            {ACCENTS.map((a) => (
-              <button
-                key={a.id}
-                className={`accent-dot${accent === a.id ? " on" : ""}`}
-                title={a.label}
-                aria-label={`${a.label} theme`}
-                style={{ background: `linear-gradient(135deg, ${a.from}, ${a.to})` }}
-                onClick={() => {
-                  applyAccent(a.id);
-                  setAccent(a.id);
-                }}
-              />
-            ))}
-          </div>
-        </div>
+        {/* The foot holds state, never settings: the switches and the
+            appearance live in Profile > Preferences (IA §4.4). */}
         {store.usage && (
           <div className="usage">
             <div>
@@ -2420,6 +2463,9 @@ export function Vault() {
               setActivityOpen((open) => !open);
             }}
           />
+          <button className="icon-btn add-btn" title="Add to your vault" aria-label="Add" onClick={openAddSheet}>
+            <PlusGlyph size={18} />
+          </button>
           <button
             className="btn"
             title="Create a note, document, spreadsheet or folder"
@@ -2784,6 +2830,15 @@ export function Vault() {
               onMenu={openFileMenu}
               onEnterSelect={enterSelect}
               onDragStart={startFileDrag}
+              // Albums are content as well as places: the Photos place
+              // carries a shelf of them, so they are reachable without the
+              // sidebar at all (IA §4.6).
+              albums={view.kind === "photos" ? albumCovers : undefined}
+              onOpenAlbum={openAlbum}
+              onNewAlbum={() => {
+                setSelectMode(true);
+                showToast("Select photos, then choose Add to album.");
+              }}
             />
           ) : layout === "list" && view.kind !== "recent" ? (
             <>
@@ -2890,12 +2945,15 @@ export function Vault() {
           />
         )}
 
+      {/* The phone's places, per IA §6: Files, Photos, Search, Notices,
+          More. Tabs are places, never actions: Add lives in the top bar. */}
       <nav className="tabbar">
         <button
-          className={`tab${view.kind === "folder" && !drawerOpen ? " active" : ""}`}
+          className={`tab${view.kind === "folder" && !drawerOpen && !activityOpen ? " active" : ""}`}
           onClick={() => {
             setQuery("");
             setDrawerOpen(false);
+            setActivityOpen(false);
             setView({ kind: "folder", id: null });
           }}
         >
@@ -2903,29 +2961,37 @@ export function Vault() {
           <span>Files</span>
         </button>
         <button
-          className={`tab${view.kind === "recent" && !drawerOpen ? " active" : ""}`}
+          className={`tab${view.kind === "photos" && !drawerOpen && !activityOpen ? " active" : ""}`}
           onClick={() => {
             setQuery("");
             setDrawerOpen(false);
-            setView({ kind: "recent" });
+            setActivityOpen(false);
+            setView({ kind: "photos" });
           }}
         >
-          <ClockGlyph size={19} />
-          <span>Recent</span>
-        </button>
-        <button className="tab tab-add" aria-label="Add" onClick={openAddSheet}>
-          <PlusGlyph size={22} />
+          <PhotoGlyph size={19} />
+          <span>Photos</span>
         </button>
         <button
-          className={`tab${view.kind === "favorites" && !drawerOpen ? " active" : ""}`}
+          className={`tab${searchFocused || searching ? " active" : ""}`}
           onClick={() => {
-            setQuery("");
             setDrawerOpen(false);
-            setView({ kind: "favorites" });
+            setActivityOpen(false);
+            searchInput.current?.focus();
           }}
         >
-          <StarGlyph size={19} />
-          <span>Favorites</span>
+          <SearchGlyph size={19} />
+          <span>Search</span>
+        </button>
+        <button
+          className={`tab${activityOpen ? " active" : ""}`}
+          onClick={() => {
+            setDrawerOpen(false);
+            setActivityOpen((open) => !open);
+          }}
+        >
+          <InboxGlyph size={19} />
+          <span>Notices</span>
         </button>
         <button
           className={`tab${drawerOpen ? " active" : ""}`}
@@ -2973,7 +3039,20 @@ export function Vault() {
             }}
           />
         )}
-        {toast && <div className="toast">{toast}</div>}
+        {toast &&
+          (toast.action ? (
+            <button
+              className="toast toast-action"
+              onClick={() => {
+                toast.action?.();
+                setToast(null);
+              }}
+            >
+              {toast.text} <span className="toast-go">Open</span>
+            </button>
+          ) : (
+            <div className="toast">{toast.text}</div>
+          ))}
         {store.reveal && (
           <RevealToast
             onOpen={(folderId) => {
