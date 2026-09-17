@@ -399,7 +399,12 @@ interface StoreState {
     folderId: string | null,
   ) => Promise<string>;
   /** A conflicting save kept as this account's own new file. */
-  saveFileCopy: (sourceId: string, bytes: Uint8Array, searchText?: string) => Promise<string>;
+  saveFileCopy: (
+    sourceId: string,
+    bytes: Uint8Array,
+    searchText?: string,
+    opts?: { name?: string },
+  ) => Promise<string>;
   /** Owner only: re-encrypts everything under a fresh key and re-seals it
    * for every remaining member. Revocation's second half. */
   rotateFileKey: (id: string) => Promise<void>;
@@ -2020,14 +2025,14 @@ export const useStore = create<StoreState>((set, get) => {
      * whoever owns the original, and the contested document stays exactly
      * as its winner saved it.
      */
-    saveFileCopy: async (sourceId, bytes, searchText) => {
+    saveFileCopy: async (sourceId, bytes, searchText, opts) => {
       const source = get().files.get(sourceId);
       if (!source) {
         throw new Error("file not found");
       }
       const fileKey = generateKey();
       const meta: FileMetadata = {
-        name: copyName(source.name),
+        name: opts?.name ?? copyName(source.name),
         mime: source.mime,
         size: bytes.length,
         mtime: Date.now(),

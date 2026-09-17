@@ -16,6 +16,8 @@ export function SelectionBar(props: {
   onTrash: () => void;
   onSelectAll: () => void;
   onDone: () => void;
+  /** Present when every selected item is a PDF and there are at least two. */
+  onCombinePdf?: () => void;
 }) {
   const none = props.count === 0;
   return (
@@ -42,6 +44,11 @@ export function SelectionBar(props: {
       <button className="btn btn-ghost" disabled={none} onClick={props.onDownload}>
         <DownloadGlyph size={13} /> Save
       </button>
+      {props.onCombinePdf && (
+        <button className="btn btn-ghost" onClick={props.onCombinePdf} title="One PDF from the selected ones, in view order">
+          Combine PDFs
+        </button>
+      )}
       <button className="btn btn-ghost danger" disabled={none} onClick={props.onTrash}>
         <TrashGlyph size={13} /> Trash
       </button>
