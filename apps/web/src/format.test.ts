@@ -12,6 +12,12 @@ describe("fileKind", () => {
   const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
+  it("recognises a saved link, the file a shared web page becomes when it cannot be rendered", () => {
+    expect(fileKind("", "How to file taxes.url")).toBe("link");
+    expect(fileKind("application/octet-stream", "Apple.webloc")).toBe("link");
+    expect(fileKind("text/plain", "notes.url.txt")).toBe("text");
+  });
+
   it("recognises a kind from its content type", () => {
     expect(fileKind("application/pdf", "statement")).toBe("pdf");
     expect(fileKind(DOCX, "report")).toBe("doc");

@@ -72,7 +72,12 @@ the newer one.
 The vault also appears in the share sheet from Photos, Safari, Mail, or any
 other app; the item is encrypted on-device and uploaded in the background,
 with a destination picker offering Smart classify, the vault root, or a
-chosen folder. Automatic photo backup is opt-in: originals are never
+chosen folder. Files, images and movies arrive as they are. A web page
+shared from a browser is rendered to a PDF inside the extension, so the
+article is stored and searchable; when the page will not render within a
+few seconds (a login wall, no network), a small link file with the page's
+title is saved instead, and the app opens it in the browser. Shared text
+becomes a text file named after its first line. Automatic photo backup is opt-in: originals are never
 recompressed, and the choices cover Wi-Fi only, videos, screenshots, and how
 far back to reach. Face ID unlocks the vault at app open. The sign-in screen
 has a visible server picker, so one app serves any deployment, self-hosted

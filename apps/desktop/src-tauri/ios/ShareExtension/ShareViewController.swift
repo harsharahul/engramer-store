@@ -195,34 +195,145 @@ final class ShareViewController: UIViewController, UITableViewDataSource, UITabl
         }
         let providers = (extensionContext?.inputItems as? [NSExtensionItem])?
             .flatMap { $0.attachments ?? [] } ?? []
-        let files = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.data.identifier) }
-        guard !files.isEmpty else {
+        let plans = ShareIntake.plan(for: providers.map { $0.registeredTypeIdentifiers })
+        let work = zip(providers, plans).filter { $0.1 != .skip }
+        guard !work.isEmpty else {
             finish(with: ShareError.unreadableItem)
             return
         }
-        remaining = files.count
+        remaining = work.count
         let session = EngramApi.backgroundSession()
-        for provider in files {
-            provider.loadFileRepresentation(forTypeIdentifier: UTType.data.identifier) { url, _ in
-                // The system deletes the provided file when this block
-                // returns; it must be copied out synchronously.
-                guard let url else {
-                    self.oneDone(failed: true)
-                    return
-                }
-                let staged = FileManager.default.temporaryDirectory
-                    .appendingPathComponent(UUID().uuidString)
-                    .appendingPathExtension(url.pathExtension)
-                do {
-                    try FileManager.default.copyItem(at: url, to: staged)
-                } catch {
-                    self.oneDone(failed: true)
-                    return
-                }
-                self.ship(staged: staged, name: url.lastPathComponent, record: record,
-                          master: master, session: session, folderId: folderId)
+        // The page's title and selection, when a browser ran the
+        // preprocessing script; they name the PDF and the link file.
+        let pageInfo = Self.pageInfo(in: providers)
+        for (provider, plan) in work {
+            switch plan {
+            case .file:
+                intakeFile(provider, record: record, master: master, session: session, folderId: folderId)
+            case .webPage, .link:
+                intakeLink(provider, info: pageInfo, record: record, master: master, session: session, folderId: folderId)
+            case .text:
+                intakeText(provider, record: record, master: master, session: session, folderId: folderId)
+            case .skip:
+                break
             }
         }
+    }
+
+    /// A file, image or movie: copied out synchronously (the system deletes
+    /// its copy when the load block returns), then encrypted and shipped.
+    private func intakeFile(_ provider: NSItemProvider, record: HandoffRecord, master: Data,
+                            session: URLSession, folderId: String?) {
+        provider.loadFileRepresentation(forTypeIdentifier: UTType.data.identifier) { url, _ in
+            guard let url else {
+                self.oneDone(failed: true)
+                return
+            }
+            let staged = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(url.pathExtension)
+            do {
+                try FileManager.default.copyItem(at: url, to: staged)
+            } catch {
+                self.oneDone(failed: true)
+                return
+            }
+            self.ship(staged: staged, name: url.lastPathComponent, record: record,
+                      master: master, session: session, folderId: folderId)
+        }
+    }
+
+    /// Plain text becomes a small text file named after its first line.
+    private func intakeText(_ provider: NSItemProvider, record: HandoffRecord, master: Data,
+                            session: URLSession, folderId: String?) {
+        provider.loadItem(forTypeIdentifier: UTType.plainText.identifier) { item, _ in
+            let text = (item as? String) ?? (item as? Data).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                self.oneDone(failed: true)
+                return
+            }
+            self.shipBytes(Data(text.utf8), name: ShareIntake.textName(text), record: record,
+                           master: master, session: session, folderId: folderId)
+        }
+    }
+
+    /// A web page is rendered to a PDF here, in this process, within a
+    /// time budget; a page that will not render (a login wall, no
+    /// network) is kept as a link file instead, so nothing shared is lost.
+    private func intakeLink(_ provider: NSItemProvider, info: PageInfo?, record: HandoffRecord, master: Data,
+                            session: URLSession, folderId: String?) {
+        provider.loadItem(forTypeIdentifier: UTType.url.identifier) { item, _ in
+            let url = (item as? URL) ?? (item as? Data).flatMap { URL(dataRepresentation: $0, relativeTo: nil) }
+            guard let url else {
+                self.oneDone(failed: true)
+                return
+            }
+            let title = info?.title.isEmpty == false ? info?.title : nil
+            let keepLink = {
+                let body = ShareIntake.linkBody(url: url, title: title)
+                self.shipBytes(Data(body.utf8), name: ShareIntake.linkName(title: title, url: url),
+                               record: record, master: master, session: session, folderId: folderId)
+            }
+            guard ShareIntake.isWebPage(url) else {
+                keepLink()
+                return
+            }
+            DispatchQueue.main.async {
+                PageRenderer.shared.render(url, budget: 12) { pdf in
+                    if let pdf {
+                        self.shipBytes(pdf, name: ShareIntake.pdfName(title: title, url: url), record: record,
+                                       master: master, session: session, folderId: folderId)
+                    } else {
+                        keepLink()
+                    }
+                }
+            }
+        }
+    }
+
+    /// Bytes made here (a rendered page, a link, a text) staged to a temp
+    /// file and shipped like any other item.
+    private func shipBytes(_ bytes: Data, name: String, record: HandoffRecord, master: Data,
+                           session: URLSession, folderId: String?) {
+        let staged = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension((name as NSString).pathExtension)
+        do {
+            try bytes.write(to: staged, options: .atomic)
+        } catch {
+            oneDone(failed: true)
+            return
+        }
+        ship(staged: staged, name: name, record: record, master: master, session: session, folderId: folderId)
+    }
+
+    struct PageInfo {
+        let title: String
+        let url: String
+        let selection: String
+    }
+
+    /// The preprocessing script's results, when a browser ran it.
+    private static func pageInfo(in providers: [NSItemProvider]) -> PageInfo? {
+        let group = DispatchGroup()
+        var found: PageInfo?
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.propertyList.identifier) {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: UTType.propertyList.identifier) { item, _ in
+                defer { group.leave() }
+                guard let dictionary = item as? [String: Any],
+                      let results = dictionary[NSExtensionJavaScriptPreprocessingResultsKey] as? [String: Any]
+                else { return }
+                found = PageInfo(
+                    title: (results["title"] as? String) ?? "",
+                    url: (results["url"] as? String) ?? "",
+                    selection: (results["selection"] as? String) ?? ""
+                )
+            }
+        }
+        // The results are already in memory; this is a short hop.
+        _ = group.wait(timeout: .now() + 2)
+        return found
     }
 
     private func ship(staged: URL, name: String, record: HandoffRecord, master: Data,
