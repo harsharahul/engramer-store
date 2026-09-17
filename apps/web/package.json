@@ -22,6 +22,7 @@
     "heic-decode": "2.1.0",
     "jszip": "3.10.1",
     "lucide-react": "1.28.0",
+    "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.2.108",
     "qrcode": "1.5.4",
     "react": "19.2.7",

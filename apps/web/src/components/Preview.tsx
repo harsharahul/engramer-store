@@ -12,6 +12,7 @@ import { saveDecryptedFile } from "../download";
 import { offlineExcuse } from "../offlinefiles";
 import { thumbnailUrl } from "../thumbs";
 import { ZoomableImage } from "./ZoomableImage";
+import { PdfViewer } from "./pdf/PdfViewer";
 import { IDENTITY, zoomAt, type Box, type ZoomState } from "../zoom";
 import {
   ChevronLeftGlyph,
@@ -33,86 +34,6 @@ interface Loaded {
   docx: Uint8Array | null;
   sheet: Uint8Array | null;
   pdf: Uint8Array | null;
-}
-
-/**
- * Draws a PDF with pdf.js rather than handing it to the browser.
- *
- * A blob URL in an iframe renders only where the engine ships a PDF viewer.
- * Safari's WebView does not, which is every desktop shell window and every
- * iPhone, so a document that opened on one machine was a blank page on
- * another. Drawing it ourselves works the same everywhere, and the engine is
- * already here for reading text out of PDFs.
- */
-function PdfBody(props: { bytes: Uint8Array; name: string; onUnreadable: () => void }) {
-  const host = useRef<HTMLDivElement>(null);
-  const [failed, setFailed] = useState(false);
-  const [pages, setPages] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    // The loading task owns the worker; destroying it is what releases both.
-    let task: { destroy: () => Promise<void> } | null = null;
-    void (async () => {
-      try {
-        const pdfjs = await import("pdfjs-dist");
-        const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
-        pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-        const loading = pdfjs.getDocument({ data: props.bytes.slice() });
-        task = loading;
-        const pdf = await loading.promise;
-        if (cancelled || !host.current) {
-          return;
-        }
-        setPages(pdf.numPages);
-        // Enough of a document to judge it by; the rest is a download away.
-        const limit = Math.min(pdf.numPages, 30);
-        for (let number = 1; number <= limit; number++) {
-          const page = await pdf.getPage(number);
-          if (cancelled || !host.current) {
-            return;
-          }
-          const width = host.current.clientWidth || 800;
-          const base = page.getViewport({ scale: 1 });
-          // Fit the width, then draw at device resolution so text stays sharp.
-          const scale = Math.min(width / base.width, 2);
-          const ratio = Math.min(window.devicePixelRatio || 1, 2);
-          const viewport = page.getViewport({ scale: scale * ratio });
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.floor(viewport.width);
-          canvas.height = Math.floor(viewport.height);
-          canvas.style.width = `${Math.floor(viewport.width / ratio)}px`;
-          canvas.style.height = `${Math.floor(viewport.height / ratio)}px`;
-          canvas.className = "pdf-page";
-          host.current.appendChild(canvas);
-          const context = canvas.getContext("2d");
-          if (context) {
-            await page.render({ canvas, canvasContext: context, viewport }).promise;
-          }
-        }
-      } catch (err) {
-        // Not every file named .pdf is one: a page saved by a browser, a
-        // truncated download, something a share sheet mislabelled. Falling
-        // back to the download offer says more than an error does.
-        diag("preview", `pdf render failed: ${err instanceof Error ? err.message : "unknown"}`);
-        if (!cancelled) {
-          setFailed(true);
-          props.onUnreadable();
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-      void task?.destroy();
-    };
-  }, [props.bytes]);
-
-  if (failed) {
-    return null; // the shell shows its own fallback, download button and all
-  }
-  return (
-    <div className="pdf-host" ref={host} data-pages={pages} />
-  );
 }
 
 /** Shows a workbook as a table, one sheet at a time. */
@@ -275,6 +196,10 @@ export function Preview(props: {
   onRename: () => void;
   onDetails: () => void;
   onEdit?: () => void;
+  /** PDF markup, forms and page operations write back through these;
+   * absent, the document is read only. */
+  onSavePdf?: (bytes: Uint8Array) => Promise<void>;
+  onSavePdfCopy?: (bytes: Uint8Array, name: string) => Promise<void>;
   /** Star toggle; double-tap now belongs to zoom, so the button is explicit. */
   onFavorite?: () => void;
   /** Move to the next or previous file in the view; null when at an end. */
@@ -806,7 +731,14 @@ export function Preview(props: {
         ) : kind === "audio" && loaded.url ? (
           <audio src={loaded.url} controls autoPlay />
         ) : kind === "pdf" && loaded.pdf && !unreadable ? (
-          <PdfBody bytes={loaded.pdf} name={file.name} onUnreadable={() => setUnreadable(true)} />
+          <PdfViewer
+            bytes={loaded.pdf}
+            name={file.name}
+            onUnreadable={() => setUnreadable(true)}
+            onSave={props.onSavePdf}
+            onSaveCopy={props.onSavePdfCopy}
+            onToast={props.onToast}
+          />
         ) : kind === "sheet" && loaded.sheet ? (
           <SheetBody bytes={loaded.sheet} />
         ) : kind === "doc" && loaded.docx ? (

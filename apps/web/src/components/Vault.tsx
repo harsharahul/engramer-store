@@ -86,7 +86,7 @@ import {
   settingsEvents,
   SETTINGS_APPLIED_EVENT,
 } from "../settingsync";
-import type { UploadSource } from "../transfer";
+import { downloadAndDecrypt, type UploadSource } from "../transfer";
 import { APP_VERSION } from "../version";
 import { reloadForUpdate, watchForUpdate } from "../update";
 import { startWatchSync } from "../watchfolders";
@@ -788,6 +788,33 @@ export function Vault() {
       return next;
     });
   }, []);
+
+  /** One PDF from several, in the order the view shows them; a new file
+   * beside the first, with the Activity log saying what was combined. */
+  const combinePdfs = async (ids: string[]) => {
+    const files = ids.map((id) => store.files.get(id)).filter((f): f is FileEntry => Boolean(f));
+    if (files.length < 2) {
+      return;
+    }
+    store.beginActivity({ kind: "processing", title: "Combining PDFs", done: 0, total: files.length, failed: 0 });
+    try {
+      const documents: Uint8Array[] = [];
+      for (const file of files) {
+        documents.push(await downloadAndDecrypt(file.id, file.key, file.digest));
+        store.updateActivity({ done: documents.length });
+      }
+      const { mergeDocuments } = await import("../pdf/pages");
+      const bytes = await mergeDocuments(documents);
+      const name = `${files[0]!.name.replace(/\.pdf$/i, "")} + ${files.length - 1} more.pdf`;
+      const id = await store.saveFileCopy(files[0]!.id, bytes, undefined, { name });
+      store.finishActivity("processing", `Combined ${files.length} PDFs into ${name}`);
+      clearSelection();
+      showToast(`Saved ${name}`, () => setPreviewId(id));
+    } catch (err) {
+      store.finishActivity("processing", "Could not combine the PDFs", err instanceof Error ? err.message : undefined);
+      showToast("Could not combine the PDFs.");
+    }
+  };
 
   /** The album a change just touched: its sidebar row shows itself. */
   const [revealTag, setRevealTag] = useState<string | null>(null);
@@ -3085,6 +3112,15 @@ export function Vault() {
             }}
             onAlbum={() => setAlbumPickerIds([...selection])}
             onMove={() => setMoveIds([...selection])}
+            onCombinePdf={
+              selection.size >= 2 &&
+              [...selection].every((id) => {
+                const file = store.files.get(id);
+                return file && !file.shared && fileKind(file.mime, file.name) === "pdf";
+              })
+                ? () => void combinePdfs(visibleFiles.filter((f) => selection.has(f.id)).map((f) => f.id))
+                : undefined
+            }
             onDownload={() => {
               for (const id of selection) {
                 const file = store.files.get(id);
@@ -3180,6 +3216,27 @@ export function Vault() {
                   setPreviewId(null);
                 }
               : undefined
+          }
+          // A PDF is marked up, filled in and re-paged inside the preview;
+          // every write is a new version through the one binary save.
+          onSavePdf={
+            previewFile.shared
+              ? undefined
+              : async (bytes) => {
+                  await store.saveFileBinary(previewFile.id, bytes);
+                  store.finishActivity("processing", `Saved ${previewFile.name}`, "A new version with your changes.");
+                }
+          }
+          onSavePdfCopy={
+            previewFile.shared
+              ? undefined
+              : async (bytes, name) => {
+                  const id = await store.saveFileCopy(previewFile.id, bytes, undefined, { name });
+                  store.finishActivity("processing", `Extracted pages to ${name}`);
+                  showToast(`Saved ${name}`, () => {
+                    setPreviewId(id);
+                  });
+                }
           }
         />
       )}
