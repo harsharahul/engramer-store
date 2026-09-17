@@ -6132,3 +6132,27 @@ button.link {
     font-size: 12px;
   }
 }
+
+/* A saved link: title, address in full, and the one thing to do with it. */
+.link-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 520px;
+  text-align: center;
+  color: var(--paper);
+}
+
+.link-body h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.link-url {
+  margin: 0;
+  font-size: 13px;
+  color: var(--paper-dim);
+  word-break: break-all;
+  user-select: all;
+}

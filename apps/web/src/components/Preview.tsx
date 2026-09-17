@@ -12,6 +12,7 @@ import { saveDecryptedFile } from "../download";
 import { offlineExcuse } from "../offlinefiles";
 import { thumbnailUrl } from "../thumbs";
 import { ZoomableImage } from "./ZoomableImage";
+import { parseLinkFile } from "../links";
 import { PdfViewer } from "./pdf/PdfViewer";
 import { IDENTITY, zoomAt, type Box, type ZoomState } from "../zoom";
 import {
@@ -19,6 +20,7 @@ import {
   ChevronRightGlyph,
   DownloadGlyph,
   InfoGlyph,
+  LinkGlyph,
   PencilGlyph,
   ShareGlyph,
   StarGlyph,
@@ -34,6 +36,32 @@ interface Loaded {
   docx: Uint8Array | null;
   sheet: Uint8Array | null;
   pdf: Uint8Array | null;
+}
+
+/**
+ * A saved link: what a shared web page became when the share extension
+ * could not render it. The address is shown in full and opens in the
+ * browser; only web addresses are ever accepted.
+ */
+function LinkBody(props: { body: string; name: string }) {
+  const link = parseLinkFile(props.body, props.name);
+  if (!link) {
+    return (
+      <div className="preview-fallback">
+        This link file has no web address in it.
+      </div>
+    );
+  }
+  return (
+    <div className="link-body">
+      <LinkGlyph size={28} />
+      <h3>{link.title}</h3>
+      <p className="link-url">{link.url}</p>
+      <a className="btn" href={link.url} target="_blank" rel="noopener noreferrer">
+        Open in the browser
+      </a>
+    </div>
+  );
 }
 
 /** Shows a workbook as a table, one sheet at a time. */
@@ -413,7 +441,7 @@ export function Preview(props: {
         // Reading it through was the check; record that it passed.
         useStore.getState().markVerified(file.id);
         const empty = { url: null, text: null, docx: null, sheet: null, pdf: null };
-        if (kind === "text") {
+        if (kind === "text" || kind === "link") {
           setLoaded({ ...empty, text: new TextDecoder().decode(bytes) });
           return;
         }
@@ -743,6 +771,8 @@ export function Preview(props: {
           <SheetBody bytes={loaded.sheet} />
         ) : kind === "doc" && loaded.docx ? (
           <DocxBody bytes={loaded.docx} name={file.name} />
+        ) : kind === "link" && loaded.text !== null ? (
+          <LinkBody body={loaded.text} name={file.name} />
         ) : loaded.text !== null ? (
           <pre>{loaded.text}</pre>
         ) : (

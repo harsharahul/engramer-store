@@ -26,10 +26,19 @@ targets:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
           NSExtensionAttributes:
+            # The page's title and selection, read inside the shared page
+            # so the extension can name the PDF it renders.
+            NSExtensionJavaScriptPreprocessingFile: EngramSharePage
+            # Files, images and movies from any app; a web page and its
+            # address from a browser's share button (rendered to a PDF by
+            # the extension, kept as a link when that fails); plain text.
             NSExtensionActivationRule:
               NSExtensionActivationSupportsFileWithMaxCount: 20
               NSExtensionActivationSupportsImageWithMaxCount: 20
               NSExtensionActivationSupportsMovieWithMaxCount: 20
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsWebPageWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
     entitlements:
       path: EngramShare/EngramShare.entitlements
       properties:

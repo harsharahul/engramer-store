@@ -32,6 +32,7 @@ export type FileKind =
   | "doc"
   | "sheet"
   | "archive"
+  | "link"
   | "other";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -44,6 +45,9 @@ export function fileKind(mime: string, name: string): FileKind {
   if (mime === "application/pdf" || /\.pdf$/i.test(name)) return "pdf";
   if (mime === DOCX_MIME || /\.docx$/i.test(name)) return "doc";
   if (mime === XLSX_MIME || /\.xlsx$/i.test(name)) return "sheet";
+  // A saved web page address, before the text rule: a .url file arrives
+  // as plain text from the share extension.
+  if (/\.(url|webloc)$/i.test(name)) return "link";
   if (mime.startsWith("text/") || /\.(md|txt|json|ya?ml|csv|log)$/i.test(name)) return "text";
   if (/\.(zip|tar|gz|bz2|7z|rar)$/i.test(name)) return "archive";
   return "other";
