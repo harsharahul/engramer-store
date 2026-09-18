@@ -2,7 +2,8 @@
   "identifier": "main",
   "description": "The main window, serving the hosted vault app: it may call the shell's unlock commands.",
   "windows": [
-    "main"
+    "main",
+    "main-*"
   ],
   "remote": {
     "urls": [
