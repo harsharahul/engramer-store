@@ -63,6 +63,29 @@ fn hide_main(app: &tauri::AppHandle) {
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 }
 
+/// iPad lets people open another window of the app from its icon or the
+/// app switcher. The windowing layer reports that as a scene request and
+/// leaves the new scene empty until a window claims it. Each extra window
+/// is another view of the same vault at the same server and unlocks on
+/// its own, the way a second browser tab would.
+#[cfg(target_os = "ios")]
+fn open_scene_window(app: &tauri::AppHandle) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static OPENED: AtomicUsize = AtomicUsize::new(0);
+    let url = app
+        .get_webview_window("main")
+        .and_then(|window| window.url().ok())
+        .or_else(|| app.state::<serverurl::HomeUrl>().0.clone());
+    let Some(url) = url else {
+        return;
+    };
+    let label = format!("main-{}", OPENED.fetch_add(1, Ordering::Relaxed) + 1);
+    match tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::External(url)).build() {
+        Ok(window) => chrome::extend_under_safe_area(&window),
+        Err(err) => eprintln!("scene window {label} not opened: {err}"),
+    }
+}
+
 /// The tray menu, the desktop app's resting state. iOS has no tray; there
 /// the app simply lives on the home screen.
 #[cfg(desktop)]
@@ -226,10 +249,11 @@ pub fn run() {
                 api.prevent_close();
                 hide_main(&window.app_handle());
             }
-            // Rotation can hand the scroll view a fresh inset; re-assert.
+            // Rotation can hand the scroll view a fresh inset; re-assert on
+            // whichever window resized, the main one or an extra scene's.
             #[cfg(target_os = "ios")]
             if let tauri::WindowEvent::Resized(_) = event {
-                if let Some(webview) = window.app_handle().get_webview_window("main") {
+                if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
                     chrome::extend_under_safe_area(&webview);
                 }
             }
@@ -244,7 +268,12 @@ pub fn run() {
             if let tauri::RunEvent::Reopen { .. } = event {
                 show_main(app);
             }
-            #[cfg(not(target_os = "macos"))]
+            // iPad asked for another window of the app.
+            #[cfg(target_os = "ios")]
+            if let tauri::RunEvent::SceneRequested { .. } = event {
+                open_scene_window(app);
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
             let _ = (app, event);
         });
 }

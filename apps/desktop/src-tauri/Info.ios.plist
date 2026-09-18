@@ -10,5 +10,16 @@
 	<string>Engram Store reads your photo library so it can back your photos and videos up to your vault. Each one is encrypted on this device before it is uploaded. If you leave automatic backup off, it reads only the photos you pick.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Engram Store saves photos to your library only when you export them.</string>
+	<!-- UIKit built with the iOS 27 SDK refuses to launch an app that has not
+	     adopted the scene life cycle. The manifest turns on the windowing
+	     layer's scene mode, which installs its own scene delegate and attaches
+	     the window to the scene the system creates. -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+		<key>UISceneConfigurations</key>
+		<dict/>
+	</dict>
 </dict>
 </plist>
