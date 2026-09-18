@@ -4,7 +4,6 @@
 // capability that lets the extra iPad windows it allows reach the shell.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,16 +11,19 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const tauriDir = join(here, "..", "src-tauri");
 
-function plistJson(path) {
-  return JSON.parse(execFileSync("plutil", ["-convert", "json", "-o", "-", path], { encoding: "utf8" }));
+// The plist is XML; the checks run on Linux too, so read the manifest's
+// dictionary from the text rather than through a macOS tool.
+function dictAfterKey(xml, key) {
+  const match = new RegExp(`<key>${key}</key>\\s*<dict>([\\s\\S]*?)</dict>`).exec(xml);
+  return match ? match[1] : null;
 }
 
 test("the iOS plist declares a scene manifest in the windowing layer's scene mode", () => {
-  const plist = plistJson(join(tauriDir, "Info.ios.plist"));
-  const manifest = plist.UIApplicationSceneManifest;
+  const xml = readFileSync(join(tauriDir, "Info.ios.plist"), "utf8");
+  const manifest = dictAfterKey(xml, "UIApplicationSceneManifest");
   assert.ok(manifest, "UIApplicationSceneManifest missing");
-  assert.equal(manifest.UIApplicationSupportsMultipleScenes, true);
-  assert.deepEqual(manifest.UISceneConfigurations, {});
+  assert.match(manifest, /<key>UIApplicationSupportsMultipleScenes<\/key>\s*<true\/>/);
+  assert.match(manifest, /<key>UISceneConfigurations<\/key>\s*<dict\/>/);
 });
 
 test("windows opened for extra scenes are covered by the capability", () => {
