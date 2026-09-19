@@ -28,7 +28,10 @@ describe("frame crypto", () => {
     const key = generateKey();
     const sealed = encryptFrame(frame(), key);
     expect(typeof sealed).toBe("string");
-    expect(sealed).not.toContain("chg");
+    // The plaintext must not leak. A three-letter marker can occur by
+    // chance in random base64 output, so check for the serialised field.
+    expect(sealed).not.toContain('"k":"chg"');
+    expect(sealed).not.toContain("64;AAAA");
     expect(decryptFrame(sealed, key)).toEqual(frame());
   });
 
