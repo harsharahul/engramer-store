@@ -5,6 +5,12 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+- **The iPhone and iPad app opens again on iOS 27.** Apps built with the
+  iOS 27 tools must use the system's scene life cycle or iOS refuses to
+  start them; the app now declares it. On iPad, asking for another window
+  of the app opens a second view of the vault instead of an empty one.
+
 ## [0.56.0] - 2026-09-17
 
 ### Added
