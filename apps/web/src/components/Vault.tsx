@@ -367,6 +367,9 @@ export function Vault() {
   const [similarTo, setSimilarTo] = useState<FileEntry | null>(null);
   const [similarHits, setSimilarHits] = useState<SearchHit[]>([]);
   const isMobile = useMediaQuery(MOBILE_QUERY);
+  // The Mac shell hides the system title bar; the app's own top strip
+  // takes its place and starts below the inset traffic lights.
+  const macShell = nativeShell() && !isHandheld();
   const viewportWidth = useViewportWidth();
   const plan = planLayout(viewportWidth, {
     sidebarWidth,
@@ -2192,7 +2195,9 @@ export function Vault() {
       ref={frameRef}
       className={`frame${dragging ? " dropzone-active" : ""}${plan.details === "pane" ? " with-details" : ""}${
         plan.details === "overlay" ? " details-overlay" : ""
-      }${plan.sidebar === "rail" ? " sidebar-rail" : ""}${plan.compact ? " compact" : ""}${drawerOpen ? " drawer" : ""}`}
+      }${plan.sidebar === "rail" ? " sidebar-rail" : ""}${plan.compact ? " compact" : ""}${drawerOpen ? " drawer" : ""}${
+        macShell ? " shell-mac" : ""
+      }`}
       style={
         {
           "--sidebar-w": `${plan.sidebarWidth}px`,
@@ -2234,7 +2239,10 @@ export function Vault() {
         />
       )}
       <aside className="sidebar">
-        <div className="brand">
+        {/* In the Mac shell the title bar is the app's own top strip: the
+            brand row and the top bar drag the window, and the sidebar
+            starts below the inset traffic lights. */}
+        <div className="brand" data-tauri-drag-region>
           <BrandMark size={26} />
           <Wordmark />
         </div>
@@ -2430,7 +2438,7 @@ export function Vault() {
       </aside>
 
       <main className="main">
-        <div className="topbar" ref={topbarRef}>
+        <div className="topbar" ref={topbarRef} data-tauri-drag-region>
           <button
             className={`icon-btn sidebar-toggle${plan.sidebar === "rail" ? " active" : ""}`}
             title={plan.sidebar === "rail" ? "Show sidebar (⌘⌥S)" : "Hide sidebar (⌘⌥S)"}
