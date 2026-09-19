@@ -10,3 +10,6 @@ lto = true
 # member named after the package. See apps/desktop/vendor/swift-rs/VENDORED.md.
 [patch.crates-io]
 swift-rs = { path = "apps/desktop/vendor/swift-rs" }
+# tao 0.35.3 with one fix: the iOS scene configuration handed to UIKit is
+# autoreleased instead of freed on return. See apps/desktop/vendor/tao/VENDORED.md.
+tao = { path = "apps/desktop/vendor/tao" }

@@ -26,6 +26,19 @@ test("the iOS plist declares a scene manifest in the windowing layer's scene mod
   assert.match(manifest, /<key>UISceneConfigurations<\/key>\s*<dict\/>/);
 });
 
+test("the vendored windowing layer autoreleases the scene configuration it hands UIKit", () => {
+  // tao 0.35.3 freed the configuration on return; UIKit then retained a dead
+  // object and every release launch crashed. The workspace patches tao with
+  // the fix, so both the patch and the fixed line have to stay in place.
+  const workspace = readFileSync(join(here, "..", "..", "..", "Cargo.toml"), "utf8");
+  assert.match(workspace, /^tao = \{ path = "apps\/desktop\/vendor\/tao" \}/m);
+  const view = readFileSync(join(here, "..", "vendor", "tao", "src", "platform_impl", "ios", "view.rs"), "utf8");
+  const fn = /fn configuration_for_connecting_scene_session[\s\S]*?\n  \}\n/.exec(view);
+  assert.ok(fn, "configuration_for_connecting_scene_session missing");
+  assert.match(fn[0], /Retained::autorelease_return\(config\)/);
+  assert.doesNotMatch(fn[0], /Retained::as_ptr\(&config\)/);
+});
+
 test("windows opened for extra scenes are covered by the capability", () => {
   const capability = JSON.parse(readFileSync(join(tauriDir, "capabilities", "default.json"), "utf8"));
   assert.ok(capability.windows.includes("main"), "main window missing");
