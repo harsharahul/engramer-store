@@ -5,6 +5,8 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+## [0.56.2] - 2026-09-23
+
 ### Changed
 - **A quieter toolbar.** One New button now holds every way to add
   something: upload files or a folder, a note, a document, a spreadsheet,
