@@ -126,7 +126,7 @@ import { offlineExcuse } from "../offlinefiles";
 import { clearThumbnailCache } from "../thumbs";
 import { FileCard, FolderCard } from "./FileCard";
 import { BrandMark, FolderArt, Wordmark } from "./FileArt";
-import { FileList, sortFiles, type SortKey, type SortState } from "./FileList";
+import { FileList, sortFiles, sortFolders, type SortKey, type SortState } from "./FileList";
 import { DetailsPanel } from "./DetailsPanel";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { MoveDialog } from "./MoveDialog";
@@ -200,6 +200,10 @@ import {
   UploadGlyph,
   VideoGlyph,
   XGlyph,
+  ChevronDownGlyph,
+  SortGlyph,
+  ProfileGlyph,
+  AdminGlyph,
 } from "./Icon";
 
 type View =
@@ -620,6 +624,20 @@ export function Vault() {
         .filter((f) => f.parentId === currentFolderId)
         .sort((a, b) => a.name.localeCompare(b.name)),
     [store.folders, currentFolderId],
+  );
+
+  // The folders as either layout shows them: on top, in the chosen sort.
+  const folderRows = useMemo(
+    () =>
+      sortFolders(
+        childFolders.map((folder) => ({
+          id: folder.id,
+          name: folder.name,
+          count: folderCounts.get(folder.id) ?? 0,
+        })),
+        sort,
+      ),
+    [childFolders, folderCounts, sort],
   );
 
   // The file list the current view shows, in display order.
@@ -1809,7 +1827,23 @@ export function Vault() {
   // only by label collapsed to one menu: at narrow widths their labels hide
   // and they became three identical icons, which is no way to pick between a
   // note, a document and a spreadsheet.
+  // The toolbar's one New button: every way to add something, uploads first
+  // because they are the most frequent (Drive and Dropbox fold creation the
+  // same way). Drag and drop and paste still upload without it.
   const newItems: MenuItem[] = [
+    {
+      id: "upload-files",
+      label: "Upload files…",
+      icon: <UploadGlyph size={15} />,
+      run: () => fileInput.current?.click(),
+    },
+    {
+      id: "upload-folder",
+      label: "Upload a folder…",
+      icon: <UploadGlyph size={15} />,
+      run: () => folderInput.current?.click(),
+    },
+    { id: "new-u", label: "", divider: true, run: () => {} },
     { id: "new-note", label: "Note", icon: <NoteGlyph size={15} />, run: () => setNewNoteOpen(true) },
     {
       id: "new-document",
@@ -1829,14 +1863,6 @@ export function Vault() {
       label: "Folder",
       icon: <FolderGlyph size={15} />,
       run: () => setNewFolderOpen(true),
-    },
-    // The topbar's Folder upload button folds into this menu when the
-    // content column is narrow, so the action never disappears with it.
-    {
-      id: "upload-folder",
-      label: "Upload a folder…",
-      icon: <UploadGlyph size={15} />,
-      run: () => folderInput.current?.click(),
     },
   ];
 
@@ -2085,6 +2111,96 @@ export function Vault() {
       persist("engramer-sort", next);
       return next;
     });
+  };
+
+  // One sort control: the key and the direction are a single choice, shown
+  // on the button ("Name ↑") and picked from one menu, the way Finder and
+  // Drive present it. Clicking the current key again flips the direction.
+  const SORT_LABELS: Record<SortKey, string> = { name: "Name", mtime: "Date modified", size: "Size" };
+  const openSortMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const at = event.currentTarget.getBoundingClientRect();
+    const setDir = (dir: 1 | -1) => {
+      setSort((prev) => {
+        const next: SortState = { key: prev.key, dir };
+        persist("engramer-sort", next);
+        return next;
+      });
+    };
+    const keyItems: MenuItem[] = (["name", "mtime", "size"] as SortKey[]).map((key) => ({
+      id: `sort-${key}`,
+      label: SORT_LABELS[key],
+      checked: sort.key === key,
+      run: () => {
+        if (sort.key !== key) {
+          onSort(key);
+        }
+      },
+    }));
+    setCtxMenu({
+      x: at.left,
+      y: at.bottom + 6,
+      title: "Sort by",
+      items: [
+        ...keyItems,
+        { id: "sort-d", label: "", divider: true, run: () => {} },
+        {
+          id: "sort-asc",
+          label: sort.key === "name" ? "A to Z" : sort.key === "size" ? "Smallest first" : "Oldest first",
+          checked: sort.dir === 1,
+          run: () => setDir(1),
+        },
+        {
+          id: "sort-desc",
+          label: sort.key === "name" ? "Z to A" : sort.key === "size" ? "Largest first" : "Newest first",
+          checked: sort.dir === -1,
+          run: () => setDir(-1),
+        },
+      ],
+    });
+  };
+
+  // The account button at the foot of the sidebar: identity is shown, the
+  // account and security actions live in its menu rather than as loose icons
+  // (IA §4.4: the foot holds state, not settings).
+  const openAccountMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const at = event.currentTarget.getBoundingClientRect();
+    const items: MenuItem[] = [
+      {
+        id: "acct-profile",
+        label: "Profile and settings",
+        icon: <ProfileGlyph size={15} />,
+        run: () => {
+          setDrawerOpen(false);
+          setView({ kind: "profile" });
+        },
+      },
+      {
+        id: "acct-2fa",
+        label: "Two-factor sign-in",
+        icon: <KeyGlyph size={15} />,
+        run: () => {
+          setDrawerOpen(false);
+          setSecurityOpen(true);
+        },
+      },
+    ];
+    if (store.isAdmin) {
+      items.push({
+        id: "acct-admin",
+        label: "Server administration",
+        icon: <AdminGlyph size={15} />,
+        run: () => {
+          setDrawerOpen(false);
+          setAdminOpen(true);
+        },
+      });
+    }
+    items.push(
+      { id: "acct-d", label: "", divider: true, run: () => {} },
+      { id: "acct-lock", label: "Lock vault", icon: <LockGlyph />, run: lock },
+    );
+    // Opens upward: the button sits at the bottom of the window.
+    setCtxMenu({ x: at.left, y: at.top - (items.length * 34 + 18), title: store.session?.email, items });
   };
 
   const usagePercent = store.usage
@@ -2400,41 +2516,19 @@ export function Vault() {
         </div>
         <div className="account-row">
           <button
-            className="account-link"
-            title="Profile and settings"
-            onClick={() => {
-              setDrawerOpen(false);
-              setView({ kind: "profile" });
-            }}
+            className="account-button"
+            title="Account"
+            aria-haspopup="menu"
+            aria-label={`Account: ${store.session?.email ?? ""}`}
+            onClick={openAccountMenu}
           >
-            {store.session?.email}
-          </button>
-          {store.isAdmin && (
-            <button
-              className="icon-btn"
-              title="Server administration"
-              onClick={() => {
-                setDrawerOpen(false);
-                setAdminOpen(true);
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6l8-3z" />
-              </svg>
-            </button>
-          )}
-          <button
-            className="icon-btn"
-            title="Two-factor authentication"
-            onClick={() => {
-              setDrawerOpen(false);
-              setSecurityOpen(true);
-            }}
-          >
-            <KeyGlyph size={14} />
-          </button>
-          <button className="icon-btn" title="Lock vault" onClick={lock}>
-            <LockGlyph />
+            <span className="account-avatar" aria-hidden="true">
+              {(store.session?.email ?? "?").slice(0, 1).toUpperCase()}
+            </span>
+            <span className="account-link">{store.session?.email}</span>
+            <span className="account-chevron" aria-hidden="true">
+              <ChevronDownGlyph size={14} />
+            </span>
           </button>
         </div>
       </aside>
@@ -2530,10 +2624,21 @@ export function Vault() {
                 </div>
               </div>
             )}
+            {/* The command palette's shortcut rides inside the field, where
+                people look for it (Linear, Raycast), instead of a separate
+                button beside it. */}
+            {!searching && (
+              <button
+                className="search-kbd palette-trigger"
+                title="Commands and Ask (⌘K)"
+                aria-label="Open commands and Ask"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setPaletteOpen(true)}
+              >
+                <kbd>⌘K</kbd>
+              </button>
+            )}
           </div>
-          <button className="btn btn-ghost palette-trigger" onClick={() => setPaletteOpen(true)}>
-            <SparkGlyph size={14} /> <kbd className="mono">⌘K</kbd>
-          </button>
           <div className="grow" />
           <ActivityBell
             open={activityOpen}
@@ -2545,27 +2650,20 @@ export function Vault() {
             <PlusGlyph size={18} />
           </button>
           <button
-            className="btn"
-            title="Create a note, document, spreadsheet or folder"
+            className="btn btn-primary new-btn"
+            title="Upload, or create a note, document, spreadsheet or folder"
             aria-haspopup="menu"
             onClick={(event) => {
               // Anchored under the button, so the menu reads as belonging to
               // it. On a phone the same component becomes a bottom sheet.
               const at = event.currentTarget.getBoundingClientRect();
-              setCtxMenu({ x: at.left, y: at.bottom + 6, title: "Create", items: newItems });
+              setCtxMenu({ x: at.right - 208, y: at.bottom + 6, title: "New", items: newItems });
             }}
           >
             <PlusGlyph /> <span className="btn-word">New</span>
-          </button>
-          <button
-            className="btn folder-btn"
-            title="Upload a whole folder, structure preserved"
-            onClick={() => folderInput.current?.click()}
-          >
-            <FolderGlyph size={14} /> <span className="btn-label">Folder</span>
-          </button>
-          <button className="btn btn-primary" onClick={() => fileInput.current?.click()}>
-            <UploadGlyph /> Upload
+            <span className="new-chevron" aria-hidden="true">
+              <ChevronDownGlyph size={14} />
+            </span>
           </button>
           <button
             className={`icon-btn info-toggle${detailsOpen ? " active" : ""}`}
@@ -2721,7 +2819,11 @@ export function Vault() {
                   </button>
                 </div>
               )}
-              {!selectMode && visibleFiles.length > 0 && (
+              {/* With a pointer, selecting is direct: click, shift or
+                  command click, or drag a marquee, and the selection bar
+                  appears. A touch screen has none of that, so it keeps an
+                  explicit Select (the Files and Photos convention). */}
+              {!selectMode && visibleFiles.length > 0 && (isMobile || isHandheld()) && (
                 <button
                   className="btn btn-ghost select-toggle"
                   onClick={() => setSelectMode(true)}
@@ -2729,22 +2831,18 @@ export function Vault() {
                   Select
                 </button>
               )}
-              <select
-                className="sort-select"
-                value={sort.key}
-                onChange={(e) => onSort(e.target.value as SortKey)}
-                title="Sort by"
-              >
-                <option value="name">Name</option>
-                <option value="mtime">Modified</option>
-                <option value="size">Size</option>
-              </select>
               <button
-                className="icon-btn"
-                title={sort.dir === 1 ? "Ascending" : "Descending"}
-                onClick={() => onSort(sort.key)}
+                className="sort-button"
+                title="Sort"
+                aria-haspopup="menu"
+                aria-label={`Sort by ${SORT_LABELS[sort.key]}, ${sort.dir === 1 ? "ascending" : "descending"}`}
+                onClick={openSortMenu}
               >
-                {sort.dir === 1 ? "↑" : "↓"}
+                <SortGlyph size={14} />
+                <span className="sort-label">{SORT_LABELS[sort.key]}</span>
+                <span className="sort-dir" aria-hidden="true">
+                  {sort.dir === 1 ? "↑" : "↓"}
+                </span>
               </button>
               <div className="seg">
                 <button
@@ -2919,41 +3017,30 @@ export function Vault() {
               }}
             />
           ) : layout === "list" && view.kind !== "recent" ? (
-            <>
-              {view.kind === "folder" && childFolders.length > 0 && (
-                <div className="grid folders-strip">
-                  {childFolders.map((folder, i) => (
-                    <FolderCard
-                      key={folder.id}
-                      name={folder.name}
-                      count={folderCounts.get(folder.id) ?? 0}
-                      index={i}
-                      onOpen={() => openFolder(folder.id)}
-                      onMenu={(x, y) => openFolderMenu(folder.id, x, y)}
-                      onDropFiles={(e) => dropOnFolder(folder.id, e)}
-                    />
-                  ))}
-                </div>
-              )}
-              <FileList
-                files={visibleFiles}
-                selection={selection}
-                sort={sort}
-                onSort={onSort}
-                onSelect={select}
-                onOpen={openFile}
-                onMenu={openFileMenu}
-                onDragStart={startFileDrag}
-              />
-            </>
+            // The layout switch is one choice for the whole place: in a list
+            // the folders are rows on top, not a strip of cards.
+            <FileList
+              files={visibleFiles}
+              folders={view.kind === "folder" ? folderRows : undefined}
+              selection={selection}
+              sort={sort}
+              onSort={onSort}
+              onSelect={select}
+              onOpen={openFile}
+              onMenu={openFileMenu}
+              onDragStart={startFileDrag}
+              onOpenFolder={openFolder}
+              onFolderMenu={openFolderMenu}
+              onDropOnFolder={dropOnFolder}
+            />
           ) : (
             <div className="grid">
               {view.kind === "folder" &&
-                childFolders.map((folder, i) => (
+                folderRows.map((folder, i) => (
                   <FolderCard
                     key={folder.id}
                     name={folder.name}
-                    count={folderCounts.get(folder.id) ?? 0}
+                    count={folder.count}
                     index={i}
                     onOpen={() => openFolder(folder.id)}
                     onMenu={(x, y) => openFolderMenu(folder.id, x, y)}

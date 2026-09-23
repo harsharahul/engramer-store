@@ -1,4 +1,17 @@
-import { BedDouble, Calendar, CarFront, ChevronLeft, ChevronRight, Plane, Ticket } from "lucide-react";
+import {
+  ArrowDownUp,
+  BedDouble,
+  Calendar,
+  CarFront,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CircleUser,
+  Plane,
+  ShieldCheck,
+  Ticket,
+} from "lucide-react";
 
 interface IconProps {
   size?: number;
@@ -61,6 +74,16 @@ export const PlaneGlyph = ({ size = 16 }: IconProps) => <Plane size={size} {...l
 export const ChevronLeftGlyph = ({ size = 16 }: IconProps) => <ChevronLeft size={size} {...lucide} />;
 
 export const ChevronRightGlyph = ({ size = 16 }: IconProps) => <ChevronRight size={size} {...lucide} />;
+
+export const ChevronDownGlyph = ({ size = 16 }: IconProps) => <ChevronDown size={size} {...lucide} />;
+
+export const CheckGlyph = ({ size = 16 }: IconProps) => <Check size={size} {...lucide} />;
+
+export const SortGlyph = ({ size = 16 }: IconProps) => <ArrowDownUp size={size} {...lucide} />;
+
+export const ProfileGlyph = ({ size = 16 }: IconProps) => <CircleUser size={size} {...lucide} />;
+
+export const AdminGlyph = ({ size = 16 }: IconProps) => <ShieldCheck size={size} {...lucide} />;
 
 export const BedGlyph = ({ size = 16 }: IconProps) => <BedDouble size={size} {...lucide} />;
 

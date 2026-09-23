@@ -109,9 +109,17 @@ Files and Photos on iOS 26 (a floating tab bar with a search tab).
   (user-made collections: pinned first, then most recently changed, then
   by title), Library (derived categories, by count). Two levels, never
   three. A collapsed group header shows its count. The toolbar holds this
-  view's actions (New, Upload, Select, sort, layout, the details and
-  sidebar toggles, Notices). The sidebar foot holds state only: storage
-  used, the version, the account row; every switch lives in Profile.
+  view's actions: one New button whose menu uploads files or a folder and
+  creates a note, document, spreadsheet or folder (Drive and Dropbox fold
+  creation the same way), the search field with the command palette's
+  ⌘K inside it, Notices, and the details and sidebar toggles. The view
+  bar holds the place's title and counts, one sort control (key and
+  direction in a single menu) and the grid/list switch, which governs
+  folders and files alike. Selection with a pointer is direct (click,
+  modifier click, marquee); an explicit Select appears only on touch.
+  The sidebar foot holds state only: storage used, the version, and the
+  account as one button whose menu holds Profile, two-factor,
+  administration and Lock; every switch lives in Profile.
   In rail mode each group header keeps its icon, so no group ever has
   zero footprint, and resting the pointer on the rail brings the full
   sidebar back.

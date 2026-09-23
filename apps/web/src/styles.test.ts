@@ -96,6 +96,19 @@ describe("the sidebar rail never hides a group", () => {
   });
 });
 
+describe("the frame's columns", () => {
+  it("pins the main column and the details pane, so a hovered rail cannot shift them", () => {
+    // Resting the pointer on the rail makes the sidebar position:absolute,
+    // which takes it out of the grid; without explicit columns the main
+    // column slid into the 64px rail track and the toolbar collapsed.
+    const desktop = /@media \(min-width: 761px\)\s*\{([\s\S]*?)\n\}/.exec(CSS);
+    expect(desktop).not.toBeNull();
+    const block = desktop?.[1] ?? "";
+    expect(block).toMatch(/\.frame > \.main\s*\{[^}]*grid-column:\s*2/);
+    expect(block).toMatch(/\.frame:not\(\.details-overlay\) > \.details\s*\{[^}]*grid-column:\s*3/);
+  });
+});
+
 describe("sidebar groups keep their rows", () => {
   it("never lets a group list shrink below its rows", () => {
     // The lists scroll internally, so as flex children they may shrink to

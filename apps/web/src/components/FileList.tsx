@@ -1,13 +1,98 @@
 import type { CSSProperties } from "react";
 import { useStore, type FileEntry } from "../store";
 import { extension, formatBytes, formatDate } from "../format";
-import { DotsGlyph, OfflineGlyph, StarGlyph } from "./Icon";
+import { DotsGlyph, FolderGlyph, OfflineGlyph, StarGlyph } from "./Icon";
 import { useLongPress } from "../longpress";
+import { useDropTarget } from "../droptarget";
 
 export type SortKey = "name" | "mtime" | "size";
 export interface SortState {
   key: SortKey;
   dir: 1 | -1;
+}
+
+/** What a folder shows in either layout: its name and how much it holds. */
+export interface FolderRowData {
+  id: string;
+  name: string;
+  count: number;
+}
+
+/**
+ * Folders follow the same sort as files, always kept on top. Name sorts by
+ * name in the chosen direction; size sorts by how many items a folder holds;
+ * folders carry no date of their own, so a date sort leaves them by name.
+ */
+export function sortFolders<T extends FolderRowData>(folders: T[], sort: SortState): T[] {
+  const byName = (a: T, b: T) => a.name.localeCompare(b.name);
+  return [...folders].sort((a, b) => {
+    switch (sort.key) {
+      case "name":
+        return byName(a, b) * sort.dir;
+      case "size":
+        return (a.count - b.count) * sort.dir || byName(a, b);
+      default:
+        return byName(a, b);
+    }
+  });
+}
+
+function FolderRow(props: {
+  folder: FolderRowData;
+  index: number;
+  onOpen: () => void;
+  onMenu: (x: number, y: number) => void;
+  onDropFiles?: (event: React.DragEvent) => void;
+}) {
+  const { folder } = props;
+  const longPress = useLongPress(props.onMenu);
+  // Same as the folder card: a drop lands in it, a lingering drag opens it.
+  const drop = useDropTarget((event) => props.onDropFiles?.(event), { springLoad: props.onOpen });
+
+  return (
+    <div
+      className={`row folder-row${drop.dropping ? " drop-target" : ""}`}
+      style={{ "--i": Math.min(props.index, 20) } as CSSProperties}
+      /* A folder opens on one click in both layouts, as its card does. */
+      onClick={props.onOpen}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        props.onMenu(e.clientX, e.clientY);
+      }}
+      {...longPress}
+      {...drop.props}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          props.onOpen();
+        }
+      }}
+    >
+      <span className="row-glyph folder-glyph">
+        <FolderGlyph size={15} />
+      </span>
+      <span className="col-name">
+        <span className="name">{folder.name}</span>
+      </span>
+      <span className="col-cat">Folder</span>
+      <span className="col-size">
+        {folder.count} item{folder.count === 1 ? "" : "s"}
+      </span>
+      <span className="col-date" />
+      <button
+        className="item-menu"
+        title="Actions"
+        aria-label="Actions"
+        onClick={(event) => {
+          event.stopPropagation();
+          const rect = event.currentTarget.getBoundingClientRect();
+          props.onMenu(rect.left, rect.bottom + 4);
+        }}
+      >
+        <DotsGlyph size={15} />
+      </button>
+    </div>
+  );
 }
 
 export function sortFiles(files: FileEntry[], sort: SortState): FileEntry[] {
@@ -98,9 +183,13 @@ function FileRow(props: {
   );
 }
 
-/** List layout: sortable columns, same selection semantics as the grid. */
+/**
+ * List layout: sortable columns, same selection semantics as the grid.
+ * Folders, when the place has any, are rows on top in the same columns.
+ */
 export function FileList(props: {
   files: FileEntry[];
+  folders?: FolderRowData[];
   selection: ReadonlySet<string>;
   sort: SortState;
   onSort: (key: SortKey) => void;
@@ -108,7 +197,11 @@ export function FileList(props: {
   onOpen: (id: string) => void;
   onMenu: (id: string, x: number, y: number) => void;
   onDragStart?: (id: string, event: React.DragEvent) => void;
+  onOpenFolder?: (id: string) => void;
+  onFolderMenu?: (id: string, x: number, y: number) => void;
+  onDropOnFolder?: (id: string, event: React.DragEvent) => void;
 }) {
+  const folders = props.folders ?? [];
   const arrow = (key: SortKey) =>
     props.sort.key === key ? (props.sort.dir === 1 ? " ↑" : " ↓") : "";
 
@@ -130,11 +223,21 @@ export function FileList(props: {
         </button>
         <span className="item-menu" aria-hidden="true" />
       </div>
+      {folders.map((folder, i) => (
+        <FolderRow
+          key={folder.id}
+          folder={folder}
+          index={i}
+          onOpen={() => props.onOpenFolder?.(folder.id)}
+          onMenu={(x, y) => props.onFolderMenu?.(folder.id, x, y)}
+          onDropFiles={(e) => props.onDropOnFolder?.(folder.id, e)}
+        />
+      ))}
       {props.files.map((file, i) => (
         <FileRow
           key={file.id}
           file={file}
-          index={i}
+          index={folders.length + i}
           selected={props.selection.has(file.id)}
           onSelect={(e) => props.onSelect(file.id, e)}
           onOpen={() => props.onOpen(file.id)}

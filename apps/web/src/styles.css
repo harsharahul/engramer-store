@@ -455,6 +455,23 @@ a {
   position: relative;
 }
 
+/* Each column is pinned to its track. Resting the pointer on the rail
+   lifts the sidebar out of the grid (position: absolute) to overlay the
+   content; without pinned tracks the main column and the details pane
+   slid one track left while the pointer stayed there. */
+@media (min-width: 761px) {
+  .frame > .main {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  /* The docked pane only; the floating overlay positions itself. */
+  .frame:not(.details-overlay) > .details {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
+
 /* A column's content must never stretch the frame beyond the viewport:
    otherwise the page itself scrolls and takes the sidebar with it. Each
    column manages its own overflow instead. */
@@ -546,8 +563,16 @@ body.resizing {
 .frame.sidebar-rail > .sidebar:not(:hover) .usage,
 .frame.sidebar-rail > .sidebar:not(:hover) .build-line,
 .frame.sidebar-rail > .sidebar:not(:hover) .account-link,
+.frame.sidebar-rail > .sidebar:not(:hover) .account-chevron,
 .frame.sidebar-rail > .sidebar:not(:hover) .brand .wordmark {
   display: none;
+}
+
+/* The rail keeps the account as its avatar. */
+.frame.sidebar-rail > .sidebar:not(:hover) .account-button {
+  width: auto;
+  padding: 6px;
+  justify-content: center;
 }
 
 .frame.sidebar-rail > .sidebar:not(:hover) .nav-item {
@@ -614,10 +639,6 @@ body.resizing {
    the folder upload folds into the New menu. */
 .frame.compact .topbar .btn-label,
 .frame.compact .topbar .btn-word,
-.frame.compact .topbar .palette-trigger,
-.frame.compact .topbar .folder-btn {
-  display: none;
-}
 
 :focus-visible {
   outline: 2px solid var(--accent);
@@ -947,22 +968,56 @@ body.resizing {
   overflow: hidden;
 }
 
+/* One account button: avatar, email, chevron; its menu holds Profile,
+   two-factor, administration and Lock. */
+.account-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--paper-dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.account-button:hover {
+  color: var(--paper);
+  background: var(--ink-2);
+}
+
+.account-avatar {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--accent-bright);
+  background: var(--accent-dim);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
 .account-link {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--paper-faint);
   font-size: 12.5px;
-  padding: 4px 6px;
-  border-radius: 6px;
-  text-align: left;
   flex: 1;
   min-width: 0;
 }
 
-.account-link:hover {
-  color: var(--paper);
-  background: var(--ink-2);
+.account-chevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--paper-faint);
 }
 
 .account-row span {
@@ -991,7 +1046,84 @@ body.resizing {
   position: relative;
   flex: 1 1 220px;
   min-width: 180px;
-  max-width: 480px;
+  max-width: 560px;
+}
+
+/* The palette shortcut sits inside the right end of the field. */
+.searchbox:has(.search-kbd) input {
+  padding-right: 52px;
+}
+
+.search-kbd {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+/* The single New button: a menu, so it carries a chevron. */
+.new-btn .new-chevron {
+  display: inline-flex;
+  margin-left: -2px;
+  opacity: 0.85;
+}
+
+/* Sort: key and direction as one control that opens one menu. */
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  background: var(--ink-1);
+  color: var(--paper-dim);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.sort-button:hover {
+  color: var(--paper);
+  border-color: var(--hairline-strong);
+}
+
+.sort-button .sort-dir {
+  color: var(--paper-faint);
+}
+
+.ctx-item .ctx-check {
+  margin-left: auto;
+  display: inline-flex;
+  color: var(--accent);
+}
+
+/* Folders as list rows: same columns as files, a folder glyph in the
+   extension slot. */
+.row.folder-row .folder-glyph {
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  background: var(--accent-dim);
+}
+
+.row.folder-row .name {
+  font-weight: 550;
+}
+
+.folder-row.drop-target {
+  background: var(--accent-dim);
+  outline: 1px solid var(--accent);
 }
 
 @media (max-width: 1420px) {
@@ -3192,10 +3324,6 @@ button.tag:hover {
   font-size: 10.5px;
 }
 
-.palette-trigger {
-  padding: 7px 10px;
-}
-
 .palette-trigger kbd {
   /* The system font draws ⌘ properly; mono fonts render it tiny and faint. */
   font-family: ui-sans-serif, -apple-system, system-ui, sans-serif;
@@ -3295,16 +3423,6 @@ button.tag:hover {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-}
-
-.sort-select {
-  background: var(--ink-1);
-  color: var(--paper-dim);
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
-  padding: 5px 8px;
-  font: inherit;
-  font-size: 12.5px;
 }
 
 .seg {
@@ -3447,10 +3565,6 @@ button.tag:hover {
 
 .col-sort:not(:disabled):hover {
   color: var(--paper);
-}
-
-.folders-strip {
-  margin-bottom: 16px;
 }
 
 /* ---------- details panel ---------- */
@@ -4028,7 +4142,7 @@ span.item-menu {
     height: 38px;
   }
 
-  .sort-select {
+  .sort-button {
     min-height: 38px;
   }
 
@@ -4140,6 +4254,15 @@ span.item-menu {
   .topbar {
     gap: 10px;
     padding: calc(12px + env(safe-area-inset-top)) 14px 12px;
+  }
+
+  /* No keyboard shortcut on a phone: the field keeps its full width. */
+  .searchbox .search-kbd {
+    display: none;
+  }
+
+  .searchbox:has(.search-kbd) input {
+    padding-right: 12px;
   }
 
   /* In the Mac shell the sidebar is off-canvas here, so the top bar is the
