@@ -5,7 +5,12 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+## [0.56.1] - 2026-09-22
+
 ### Fixed
+- **The Mac window no longer shows a grey system title bar on macOS 27.**
+  The app's own top strip is the title bar: the brand row and the toolbar
+  drag the window, and the traffic lights sit inset at the top left.
 - **The iPhone and iPad app opens again on iOS 27.** Apps built with the
   iOS 27 tools must use the system's scene life cycle or iOS refuses to
   start them; the app now declares it. On iPad, asking for another window
