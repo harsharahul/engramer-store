@@ -19,6 +19,12 @@ export const SIDEBAR_MAX = 320;
 export const SIDEBAR_DEFAULT = 232;
 /** The collapsed sidebar: icons only, labels on hover. */
 export const RAIL_WIDTH = 64;
+/**
+ * The rail in the Mac shell, which hides the system title bar: the traffic
+ * lights end 70px from the left edge, so the rail grows enough to keep them
+ * inside its column instead of straddling its border.
+ */
+export const MAC_SHELL_RAIL_WIDTH = 88;
 
 export const DETAILS_MIN = 240;
 export const DETAILS_MAX = 420;
@@ -35,6 +41,8 @@ export interface LayoutPrefs {
   detailsWidth: number;
   sidebarCollapsed: boolean;
   detailsOpen: boolean;
+  /** Width of the collapsed sidebar; the Mac shell asks for a wider one. */
+  railWidth?: number;
 }
 
 export interface LayoutPlan {
@@ -60,7 +68,8 @@ export function planLayout(viewport: number, prefs: LayoutPrefs): LayoutPlan {
   }
 
   let sidebar: LayoutPlan["sidebar"] = prefs.sidebarCollapsed ? "rail" : "expanded";
-  let sidebarWidth = sidebar === "rail" ? RAIL_WIDTH : clamp(prefs.sidebarWidth, SIDEBAR_MIN, SIDEBAR_MAX);
+  const railWidth = prefs.railWidth ?? RAIL_WIDTH;
+  let sidebarWidth = sidebar === "rail" ? railWidth : clamp(prefs.sidebarWidth, SIDEBAR_MIN, SIDEBAR_MAX);
   let details: LayoutPlan["details"] = prefs.detailsOpen ? "pane" : "hidden";
   let detailsWidth = prefs.detailsOpen ? clamp(prefs.detailsWidth, DETAILS_MIN, DETAILS_MAX) : 0;
 
@@ -75,7 +84,7 @@ export function planLayout(viewport: number, prefs: LayoutPrefs): LayoutPlan {
   }
   if (room() < CONTENT_MIN && sidebar === "expanded") {
     sidebar = "rail";
-    sidebarWidth = RAIL_WIDTH;
+    sidebarWidth = railWidth;
   }
   if (room() < CONTENT_MIN && details === "pane") {
     details = "overlay";

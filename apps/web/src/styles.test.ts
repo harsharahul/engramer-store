@@ -95,3 +95,27 @@ describe("the sidebar rail never hides a group", () => {
     expect(railHidden.some((s) => s.endsWith(".sidebar-label-text"))).toBe(true);
   });
 });
+
+describe("sidebar groups keep their rows", () => {
+  it("never lets a group list shrink below its rows", () => {
+    // The lists scroll internally, so as flex children they may shrink to
+    // nothing when the sidebar is taller than the window; that cut the first
+    // album to half a row. The sidebar scrolls as a whole instead.
+    const rule = /\.library-list\s*\{([^}]*)\}/.exec(CSS);
+    expect(rule).not.toBeNull();
+    expect(rule![1]).toMatch(/flex-shrink:\s*0/);
+  });
+});
+
+describe("the Mac shell's hidden title bar", () => {
+  it("keeps the traffic lights off the top bar at phone widths", () => {
+    // Below the phone breakpoint the sidebar is off-canvas, so nothing else
+    // reserves the corner the traffic lights occupy; the top bar must.
+    const phoneBlock = CSS.slice(CSS.indexOf(`@media (max-width: ${PHONE_MAX}px)`));
+    const rule = /\.frame\.shell-mac\s+\.topbar\s*\{([^}]*)\}/.exec(phoneBlock);
+    expect(rule).not.toBeNull();
+    const padding = /padding-left:\s*(\d+)px/.exec(rule?.[1] ?? "");
+    expect(padding).not.toBeNull();
+    expect(Number(padding?.[1] ?? 0)).toBeGreaterThanOrEqual(84);
+  });
+});

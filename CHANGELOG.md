@@ -5,6 +5,13 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+- **Albums and Library rows are no longer cut off in a short window.** The
+  sidebar scrolls as a whole instead of squeezing the group lists.
+- **The Mac window's traffic lights keep clear of the app.** The collapsed
+  sidebar is wide enough to hold them, and in a narrow window the top bar
+  leaves them their corner instead of putting the search field under them.
+
 ## [0.56.1] - 2026-09-22
 
 ### Fixed
