@@ -5,6 +5,14 @@ members = ["crates/engram-core", "crates/engram-ffi", "apps/desktop/src-tauri"]
 [profile.release]
 lto = true
 
+# Proc macros and build scripts stay unstripped. Cargo's default strips
+# them with its own tool, which leaves the symbol string table 4-byte
+# aligned; the macOS 27 loader requires 8 and refuses to load the macro
+# ("mis-aligned LINKEDIT string pool"), so release builds fail to compile
+# any crate that uses one. The shipped binaries are unaffected.
+[profile.release.build-override]
+strip = "none"
+
 # swift-rs 1.0.8 with one fix for Xcode 27 release builds: the exported
 # C symbols of every archive member are made global again, not only the
 # member named after the package. See apps/desktop/vendor/swift-rs/VENDORED.md.
