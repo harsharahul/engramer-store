@@ -76,7 +76,8 @@ export function autoScrollStep(
 }
 
 /** Elements a band must never start from: they have their own pointer job. */
-const INTERACTIVE = "[data-file-id], .card, button, input, textarea, select, a, [contenteditable], .bulk-bar";
+const INTERACTIVE =
+  "[data-file-id], .card, .folder-row, button, input, textarea, select, a, [contenteditable], .bulk-bar";
 
 /** Whether a click landed on nothing in particular: the cue to clear. */
 export function isEmptySpace(target: EventTarget | null): boolean {

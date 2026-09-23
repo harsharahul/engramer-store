@@ -5,7 +5,22 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Changed
+- **A quieter toolbar.** One New button now holds every way to add
+  something: upload files or a folder, a note, a document, a spreadsheet,
+  a folder. The command palette's ⌘K sits inside the search field. Sorting
+  is one control that shows the current order and picks key and direction
+  from one menu. With a mouse or trackpad, selecting is direct (click,
+  shift or command click, drag); the Select button remains on touch
+  screens.
+- **The account is one button at the foot of the sidebar.** Profile,
+  two-factor sign-in, administration and Lock live in its menu instead of
+  as loose icons.
+
 ### Fixed
+- **Switching to list view turns folders into rows too.** Folders sit on
+  top in the same columns as files, open with one click, take dropped
+  files, and follow the chosen sort.
 - **Albums and Library rows are no longer cut off in a short window.** The
   sidebar scrolls as a whole instead of squeezing the group lists.
 - **The Mac window's traffic lights keep clear of the app.** The collapsed

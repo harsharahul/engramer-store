@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { MOBILE_QUERY, useMediaQuery } from "../media";
 import { useSheetDrag } from "../sheetdrag";
+import { CheckGlyph } from "./Icon";
 
 export interface MenuItem {
   id: string;
@@ -8,6 +9,8 @@ export interface MenuItem {
   icon?: React.ReactNode;
   danger?: boolean;
   divider?: boolean;
+  /** A choice among siblings (sort order, say): set on each, true on the current one. */
+  checked?: boolean;
   run: () => void;
 }
 
@@ -77,7 +80,8 @@ export function ContextMenu(props: {
         ) : (
           <button
             key={item.id}
-            role="menuitem"
+            role={item.checked === undefined ? "menuitem" : "menuitemradio"}
+            aria-checked={item.checked}
             className={`ctx-item${item.danger ? " danger" : ""}`}
             onClick={() => {
               props.onClose();
@@ -86,6 +90,11 @@ export function ContextMenu(props: {
           >
             {item.icon}
             {item.label}
+            {item.checked && (
+              <span className="ctx-check">
+                <CheckGlyph size={14} />
+              </span>
+            )}
           </button>
         ),
       )}
