@@ -2871,6 +2871,10 @@ body.resizing {
   gap: 2px;
   overflow-y: auto;
   max-height: 40vh;
+  /* A scrolling flex child may shrink to nothing when the sidebar is
+     taller than the window, which cut the first album to half a row. The
+     sidebar scrolls as a whole instead. */
+  flex-shrink: 0;
 }
 
 .nav-item.small {
@@ -4136,6 +4140,13 @@ span.item-menu {
   .topbar {
     gap: 10px;
     padding: calc(12px + env(safe-area-inset-top)) 14px 12px;
+  }
+
+  /* In the Mac shell the sidebar is off-canvas here, so the top bar is the
+     only thing under the traffic lights (they end 70px in) and reserves
+     that corner itself. */
+  .frame.shell-mac .topbar {
+    padding-left: 84px;
   }
 
   .topbar .btn,

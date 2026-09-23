@@ -3,6 +3,7 @@ import {
   CONTENT_MIN,
   DETAILS_DEFAULT,
   DETAILS_MIN,
+  MAC_SHELL_RAIL_WIDTH,
   RAIL_WIDTH,
   SIDEBAR_DEFAULT,
   SIDEBAR_MIN,
@@ -51,6 +52,19 @@ describe("planLayout concession ladder", () => {
     expect(plan.sidebar).toBe("rail");
     expect(plan.sidebarWidth).toBe(RAIL_WIDTH);
     expect(plan.details).toBe("pane");
+  });
+
+  it("widens the rail when the shell asks for room under the traffic lights", () => {
+    // The Mac shell hides the system title bar; its traffic lights end at
+    // 70px from the left, wider than the default rail, so the rail grows
+    // enough to keep them inside its column.
+    const plan = planLayout(880, prefs({ railWidth: MAC_SHELL_RAIL_WIDTH }));
+    expect(plan.sidebar).toBe("rail");
+    expect(plan.sidebarWidth).toBe(MAC_SHELL_RAIL_WIDTH);
+    expect(MAC_SHELL_RAIL_WIDTH).toBeGreaterThanOrEqual(70 + 14);
+    expect(planLayout(880, prefs({ sidebarCollapsed: true, railWidth: MAC_SHELL_RAIL_WIDTH })).sidebarWidth).toBe(
+      MAC_SHELL_RAIL_WIDTH,
+    );
   });
 
   it("finally floats the details over the content instead of hiding it", () => {

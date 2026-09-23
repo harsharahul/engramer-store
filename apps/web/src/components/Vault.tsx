@@ -43,6 +43,7 @@ import {
   planLayout,
   resizeDetails,
   resizeSidebar,
+  MAC_SHELL_RAIL_WIDTH,
 } from "../layout";
 import { useDivider } from "../usedivider";
 import { isGathering, nextSelection } from "../selection";
@@ -376,6 +377,7 @@ export function Vault() {
     detailsWidth,
     sidebarCollapsed,
     detailsOpen,
+    railWidth: macShell ? MAC_SHELL_RAIL_WIDTH : undefined,
   });
   const frameRef = useRef<HTMLDivElement>(null);
 
