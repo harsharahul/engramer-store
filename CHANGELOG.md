@@ -21,6 +21,9 @@ All notable changes to Engram Store are documented here, following
 - **The sidebar is rebuilt on shadcn/ui.** Every icon in the collapsed rail
   sits on one line, groups keep their icon there, labels become tooltips,
   and the account shows its name above the full email address.
+- **The toolbar's sidebar button uses the sidebar glyph** Finder, Mail and
+  Notes use, and the sort control is plain text with a chevron, as in
+  macOS list headers.
 
 ### Fixed
 - **A file being downloaded while it is deleted no longer risks the server.**

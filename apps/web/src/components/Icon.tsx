@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleUser,
+  PanelLeft,
   Plane,
   ShieldCheck,
   Ticket,
@@ -80,6 +81,8 @@ export const ChevronDownGlyph = ({ size = 16 }: IconProps) => <ChevronDown size=
 export const CheckGlyph = ({ size = 16 }: IconProps) => <Check size={size} {...lucide} />;
 
 export const SortGlyph = ({ size = 16 }: IconProps) => <ArrowDownUp size={size} {...lucide} />;
+/** Show or hide the sidebar: the panel glyph Finder, Mail and Notes use. */
+export const SidebarGlyph = ({ size = 16 }: IconProps) => <PanelLeft size={size} {...lucide} />;
 
 export const ProfileGlyph = ({ size = 16 }: IconProps) => <CircleUser size={size} {...lucide} />;
 
