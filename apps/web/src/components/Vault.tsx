@@ -43,7 +43,6 @@ import {
   planLayout,
   resizeDetails,
   resizeSidebar,
-  MAC_SHELL_RAIL_WIDTH,
 } from "../layout";
 import { useDivider } from "../usedivider";
 import { isGathering, nextSelection } from "../selection";
@@ -127,6 +126,9 @@ import { clearThumbnailCache } from "../thumbs";
 import { FileCard, FolderCard } from "./FileCard";
 import { BrandMark, FolderArt, Wordmark } from "./FileArt";
 import { FileList, sortFiles, sortFolders, type SortKey, type SortState } from "./FileList";
+import { AppSidebar, type SidebarGroupData, type SidebarPlace } from "./chrome/AppSidebar";
+import { capsule, capsuleIcon } from "./chrome/glass";
+import { cn } from "@/lib/utils";
 import { DetailsPanel } from "./DetailsPanel";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import { MoveDialog } from "./MoveDialog";
@@ -375,13 +377,14 @@ export function Vault() {
   // The Mac shell hides the system title bar; the app's own top strip
   // takes its place and starts below the inset traffic lights.
   const macShell = nativeShell() && !isHandheld();
+  // A resting pointer opens the rail as an overlay (AppSidebar shows words).
+  const [railOpen, setRailOpen] = useState(false);
   const viewportWidth = useViewportWidth();
   const plan = planLayout(viewportWidth, {
     sidebarWidth,
     detailsWidth,
     sidebarCollapsed,
     detailsOpen,
-    railWidth: macShell ? MAC_SHELL_RAIL_WIDTH : undefined,
   });
   const frameRef = useRef<HTMLDivElement>(null);
 
@@ -2266,47 +2269,131 @@ export function Vault() {
     view.kind !== "shared" &&
     view.kind !== "profile";
 
-  const navButton = (
+  // The sidebar's contents as data; AppSidebar draws them (shadcn/ui).
+  const place = (
+    key: string,
     active: boolean,
-    onClick: () => void,
+    select: () => void,
     icon: React.ReactNode,
     label: string,
     count?: number,
     drop?: typeof rootDrop,
-  ) => (
-    <button
-      className={`nav-item${active && !searching ? " active" : ""}${drop?.dropping ? " drop-target" : ""}`}
-      onClick={() => {
-        setQuery("");
-        setDrawerOpen(false);
-        onClick();
-      }}
-      {...(drop ? drop.props : {})}
-      title={label}
-    >
-      {icon} <span className="nav-label">{label}</span>
-      {count !== undefined && count > 0 && <span className="nav-count">{count}</span>}
-    </button>
-  );
+  ): SidebarPlace => ({
+    key,
+    label,
+    icon,
+    active: active && !searching,
+    count,
+    drop: drop ? { props: drop.props as Record<string, unknown>, dropping: drop.dropping } : undefined,
+    onSelect: () => {
+      setQuery("");
+      setDrawerOpen(false);
+      select();
+    },
+  });
 
-  /** A sidebar section heading that folds its list, Finder-style. */
-  // A group header keeps its icon in the rail (only the words go), so a
-  // group is never without a footprint; collapsed, it shows its count.
-  const sectionLabel = (
-    icon: React.ReactNode,
-    label: string,
-    open: boolean,
-    onToggle: () => void,
-    count?: number,
-  ) => (
-    <button className="sidebar-label" aria-expanded={open} onClick={onToggle} title={label}>
-      {icon} <span className="sidebar-label-text">{label}</span>
-      {!open && count !== undefined && count > 0 && <span className="nav-count">{count}</span>}
-      <span className="disclosure" aria-hidden="true">
-        <ChevronRightGlyph size={11} />
-      </span>
-    </button>
-  );
+  const sidebarPlaces: SidebarPlace[] = [
+    place("files", view.kind === "folder", () => setView({ kind: "folder", id: null }), <FolderGlyph />, "Files", undefined, rootDrop),
+    place("recent", view.kind === "recent", () => setView({ kind: "recent" }), <ClockGlyph />, "Recent"),
+    place("photos", view.kind === "photos", () => setView({ kind: "photos" }), <PhotoGlyph />, "Photos"),
+    place(
+      "favorites",
+      view.kind === "favorites",
+      () => setView({ kind: "favorites" }),
+      <StarGlyph />,
+      "Favorites",
+      liveFiles.filter((f) => f.favorite).length,
+    ),
+    ...(expiringCount > 0
+      ? [place("expiring", view.kind === "expiring", () => setView({ kind: "expiring" }), <ClockGlyph />, "Expiring soon", expiringCount)]
+      : []),
+    ...(calendarWorthy
+      ? [place("calendar", view.kind === "calendar", () => setView({ kind: "calendar" }), <CalendarGlyph />, "Calendar")]
+      : []),
+    place("shared", view.kind === "shared", () => setView({ kind: "shared" }), <LinkGlyph />, "Shared"),
+    ...(sharedWithMeCount > 0
+      ? [
+          place(
+            "shared-with-me",
+            view.kind === "shared-with-me",
+            () => setView({ kind: "shared-with-me" }),
+            <PeopleGlyph />,
+            "Shared with me",
+            sharedWithMeCount,
+          ),
+        ]
+      : []),
+    place("trash", view.kind === "trash", () => setView({ kind: "trash" }), <TrashGlyph />, "Trash"),
+  ];
+
+  const sidebarGroups: SidebarGroupData[] = [];
+  if (albums.length > 0) {
+    sidebarGroups.push({
+      key: "albums",
+      label: "Albums",
+      icon: <BookGlyph size={14} />,
+      open: albumsOpen,
+      onToggle: () => {
+        setAlbumsOpen(!albumsOpen);
+        persist("engramer-side-albums", !albumsOpen);
+      },
+      rows: orderedAlbums.map((album) => ({
+        key: album.tag,
+        label: album.title,
+        icon: <PhotoGlyph size={14} />,
+        active: view.kind === "album" && view.tag === album.tag && !searching,
+        count: album.count,
+        pinned: pins.has(album.tag),
+        reveal: revealTag === album.tag,
+        attrs: { "data-album": album.tag },
+        onSelect: () => openAlbum(album.tag),
+        onContextMenu: (event) => {
+          event.preventDefault();
+          const isPinned = pins.has(album.tag);
+          setCtxMenu({
+            x: event.clientX,
+            y: event.clientY,
+            title: album.title,
+            items: [
+              { id: "open", label: "Open", run: () => openAlbum(album.tag) },
+              {
+                id: "pin",
+                label: isPinned ? "Unpin" : "Pin to the top",
+                run: () => setPin(store.session?.email ?? "", album.tag, !isPinned),
+              },
+            ],
+          });
+        },
+      })),
+    });
+  }
+  if (libraryCategories.length > 0) {
+    sidebarGroups.push({
+      key: "library",
+      label: "Library",
+      icon: <SparkGlyph size={14} />,
+      open: libraryOpen,
+      onToggle: () => {
+        setLibraryOpen(!libraryOpen);
+        persist("engramer-side-library", !libraryOpen);
+      },
+      rows: libraryCategories.map((name) => {
+        const CategoryIcon = CATEGORY_ICONS[name] ?? AsteriskGlyph;
+        return {
+          key: name,
+          label: name,
+          icon: <CategoryIcon size={14} />,
+          active: view.kind === "category" && view.name === name && !searching,
+          count: categoryCounts.get(name),
+          onSelect: () => {
+            setQuery("");
+            setDrawerOpen(false);
+            setView({ kind: "category", name });
+          },
+        };
+      }),
+    });
+  }
 
   return (
     <div
@@ -2356,199 +2443,54 @@ export function Vault() {
           {...detailsDivider.props}
         />
       )}
-      <aside className="sidebar">
-        {/* In the Mac shell the title bar is the app's own top strip: the
-            brand row and the top bar drag the window, and the sidebar
-            starts below the inset traffic lights. */}
-        <div className="brand" data-tauri-drag-region>
-          <BrandMark size={26} />
-          <Wordmark />
-        </div>
-        {navButton(
-          view.kind === "folder",
-          () => setView({ kind: "folder", id: null }),
-          <FolderGlyph />,
-          "Files",
-          undefined,
-          rootDrop,
-        )}
-        {navButton(view.kind === "recent", () => setView({ kind: "recent" }), <ClockGlyph />, "Recent")}
-        {navButton(view.kind === "photos", () => setView({ kind: "photos" }), <PhotoGlyph />, "Photos")}
-        {navButton(
-          view.kind === "favorites",
-          () => setView({ kind: "favorites" }),
-          <StarGlyph />,
-          "Favorites",
-          liveFiles.filter((f) => f.favorite).length,
-        )}
-        {expiringCount > 0 &&
-          navButton(
-            view.kind === "expiring",
-            () => setView({ kind: "expiring" }),
-            <ClockGlyph />,
-            "Expiring soon",
-            expiringCount,
-          )}
-        {calendarWorthy &&
-          navButton(
-            view.kind === "calendar",
-            () => setView({ kind: "calendar" }),
-            <CalendarGlyph />,
-            "Calendar",
-          )}
-        {navButton(view.kind === "shared", () => setView({ kind: "shared" }), <LinkGlyph />, "Shared")}
-        {sharedWithMeCount > 0 &&
-          navButton(
-            view.kind === "shared-with-me",
-            () => setView({ kind: "shared-with-me" }),
-            <PeopleGlyph />,
-            "Shared with me",
-            sharedWithMeCount,
-          )}
-        {navButton(view.kind === "trash", () => setView({ kind: "trash" }), <TrashGlyph />, "Trash")}
-
-        {albums.length > 0 && (
-          <>
-            {sectionLabel(
-              <BookGlyph size={12} />,
-              "Albums",
-              albumsOpen,
-              () => {
-                setAlbumsOpen(!albumsOpen);
-                persist("engramer-side-albums", !albumsOpen);
-              },
-              albums.length,
-            )}
-            {albumsOpen && (
-            <div className="library-list" data-group="albums">
-              {orderedAlbums.map((album) => (
-                <button
-                  key={album.tag}
-                  data-album={album.tag}
-                  className={`nav-item small${
-                    view.kind === "album" && view.tag === album.tag && !searching ? " active" : ""
-                  }${revealTag === album.tag ? " reveal" : ""}`}
-                  onClick={() => openAlbum(album.tag)}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    const isPinned = pins.has(album.tag);
-                    setCtxMenu({
-                      x: event.clientX,
-                      y: event.clientY,
-                      title: album.title,
-                      items: [
-                        { id: "open", label: "Open", run: () => openAlbum(album.tag) },
-                        {
-                          id: "pin",
-                          label: isPinned ? "Unpin" : "Pin to the top",
-                          run: () => setPin(store.session?.email ?? "", album.tag, !isPinned),
-                        },
-                      ],
-                    });
-                  }}
-                >
-                  <PhotoGlyph size={14} />
-                  {album.title}
-                  {pins.has(album.tag) && <span className="nav-pin">pinned</span>}
-                  <span className="nav-count">{album.count}</span>
-                </button>
-              ))}
-            </div>
-            )}
-          </>
-        )}
-
-        {libraryCategories.length > 0 && (
-          <>
-            {sectionLabel(
-              <SparkGlyph size={12} />,
-              "Library",
-              libraryOpen,
-              () => {
-                setLibraryOpen(!libraryOpen);
-                persist("engramer-side-library", !libraryOpen);
-              },
-              libraryCategories.length,
-            )}
-            {libraryOpen && (
-            <div className="library-list">
-              {libraryCategories.map((name) => {
-                const CategoryIcon = CATEGORY_ICONS[name] ?? AsteriskGlyph;
-                return (
-                  <button
-                    key={name}
-                    className={`nav-item small${
-                      view.kind === "category" && view.name === name && !searching ? " active" : ""
-                    }`}
-                    onClick={() => {
-                      setQuery("");
-                      setDrawerOpen(false);
-                      setView({ kind: "category", name });
-                    }}
-                  >
-                    <CategoryIcon size={14} />
-                    {name}
-                    <span className="nav-count">{categoryCounts.get(name)}</span>
-                  </button>
-                );
-              })}
-            </div>
-            )}
-          </>
-        )}
-
-        <div className="spacer" />
-        {/* The foot holds state, never settings: the switches and the
-            appearance live in Profile > Preferences (IA §4.4). */}
-        {store.usage && (
-          <div className="usage">
-            <div>
-              {formatBytes(store.usage.usedBytes)} of {formatBytes(store.usage.quotaBytes)}
-            </div>
-            <div className="meter">
-              <div style={{ width: `${usagePercent}%` }} />
-            </div>
-            encrypted at rest
-          </div>
-        )}
-        <div className="build-line" title="The version running in this page">
-          v{APP_VERSION}
-        </div>
-        <div className="account-row">
-          <button
-            className="account-button"
-            title="Account"
-            aria-haspopup="menu"
-            aria-label={`Account: ${store.session?.email ?? ""}`}
-            onClick={openAccountMenu}
-          >
-            <span className="account-avatar" aria-hidden="true">
-              {(store.session?.email ?? "?").slice(0, 1).toUpperCase()}
-            </span>
-            <span className="account-link">{store.session?.email}</span>
-            <span className="account-chevron" aria-hidden="true">
-              <ChevronDownGlyph size={14} />
-            </span>
-          </button>
-        </div>
+      <aside
+        className={`sidebar${railOpen ? " rail-open" : ""}`}
+        onMouseEnter={() => plan.sidebar === "rail" && setRailOpen(true)}
+        onMouseLeave={() => setRailOpen(false)}
+      >
+        <AppSidebar
+          collapsed={plan.sidebar === "rail" && !railOpen}
+          places={sidebarPlaces}
+          groups={sidebarGroups}
+          usage={
+            store.usage
+              ? {
+                  label: `${formatBytes(store.usage.usedBytes)} of ${formatBytes(store.usage.quotaBytes)}`,
+                  percent: usagePercent,
+                }
+              : undefined
+          }
+          version={APP_VERSION}
+          account={{ email: store.session?.email ?? "", onOpen: openAccountMenu }}
+        />
       </aside>
 
       <main className="main">
         <div className="topbar" ref={topbarRef} data-tauri-drag-region>
-          <button
-            className={`icon-btn sidebar-toggle${plan.sidebar === "rail" ? " active" : ""}`}
-            title={plan.sidebar === "rail" ? "Show sidebar (⌘⌥S)" : "Hide sidebar (⌘⌥S)"}
-            aria-label={plan.sidebar === "rail" ? "Show sidebar" : "Hide sidebar"}
-            onClick={toggleSidebar}
+          {/* Liquid Glass: the controls float in capsules, no bar behind them. */}
+          <div className={cn(capsule, "tw:max-[760px]:hidden")}>
+            <button
+              className={cn(`icon-btn sidebar-toggle${plan.sidebar === "rail" ? " active" : ""}`, capsuleIcon)}
+              title={plan.sidebar === "rail" ? "Show sidebar (⌘⌥S)" : "Hide sidebar (⌘⌥S)"}
+              aria-label={plan.sidebar === "rail" ? "Show sidebar" : "Hide sidebar"}
+              onClick={toggleSidebar}
+            >
+              <MenuGlyph size={16} />
+            </button>
+          </div>
+          <div
+            className={cn(
+              "searchbox",
+              capsule,
+              "tw:shrink tw:p-0 tw:focus-within:ring-2 tw:focus-within:ring-ring/40",
+            )}
           >
-            <MenuGlyph size={16} />
-          </button>
-          <div className="searchbox">
             <span className="search-glyph">
               <SearchGlyph />
             </span>
             <input
               ref={searchInput}
+              className="tw:h-full tw:w-full tw:rounded-full tw:border-0 tw:bg-transparent tw:pr-14 tw:pl-9 tw:text-[14px] tw:shadow-none tw:focus-visible:outline-none tw:max-[760px]:pr-3"
               placeholder={
                 isMobile || compactSearch
                   ? "Search your vault"
@@ -2640,17 +2582,31 @@ export function Vault() {
             )}
           </div>
           <div className="grow" />
-          <ActivityBell
-            open={activityOpen}
-            onToggle={() => {
-              setActivityOpen((open) => !open);
-            }}
-          />
-          <button className="icon-btn add-btn" title="Add to your vault" aria-label="Add" onClick={openAddSheet}>
-            <PlusGlyph size={18} />
-          </button>
+          <div className={capsule}>
+            <ActivityBell
+              open={activityOpen}
+              onToggle={() => {
+                setActivityOpen((open) => !open);
+              }}
+            />
+            <button
+              className={cn("icon-btn add-btn", capsuleIcon)}
+              title="Add to your vault"
+              aria-label="Add"
+              onClick={openAddSheet}
+            >
+              <PlusGlyph size={18} />
+            </button>
+            <button
+              className={cn(`icon-btn info-toggle${detailsOpen ? " active" : ""}`, capsuleIcon)}
+              title={detailsOpen ? "Hide details (⌘⌥I)" : "Show details (⌘⌥I)"}
+              onClick={toggleDetails}
+            >
+              <InfoGlyph />
+            </button>
+          </div>
           <button
-            className="btn btn-primary new-btn"
+            className="btn btn-primary new-btn tw:h-10 tw:rounded-full tw:px-4 tw:shadow-(--glass-shadow)"
             title="Upload, or create a note, document, spreadsheet or folder"
             aria-haspopup="menu"
             onClick={(event) => {
@@ -2664,13 +2620,6 @@ export function Vault() {
             <span className="new-chevron" aria-hidden="true">
               <ChevronDownGlyph size={14} />
             </span>
-          </button>
-          <button
-            className={`icon-btn info-toggle${detailsOpen ? " active" : ""}`}
-            title={detailsOpen ? "Hide details (⌘⌥I)" : "Show details (⌘⌥I)"}
-            onClick={toggleDetails}
-          >
-            <InfoGlyph />
           </button>
           <input
             ref={fileInput}
