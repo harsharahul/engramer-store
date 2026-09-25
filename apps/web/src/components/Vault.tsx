@@ -116,6 +116,8 @@ import { extension, fileKind, formatBytes } from "../format";
 import { albumTitle, albumsFrom, type Album } from "../albums";
 import { orderCollections } from "../sidebar";
 import { Popover, PopoverContent } from "./ui/popover";
+import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
 import { PhotoGrid } from "./PhotoGrid";
 import { AlbumPicker } from "./AlbumPicker";
 import { SelectionBar } from "./SelectionBar";
@@ -2471,14 +2473,15 @@ export function Vault() {
         <div className="topbar" ref={topbarRef} data-tauri-drag-region>
           {/* Liquid Glass: the controls float in capsules, no bar behind them. */}
           <div className={cn(capsule, "tw:max-[760px]:hidden")}>
-            <button
-              className={cn(`icon-btn sidebar-toggle${plan.sidebar === "rail" ? " active" : ""}`, capsuleIcon)}
+            <IconButton
+              size="md"
+              className={cn("sidebar-toggle", capsuleIcon)}
+              label={plan.sidebar === "rail" ? "Show sidebar" : "Hide sidebar"}
               title={plan.sidebar === "rail" ? "Show sidebar (⌘⌥S)" : "Hide sidebar (⌘⌥S)"}
-              aria-label={plan.sidebar === "rail" ? "Show sidebar" : "Hide sidebar"}
               onClick={toggleSidebar}
             >
               <SidebarGlyph size={16} />
-            </button>
+            </IconButton>
           </div>
           <div
             ref={searchBox}
@@ -2600,24 +2603,29 @@ export function Vault() {
                 setActivityOpen((open) => !open);
               }}
             />
-            <button
-              className={cn("icon-btn add-btn", capsuleIcon)}
+            <IconButton
+              size="md"
+              className={cn("add-btn tw:hidden tw:max-[760px]:inline-flex", capsuleIcon)}
+              label="Add"
               title="Add to your vault"
-              aria-label="Add"
               onClick={openAddSheet}
             >
               <PlusGlyph size={18} />
-            </button>
-            <button
-              className={cn(`icon-btn info-toggle${detailsOpen ? " active" : ""}`, capsuleIcon)}
+            </IconButton>
+            <IconButton
+              size="md"
+              className={cn("info-toggle tw:max-[760px]:hidden", capsuleIcon)}
+              label={detailsOpen ? "Hide details" : "Show details"}
               title={detailsOpen ? "Hide details (⌘⌥I)" : "Show details (⌘⌥I)"}
+              aria-pressed={detailsOpen}
               onClick={toggleDetails}
             >
               <InfoGlyph />
-            </button>
+            </IconButton>
           </div>
-          <button
-            className="btn btn-primary new-btn tw:h-10 tw:rounded-full tw:px-4 tw:shadow-(--glass-shadow)"
+          <Button
+            size="lg"
+            className="new-btn tw:rounded-full tw:shadow-(--glass-shadow) tw:max-[760px]:hidden"
             title="Upload, or create a note, document, spreadsheet or folder"
             aria-haspopup="menu"
             onClick={(event) => {
@@ -2631,7 +2639,7 @@ export function Vault() {
             <span className="new-chevron" aria-hidden="true">
               <ChevronDownGlyph size={14} />
             </span>
-          </button>
+          </Button>
           <input
             ref={fileInput}
             type="file"

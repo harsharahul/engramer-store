@@ -6,7 +6,7 @@
  * app.css, so another platform restyles every capsule at once.
  */
 export const capsule =
-  "tw:flex tw:h-10 tw:shrink-0 tw:items-center tw:gap-0.5 tw:rounded-full tw:border tw:border-(--glass-border) tw:bg-(--glass-bg) tw:p-0.5 tw:shadow-(--glass-shadow) tw:backdrop-blur-xl tw:backdrop-saturate-150";
+  "tw:flex tw:h-10 tw:shrink-0 tw:items-center tw:gap-0.5 tw:rounded-full tw:border tw:border-(--glass-border) tw:bg-(--glass-bg) tw:p-0.5 tw:shadow-(--glass-shadow) tw:backdrop-blur-xl tw:backdrop-saturate-150 tw:pointer-coarse:h-11";
 
-/** An icon button inside a capsule. */
-export const capsuleIcon = "tw:size-9 tw:rounded-full";
+/** An IconButton (size "md") inside a capsule: round, concentric with it. */
+export const capsuleIcon = "tw:rounded-full";

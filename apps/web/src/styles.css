@@ -3206,11 +3206,6 @@ button.tag:hover {
   color: var(--accent-bright);
 }
 
-.info-toggle.active {
-  color: var(--accent);
-  background: var(--accent-dim);
-}
-
 /* ---------- selection ---------- */
 
 .card {
@@ -4013,12 +4008,6 @@ span.item-menu {
 
   /* No keyboard shortcut on a phone: the field keeps its full width. */
   .searchbox .search-kbd {
-    display: none;
-  }
-
-  .topbar .btn,
-  .topbar .info-toggle,
-  .topbar .sidebar-toggle {
     display: none;
   }
 
@@ -5787,18 +5776,6 @@ button.link {
 .album-cover-count {
   font-size: 11.5px;
   color: var(--paper-faint);
-}
-
-/* The phone's Add lives in the top bar; elsewhere the New and Upload
-   buttons carry the job. */
-.topbar .add-btn {
-  display: none;
-}
-
-@media (max-width: 760px) {
-  .topbar .add-btn {
-    display: inline-flex;
-  }
 }
 
 /* ---------- PDF viewer ---------- */
