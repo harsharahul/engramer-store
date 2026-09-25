@@ -5,6 +5,13 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+- **The Mac traffic lights sit where macOS puts them.** On macOS 26 and
+  later they landed about 9 points above the toolbar's centre line and
+  against the sidebar pane's top edge. They now sit 19 points in and 19
+  down, centred on the toolbar row as in Mail and Finder, and the toolbar
+  keeps a clear gap after them beside the icon rail.
+
 ## [0.56.3] - 2026-09-25
 
 ### Changed

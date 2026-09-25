@@ -6234,11 +6234,13 @@ button.link {
   padding-top: 0;
 }
 
-/* Whatever is left of the lights' corner (they end 70px in) the toolbar
-   keeps clear: all of it on a phone-width window, none beside a full
-   sidebar. */
+/* The lights sit where macOS puts them in a toolbar window (Mail,
+   Finder): 19px in and 19px down, three 14px buttons 23px apart, so they
+   end 79px in and centre on the 52px toolbar row. Beside the rail the
+   toolbar keeps a 14px gap after them; beside a full sidebar they are in
+   the pane and the toolbar keeps its own 16px. */
 .frame.shell-mac .topbar {
-  padding-left: max(16px, calc(84px - var(--sidebar-w, 0px)));
+  padding-left: max(16px, calc(93px - var(--sidebar-w, 0px)));
 }
 
 .frame.shell-mac .topbar {
