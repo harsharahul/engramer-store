@@ -181,6 +181,7 @@ import {
   PeopleGlyph,
   LockGlyph,
   MenuGlyph,
+  SidebarGlyph,
   ChevronRightGlyph,
   MonitorGlyph,
   MoveGlyph,
@@ -203,7 +204,6 @@ import {
   VideoGlyph,
   XGlyph,
   ChevronDownGlyph,
-  SortGlyph,
   ProfileGlyph,
   AdminGlyph,
 } from "./Icon";
@@ -2475,7 +2475,7 @@ export function Vault() {
               aria-label={plan.sidebar === "rail" ? "Show sidebar" : "Hide sidebar"}
               onClick={toggleSidebar}
             >
-              <MenuGlyph size={16} />
+              <SidebarGlyph size={16} />
             </button>
           </div>
           <div
@@ -2787,11 +2787,11 @@ export function Vault() {
                 aria-label={`Sort by ${SORT_LABELS[sort.key]}, ${sort.dir === 1 ? "ascending" : "descending"}`}
                 onClick={openSortMenu}
               >
-                <SortGlyph size={14} />
                 <span className="sort-label">{SORT_LABELS[sort.key]}</span>
                 <span className="sort-dir" aria-hidden="true">
                   {sort.dir === 1 ? "↑" : "↓"}
                 </span>
+                <ChevronDownGlyph size={13} />
               </button>
               <div className="seg">
                 <button
