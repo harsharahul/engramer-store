@@ -1,0 +1,74 @@
+/*
+ * Stylesheet entry. Two systems live side by side while surfaces move to
+ * shadcn/ui:
+ *
+ * - styles.css, the existing hand-written stylesheet, loads first and
+ *   unchanged (still unlayered, so its cascade with third-party styles such
+ *   as the PDF viewer and the code editor is exactly what it was).
+ * - Tailwind loads its theme and utilities only, every class prefixed
+ *   "tw:". The prefix keeps Tailwind from generating rules for words the old
+ *   components already use as class names (grid, row, card, hidden), and its
+ *   global reset (preflight) is left out so nothing the old stylesheet relied
+ *   on changes. Utilities come after styles.css, so a tw: class wins any tie.
+ *
+ * Colours are not a second palette: the shadcn tokens below point at the
+ * app's own variables, so both systems switch light and dark together.
+ */
+@import "./styles.css";
+@import "tailwindcss/theme.css" layer(theme) prefix(tw);
+@import "tailwindcss/utilities.css";
+@import "tw-animate-css";
+
+@source "./components";
+
+/* The few shadcn variables its components read directly (in arbitrary
+   values), pointed at the app's own tokens. None share a name with them. */
+:root {
+  --foreground: var(--paper);
+  --secondary: var(--ink-2);
+  --sidebar-accent: var(--ink-2);
+  --sidebar-border: var(--hairline);
+  --radius-md: calc(var(--radius) - 2px);
+}
+
+/* The app is dark unless the page says light. */
+@custom-variant dark (&:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *));
+
+@theme inline {
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+
+  --color-background: var(--ink-0);
+  --color-foreground: var(--paper);
+  --color-card: var(--ink-1);
+  --color-card-foreground: var(--paper);
+  --color-popover: var(--ink-1);
+  --color-popover-foreground: var(--paper);
+  --color-primary: var(--accent);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--ink-2);
+  --color-secondary-foreground: var(--paper);
+  --color-muted: var(--ink-2);
+  --color-muted-foreground: var(--paper-faint);
+  /* shadcn's "accent" is a hover surface, not the brand blue. */
+  --color-accent: var(--ink-2);
+  --color-accent-foreground: var(--paper);
+  --color-destructive: var(--danger);
+  --color-border: var(--hairline-strong);
+  --color-input: var(--hairline-strong);
+  --color-ring: var(--accent);
+
+  --color-sidebar: var(--ink-1);
+  --color-sidebar-foreground: var(--paper-dim);
+  --color-sidebar-primary: var(--accent);
+  --color-sidebar-primary-foreground: #ffffff;
+  --color-sidebar-accent: var(--ink-2);
+  --color-sidebar-accent-foreground: var(--paper);
+  --color-sidebar-border: var(--hairline);
+  --color-sidebar-ring: var(--accent);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
