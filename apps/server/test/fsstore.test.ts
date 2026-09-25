@@ -54,4 +54,25 @@ describe("fs blob store missing keys", () => {
     }
     expect(Buffer.concat(ranged)).toEqual(Buffer.from("2345"));
   });
+
+  /**
+   * A stream handed out by get() owns the bytes it will read. It used to be
+   * opened lazily after an existence check, so a delete in between (an
+   * account deletion racing a download) made the stream fail on its own,
+   * with nothing listening: an uncaught exception that took a CI run down
+   * and could take the server with it.
+   */
+  it("a stream already handed out survives the blob being removed", async () => {
+    const store = makeStore();
+    const bytes = Buffer.from("still here");
+    await store.put("blob-2", Readable.from(bytes), 1024);
+    const stream = await store.get("blob-2");
+    await store.remove("blob-2");
+    const read: Buffer[] = [];
+    for await (const chunk of stream) {
+      read.push(chunk as Buffer);
+    }
+    expect(Buffer.concat(read)).toEqual(bytes);
+    await expect(store.get("blob-2")).rejects.toBeInstanceOf(BlobNotFoundError);
+  });
 });

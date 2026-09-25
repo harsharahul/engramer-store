@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream, existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { readdir, rename, unlink } from "node:fs/promises";
+import { open, readdir, rename, unlink } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import type { Readable } from "node:stream";
@@ -180,14 +180,23 @@ export class FsBlobStore implements BlobStore {
   }
 
   async get(key: string, range?: BlobRange): Promise<Readable> {
-    // Refuse a missing key here, where callers decide fallback; a stream
-    // that errors ENOENT on first read arrives after that decision point.
-    if (!existsSync(this.path(key))) {
-      throw new BlobNotFoundError(key);
+    // Open first, then stream from the open handle. A missing key is
+    // refused here, where callers decide fallback, and a stream already
+    // handed out owns its bytes: removing the blob afterwards (an account
+    // deletion racing a download) cannot make it fail with a late ENOENT
+    // that nothing is listening for.
+    let handle;
+    try {
+      handle = await open(this.path(key), "r");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new BlobNotFoundError(key);
+      }
+      throw err;
     }
     return range
-      ? createReadStream(this.path(key), { start: range.start, end: range.end })
-      : createReadStream(this.path(key));
+      ? handle.createReadStream({ start: range.start, end: range.end })
+      : handle.createReadStream();
   }
 
   async remove(key: string): Promise<void> {
