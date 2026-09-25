@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 const require = createRequire(import.meta.url);
@@ -361,8 +362,11 @@ function officeDevHeaders(): Plugin {
 
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(version) },
+  // shadcn/ui components import from "@/…" (src).
+  resolve: { alias: { "@": join(import.meta.dirname, "src") } },
   plugins: [
     react(),
+    tailwindcss(),
     officeDevHeaders(),
     versionFile(),
     ocrAssets(),

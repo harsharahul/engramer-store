@@ -1,6 +1,6 @@
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
-import "./styles.css";
+import "./app.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
