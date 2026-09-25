@@ -5,6 +5,8 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+## [0.56.3] - 2026-09-25
+
 ### Changed
 - **A Liquid Glass app icon.** The shield floats above its tile and the
   text bars float above the shield, each casting its own shadow. On
