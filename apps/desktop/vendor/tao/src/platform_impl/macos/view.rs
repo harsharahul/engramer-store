@@ -1177,6 +1177,18 @@ pub unsafe fn inset_traffic_lights(window: &NSWindow, position: LogicalPosition<
   for (i, button) in window_buttons.into_iter().enumerate() {
     let mut rect = NSView::frame(&button);
     rect.origin.x = x + (i as f64 * space_between);
+    // Engram Store patch: place the buttons' top edge `y` points below the
+    // window's top. Upstream keeps AppKit's own vertical offset inside the
+    // title bar view, which macOS 26 raised to 9 points from its bottom, so
+    // the lights landed about 9 points above the requested inset.
+    if let Some(title_bar_view) = button.superview() {
+      let height = NSView::frame(&title_bar_view).size.height;
+      rect.origin.y = if title_bar_view.isFlipped() {
+        y
+      } else {
+        height - y - rect.size.height
+      };
+    }
     button.setFrameOrigin(rect.origin);
   }
 }

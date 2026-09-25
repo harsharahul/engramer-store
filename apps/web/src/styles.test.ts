@@ -81,12 +81,13 @@ describe("the details panel survives the phone layout", () => {
  */
 describe("the Mac shell's hidden title bar", () => {
   it("keeps the toolbar's controls clear of the traffic lights at every sidebar width", () => {
-    // The lights end 70px from the window's left edge. Beside a full sidebar
-    // they sit inside the sidebar pane; in the rail and on a phone-width
-    // window the toolbar itself must leave that corner free, which one rule
-    // does by reserving whatever of the first 84px the sidebar does not.
+    // The lights end 79px from the window's left edge (19px in, as macOS
+    // places them in a toolbar window). Beside a full sidebar they sit
+    // inside the sidebar pane; in the rail and on a phone-width window the
+    // toolbar itself must leave that corner free with a 14px gap, which one
+    // rule does by reserving whatever of the first 93px the sidebar does not.
     const bodies = [...CSS.matchAll(/\.frame\.shell-mac \.topbar\s*\{([^}]*)\}/g)].map((m) => m[1] ?? "");
-    expect(bodies.some((b) => /padding-left:\s*max\(16px,\s*calc\(84px - var\(--sidebar-w/.test(b))).toBe(true);
+    expect(bodies.some((b) => /padding-left:\s*max\(16px,\s*calc\(93px - var\(--sidebar-w/.test(b))).toBe(true);
   });
 
   it("starts the sidebar's contents below the toolbar row the lights sit in", () => {
