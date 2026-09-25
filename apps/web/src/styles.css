@@ -73,7 +73,7 @@ body::after {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 999;
+  z-index: var(--z-grain);
   opacity: 0.05;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
 }
@@ -124,7 +124,7 @@ a {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
@@ -135,7 +135,7 @@ a {
   }
   to {
     opacity: 1;
-    transform: scale(1) translateY(0);
+    transform: none;
   }
 }
 
@@ -456,6 +456,13 @@ a {
   grid-template-columns: var(--sidebar-w, 232px) 1fr;
   height: 100%;
   position: relative;
+  /* The window's own chrome stays clear on every form factor: the iPad
+     status bar and multitasking handle above, a phone's rounded corners
+     at the sides in landscape. Fixed-position sheets and bars add the
+     insets themselves; on the Mac and in a browser these are zero. */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 /* Each column is pinned to its track. Resting the pointer on the rail
@@ -495,7 +502,7 @@ a {
   right: 0;
   bottom: 0;
   width: var(--details-w, 300px);
-  z-index: 240;
+  z-index: var(--z-pane);
   border-left: 1px solid var(--hairline-strong);
   box-shadow: -18px 0 50px rgba(0, 0, 0, 0.35);
 }
@@ -510,7 +517,7 @@ a {
   bottom: 0;
   width: 9px;
   cursor: col-resize;
-  z-index: 60;
+  z-index: calc(var(--z-toolbar) + 1);
   touch-action: none;
 }
 
@@ -578,7 +585,7 @@ body.resizing {
   bottom: 0;
   left: 0;
   width: 240px;
-  z-index: 230;
+  z-index: var(--z-pane);
   box-shadow: var(--glass-shadow), 24px 0 70px rgba(8, 9, 11, 0.35);
 }
 
@@ -656,7 +663,7 @@ body.resizing {
   position: absolute;
   top: 10px;
   left: 10px;
-  z-index: 2;
+  z-index: var(--z-raised);
   padding: 3px 8px;
   border-radius: 999px;
   font-size: 10px;
@@ -674,7 +681,7 @@ body.resizing {
   left: 50%;
   transform: translateX(-50%);
   bottom: calc(18px + env(safe-area-inset-bottom));
-  z-index: 60;
+  z-index: var(--z-floating);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -818,6 +825,12 @@ body.resizing {
 /* Liquid Glass: the toolbar is a row of floating capsules, no bar. Its
    height is the platform token the traffic lights are centred on. */
 .topbar {
+  /* Every glass capsule's backdrop blur makes it a stacking context, which
+     traps the search panel's own z-index inside the capsule. The toolbar
+     is one layer above the content, so its panels and menus open over the
+     cards, shelves and sticky headers below. */
+  position: relative;
+  z-index: var(--z-toolbar);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1004,7 +1017,7 @@ body.resizing {
 .photo-month {
   position: sticky;
   top: 8px;
-  z-index: 5;
+  z-index: var(--z-sticky);
   width: fit-content;
   margin: 8px 0 6px 2px;
   padding: 5px 12px;
@@ -1185,7 +1198,7 @@ body.resizing {
 .ptr-indicator {
   position: sticky;
   top: 0;
-  z-index: 6;
+  z-index: calc(var(--z-sticky) + 1);
   width: fit-content;
   margin: 0 auto 8px;
   padding: 6px 14px;
@@ -1622,7 +1635,7 @@ body.resizing {
   content: "Drop to encrypt and upload";
   position: fixed;
   inset: 12px;
-  z-index: 200;
+  z-index: var(--z-veil);
   display: grid;
   place-items: center;
   font-family: var(--font-display);
@@ -1645,7 +1658,7 @@ body.resizing {
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-modal);
-  z-index: 150;
+  z-index: var(--z-floating);
   overflow: hidden;
   animation: fade-rise 0.3s ease both;
 }
@@ -1742,7 +1755,7 @@ body.resizing {
   backdrop-filter: blur(6px);
   display: grid;
   place-items: center;
-  z-index: 300;
+  z-index: var(--z-modal);
   padding: 24px;
 }
 
@@ -2012,12 +2025,9 @@ body.resizing {
   position: relative;
 }
 
+/* Rendered through a Popover (ui/popover.tsx): anchored under the search
+   field, portaled, at the popover tier. It carries only its looks here. */
 .search-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  z-index: 220;
   background: var(--ink-1);
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-lg);
@@ -2328,7 +2338,7 @@ body.resizing {
   bottom: 74px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 400;
+  z-index: var(--z-toast);
   display: flex;
   align-items: center;
   gap: 9px;
@@ -2356,7 +2366,7 @@ body.resizing {
   position: fixed;
   bottom: 74px;
   right: 20px;
-  z-index: 400;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2468,7 +2478,7 @@ body.resizing {
 .preview-shell {
   position: fixed;
   inset: 0;
-  z-index: 300;
+  z-index: var(--z-modal);
   background: rgba(8, 9, 11, 0.92);
   /* The backdrop is dark in both themes, so the overlay carries the dark
      palette: in the light theme the file name, the toolbars and every
@@ -2687,7 +2697,7 @@ body.resizing {
   border-radius: 999px;
   padding: 9px 18px;
   font-size: 13px;
-  z-index: 400;
+  z-index: var(--z-toast);
   animation: fade-rise 0.25s ease both;
   box-shadow: var(--shadow-modal);
 }
@@ -3109,7 +3119,7 @@ button.tag:hover {
   border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
   border-radius: 14px;
   box-shadow: var(--shadow-modal);
-  z-index: 250;
+  z-index: var(--z-floating);
   cursor: pointer;
   animation: fade-rise 0.45s cubic-bezier(0.3, 1.45, 0.5, 1) both;
 }
@@ -3326,7 +3336,7 @@ button.tag:hover {
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: none;
   }
 }
 
@@ -3513,7 +3523,7 @@ button.tag:hover {
   border-radius: 999px;
   padding: 7px 10px 7px 18px;
   box-shadow: var(--shadow-modal);
-  z-index: 260;
+  z-index: calc(var(--z-floating) + 1);
   animation: fade-rise 0.22s ease both;
 }
 
@@ -3531,7 +3541,7 @@ button.tag:hover {
 
 .ctx-menu {
   position: fixed;
-  z-index: 400;
+  z-index: var(--z-popover);
   background: var(--ink-2);
   border: 1px solid var(--hairline-strong);
   border-radius: 12px;
@@ -3854,7 +3864,7 @@ span.item-menu {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
@@ -3863,9 +3873,10 @@ span.item-menu {
   display: none;
 }
 
-/* Outside the phone layout the stack is not a real box: each child keeps
-   its own position: fixed rule exactly as before this wrapper existed. */
-.bottom-stack {
+/* Outside the phone layout the stacks are not real boxes: each child keeps
+   its own position: fixed rule exactly as before the wrappers existed. */
+.bottom-stack,
+.toast-stack {
   display: contents;
 }
 
@@ -3943,13 +3954,6 @@ span.item-menu {
     height: 28px;
   }
 
-  /* iOS zooms the page on focus for inputs under 16px. */
-  input,
-  textarea,
-  select {
-    font-size: 16px;
-  }
-
   .accent-dot {
     width: 22px;
     height: 22px;
@@ -3993,10 +3997,11 @@ span.item-menu {
     grid-template-columns: 1fr;
   }
 
-  /* Topbar: search only; every action lives in the tab bar and sheets. */
+  /* Topbar: search only; every action lives in the tab bar and sheets.
+     The frame already clears the status bar. */
   .topbar {
     gap: 10px;
-    padding: calc(12px + env(safe-area-inset-top)) 14px 12px;
+    padding: 12px 14px;
   }
 
   /* A phone-width Mac window: no safe area up here, and the capsules stay
@@ -4049,7 +4054,7 @@ span.item-menu {
     bottom: 0;
     left: 0;
     width: min(84vw, 320px);
-    z-index: 290;
+    z-index: var(--z-drawer);
     transform: translateX(-100%);
     transition: transform 0.24s ease;
     padding-top: calc(20px + env(safe-area-inset-top));
@@ -4069,7 +4074,7 @@ span.item-menu {
   .drawer-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 285;
+    z-index: calc(var(--z-drawer) - 1);
     background: rgba(8, 9, 11, 0.55);
     backdrop-filter: blur(2px);
     -webkit-backdrop-filter: blur(2px);
@@ -4087,7 +4092,7 @@ span.item-menu {
     left: 0;
     right: 0;
     bottom: 0;
-    z-index: 240;
+    z-index: var(--z-pane);
     padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
     background: color-mix(in srgb, var(--ink-1) 94%, transparent);
     backdrop-filter: blur(14px);
@@ -4133,7 +4138,7 @@ span.item-menu {
     left: 12px;
     right: 12px;
     bottom: calc(var(--tabbar-h, 74px) + env(safe-area-inset-bottom));
-    z-index: 250;
+    z-index: var(--z-floating);
     display: flex;
     flex-direction: column-reverse;
     gap: 8px;
@@ -4141,6 +4146,30 @@ span.item-menu {
   }
 
   .bottom-stack > * {
+    pointer-events: auto;
+    position: static;
+    bottom: auto;
+    left: auto;
+    right: auto;
+    transform: none;
+  }
+
+  /* Toasts and save narration answer an action wherever it was taken, so
+     they stack in their own column at the toast tier: over the preview or
+     dialog they came from, which the widget stack must stay under. */
+  .toast-stack {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(var(--tabbar-h, 74px) + env(safe-area-inset-bottom));
+    z-index: var(--z-toast);
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 8px;
+    pointer-events: none;
+  }
+
+  .toast-stack > * {
     pointer-events: auto;
     position: static;
     bottom: auto;
@@ -4181,7 +4210,7 @@ span.item-menu {
     top: auto;
     max-height: 72vh;
     max-height: 72dvh;
-    z-index: 260;
+    z-index: var(--z-sheet);
     border: 1px solid var(--hairline-strong);
     border-radius: 18px;
     box-shadow: 0 -18px 60px rgba(8, 9, 11, 0.45);
@@ -4201,7 +4230,7 @@ span.item-menu {
   .sheet-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 390;
+    z-index: calc(var(--z-popover) - 1);
     background: rgba(8, 9, 11, 0.5);
   }
 
@@ -4576,7 +4605,7 @@ span.item-menu {
   gap: 10px;
   color: var(--muted);
   background: var(--ink-1);
-  z-index: 1;
+  z-index: var(--z-raised);
 }
 
 /* ------------------------------------------------- Dates worth tracking
@@ -5344,7 +5373,7 @@ span.item-menu {
 
 .marquee {
   position: absolute;
-  z-index: 5;
+  z-index: var(--z-sticky);
   border: 1px solid color-mix(in srgb, var(--accent) 75%, transparent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border-radius: 3px;
@@ -5358,7 +5387,7 @@ span.item-menu {
   position: fixed;
   top: 0;
   left: 0;
-  z-index: -1;
+  z-index: var(--z-behind);
   width: 56px;
   height: 56px;
   border-radius: 10px;
@@ -5469,7 +5498,7 @@ span.item-menu {
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-modal);
-  z-index: 300;
+  z-index: var(--z-popover);
   overflow: hidden;
   animation: fade-rise 0.18s ease both;
 }
@@ -5652,7 +5681,7 @@ button.link {
     max-height: 80vh;
     border-radius: 18px 18px 0 0;
     padding-bottom: env(safe-area-inset-bottom);
-    z-index: 320;
+    z-index: var(--z-floating);
   }
 }
 

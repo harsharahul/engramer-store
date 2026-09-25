@@ -115,6 +115,7 @@ import { HeadsUp, TripHeadsUp } from "./HeadsUp";
 import { extension, fileKind, formatBytes } from "../format";
 import { albumTitle, albumsFrom, type Album } from "../albums";
 import { orderCollections } from "../sidebar";
+import { Popover, PopoverContent } from "./ui/popover";
 import { PhotoGrid } from "./PhotoGrid";
 import { AlbumPicker } from "./AlbumPicker";
 import { SelectionBar } from "./SelectionBar";
@@ -497,6 +498,7 @@ export function Vault() {
   const cameraInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
+  const searchBox = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const persist = (key: string, value: unknown) => {
@@ -2479,6 +2481,7 @@ export function Vault() {
             </button>
           </div>
           <div
+            ref={searchBox}
             className={cn(
               "searchbox",
               capsule,
@@ -2526,8 +2529,16 @@ export function Vault() {
                 }
               }}
             />
-            {searchFocused && !searching && (
-              <div className="search-panel" onMouseDown={(e) => e.preventDefault()}>
+            {/* Anchored under the field and portaled, so no capsule or pane
+                can cover it; it never takes focus from the field. */}
+            <Popover open={searchFocused && !searching} modal={false}>
+              <PopoverContent
+                anchor={searchBox}
+                className="search-panel tw:w-(--anchor-width)"
+                initialFocus={false}
+                finalFocus={false}
+                onMouseDown={(e) => e.preventDefault()}
+              >
                 {recentSearches.length > 0 && (
                   <>
                     <div className="search-panel-label">Recent</div>
@@ -2564,8 +2575,8 @@ export function Vault() {
                   Search reads names, tags, folder names, and text inside documents
                   {ocrOn ? " and images" : ""}, decrypted only on this device.
                 </div>
-              </div>
-            )}
+              </PopoverContent>
+            </Popover>
             {/* The command palette's shortcut rides inside the field, where
                 people look for it (Linear, Raycast), instead of a separate
                 button beside it. */}
@@ -3153,20 +3164,6 @@ export function Vault() {
             }}
           />
         )}
-        {toast &&
-          (toast.action ? (
-            <button
-              className="toast toast-action"
-              onClick={() => {
-                toast.action?.();
-                setToast(null);
-              }}
-            >
-              {toast.text} <span className="toast-go">Open</span>
-            </button>
-          ) : (
-            <div className="toast">{toast.text}</div>
-          ))}
         {store.reveal && (
           <RevealToast
             onOpen={(folderId) => {
@@ -3177,7 +3174,6 @@ export function Vault() {
           />
         )}
         <UploadTray />
-        <SaveOverlay />
         {gathering && (
           <SelectionBar
             count={selection.size}
@@ -3232,6 +3228,25 @@ export function Vault() {
             onDone={clearSelection}
           />
         )}
+      </div>
+      {/* Toasts answer an action wherever it was taken, so they stack above
+          the preview or dialog it came from; see .toast-stack. */}
+      <div className="toast-stack">
+        {toast &&
+          (toast.action ? (
+            <button
+              className="toast toast-action"
+              onClick={() => {
+                toast.action?.();
+                setToast(null);
+              }}
+            >
+              {toast.text} <span className="toast-go">Open</span>
+            </button>
+          ) : (
+            <div className="toast">{toast.text}</div>
+          ))}
+        <SaveOverlay />
       </div>
       {ctxMenu && <ContextMenu {...ctxMenu} onClose={() => setCtxMenu(null)} />}
       {moveIds && (

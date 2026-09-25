@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -79,6 +79,93 @@ describe("the details panel survives the phone layout", () => {
  * laptop window, because the rail hid the group header outright. A group
  * header may lose its words in the rail, never its icon.
  */
+const APP_CSS = readFileSync(join(__dirname, "app.css"), "utf8");
+
+/**
+ * Two stylesheets share the page, and cascade layers decide between them.
+ * Before the layers, Tailwind's utilities were imported unlayered next to
+ * the unlayered legacy stylesheet, so a `tw:` class lost to any legacy
+ * selector with more specificity (a phone `input` rule lost to
+ * `tw:text-[14px]`, and iOS zoomed the whole app on focus). Every
+ * stylesheet names its layer, and the platform layer stays on top.
+ */
+describe("the cascade is layered", () => {
+  it("declares the layer order once, lowest to highest", () => {
+    expect(APP_CSS).toMatch(/^@layer theme, vendor, legacy, components, utilities, platform;/m);
+  });
+
+  it("imports every stylesheet into a named layer", () => {
+    const imports = [...APP_CSS.matchAll(/^@import\s+"([^"]+)"([^;]*);/gm)];
+    expect(imports.length).toBeGreaterThan(0);
+    const unlayered = imports
+      .filter(([, path, rest]) => !/layer\(/.test(rest ?? "") && path !== "tw-animate-css")
+      .map(([, path]) => path);
+    // tw-animate-css is a Tailwind plugin (@theme and @utility blocks), so
+    // its utilities compile into the utilities layer on their own.
+    expect(unlayered).toEqual([]);
+  });
+
+  it("keeps touch inputs at 16px in the platform layer, and nowhere else", () => {
+    const platform = /@layer platform\s*\{([\s\S]*)\}\s*$/.exec(APP_CSS)?.[1] ?? "";
+    expect(platform).toMatch(/@media \(pointer: coarse\)/);
+    expect(platform).toMatch(/font-size:\s*max\(16px, 1em\)/);
+    // The legacy stylesheet no longer carries its own copy of the rule.
+    const coarse = mediaBlocks(CSS).filter(([condition]) => /pointer:\s*coarse/.test(condition));
+    for (const [, body] of coarse) {
+      expect(body).not.toMatch(/\n\s*input,\s*\n\s*textarea,\s*\n\s*select\s*\{[^}]*font-size/);
+    }
+  });
+});
+
+/**
+ * What covers what is decided once, by the z scale in app.css. Before it,
+ * 21 hand-picked numbers were scattered through the stylesheet: the phone
+ * bottom stack (250) trapped toasts under the preview (300), the update bar
+ * (60) hid under an expanded rail (230), and nobody could tell without a
+ * table. A stacked element takes a tier, never a number.
+ */
+describe("the z scale", () => {
+  it("defines every tier once in app.css", () => {
+    for (const tier of ["behind", "raised", "sticky", "toolbar", "pane", "sheet", "drawer", "floating", "modal", "popover", "toast", "veil", "grain"]) {
+      expect(APP_CSS).toMatch(new RegExp(`--z-${tier}:\\s*-?\\d+;`));
+    }
+  });
+
+  it("lets no rule pick a z-index number of its own", () => {
+    const literals = [...CSS.matchAll(/z-index:\s*(-?\d+)\s*;/g)].map((m) => m[0]);
+    expect(literals).toEqual([]);
+    const ui = readdirSync(join(__dirname, "components", "ui")).filter((f) => f.endsWith(".tsx"));
+    const utilities = ui.flatMap((f) =>
+      [...readFileSync(join(__dirname, "components", "ui", f), "utf8").matchAll(/tw:z-\d+/g)].map((m) => `${f}: ${m[0]}`),
+    );
+    expect(utilities).toEqual([]);
+  });
+
+  it("ends every entrance animation with transform: none, so a finished pane traps nothing", () => {
+    // A retained translate(0) from `animation ... both` still makes the
+    // element a containing block for fixed descendants and a stacking
+    // context: the details pane clipped its own confirm dialog that way.
+    for (const name of ["fade-rise", "scale-in", "slide-in-right", "sheet-up"]) {
+      const frames = new RegExp(`@keyframes ${name}\\s*\\{[\\s\\S]*?to\\s*\\{([^}]*)\\}`).exec(CSS)?.[1] ?? "";
+      expect(frames, name).toMatch(/transform:\s*none/);
+    }
+  });
+});
+
+/**
+ * The search suggestions opened UNDER the content (folder cards, the albums
+ * shelf, insight cards) on every platform: each glass capsule's backdrop
+ * blur is a stacking context that traps the panel's z-index, so the
+ * toolbar itself must be a layer above the content.
+ */
+describe("the toolbar's panels open over the content", () => {
+  it("puts the toolbar on its own layer above the content", () => {
+    const rule = /\n\.topbar\s*\{([^}]*)\}/.exec(CSS)?.[1] ?? "";
+    expect(rule).toMatch(/position:\s*relative/);
+    expect(rule).toMatch(/z-index:\s*var\(--z-toolbar\)/);
+  });
+});
+
 describe("the Mac shell's hidden title bar", () => {
   it("keeps the toolbar's controls clear of the traffic lights at every sidebar width", () => {
     // The lights end 79px from the window's left edge (19px in, as macOS
