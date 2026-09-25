@@ -15,12 +15,12 @@
  *  4. Re-run xcodegen so the pbxproj reflects all of the above.
  *  5. Then the pbxproj repairs: drop libapp.a from Resources (App Store
  *     validation refuses bundled static libraries), floor stragglers.
- *  6. App entitlements, brand icons, privacy strings, as before.
+ *  6. App entitlements, the app icon, privacy strings.
  *  7. Verify every expected target exists, loudly: a silently missing
  *     target is the same failure class as a missing ACL entry.
  */
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,7 +38,6 @@ const yml = join(apple, "project.yml");
 const env = { ...process.env };
 delete env.FORCE_COLOR;
 const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: "pipe", env }).toString();
-const sips = (...args) => execFileSync("sips", args, { stdio: ["ignore", "pipe", "ignore"] });
 
 try {
   run("xcodegen", ["--version"]);
@@ -106,6 +105,15 @@ spec = spec.replace(/^\s*- path: \.\.\/\.\.\/apple\/Intel\n/gm, "");
       `$1sources:\n$1  - path: ../../apple/PrivacyInfo.xcprivacy`,
     );
   }
+  // 1d. The Liquid Glass app icon: the Icon Composer document is a
+  // resource of the app target; Xcode's actool compiles it into the live
+  // icon plus flat renditions for iOS 16 to 18.
+  if (!tail.includes("AppIcon.icon")) {
+    tail = tail.replace(
+      /^(\s*)sources:\s*$/m,
+      `$1sources:\n$1  - path: ../../icons/AppIcon.icon\n$1    type: file\n$1    buildPhase: resources`,
+    );
+  }
   if (!tail.includes("FoundationModels.framework")) {
     tail = tail.replace(
       /^(\s*)dependencies:\s*$/m,
@@ -165,8 +173,18 @@ writeFileSync(
   kept
     .join("\n")
     .replaceAll("IPHONEOS_DEPLOYMENT_TARGET = 14.0;", "IPHONEOS_DEPLOYMENT_TARGET = 16.0;")
-    .replaceAll("IPHONEOS_DEPLOYMENT_TARGET = 15.0;", "IPHONEOS_DEPLOYMENT_TARGET = 16.0;"),
+    .replaceAll("IPHONEOS_DEPLOYMENT_TARGET = 15.0;", "IPHONEOS_DEPLOYMENT_TARGET = 16.0;")
+    // XcodeGen types the icon document as a plain wrapper, which Xcode
+    // would copy verbatim; the Icon Composer type routes it to actool.
+    .replace(
+      /lastKnownFileType = wrapper\.icon; path = AppIcon\.icon;/,
+      "lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon;",
+    ),
 );
+if (!readFileSync(project, "utf8").includes("folder.iconcomposer.icon; path = AppIcon.icon;")) {
+  console.error("ios project: the app icon is not typed as an Icon Composer document");
+  process.exit(1);
+}
 
 // 6a. App entitlements (generation leaves the file empty).
 copyFileSync(
@@ -175,27 +193,10 @@ copyFileSync(
 );
 console.log("ios project: app entitlements applied");
 
-// 6b. Brand icons over the placeholder set.
-const source = join(tauriDir, "icons", "ios");
-const catalog = join(apple, "Assets.xcassets", "AppIcon.appiconset");
-const catalogNames = new Set(readdirSync(catalog));
-let stamped = 0;
-for (const name of readdirSync(source)) {
-  if (!name.endsWith(".png") || !catalogNames.has(name)) continue;
-  const target = join(catalog, name);
-  copyFileSync(join(source, name), target);
-  const size = Number(sips("-g", "pixelWidth", target).toString().match(/pixelWidth: (\d+)/)?.[1]);
-  if (!size) continue;
-  const zoomed = Math.round(size * 1.16);
-  sips("-z", String(zoomed), String(zoomed), target);
-  sips("-c", String(size), String(size), target);
-  const flat = `${target}.jpg`;
-  sips("-s", "format", "jpeg", "-s", "formatOptions", "best", target, "--out", flat);
-  sips("-s", "format", "png", flat, "--out", target);
-  unlinkSync(flat);
-  stamped++;
-}
-console.log(`ios project: stamped ${stamped} brand icons over the placeholder set`);
+// 6b. The app icon is the Icon Composer document added in 1d; generation's
+// placeholder icon set would compete with it for the AppIcon name.
+rmSync(join(apple, "Assets.xcassets", "AppIcon.appiconset"), { recursive: true, force: true });
+console.log("ios project: app icon is icons/AppIcon.icon");
 
 // 6c. Privacy usage strings and capability flags into the generated
 // Info.plist. Strings and booleans both: the document-browser keys that

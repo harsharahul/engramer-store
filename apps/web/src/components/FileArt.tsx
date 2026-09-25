@@ -119,37 +119,12 @@ export function FolderArt() {
 }
 
 /**
- * The brand mark: an ocean shield-document with a folded corner and the
- * "face" of text bars, matching the app icon. Rendered on its rounded tile.
+ * The brand mark: the Liquid Glass app icon, in the active accent's
+ * palette. The images are rendered by scripts/brand-glass.mjs; the
+ * stylesheet picks the one matching data-accent.
  */
 export function BrandMark({ size = 24 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 512 512" aria-hidden="true" className="brand-mark">
-      <defs>
-        <linearGradient id="bm-tile" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" style={{ stopColor: "var(--brand-a)" }} />
-          <stop offset="100%" style={{ stopColor: "var(--brand-b)" }} />
-        </linearGradient>
-        <linearGradient id="bm-sheet" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#ffffff" />
-          <stop offset="100%" stopColor="#dbeafe" />
-        </linearGradient>
-      </defs>
-      <rect width="512" height="512" rx="120" fill="url(#bm-tile)" />
-      <path
-        d="M 168 176 Q 168 152 192 152 L 312 152 L 344 186 L 344 292 Q 344 356 256 396 Q 168 356 168 292 Z"
-        fill="url(#bm-sheet)"
-      />
-      <path d="M 312 152 L 344 186 L 312 186 Z" fill="#93c5fd" />
-      <rect x="200" y="228" width="66" height="13" rx="6.5" fill="#1e40af" />
-      <rect x="274" y="228" width="40" height="13" rx="6.5" fill="#2563eb" />
-      <rect x="200" y="258" width="44" height="13" rx="6.5" fill="#22d3ee" />
-      <rect x="252" y="258" width="62" height="13" rx="6.5" fill="#1e40af" />
-      <rect x="214" y="288" width="52" height="13" rx="6.5" fill="#2563eb" />
-      <rect x="274" y="288" width="24" height="13" rx="6.5" fill="#22d3ee" />
-      <rect x="226" y="318" width="40" height="13" rx="6.5" fill="#1e40af" />
-    </svg>
-  );
+  return <span aria-hidden="true" className="brand-mark" style={{ width: size, height: size }} />;
 }
 
 /** The "engram store" wordmark: bold + light, with a cyan full-stop. */

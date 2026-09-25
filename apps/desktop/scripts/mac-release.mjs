@@ -156,6 +156,25 @@ if (builtVersion !== version) {
 // ----- assemble: profile and extension go in before any signature -----
 
 copyFileSync(appProfile, join(appPath, "Contents", "embedded.provisionprofile"));
+
+// The Liquid Glass icon: actool compiles the Icon Composer document into
+// Assets.car (the live icon macOS 26 renders in light, dark, clear and
+// tinted) plus a flat AppIcon.icns for older systems, and the plist keys
+// point the app at both.
+const infoPlist = join(appPath, "Contents", "Info.plist");
+const iconPlist = join(appPath, "Contents", "icon-partial.plist");
+run("xcrun", [
+  "actool", join(tauriDir, "icons", "AppIcon.icon"),
+  "--compile", join(appPath, "Contents", "Resources"),
+  "--platform", "macosx", "--minimum-deployment-target", "14.0",
+  "--app-icon", "AppIcon", "--output-partial-info-plist", iconPlist,
+]);
+rmSync(iconPlist);
+run("plutil", ["-replace", "CFBundleIconFile", "-string", "AppIcon", infoPlist]);
+run("plutil", ["-replace", "CFBundleIconName", "-string", "AppIcon", infoPlist]);
+if (!existsSync(join(appPath, "Contents", "Resources", "Assets.car"))) {
+  fail("actool left no Assets.car; the app would ship without its icon");
+}
 if (appexPath) {
   if (!filesProfile || !existsSync(filesProfile)) {
     fail("the extension is built; set ENGRAM_MAC_FILES_PROFILE to its provisioning profile");

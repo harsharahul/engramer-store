@@ -6,6 +6,13 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Changed
+- **A Liquid Glass app icon.** The shield floats above its tile and the
+  text bars float above the shield, each casting its own shadow. On
+  macOS 26 and iOS 26 the system renders it live in light, dark, clear and
+  tinted appearances; earlier systems get flat renders of the same icon.
+  The mark inside the app follows the chosen accent palette, and each of
+  the six palettes has its own glass icon under `brand/glass`, built by
+  `scripts/brand-glass.mjs` with Apple's Icon Composer renderer.
 - **Liquid Glass window layout.** The sidebar is a floating glass pane
   inset from the window's edges, and the toolbar's controls float in glass
   capsules with no bar behind them. On the Mac the traffic lights sit inside

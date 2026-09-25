@@ -339,6 +339,9 @@ a {
 }
 
 .brand-mark {
+  display: inline-block;
+  flex: none;
+  background: var(--brand-mark, url("/brand/ocean.png")) center / contain no-repeat;
   filter: drop-shadow(0 4px 12px color-mix(in srgb, var(--accent) 25%, transparent));
   vertical-align: middle;
 }
@@ -3650,6 +3653,7 @@ button.tag:hover {
   --accent-2: #22d3ee;
   --brand-a: #172554;
   --brand-b: #2563eb;
+  --brand-mark: url("/brand/ocean.png");
 }
 
 :root[data-accent="aurora"] {
@@ -3658,6 +3662,7 @@ button.tag:hover {
   --accent-2: #818cf8;
   --brand-a: #134e4a;
   --brand-b: #6d28d9;
+  --brand-mark: url("/brand/aurora.png");
 }
 
 :root[data-accent="emerald"] {
@@ -3666,6 +3671,7 @@ button.tag:hover {
   --accent-2: #6ee7b7;
   --brand-a: #064e3b;
   --brand-b: #059669;
+  --brand-mark: url("/brand/emerald.png");
 }
 
 :root[data-accent="violet"] {
@@ -3674,6 +3680,7 @@ button.tag:hover {
   --accent-2: #c4b5fd;
   --brand-a: #2e1065;
   --brand-b: #7c3aed;
+  --brand-mark: url("/brand/violet.png");
 }
 
 :root[data-accent="sunset"] {
@@ -3682,6 +3689,7 @@ button.tag:hover {
   --accent-2: #fbbf24;
   --brand-a: #4c0519;
   --brand-b: #be123c;
+  --brand-mark: url("/brand/sunset.png");
 }
 
 :root[data-accent="midnight"] {
@@ -3690,6 +3698,7 @@ button.tag:hover {
   --accent-2: #94a3b8;
   --brand-a: #0f172a;
   --brand-b: #334155;
+  --brand-mark: url("/brand/midnight.png");
 }
 
 /* ---------- appearance bar (sidebar) ---------- */
