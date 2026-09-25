@@ -16,6 +16,10 @@ All notable changes to Engram Store are documented here, following
   and the account shows its name above the full email address.
 
 ### Fixed
+- **A file being downloaded while it is deleted no longer risks the server.**
+  On a self-hosted disk store, the download now holds the file open from
+  the start, so a deletion in between can no longer raise an error that
+  nothing handles.
 - **Narrow windows hide the toolbar's button words again.** A stylesheet
   slip in 0.56.2 had merged that rule into another.
 
