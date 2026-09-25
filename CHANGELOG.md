@@ -5,6 +5,20 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Changed
+- **Liquid Glass window layout.** The sidebar is a floating glass pane
+  inset from the window's edges, and the toolbar's controls float in glass
+  capsules with no bar behind them. On the Mac the traffic lights sit inside
+  the sidebar's top corner, level with the toolbar's controls, and stay in
+  that row when the sidebar collapses to its icon rail.
+- **The sidebar is rebuilt on shadcn/ui.** Every icon in the collapsed rail
+  sits on one line, groups keep their icon there, labels become tooltips,
+  and the account shows its name above the full email address.
+
+### Fixed
+- **Narrow windows hide the toolbar's button words again.** A stylesheet
+  slip in 0.56.2 had merged that rule into another.
+
 ## [0.56.2] - 2026-09-23
 
 ### Changed

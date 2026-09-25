@@ -19,12 +19,6 @@ export const SIDEBAR_MAX = 320;
 export const SIDEBAR_DEFAULT = 232;
 /** The collapsed sidebar: icons only, labels on hover. */
 export const RAIL_WIDTH = 64;
-/**
- * The rail in the Mac shell, which hides the system title bar: the traffic
- * lights end 70px from the left edge, so the rail grows enough to keep them
- * inside its column instead of straddling its border.
- */
-export const MAC_SHELL_RAIL_WIDTH = 88;
 
 export const DETAILS_MIN = 240;
 export const DETAILS_MAX = 420;

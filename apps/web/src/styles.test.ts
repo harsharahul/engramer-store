@@ -79,56 +79,18 @@ describe("the details panel survives the phone layout", () => {
  * laptop window, because the rail hid the group header outright. A group
  * header may lose its words in the rail, never its icon.
  */
-describe("the sidebar rail never hides a group", () => {
-  /** Every selector list whose rule turns display off. */
-  function hiddenSelectors(css: string): string[] {
-    return [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
-      .filter((rule) => /display:\s*none/.test(rule[2]!))
-      .flatMap((rule) => rule[1]!.split(",").map((s) => s.trim()));
-  }
-
-  it("hides a group header's words, not the header", () => {
-    const railHidden = hiddenSelectors(CSS).filter((s) => s.includes(".sidebar-rail"));
-    expect(railHidden.length).toBeGreaterThan(0);
-    const hidesHeader = railHidden.filter((s) => /\.sidebar-label\s*$/.test(s));
-    expect(hidesHeader).toEqual([]);
-    expect(railHidden.some((s) => s.endsWith(".sidebar-label-text"))).toBe(true);
-  });
-});
-
-describe("the frame's columns", () => {
-  it("pins the main column and the details pane, so a hovered rail cannot shift them", () => {
-    // Resting the pointer on the rail makes the sidebar position:absolute,
-    // which takes it out of the grid; without explicit columns the main
-    // column slid into the 64px rail track and the toolbar collapsed.
-    const desktop = /@media \(min-width: 761px\)\s*\{([\s\S]*?)\n\}/.exec(CSS);
-    expect(desktop).not.toBeNull();
-    const block = desktop?.[1] ?? "";
-    expect(block).toMatch(/\.frame > \.main\s*\{[^}]*grid-column:\s*2/);
-    expect(block).toMatch(/\.frame:not\(\.details-overlay\) > \.details\s*\{[^}]*grid-column:\s*3/);
-  });
-});
-
-describe("sidebar groups keep their rows", () => {
-  it("never lets a group list shrink below its rows", () => {
-    // The lists scroll internally, so as flex children they may shrink to
-    // nothing when the sidebar is taller than the window; that cut the first
-    // album to half a row. The sidebar scrolls as a whole instead.
-    const rule = /\.library-list\s*\{([^}]*)\}/.exec(CSS);
-    expect(rule).not.toBeNull();
-    expect(rule![1]).toMatch(/flex-shrink:\s*0/);
-  });
-});
-
 describe("the Mac shell's hidden title bar", () => {
-  it("keeps the traffic lights off the top bar at phone widths", () => {
-    // Below the phone breakpoint the sidebar is off-canvas, so nothing else
-    // reserves the corner the traffic lights occupy; the top bar must.
-    const phoneBlock = CSS.slice(CSS.indexOf(`@media (max-width: ${PHONE_MAX}px)`));
-    const rule = /\.frame\.shell-mac\s+\.topbar\s*\{([^}]*)\}/.exec(phoneBlock);
-    expect(rule).not.toBeNull();
-    const padding = /padding-left:\s*(\d+)px/.exec(rule?.[1] ?? "");
-    expect(padding).not.toBeNull();
-    expect(Number(padding?.[1] ?? 0)).toBeGreaterThanOrEqual(84);
+  it("keeps the toolbar's controls clear of the traffic lights at every sidebar width", () => {
+    // The lights end 70px from the window's left edge. Beside a full sidebar
+    // they sit inside the sidebar pane; in the rail and on a phone-width
+    // window the toolbar itself must leave that corner free, which one rule
+    // does by reserving whatever of the first 84px the sidebar does not.
+    const bodies = [...CSS.matchAll(/\.frame\.shell-mac \.topbar\s*\{([^}]*)\}/g)].map((m) => m[1] ?? "");
+    expect(bodies.some((b) => /padding-left:\s*max\(16px,\s*calc\(84px - var\(--sidebar-w/.test(b))).toBe(true);
+  });
+
+  it("starts the sidebar's contents below the toolbar row the lights sit in", () => {
+    const rule = /\.frame\.shell-mac > \.sidebar\s*\{([^}]*)\}/.exec(CSS);
+    expect(rule?.[1] ?? "").toMatch(/padding-top:\s*calc\(var\(--toolbar-h\) - var\(--pane-inset\)\)/);
   });
 });

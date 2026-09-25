@@ -31,6 +31,27 @@
   --radius-md: calc(var(--radius) - 2px);
 }
 
+/* Platform tokens: the window chrome's geometry and material. These are the
+   Apple (Liquid Glass) values; a Windows or Android build swaps this block
+   (Mica, Material surfaces) and keeps every component. --toolbar-h is the
+   one number the Mac shell's traffic-light position is derived from
+   (tauri.conf.json trafficLightPosition y = (toolbar-h - 14) / 2). */
+:root {
+  --toolbar-h: 52px;
+  --pane-inset: 8px;
+  --pane-radius: 12px;
+  --glass-blur: 24px;
+  --glass-bg: color-mix(in srgb, var(--ink-1) 72%, transparent);
+  --glass-border: color-mix(in srgb, var(--paper) 9%, transparent);
+  --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+:root[data-theme="light"] {
+  --glass-bg: rgba(255, 255, 255, 0.62);
+  --glass-border: rgba(15, 23, 42, 0.08);
+  --glass-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
 /* The app is dark unless the page says light. */
 @custom-variant dark (&:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *));
 
