@@ -24,6 +24,7 @@
   --danger: #f2685a;
   --danger-dim: rgba(242, 104, 90, 0.14);
   --ok: #34d399;
+  --warn: #f0a63a;
   --font-display: "Geist Variable", "Helvetica Neue", sans-serif;
   --font-ui: "Geist Variable", "Helvetica Neue", sans-serif;
   --font-mono: "Geist Mono Variable", "Menlo", monospace;
@@ -1158,8 +1159,11 @@ body.resizing {
 
 .card .art {
   aspect-ratio: 4 / 3;
-  display: grid;
-  place-items: center;
+  /* Flex, not grid: WKWebView on iOS left a grid-centred SVG at the top
+     of the box; flex centres it on every engine. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--ink-2);
   overflow: hidden;
   position: relative;
@@ -1172,6 +1176,25 @@ body.resizing {
   inset: 0;
   background: radial-gradient(70% 62% at 50% 34%, color-mix(in srgb, currentColor 13%, transparent), transparent 75%);
   pointer-events: none;
+}
+
+/* Artwork scales with the card, so a folder or a file kind sits the same
+   way in a two-column phone grid, a three-column iPad grid and a Mac
+   window: the folder takes 56% of the art's width, a kind icon 38%. */
+.card .art .folder-art {
+  width: 56%;
+  max-width: 168px;
+  height: auto;
+}
+
+.card .art .sheet-art {
+  width: 38%;
+  max-width: 104px;
+}
+
+.card .art .sheet-art svg {
+  width: 100%;
+  height: auto;
 }
 
 .card .art img {
@@ -2618,6 +2641,54 @@ body.resizing {
 .folder-art {
   color: var(--accent);
   filter: drop-shadow(0 10px 24px color-mix(in srgb, var(--accent) 14%, transparent));
+}
+
+/* The dot says what is happening inside the folder (folderactivity.ts):
+   it breathes while work is in hand there, turns amber when something
+   failed, and rests otherwise. The hover lift still applies on top. */
+.folder-art[data-activity="busy"] .folder-stud {
+  animation: stud-breathe 1.6s ease-in-out infinite;
+}
+
+.folder-art[data-activity="failed"] .folder-stud {
+  fill: var(--warn);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--warn) 70%, transparent));
+}
+
+@keyframes stud-breathe {
+  0%,
+  100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 0 transparent);
+  }
+  50% {
+    opacity: 0.55;
+    filter: drop-shadow(0 0 7px color-mix(in srgb, var(--accent-2) 80%, transparent));
+  }
+}
+
+/* The same signal on a list row, beside the folder glyph. */
+.row-glyph.folder-glyph {
+  position: relative;
+}
+
+.folder-activity {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  box-shadow: 0 0 0 2px var(--ink-1);
+}
+
+.folder-activity[data-activity="busy"] {
+  animation: stud-breathe 1.6s ease-in-out infinite;
+}
+
+.folder-activity[data-activity="failed"] {
+  background: var(--warn);
 }
 
 /* ---------- library, tags, favorites ---------- */

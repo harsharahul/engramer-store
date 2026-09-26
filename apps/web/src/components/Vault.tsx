@@ -118,6 +118,7 @@ import { orderCollections } from "../sidebar";
 import { Popover, PopoverContent } from "./ui/popover";
 import { Button } from "./ui/button";
 import { IconButton } from "./ui/icon-button";
+import { folderActivity } from "../folderactivity";
 import { PhotoGrid } from "./PhotoGrid";
 import { AlbumPicker } from "./AlbumPicker";
 import { SelectionBar } from "./SelectionBar";
@@ -650,6 +651,20 @@ export function Vault() {
   );
 
   // The folders as either layout shows them: on top, in the chosen sort.
+  // Each folder's dot: busy while work is in hand inside it, failed when
+  // something there failed.
+  const folderStates = useMemo(
+    () =>
+      folderActivity({
+        folders: store.folders,
+        files: store.files,
+        uploads: store.uploads,
+        working: store.working,
+        failed: store.workFailed,
+      }),
+    [store.folders, store.files, store.uploads, store.working, store.workFailed],
+  );
+
   const folderRows = useMemo(
     () =>
       sortFolders(
@@ -3060,6 +3075,7 @@ export function Vault() {
             <FileList
               files={visibleFiles}
               folders={view.kind === "folder" ? folderRows : undefined}
+              folderActivity={folderStates}
               selection={selection}
               sort={sort}
               onSort={onSort}
@@ -3079,6 +3095,7 @@ export function Vault() {
                     key={folder.id}
                     name={folder.name}
                     count={folder.count}
+                    activity={folderStates.get(folder.id)}
                     index={i}
                     onOpen={() => openFolder(folder.id)}
                     onMenu={(x, y) => openFolderMenu(folder.id, x, y)}

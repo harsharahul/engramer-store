@@ -5,6 +5,19 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Added
+- **A folder's dot tells you what is happening inside it.** It breathes
+  while anything in the folder, or in a folder below it, is uploading or
+  being processed, turns amber when an upload or a processing pass there
+  failed, and rests when the folder is settled. The same dot sits beside
+  the folder in list view, and the folder's name says it in words for
+  assistive tech.
+
+### Changed
+- **Folder and file artwork scales with its card.** The drawing takes the
+  same share of the card on a two-column phone grid, a three-column iPad
+  grid and a Mac window, centred in the same place on every engine.
+
 ### Fixed
 - **The iPhone app no longer zooms when you tap the search box.** iOS
   enlarges a page whose focused text field is under 16 points, and the
