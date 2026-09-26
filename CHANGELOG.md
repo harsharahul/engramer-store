@@ -5,6 +5,8 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-09-25
+
 ### Added
 - **A folder's dot tells you what is happening inside it.** It breathes
   while anything in the folder, or in a folder below it, is uploading or
