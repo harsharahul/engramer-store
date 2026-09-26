@@ -195,6 +195,9 @@ export interface UploadItem {
    * scanned pages, indexing by meaning); shown in place of "encrypting". */
   detail?: string;
   error?: string;
+  /** Where the upload lands, once known: the folder the user picked, or
+   * the category folder a root upload is filed into. */
+  folderId?: string | null;
 }
 
 export interface Usage {
@@ -316,6 +319,11 @@ interface StoreState {
   usage: Usage | null;
   isAdmin: boolean;
   uploads: UploadItem[];
+  /** Files being processed right now; their folders show as busy. */
+  working: ReadonlySet<string>;
+  /** Files whose last processing pass failed this session; their folders
+   * show the failure until a later pass succeeds. */
+  workFailed: ReadonlySet<string>;
   /** Interrupted uploads whose bytes still wait on disk, found at start;
    * the tray offers to continue or discard each. */
   pendingResumes: ResumeRecord[];
@@ -1195,7 +1203,7 @@ export const useStore = create<StoreState>((set, get) => {
     return pending;
   };
 
-  return {
+  const state: StoreState = {
     session: null,
     pendingClaims: [],
     autoReleasedNote: null,
@@ -1209,6 +1217,8 @@ export const useStore = create<StoreState>((set, get) => {
     usage: null,
     isAdmin: false,
     uploads: [],
+    working: new Set(),
+    workFailed: new Set(),
     pendingResumes: [],
     offline: [],
     uploadAbort: null,
@@ -1289,6 +1299,8 @@ export const useStore = create<StoreState>((set, get) => {
         folders: new Map(),
         files: new Map(),
         uploads: [],
+        working: new Set(),
+        workFailed: new Set(),
         reveal: null,
       });
       try {
@@ -1357,6 +1369,8 @@ export const useStore = create<StoreState>((set, get) => {
         files: new Map(),
         usage: null,
         uploads: [],
+        working: new Set(),
+        workFailed: new Set(),
         offline: [],
         reveal: null,
       });
@@ -1376,6 +1390,8 @@ export const useStore = create<StoreState>((set, get) => {
         files: new Map(),
         usage: null,
         uploads: [],
+        working: new Set(),
+        workFailed: new Set(),
         offline: [],
         reveal: null,
       });
@@ -1574,7 +1590,13 @@ export const useStore = create<StoreState>((set, get) => {
         set({
           uploads: [
             ...get().uploads,
-            { id: uploadId, name: file.name, progress: 0, status: "encrypting" },
+            {
+              id: uploadId,
+              name: file.name,
+              progress: 0,
+              status: "encrypting",
+              ...(folderId ? { folderId } : {}),
+            },
           ],
         });
         const update = (patch: Partial<UploadItem>) =>
@@ -1600,6 +1622,7 @@ export const useStore = create<StoreState>((set, get) => {
           // folder the user picked stay where the user put them.
           const destination =
             folderId ?? (await ensureCategoryFolder(prepared.analysis.category));
+          update({ folderId: destination });
           // The bar never walks backwards (a retried part restarts its own
           // count), and a full bar that is still working reads "finalizing"
           // while the server stitches parts together.
@@ -2222,7 +2245,13 @@ export const useStore = create<StoreState>((set, get) => {
       set({
         uploads: [
           ...get().uploads,
-          { id: uploadId, name: record.name, progress: 0, status: "encrypting" },
+          {
+            id: uploadId,
+            name: record.name,
+            progress: 0,
+            status: "encrypting",
+            folderId: record.folderId,
+          },
         ],
       });
       const update = (patch: Partial<UploadItem>) =>
@@ -3369,4 +3398,36 @@ export const useStore = create<StoreState>((set, get) => {
       });
     },
   };
+
+  // Every processing pass, whoever starts it, records the file it has in
+  // hand and whether it failed, so the file's folder can show that work is
+  // happening inside it (and where something went wrong).
+  const process = state.processFile;
+  const toggled = (set_: ReadonlySet<string>, id: string, on: boolean) => {
+    const next = new Set(set_);
+    if (on) {
+      next.add(id);
+    } else {
+      next.delete(id);
+    }
+    return next;
+  };
+  state.processFile = async (id, opts) => {
+    set({ working: toggled(get().working, id, true) });
+    try {
+      const outcome = await process(id, opts);
+      if (get().workFailed.has(id)) {
+        set({ workFailed: toggled(get().workFailed, id, false) });
+      }
+      return outcome;
+    } catch (err) {
+      if (!opts?.signal?.aborted) {
+        set({ workFailed: toggled(get().workFailed, id, true) });
+      }
+      throw err;
+    } finally {
+      set({ working: toggled(get().working, id, false) });
+    }
+  };
+  return state;
 });

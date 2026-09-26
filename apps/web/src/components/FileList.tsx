@@ -4,6 +4,7 @@ import { extension, formatBytes, formatDate } from "../format";
 import { DotsGlyph, FolderGlyph, OfflineGlyph, StarGlyph } from "./Icon";
 import { useLongPress } from "../longpress";
 import { useDropTarget } from "../droptarget";
+import { folderActivityLabel, type FolderActivity } from "../folderactivity";
 
 export type SortKey = "name" | "mtime" | "size";
 export interface SortState {
@@ -39,6 +40,7 @@ export function sortFolders<T extends FolderRowData>(folders: T[], sort: SortSta
 
 function FolderRow(props: {
   folder: FolderRowData;
+  activity?: FolderActivity;
   index: number;
   onOpen: () => void;
   onMenu: (x: number, y: number) => void;
@@ -70,9 +72,13 @@ function FolderRow(props: {
     >
       <span className="row-glyph folder-glyph">
         <FolderGlyph size={15} />
+        {props.activity && <span className="folder-activity" data-activity={props.activity} />}
       </span>
       <span className="col-name">
-        <span className="name">{folder.name}</span>
+        <span className="name">
+          {folder.name}
+          {props.activity && <span className="tw:sr-only">, {folderActivityLabel(props.activity)}</span>}
+        </span>
       </span>
       <span className="col-cat">Folder</span>
       <span className="col-size">
@@ -200,6 +206,8 @@ export function FileList(props: {
   onOpenFolder?: (id: string) => void;
   onFolderMenu?: (id: string, x: number, y: number) => void;
   onDropOnFolder?: (id: string, event: React.DragEvent) => void;
+  /** Each folder's dot state, by folder id. */
+  folderActivity?: ReadonlyMap<string, FolderActivity>;
 }) {
   const folders = props.folders ?? [];
   const arrow = (key: SortKey) =>
@@ -227,6 +235,7 @@ export function FileList(props: {
         <FolderRow
           key={folder.id}
           folder={folder}
+          activity={props.folderActivity?.get(folder.id)}
           index={i}
           onOpen={() => props.onOpenFolder?.(folder.id)}
           onMenu={(x, y) => props.onFolderMenu?.(folder.id, x, y)}

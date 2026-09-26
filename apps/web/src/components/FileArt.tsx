@@ -1,3 +1,4 @@
+import type { FolderActivity } from "../folderactivity";
 import type { FileKind } from "../format";
 
 /**
@@ -89,9 +90,21 @@ export function SheetArt(props: { kind: FileKind; ext: string }) {
  * A layered folder: back panel, papers peeking out, front flap that lifts on
  * hover. Outline and stud follow the accent (via currentColor set in CSS).
  */
-export function FolderArt() {
+/**
+ * The folder illustration. Its dot shows what is happening inside the
+ * folder: it pulses while work is in hand, turns amber when something
+ * failed, and rests otherwise (see folderactivity.ts).
+ */
+export function FolderArt({ activity }: { activity?: FolderActivity } = {}) {
   return (
-    <svg className="folder-art" viewBox="0 0 96 72" width="112" height="84" aria-hidden="true">
+    <svg
+      className="folder-art"
+      viewBox="0 0 96 72"
+      width="112"
+      height="84"
+      aria-hidden="true"
+      data-activity={activity}
+    >
       <path
         d="M8 16a4 4 0 0 1 4-4h20l7 8h45a4 4 0 0 1 4 4v32a4 4 0 0 1-4 4H12a4 4 0 0 1-4-4Z"
         fill="currentColor"

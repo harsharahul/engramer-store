@@ -6,6 +6,7 @@ import { blurUrl } from "../intel/blur";
 import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { DotsGlyph, OfflineGlyph, PeopleGlyph, StarGlyph } from "./Icon";
 import { FolderArt, KIND_ACCENTS, SheetArt } from "./FileArt";
+import { folderActivityLabel, type FolderActivity } from "../folderactivity";
 import { useLongPress } from "../longpress";
 
 /** Overflow trigger shown on cards and rows; long-press is undiscoverable alone. */
@@ -150,6 +151,8 @@ export function FileCard(props: {
 export function FolderCard(props: {
   name: string;
   count: number;
+  /** What is happening inside the folder; absent when it is settled. */
+  activity?: FolderActivity;
   index: number;
   onOpen: () => void;
   onMenu: (x: number, y: number) => void;
@@ -180,11 +183,14 @@ export function FolderCard(props: {
       title={props.name}
     >
       <div className="art">
-        <FolderArt />
+        <FolderArt activity={props.activity} />
       </div>
       <div className="label">
         <div className="label-text">
-          <div className="name">{props.name}</div>
+          <div className="name">
+            {props.name}
+            {props.activity && <span className="tw:sr-only">, {folderActivityLabel(props.activity)}</span>}
+          </div>
           <div className="sub">
             {props.count} item{props.count === 1 ? "" : "s"}
           </div>
