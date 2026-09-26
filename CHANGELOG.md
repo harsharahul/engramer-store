@@ -5,6 +5,19 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+- **The Mac traffic lights stay on the toolbar's centre line.** 0.57.0
+  placed them there only while the window's content view was repainting,
+  which a web view never lets happen, so the shipped app showed them at
+  macOS's default spot. The position is now applied again whenever the
+  window resizes, becomes key or leaves full screen, and the Mac release
+  build launches the built app and checks where the lights landed before
+  it is signed.
+- **The sidebar opens and closes as one motion.** Collapsing it to the
+  icon rail ran a 200 ms linear slide while the content columns and the
+  toolbar's inset jumped. All of them now move together over 300 ms on
+  one easing curve; reduced-motion settings keep the instant switch.
+
 ## [0.57.0] - 2026-09-25
 
 ### Added

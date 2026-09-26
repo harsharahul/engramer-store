@@ -186,6 +186,34 @@ describe("the toolbar's panels open over the content", () => {
   });
 });
 
+/**
+ * The sidebar, the content columns and the toolbar inset reflow on one
+ * clock. shadcn's sidebar shipped with a 200ms linear width transition
+ * while the frame's grid and the Mac toolbar's padding snapped, so the
+ * window moved in two jerks. Every part reads the pane motion tokens.
+ */
+describe("pane motion", () => {
+  it("defines the pane motion tokens once in app.css", () => {
+    expect(APP_CSS).toMatch(/--motion-pane:\s*\d+ms;/);
+    expect(APP_CSS).toMatch(/--ease-pane:\s*cubic-bezier\(/);
+  });
+
+  it("gives the sidebar no clock of its own", () => {
+    const sidebar = readFileSync(join(__dirname, "components", "ui", "sidebar.tsx"), "utf8");
+    expect(sidebar).not.toMatch(/tw:ease-linear|tw:duration-\d/);
+    expect(sidebar).toMatch(/tw:duration-\(--motion-pane\) tw:ease-\(--ease-pane\)/);
+  });
+
+  it("transitions every rule that lays out by the sidebar's width on the pane tokens", () => {
+    // A rule that reads --sidebar-w places something beside the sidebar;
+    // if it snaps while the sidebar glides, the window moves in two jerks.
+    const offenders = [...CSS.matchAll(/([^{}]+)\{([^}]*var\(--sidebar-w[^}]*)\}/g)]
+      .filter(([, , body]) => !/transition:[^;]*var\(--motion-pane\)/.test(body!))
+      .map(([, selector]) => selector!.trim().split("\n").pop()!.trim());
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe("the Mac shell's hidden title bar", () => {
   it("keeps the toolbar's controls clear of the traffic lights at every sidebar width", () => {
     // The lights end 79px from the window's left edge (19px in, as macOS

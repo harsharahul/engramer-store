@@ -316,6 +316,7 @@ a {
 .frame {
   display: grid;
   grid-template-columns: var(--sidebar-w, 232px) 1fr;
+  transition: grid-template-columns var(--motion-pane) var(--ease-pane);
   height: 100%;
   position: relative;
   /* The window's own chrome stays clear on every form factor: the iPad
@@ -355,6 +356,7 @@ a {
 
 .frame.with-details {
   grid-template-columns: var(--sidebar-w, 232px) 1fr var(--details-w, 300px);
+  transition: grid-template-columns var(--motion-pane) var(--ease-pane);
 }
 
 /* No column left for the pane: it floats over the content from the right
@@ -403,6 +405,7 @@ a {
 
 .divider-sidebar {
   left: calc(var(--sidebar-w, 232px) - 4px);
+  transition: left var(--motion-pane) var(--ease-pane);
 }
 
 .divider-details {
@@ -440,7 +443,7 @@ body.resizing {
 /* Collapsed, the pane is an icon rail. Resting the pointer on it (AppSidebar
    sets .rail-open) brings the full sidebar back as an overlay. */
 .frame.sidebar-rail > .sidebar {
-  transition: width 0.18s ease;
+  transition: width var(--motion-pane) var(--ease-pane);
 }
 
 .frame.sidebar-rail > .sidebar.rail-open {
@@ -6158,6 +6161,7 @@ button.link {
    the pane and the toolbar keeps its own 16px. */
 .frame.shell-mac .topbar {
   padding-left: max(16px, calc(93px - var(--sidebar-w, 0px)));
+  transition: padding-left var(--motion-pane) var(--ease-pane);
 }
 
 .frame.shell-mac .topbar {
