@@ -72,6 +72,15 @@
   --z-grain: 999; /* the paper grain, pointer-events none */
 }
 
+/* Pane motion: the sidebar's width, the content columns beside it and the
+   toolbar's inset all move on this one clock, so the window reflows as a
+   whole rather than in parts. The curve starts quickly and settles, like
+   the Finder's own sidebar. Reduced motion collapses it (styles.css). */
+:root {
+  --motion-pane: 300ms;
+  --ease-pane: cubic-bezier(0.2, 0, 0, 1);
+}
+
 :root[data-theme="light"] {
   --glass-bg: rgba(255, 255, 255, 0.62);
   --glass-border: rgba(15, 23, 42, 0.08);

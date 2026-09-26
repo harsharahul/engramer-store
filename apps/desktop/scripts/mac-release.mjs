@@ -153,6 +153,11 @@ if (builtVersion !== version) {
   fail(`the app at ${appPath} is ${builtVersion}, not ${version}; a stale build is in the way`);
 }
 
+// The window chrome is checked on the binary that ships: the app runs for
+// a few seconds and reports where its traffic lights landed (see
+// scripts/mac-chrome-check.mjs and docs/ui-checks.md).
+run("node", [join(here, "mac-chrome-check.mjs"), appPath]);
+
 // ----- assemble: profile and extension go in before any signature -----
 
 copyFileSync(appProfile, join(appPath, "Contents", "embedded.provisionprofile"));

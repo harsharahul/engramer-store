@@ -1174,6 +1174,8 @@ pub unsafe fn inset_traffic_lights(window: &NSWindow, position: LogicalPosition<
   let window_buttons = vec![close, miniaturize.clone(), zoom];
   let space_between = NSView::frame(&miniaturize).origin.x - close_rect.origin.x;
 
+  let report = std::env::var_os("ENGRAM_WINDOW_CHROME_LOG").is_some();
+
   for (i, button) in window_buttons.into_iter().enumerate() {
     let mut rect = NSView::frame(&button);
     rect.origin.x = x + (i as f64 * space_between);
@@ -1188,6 +1190,17 @@ pub unsafe fn inset_traffic_lights(window: &NSWindow, position: LogicalPosition<
       } else {
         height - y - rect.size.height
       };
+      if report && i == 0 {
+        // Engram Store patch: the release check reads this line to confirm
+        // where the lights landed (top-left corner of the close button, in
+        // points from the window's top-left).
+        eprintln!(
+          "window-chrome: close-light top-left=({:.1},{:.1}) size={:.1}",
+          rect.origin.x,
+          height - rect.origin.y - rect.size.height,
+          rect.size.height
+        );
+      }
     }
     button.setFrameOrigin(rect.origin);
   }

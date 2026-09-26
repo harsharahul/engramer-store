@@ -38,6 +38,20 @@ browser builds are found through `CATALOG_PLAYWRIGHT`, `CATALOG_CHROMIUM`
 and `CATALOG_WEBKIT`; the server through `CATALOG_URL` (default
 `http://127.0.0.1:3181`).
 
+## Mac window chrome
+
+`apps/desktop/scripts/mac-chrome-check.mjs` launches a built Mac app with
+`ENGRAM_WINDOW_CHROME_LOG` set, reads where the app reports its traffic
+lights landing, and compares that with `trafficLightPosition` in
+`tauri.conf.json`. `mac:release` runs it on the app it just built, before
+signing, and stops if the two disagree. It needs no screenshot or
+accessibility permission: the report comes from the window itself.
+
+```sh
+cd apps/desktop
+node scripts/mac-chrome-check.mjs "../../target/release/bundle/macos/Engram Store.app"
+```
+
 ## iOS screen walk
 
 `apps/desktop/ios-screenwalk` is a UI test that walks the installed app
