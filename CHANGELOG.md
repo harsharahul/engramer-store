@@ -17,6 +17,11 @@ All notable changes to Engram Store are documented here, following
 - **Folder and file artwork scales with its card.** The drawing takes the
   same share of the card on a two-column phone grid, a three-column iPad
   grid and a Mac window, centred in the same place on every engine.
+- **Dependencies updated** to their current minor and patch releases:
+  Fastify 5.12, React 19.3, Vite 8.3, pdf.js 6.3, Transformers 4.3, the
+  AWS S3 client, Zod, Lucide and the rest of the npm set. The two major
+  bumps in the batch (better-sqlite3 13, Vitest 5) wait for their own
+  upgrades.
 
 ### Fixed
 - **The iPhone app no longer zooms when you tap the search box.** iOS
