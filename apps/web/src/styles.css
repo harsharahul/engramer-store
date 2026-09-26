@@ -3835,11 +3835,35 @@ span.item-menu {
     margin-left: auto;
   }
 
-  /* Topbar: search only; every action lives in the tab bar and sheets.
-     The frame already clears the status bar. */
+  /* Topbar: the place's own header (title, Add, More), or the search
+     screen's field with Cancel. The frame already clears the status bar. */
   .topbar {
     gap: 10px;
     padding: 12px 14px;
+  }
+
+  .phone-title {
+    min-width: 0;
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .topbar .cancel-search {
+    flex: none;
+  }
+
+  /* The Search tab's page before anything is typed. */
+  .search-inline {
+    padding: 4px 14px 24px;
+  }
+
+  .search-inline .search-panel-label {
+    padding-top: 14px;
   }
 
   /* A phone-width Mac window: no safe area up here, and the capsules stay

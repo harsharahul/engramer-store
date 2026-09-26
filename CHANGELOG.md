@@ -26,6 +26,12 @@ All notable changes to Engram Store are documented here, following
   can no longer miss its round shape, pressed toggles read in the accent,
   and every icon button carries a spoken label. On touch devices every
   button grows to a 44-point target.
+- **The phone's top row is the place's own header.** Files, Photos and
+  every other place show their name with Add and a More menu (select, new
+  folder, sort, grid or list) where a thumb reaches, instead of the Mac
+  toolbar squeezed to fit. Search is a screen of its own behind the Search
+  tab: a full-width field with Cancel, recent searches and filters as the
+  page, results as you type. Nothing floats over another page any more.
 - **The phone's preview header fits.** It keeps Close, the file name and
   Edit, and folds favorite, share, details, rename and download into one
   More menu; stepping between files stays a swipe.

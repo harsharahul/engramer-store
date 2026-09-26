@@ -194,6 +194,7 @@ import {
   PenNibGlyph,
   PhotoGlyph,
   PlusGlyph,
+  DotsGlyph,
   ReceiptGlyph,
   RestoreGlyph,
   ScanTextGlyph,
@@ -341,6 +342,9 @@ export function Vault() {
   const [theme, setTheme] = useState<ThemeMode>(() => currentTheme());
   const [accent, setAccent] = useState<string>(() => currentAccent());
   const [searchFocused, setSearchFocused] = useState(false);
+  /* The phone's Search tab is a screen of its own: the field with Cancel
+     and, until something is typed, the suggestions as the page. */
+  const [phoneSearchOpen, setPhoneSearchOpen] = useState(false);
   const [searchCursor, setSearchCursor] = useState(0);
   // The account's recent searches, re-read when a decision lands from
   // any device.
@@ -522,6 +526,18 @@ export function Vault() {
 
   const currentFolderId = view.kind === "folder" ? view.id : null;
   const searching = query.trim().length > 0;
+  const phoneSearch = isMobile && (phoneSearchOpen || searching);
+  useEffect(() => {
+    if (phoneSearch) {
+      searchInput.current?.focus();
+    }
+  }, [phoneSearch]);
+  const cancelSearch = () => {
+    setQuery("");
+    setPhoneSearchOpen(false);
+    setSearchFocused(false);
+    searchInput.current?.blur();
+  };
 
   // A warm boot shows the library from this device's cache even when the
   // server is unreachable; the failed background sync surfaces as a toast
@@ -2124,6 +2140,36 @@ export function Vault() {
   // on the button ("Name ↑") and picked from one menu, the way Finder and
   // Drive present it. Clicking the current key again flips the direction.
   const SORT_LABELS: Record<SortKey, string> = { name: "Name", mtime: "Date modified", size: "Size" };
+  /* The phone header's More menu: what the Mac toolbar and header row
+     offer, in one sheet a thumb can reach. */
+  const openPhoneMore = (event: React.MouseEvent<HTMLButtonElement>) => {
+    const at = event.currentTarget.getBoundingClientRect();
+    const items: MenuItem[] = [];
+    if (visibleFiles.length > 0 && !selectMode) {
+      items.push({ id: "more-select", label: "Select", icon: <GridGlyph size={15} />, run: () => setSelectMode(true) });
+    }
+    if (view.kind === "folder") {
+      items.push({ id: "more-folder", label: "New folder", icon: <FolderGlyph size={15} />, run: () => setNewFolderOpen(true) });
+    }
+    items.push({ id: "more-d1", label: "", divider: true, run: () => {} });
+    for (const key of ["name", "mtime", "size"] as SortKey[]) {
+      items.push({
+        id: `more-sort-${key}`,
+        label: `Sort by ${SORT_LABELS[key].toLowerCase()}`,
+        checked: sort.key === key,
+        run: () => {
+          if (sort.key !== key) {
+            onSort(key);
+          }
+        },
+      });
+    }
+    items.push({ id: "more-d2", label: "", divider: true, run: () => {} });
+    items.push({ id: "more-grid", label: "Grid", checked: layout === "grid", run: () => layout !== "grid" && toggleLayout() });
+    items.push({ id: "more-list", label: "List", checked: layout === "list", run: () => layout !== "list" && toggleLayout() });
+    setCtxMenu({ x: at.right - 208, y: at.bottom + 6, title: viewTitle, items });
+  };
+
   const openSortMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
     const at = event.currentTarget.getBoundingClientRect();
     const setDir = (dir: 1 | -1) => {
@@ -2237,6 +2283,47 @@ export function Vault() {
     (f) =>
       f.tags.some((tag) => tag.startsWith("trip:")) ||
       f.facts.some((fact) => fact.confirmed && !fact.dismissed && DATED_KINDS.has(fact.kind)),
+  );
+
+  const searchSuggestions = (
+    <>
+                {recentSearches.length > 0 && (
+                  <>
+                    <div className="search-panel-label">Recent</div>
+                    {recentSearches.map((recent) => (
+                      <button
+                        key={recent}
+                        className="search-recent"
+                        onClick={() => {
+                          setQuery(recent);
+                          searchInput.current?.focus();
+                        }}
+                      >
+                        <ClockGlyph size={12} /> {recent}
+                      </button>
+                    ))}
+                  </>
+                )}
+                <div className="search-panel-label">Narrow it down</div>
+                <div className="search-ops">
+                  {OPERATOR_HINTS.map((op) => (
+                    <button
+                      key={op}
+                      className="search-op mono"
+                      onClick={() => {
+                        setQuery((q) => (q ? `${q.trimEnd()} ${op}` : op));
+                        searchInput.current?.focus();
+                      }}
+                    >
+                      {op}
+                    </button>
+                  ))}
+                </div>
+                <div className="search-panel-note">
+                  Search reads names, tags, folder names, and text inside documents
+                  {ocrOn ? " and images" : ""}, decrypted only on this device.
+                </div>
+    </>
   );
 
   const viewTitle = searching
@@ -2472,6 +2559,11 @@ export function Vault() {
       <main className="main">
         <div className="topbar" ref={topbarRef} data-tauri-drag-region>
           {/* Liquid Glass: the controls float in capsules, no bar behind them. */}
+          {isMobile && !phoneSearch && (
+            <div className="phone-title" role="heading" aria-level={1}>
+              {viewTitle}
+            </div>
+          )}
           <div className={cn(capsule, "tw:max-[760px]:hidden")}>
             <IconButton
               size="md"
@@ -2489,6 +2581,7 @@ export function Vault() {
               "searchbox",
               capsule,
               "tw:shrink tw:p-0 tw:focus-within:ring-2 tw:focus-within:ring-ring/40",
+              isMobile && !phoneSearch && "tw:hidden",
             )}
           >
             <span className="search-glyph">
@@ -2534,7 +2627,7 @@ export function Vault() {
             />
             {/* Anchored under the field and portaled, so no capsule or pane
                 can cover it; it never takes focus from the field. */}
-            <Popover open={searchFocused && !searching} modal={false}>
+            <Popover open={!isMobile && searchFocused && !searching} modal={false}>
               <PopoverContent
                 anchor={searchBox}
                 className="search-panel tw:w-(--anchor-width)"
@@ -2542,42 +2635,7 @@ export function Vault() {
                 finalFocus={false}
                 onMouseDown={(e) => e.preventDefault()}
               >
-                {recentSearches.length > 0 && (
-                  <>
-                    <div className="search-panel-label">Recent</div>
-                    {recentSearches.map((recent) => (
-                      <button
-                        key={recent}
-                        className="search-recent"
-                        onClick={() => {
-                          setQuery(recent);
-                          searchInput.current?.focus();
-                        }}
-                      >
-                        <ClockGlyph size={12} /> {recent}
-                      </button>
-                    ))}
-                  </>
-                )}
-                <div className="search-panel-label">Narrow it down</div>
-                <div className="search-ops">
-                  {OPERATOR_HINTS.map((op) => (
-                    <button
-                      key={op}
-                      className="search-op mono"
-                      onClick={() => {
-                        setQuery((q) => (q ? `${q.trimEnd()} ${op}` : op));
-                        searchInput.current?.focus();
-                      }}
-                    >
-                      {op}
-                    </button>
-                  ))}
-                </div>
-                <div className="search-panel-note">
-                  Search reads names, tags, folder names, and text inside documents
-                  {ocrOn ? " and images" : ""}, decrypted only on this device.
-                </div>
+                {searchSuggestions}
               </PopoverContent>
             </Popover>
             {/* The command palette's shortcut rides inside the field, where
@@ -2595,23 +2653,29 @@ export function Vault() {
               </button>
             )}
           </div>
+          {phoneSearch && (
+            <Button variant="ghost" className="cancel-search" onClick={cancelSearch}>
+              Cancel
+            </Button>
+          )}
           <div className="grow" />
-          <div className={capsule}>
+          {isMobile && !phoneSearch && (
+            <div className={capsule}>
+              <IconButton size="md" className={capsuleIcon} label="Add" title="Add to your vault" onClick={openAddSheet}>
+                <PlusGlyph size={18} />
+              </IconButton>
+              <IconButton size="md" className={capsuleIcon} label="More" aria-haspopup="menu" onClick={openPhoneMore}>
+                <DotsGlyph />
+              </IconButton>
+            </div>
+          )}
+          <div className={cn(capsule, "tw:max-[760px]:hidden")}>
             <ActivityBell
               open={activityOpen}
               onToggle={() => {
                 setActivityOpen((open) => !open);
               }}
             />
-            <IconButton
-              size="md"
-              className={cn("add-btn tw:hidden tw:max-[760px]:inline-flex", capsuleIcon)}
-              label="Add"
-              title="Add to your vault"
-              onClick={openAddSheet}
-            >
-              <PlusGlyph size={18} />
-            </IconButton>
             <IconButton
               size="md"
               className={cn("info-toggle tw:max-[760px]:hidden", capsuleIcon)}
@@ -2691,9 +2755,10 @@ export function Vault() {
           />
         </div>
 
-        <div className="viewbar">
+        <div className={cn("viewbar", phoneSearch && !searching && "tw:hidden")}>
           <div className="crumbs">
             {view.kind === "folder" && !searching && !similarActive ? (
+              (!isMobile || breadcrumbs.length > 0) && (
               <>
                 <Crumb
                   label="All files"
@@ -2715,8 +2780,11 @@ export function Vault() {
                   </span>
                 ))}
               </>
+              )
             ) : (
-              <span className="current">{similarActive ? "Similar items" : viewTitle}</span>
+              (!isMobile || searching || similarActive) && (
+                <span className="current">{similarActive ? "Similar items" : viewTitle}</span>
+              )
             )}
             <span className="crumb-note">
               {searching ? (
@@ -2878,7 +2946,9 @@ export function Vault() {
               <TripHeadsUp files={liveFiles} onOpen={(id) => openFile(id)} />
             </>
           )}
-          {searching ? (
+          {phoneSearch && !searching ? (
+            <div className="search-inline">{searchSuggestions}</div>
+          ) : searching ? (
             <SearchResults
               hits={shownHits}
               folders={store.folders}
@@ -3085,6 +3155,7 @@ export function Vault() {
           className={`tab${view.kind === "folder" && !drawerOpen && !activityOpen ? " active" : ""}`}
           onClick={() => {
             setQuery("");
+            setPhoneSearchOpen(false);
             setDrawerOpen(false);
             setActivityOpen(false);
             setView({ kind: "folder", id: null });
@@ -3097,6 +3168,7 @@ export function Vault() {
           className={`tab${view.kind === "photos" && !drawerOpen && !activityOpen ? " active" : ""}`}
           onClick={() => {
             setQuery("");
+            setPhoneSearchOpen(false);
             setDrawerOpen(false);
             setActivityOpen(false);
             setView({ kind: "photos" });
@@ -3110,6 +3182,7 @@ export function Vault() {
           onClick={() => {
             setDrawerOpen(false);
             setActivityOpen(false);
+            setPhoneSearchOpen(true);
             searchInput.current?.focus();
           }}
         >
