@@ -343,9 +343,28 @@ extern "C" fn window_will_close(this: &Object, _: Sel, _: id) {
   trace!("Completed `windowWillClose:`");
 }
 
+/// Engram Store patch: puts the traffic lights back where the window asked
+/// for them. `drawRect:` on the content view applies the inset too, but a
+/// web view covers that view for the life of the window, so it draws once
+/// at most, and AppKit lays the standard buttons out again whenever the
+/// window resizes, changes key state or leaves full screen. Every one of
+/// those delegate hooks re-applies the inset.
+fn reapply_traffic_lights(state: &WindowDelegateState) {
+  #[allow(deprecated)] // TODO: Use define_class!
+  let view_state: &ViewState = unsafe {
+    let ns_view: &Object = &state.ns_view;
+    let state_ptr: *mut c_void = *ns_view.get_ivar("taoState");
+    &*(state_ptr as *const ViewState)
+  };
+  if let Some(position) = view_state.traffic_light_inset {
+    unsafe { super::view::inset_traffic_lights(&state.ns_window, position) };
+  }
+}
+
 extern "C" fn window_did_resize(this: &Object, _: Sel, _: id) {
   trace!("Triggered `windowDidResize:`");
   with_state(this, |state| {
+    reapply_traffic_lights(state);
     if !state.is_checking_zoomed_in {
       state.emit_resize_event();
       state.emit_move_event();
@@ -366,6 +385,7 @@ extern "C" fn window_did_move(this: &Object, _: Sel, _: id) {
 extern "C" fn window_did_change_backing_properties(this: &Object, _: Sel, _: id) {
   trace!("Triggered `windowDidChangeBackingProperties:`");
   with_state(this, |state| {
+    reapply_traffic_lights(state);
     state.emit_static_scale_factor_changed_event();
   });
   trace!("Completed `windowDidChangeBackingProperties:`");
@@ -374,6 +394,7 @@ extern "C" fn window_did_change_backing_properties(this: &Object, _: Sel, _: id)
 extern "C" fn window_did_become_key(this: &Object, _: Sel, _: id) {
   trace!("Triggered `windowDidBecomeKey:`");
   with_state(this, |state| {
+    reapply_traffic_lights(state);
     // TODO: center the cursor if the window had mouse grab when it
     // lost focus
     state.emit_event(WindowEvent::Focused(true));
@@ -606,6 +627,7 @@ extern "C" fn window_did_exit_fullscreen(this: &Object, _: Sel, _: id) {
         window.set_fullscreen(target_fullscreen);
       }
     });
+    reapply_traffic_lights(state);
     state.emit_resize_event();
     state.emit_move_event();
   });
