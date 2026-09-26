@@ -68,9 +68,12 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   // per-address limiting. Trust is opt-in and explicit, because believing
   // a forwarded header from just anyone is worse than ignoring it: an
   // untrusted caller could otherwise claim any address it likes.
+  // A hop count is spelled out as the function it stands for: trust the
+  // first N addresses behind the socket (Fastify types the count no more).
+  const trusted = config.trustedProxies;
   const app = Fastify({
     bodyLimit: 16 * 1024 * 1024,
-    trustProxy: config.trustedProxies,
+    trustProxy: typeof trusted === "number" ? (_address: string, hop: number) => hop < trusted : trusted,
     // Structured request logs to stdout for whatever ships container logs
     // off the node. Off by default; even when on, entries carry only what
     // the server already sees: method, path (opaque ids), status, timing.
