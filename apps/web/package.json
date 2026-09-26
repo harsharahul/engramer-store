@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json && vite build",
     "dev": "vite",
     "preview": "vite preview",
+    "ui:catalog": "node scripts/ui-catalog.mjs",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

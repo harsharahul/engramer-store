@@ -153,6 +153,26 @@ describe("the z scale", () => {
 });
 
 /**
+ * One phone breakpoint, everywhere. The stylesheet's phone block and its
+ * complement must meet at exactly 760px (a `min-width: 761px` block left a
+ * gap for fractional widths), and shadcn's hook must read the same query
+ * as the app (it shipped with 768px, so between 761 and 767px the sidebar
+ * thought it was on a phone while the layout did not).
+ */
+describe("one phone breakpoint", () => {
+  it("uses the exact complement of the phone query for the desktop block", () => {
+    expect(CSS).not.toMatch(/@media \(min-width: 761px\)/);
+    expect(CSS).toMatch(/@media not all and \(max-width: 760px\)/);
+  });
+
+  it("points shadcn's mobile hook at the app's query", () => {
+    const hook = readFileSync(join(__dirname, "hooks", "use-mobile.ts"), "utf8");
+    expect(hook).toMatch(/MOBILE_QUERY/);
+    expect(hook).not.toMatch(/768/);
+  });
+});
+
+/**
  * The search suggestions opened UNDER the content (folder cards, the albums
  * shelf, insight cards) on every platform: each glass capsule's backdrop
  * blur is a stacking context that traps the panel's z-index, so the
