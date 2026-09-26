@@ -35,6 +35,7 @@ import { entitiesEnabled, extractEntities } from "../intel/entities";
 import { lookupAirport } from "../intel/airports";
 import { DECISIONS_EVENT, decisionEvents } from "../decisions";
 import { PlaneGlyph, SparkGlyph, XGlyph } from "./Icon";
+import { Button } from "./ui/button";
 
 /** More than this and the bar stays shut until asked; one is not a queue. */
 const COLLAPSE_ABOVE = 1;
@@ -107,20 +108,22 @@ export function HeadsUp(props: {
           {total > BULK_ABOVE && (
             <div className="pending-bulk">
               <span>Answer everything listed at once:</span>
-              <button
-                className="btn btn-small"
+              <Button
+                variant="secondary"
+                size="xs"
                 disabled={resolving}
                 onClick={() => void resolveAll("confirm")}
               >
                 Track all {total}
-              </button>
-              <button
-                className="btn btn-small btn-quiet"
+              </Button>
+              <Button
+                variant="quiet"
+                size="xs"
                 disabled={resolving}
                 onClick={() => void resolveAll("dismiss")}
               >
                 Ignore all
-              </button>
+              </Button>
             </div>
           )}
           {groups.slice(0, FILES_AT_ONCE).map((group) => (
@@ -253,13 +256,14 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
         {canLink && (
           <div className="pending-bulk">
             <span>Documents that share no reference can still belong together.</span>
-            <button
-              className="btn btn-small"
+            <Button
+              variant="secondary"
+              size="xs"
               disabled={linking}
               onClick={() => void findConnections()}
             >
               {linking ? "Looking…" : "Find connections"}
-            </button>
+            </Button>
           </div>
         )}
         {open.map((trip) => (
@@ -285,8 +289,8 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
               </ul>
             </details>
             <div className="pending-card-actions">
-              <button
-                className="btn btn-small btn-primary"
+              <Button
+                size="xs"
                 disabled={busy === trip.id}
                 onClick={() => {
                   setBusy(trip.id);
@@ -294,13 +298,14 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
                 }}
               >
                 Group as {tripTitle(tripTag(trip))}
-              </button>
-              <button
-                className="btn btn-small btn-quiet"
+              </Button>
+              <Button
+                variant="quiet"
+                size="xs"
                 onClick={() => rememberTripDismissal(account, trip.id)}
               >
                 <XGlyph size={12} /> Ignore
-              </button>
+              </Button>
             </div>
           </div>
         ))}
@@ -378,31 +383,31 @@ function FactRow(props: {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
           />
-          <button
-            className="btn btn-small btn-primary"
+          <Button
+            size="xs"
             disabled={!/^\d{4}-\d{2}-\d{2}$/.test(draft)}
             onClick={() => props.onConfirm(draft)}
           >
             Track {/^\d{4}-\d{2}-\d{2}$/.test(draft) ? shown(draft) : "it"}
-          </button>
-          <button className="btn btn-small btn-quiet" onClick={() => setEditing(false)}>
+          </Button>
+          <Button variant="quiet" size="xs" onClick={() => setEditing(false)}>
             Cancel
-          </button>
+          </Button>
         </>
       ) : other ? (
         <>
           <span className="pending-ask">Which one?</span>
-          <button className="btn btn-small" onClick={() => props.onConfirm(props.fact.value)}>
+          <Button variant="secondary" size="xs" onClick={() => props.onConfirm(props.fact.value)}>
             {shown(props.fact.value)}
-          </button>
-          <button className="btn btn-small" onClick={() => props.onConfirm(other)}>
+          </Button>
+          <Button variant="secondary" size="xs" onClick={() => props.onConfirm(other)}>
             {shown(other)}
-          </button>
+          </Button>
         </>
       ) : (
-        <button className="btn btn-small btn-primary" onClick={() => props.onConfirm()}>
+        <Button size="xs" onClick={() => props.onConfirm()}>
           Track it
-        </button>
+        </Button>
       )}
       {!editing && (
         <button
@@ -413,13 +418,14 @@ function FactRow(props: {
           Wrong date?
         </button>
       )}
-      <button
-        className="btn btn-small btn-quiet"
+      <Button
+        variant="quiet"
+        size="xs"
         onClick={props.onDismiss}
         title="Do not ask about this again"
       >
         <XGlyph size={12} /> Ignore
-      </button>
+      </Button>
     </div>
   );
 }

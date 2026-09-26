@@ -1,5 +1,7 @@
 import { useStore } from "../store";
 import { XGlyph } from "./Icon";
+import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
 
 export function UploadTray() {
   const uploads = useStore((s) => s.uploads);
@@ -31,9 +33,9 @@ export function UploadTray() {
             Cancel
           </button>
         )}
-        <button className="icon-btn" title="Clear" onClick={clear}>
+        <IconButton label="Clear" onClick={clear}>
           <XGlyph size={14} />
-        </button>
+        </IconButton>
       </header>
       <ul>
         {pendingResumes.map((record) => (
@@ -45,12 +47,12 @@ export function UploadTray() {
               <span className="upload-state">interrupted</span>
             </div>
             <div className="upload-name">
-              <button className="btn" onClick={() => void resumeUpload(record.fileId)}>
+              <Button variant="secondary" onClick={() => void resumeUpload(record.fileId)}>
                 Resume
-              </button>
-              <button className="btn btn-ghost" onClick={() => void discardResume(record.fileId)}>
+              </Button>
+              <Button variant="ghost" onClick={() => void discardResume(record.fileId)}>
                 Discard
-              </button>
+              </Button>
             </div>
           </li>
         ))}

@@ -2758,17 +2758,16 @@ export function Vault() {
                     }`}
             </span>
             {(searching || similarActive) && (
-              <button
-                className="icon-btn"
+              <IconButton
+                label={searching ? "Clear search" : "Back to files"}
                 onClick={() => {
                   setQuery("");
                   setSimilarTo(null);
                   setSimilarHits([]);
                 }}
-                title={searching ? "Clear search" : "Back to files"}
               >
                 <XGlyph size={13} />
-              </button>
+              </IconButton>
             )}
           </div>
           {showViewControls && (
@@ -2792,12 +2791,13 @@ export function Vault() {
                   appears. A touch screen has none of that, so it keeps an
                   explicit Select (the Files and Photos convention). */}
               {!selectMode && visibleFiles.length > 0 && (isMobile || isHandheld()) && (
-                <button
-                  className="btn btn-ghost select-toggle"
+                <Button
+                  variant="ghost"
+                  className="select-toggle"
                   onClick={() => setSelectMode(true)}
                 >
                   Select
-                </button>
+                </Button>
               )}
               <button
                 className="sort-button"
@@ -3150,12 +3150,12 @@ export function Vault() {
             <span>
               Version {updateReady} is ready. This window is running {APP_VERSION}.
             </span>
-            <button className="btn btn-primary" onClick={() => void reloadForUpdate()}>
+            <Button onClick={() => void reloadForUpdate()}>
               Reload
-            </button>
-            <button className="icon-btn" title="Later" onClick={() => setUpdateReady(null)}>
+            </Button>
+            <IconButton label="Later" onClick={() => setUpdateReady(null)}>
               <XGlyph />
-            </button>
+            </IconButton>
           </div>
         )}
         {activityOpen && (
@@ -3549,9 +3549,9 @@ function EmptyState(props: {
           <h3>Could not reach your vault</h3>
           <p>{props.syncError}</p>
           <div className="empty-actions">
-            <button className="btn btn-primary" onClick={props.onRetry}>
+            <Button onClick={props.onRetry}>
               Try again
-            </button>
+            </Button>
           </div>
         </div>
       );
@@ -3592,9 +3592,9 @@ function EmptyState(props: {
         <h3>{props.view.kind === "album" ? "This album is empty" : "No photos yet"}</h3>
         <p>Photos and videos you add appear here as a timeline.</p>
         <div className="empty-actions">
-          <button className="btn btn-primary" onClick={props.onUpload}>
+          <Button onClick={props.onUpload}>
             Add photos
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -3605,12 +3605,12 @@ function EmptyState(props: {
       <h3>An empty shelf</h3>
       <p>Drop files anywhere, paste from the clipboard, or start writing.</p>
       <div className="empty-actions">
-        <button className="btn btn-primary" onClick={props.onUpload}>
+        <Button onClick={props.onUpload}>
           <UploadGlyph /> Upload files
-        </button>
-        <button className="btn" onClick={props.onNote}>
+        </Button>
+        <Button variant="secondary" onClick={props.onNote}>
           <NoteGlyph size={14} /> New note
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -3649,16 +3649,15 @@ function RevealToast(props: { onOpen: (folderId: string | null) => void }) {
           ))}
         </div>
       </div>
-      <button
-        className="icon-btn"
-        title="Dismiss"
+      <IconButton
+        label="Dismiss"
         onClick={(e) => {
           e.stopPropagation();
           dismiss();
         }}
       >
         <XGlyph size={14} />
-      </button>
+      </IconButton>
     </div>
   );
 }
@@ -3686,12 +3685,12 @@ function TrashList(props: {
           </div>
           <span className="row-meta">{formatBytes(file.size)}</span>
           <div className="row-actions" style={{ opacity: 1 }}>
-            <button className="icon-btn" title="Restore" onClick={() => props.onRestore(file.id)}>
+            <IconButton label="Restore" onClick={() => props.onRestore(file.id)}>
               <RestoreGlyph />
-            </button>
-            <button className="icon-btn" title="Delete forever" onClick={() => props.onDeleteForever(file.id)}>
+            </IconButton>
+            <IconButton label="Delete forever" onClick={() => props.onDeleteForever(file.id)}>
               <XGlyph />
-            </button>
+            </IconButton>
           </div>
         </div>
       ))}

@@ -4,6 +4,7 @@ import { ApiError, api } from "../api";
 import { useStore } from "../store";
 import { Auth } from "./Auth";
 import { BrandMark } from "./FileArt";
+import { Button } from "./ui/button";
 
 /**
  * The claim side of an account-to-account share. The link conveys identity
@@ -63,9 +64,9 @@ export function CollabInviteView() {
               once they approve your request from the document's Share panel, it appears in
               your <strong>Shared with me</strong>.
             </p>
-            <button className="btn btn-primary" onClick={() => navigate("/")}>
+            <Button onClick={() => navigate("/")}>
               Open your vault
-            </button>
+            </Button>
           </>
         ) : (
           <>
@@ -75,13 +76,12 @@ export function CollabInviteView() {
               are ({session.email}); the document itself stays sealed until they release
               its key to you.
             </p>
-            <button
-              className="btn btn-primary"
+            <Button
               disabled={state.phase === "claiming"}
               onClick={() => void claim()}
             >
               {state.phase === "claiming" ? "Accepting…" : "Accept the invitation"}
-            </button>
+            </Button>
           </>
         )}
       </div>

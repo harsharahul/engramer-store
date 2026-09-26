@@ -1,3 +1,5 @@
+import { Button } from "./ui/button";
+
 /**
  * Shows a recovery key once, with a copy button. The same panel serves
  * signup (first display), and the profile's view and rotate actions, so
@@ -18,15 +20,15 @@ export function RecoveryKeyModal(props: {
         <p className="modal-sub">{props.sub}</p>
         <div className="recovery-key">{props.recoveryKeyHex}</div>
         <div className="modal-actions">
-          <button
-            className="btn"
+          <Button
+            variant="secondary"
             onClick={() => void navigator.clipboard.writeText(props.recoveryKeyHex)}
           >
             Copy
-          </button>
-          <button className="btn btn-primary" onClick={props.onClose} disabled={props.busy}>
+          </Button>
+          <Button onClick={props.onClose} disabled={props.busy}>
             {props.confirmLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

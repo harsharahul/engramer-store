@@ -7,6 +7,8 @@ import { applyPagePlan, extractPages, type PagePlan } from "../../pdf/pages";
 import { ensureScopedStylesheet } from "../../pdf/scopedcss";
 import { ChevronLeftGlyph, ChevronRightGlyph, PencilGlyph, SearchGlyph, XGlyph } from "../Icon";
 import { PdfThumbnails } from "./PdfThumbnails";
+import { Button } from "../ui/button";
+import { IconButton } from "../ui/icon-button";
 
 /**
  * A PDF the way a reader expects one: every page on demand rather than
@@ -405,28 +407,31 @@ export function PdfViewer(props: {
     <div className={`pdfv pdfv-${mode}${side !== "none" ? " pdfv-with-side" : ""}`}>
       <div className="pdfv-toolbar" role="toolbar" aria-label="PDF">
         <div className="pdfv-group">
-          <button
-            className={`icon-btn${side === "thumbnails" ? " active" : ""}`}
-            title="Thumbnails"
+          <Button
+            variant="ghost"
+            size="sm"
             aria-label="Thumbnails"
+            aria-pressed={side === "thumbnails"}
             onClick={() => setSide(side === "thumbnails" ? "none" : "thumbnails")}
           >
-            <span className="pdfv-word">Pages</span>
-          </button>
+            Pages
+          </Button>
           {outline && outline.length > 0 && (
-            <button
-              className={`icon-btn${side === "outline" ? " active" : ""}`}
-              title="Outline"
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Outline"
+              aria-pressed={side === "outline"}
               onClick={() => setSide(side === "outline" ? "none" : "outline")}
             >
-              <span className="pdfv-word">Outline</span>
-            </button>
+              Outline
+            </Button>
           )}
         </div>
         <div className="pdfv-group pdfv-nav">
-          <button className="icon-btn" title="Previous page" aria-label="Previous page" disabled={page <= 1} onClick={() => goTo(page - 1)}>
+          <IconButton label="Previous page" disabled={page <= 1} onClick={() => goTo(page - 1)}>
             <ChevronLeftGlyph size={14} />
-          </button>
+          </IconButton>
           <form
             className="pdfv-page"
             onSubmit={(event) => {
@@ -448,14 +453,14 @@ export function PdfViewer(props: {
             />
             <span>of {pages || "…"}</span>
           </form>
-          <button className="icon-btn" title="Next page" aria-label="Next page" disabled={page >= pages} onClick={() => goTo(page + 1)}>
+          <IconButton label="Next page" disabled={page >= pages} onClick={() => goTo(page + 1)}>
             <ChevronRightGlyph size={14} />
-          </button>
+          </IconButton>
         </div>
         <div className="pdfv-group">
-          <button className="icon-btn" title="Zoom out" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.2)}>
+          <IconButton label="Zoom out" onClick={() => zoomBy(1 / 1.2)}>
             <span className="pdfv-word">−</span>
-          </button>
+          </IconButton>
           <select
             className="pdfv-zoom"
             aria-label="Zoom"
@@ -473,40 +478,47 @@ export function PdfViewer(props: {
               ),
             )}
           </select>
-          <button className="icon-btn" title="Zoom in" aria-label="Zoom in" onClick={() => zoomBy(1.2)}>
+          <IconButton label="Zoom in" onClick={() => zoomBy(1.2)}>
             <span className="pdfv-word">+</span>
-          </button>
-          <button className="icon-btn" title={`Rotate view (${rotation}°)`} aria-label="Rotate view" onClick={rotateView}>
-            <span className="pdfv-word">Rotate</span>
-          </button>
+          </IconButton>
+          <Button variant="ghost" size="sm" title={`Rotate view (${rotation}°)`} onClick={rotateView}>
+            Rotate
+          </Button>
         </div>
         <div className="grow" />
         <div className="pdfv-group">
-          <button className={`icon-btn${find.open ? " active" : ""}`} title="Find in document (⌘F)" aria-label="Find" onClick={() => (find.open ? closeFind() : openFind())}>
+          <IconButton
+            label="Find"
+            title="Find in document (⌘F)"
+            aria-pressed={find.open}
+            onClick={() => (find.open ? closeFind() : openFind())}
+          >
             <SearchGlyph size={14} />
-          </button>
+          </IconButton>
           {canEdit && (
             <>
-              <button
-                className={`btn btn-ghost${mode === "markup" ? " active" : ""}`}
+              <Button
+                variant="ghost"
+                aria-pressed={mode === "markup"}
                 title="Highlight, draw, add text or an image"
                 onClick={() => void enterMode(mode === "markup" ? "view" : "markup")}
               >
                 <PencilGlyph size={13} /> Markup
-              </button>
-              <button
-                className={`btn btn-ghost${mode === "pages" ? " active" : ""}`}
+              </Button>
+              <Button
+                variant="ghost"
+                aria-pressed={mode === "pages"}
                 title="Turn, reorder, remove or extract pages"
                 onClick={() => void enterMode(mode === "pages" ? "view" : "pages")}
               >
                 Pages
-              </button>
+              </Button>
             </>
           )}
           {canEdit && (dirty || (mode === "pages" && planTouched)) && (
-            <button className="btn" disabled={saving} onClick={() => void (mode === "pages" ? applyPlan() : save())}>
+            <Button variant="secondary" disabled={saving} onClick={() => void (mode === "pages" ? applyPlan() : save())}>
               {saving ? "Saving…" : "Save"}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -545,15 +557,15 @@ export function PdfViewer(props: {
                     : ""
               : ""}
           </span>
-          <button className="icon-btn" title="Previous match" onClick={() => runFind(find.query, true, true)} disabled={!find.query}>
+          <IconButton label="Previous match" onClick={() => runFind(find.query, true, true)} disabled={!find.query}>
             <ChevronLeftGlyph size={13} />
-          </button>
-          <button className="icon-btn" title="Next match" onClick={() => runFind(find.query, true, false)} disabled={!find.query}>
+          </IconButton>
+          <IconButton label="Next match" onClick={() => runFind(find.query, true, false)} disabled={!find.query}>
             <ChevronRightGlyph size={13} />
-          </button>
-          <button className="icon-btn" title="Close" onClick={closeFind}>
+          </IconButton>
+          <IconButton label="Close" onClick={closeFind}>
             <XGlyph size={13} />
-          </button>
+          </IconButton>
         </div>
       )}
 
@@ -567,13 +579,14 @@ export function PdfViewer(props: {
               ["image", "Image"],
             ] as Array<[Tool, string]>
           ).map(([id, label]) => (
-            <button
+            <Button
               key={id}
-              className={`btn btn-ghost${tool === id ? " active" : ""}`}
+              variant="ghost"
+              aria-pressed={tool === id}
               onClick={() => void setEditorTool(tool === id ? "none" : id)}
             >
               {label}
-            </button>
+            </Button>
           ))}
           <span className="pdfv-hint">
             {tool === "none"
@@ -592,22 +605,22 @@ export function PdfViewer(props: {
       {mode === "pages" && (
         <div className="pdfv-tools" role="toolbar" aria-label="Page tools">
           <span className="pdfv-hint">{picked.size === 0 ? "Select pages below." : `${picked.size} selected`}</span>
-          <button className="btn btn-ghost" disabled={picked.size === 0} onClick={turnPicked}>
+          <Button variant="ghost" disabled={picked.size === 0} onClick={turnPicked}>
             Turn
-          </button>
-          <button className="btn btn-ghost" disabled={picked.size === 0} onClick={() => movePicked(-1)}>
+          </Button>
+          <Button variant="ghost" disabled={picked.size === 0} onClick={() => movePicked(-1)}>
             Move up
-          </button>
-          <button className="btn btn-ghost" disabled={picked.size === 0} onClick={() => movePicked(1)}>
+          </Button>
+          <Button variant="ghost" disabled={picked.size === 0} onClick={() => movePicked(1)}>
             Move down
-          </button>
-          <button className="btn btn-ghost danger" disabled={picked.size === 0} onClick={removePicked}>
+          </Button>
+          <Button variant="ghost" className="danger" disabled={picked.size === 0} onClick={removePicked}>
             Remove
-          </button>
+          </Button>
           {props.onSaveCopy && (
-            <button className="btn btn-ghost" disabled={picked.size === 0 || saving} onClick={() => void extractPicked()}>
+            <Button variant="ghost" disabled={picked.size === 0 || saving} onClick={() => void extractPicked()}>
               Extract to a new file
-            </button>
+            </Button>
           )}
         </div>
       )}

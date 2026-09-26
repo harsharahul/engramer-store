@@ -44,6 +44,8 @@ import {
 import { diag } from "../diag";
 import { PeopleGlyph, XGlyph } from "./Icon";
 import { Confirm } from "./Dialogs";
+import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
 
 /**
  * Word and Excel editing.
@@ -1326,37 +1328,36 @@ export function OfficeEditor(props: {
         {conflict ? (
           <>
             <span className="error-text">Someone else saved this document first.</span>
-            <button className="btn" onClick={() => void reloadTheirs()} disabled={busy}>
+            <Button variant="secondary" onClick={() => void reloadTheirs()} disabled={busy}>
               Reload theirs
               <span className="btn-label"> (discards your changes)</span>
-            </button>
-            <button className="btn btn-primary" onClick={() => void saveAsCopy()} disabled={busy}>
+            </Button>
+            <Button onClick={() => void saveAsCopy()} disabled={busy}>
               {busy ? <span className="spinner" /> : null}
               Save as a copy
-            </button>
+            </Button>
           </>
         ) : (
-          <button
-            className="btn btn-primary"
+          <Button
             onClick={() => void save()}
             disabled={stage !== "ready" || busy}
           >
             {busy ? <span className="spinner" /> : null}
             {busy ? "Encrypting" : "Save"}
             {!busy && <kbd className="mono save-kbd">⌘S</kbd>}
-          </button>
+          </Button>
         )}
-        <button className="icon-btn" title="Close" onClick={() => void close()}>
+        <IconButton label="Close" onClick={() => void close()}>
           <XGlyph />
-        </button>
+        </IconButton>
       </div>
       <div className="office-body">
         {stage === "failed" ? (
           <div className="preview-fallback">
             {error ?? "this document could not be opened"}
             {blockedFrame && (
-              <button
-                className="btn"
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setBlockedFrame(false);
                   setError(null);
@@ -1365,7 +1366,7 @@ export function OfficeEditor(props: {
                 }}
               >
                 Try again
-              </button>
+              </Button>
             )}
           </div>
         ) : null}

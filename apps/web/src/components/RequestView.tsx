@@ -15,6 +15,7 @@ import { analyzeFile } from "../transfer";
 import { formatBytes } from "../format";
 import { BrandMark } from "./FileArt";
 import { UploadGlyph } from "./Icon";
+import { Button } from "./ui/button";
 
 interface Sending {
   id: string;
@@ -161,9 +162,9 @@ export function RequestView() {
               Files are encrypted in your browser before upload; only the person who made this
               request can open them. Not even the server can look inside.
             </p>
-            <button className="btn btn-primary" onClick={() => fileInput.current?.click()}>
+            <Button onClick={() => fileInput.current?.click()}>
               <UploadGlyph /> Choose files
-            </button>
+            </Button>
             <p className="sub small">or drop them anywhere on this page</p>
             <input
               ref={fileInput}

@@ -19,7 +19,16 @@ All notable changes to Engram Store are documented here, following
 - **Toasts show over the screen they came from on the phone.** A "saved"
   or "added" message raised from a preview or a dialog appeared behind it.
 - **The iPad layout clears the status bar and the multitasking handle.**
-  The toolbar and the sidebar's brand row sat under them.
+  The toolbar, the sidebar's brand row and the full-screen preview sat
+  under them.
+- **Every button shares one look.** Buttons and icon buttons across the
+  app are two components with fixed sizes and states, so a toolbar button
+  can no longer miss its round shape, pressed toggles read in the accent,
+  and every icon button carries a spoken label. On touch devices every
+  button grows to a 44-point target.
+- **The phone's preview header fits.** It keeps Close, the file name and
+  Edit, and folds favorite, share, details, rename and download into one
+  More menu; stepping between files stays a swipe.
 - **The Mac traffic lights sit where macOS puts them.** On macOS 26 and
   later they landed about 9 points above the toolbar's centre line and
   against the sidebar pane's top edge. They now sit 19 points in and 19

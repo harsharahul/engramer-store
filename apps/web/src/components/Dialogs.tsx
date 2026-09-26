@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Button } from "./ui/button";
 
 export function TextPrompt(props: {
   title: string;
@@ -34,12 +35,12 @@ export function TextPrompt(props: {
         <form onSubmit={submit}>
           <input autoFocus value={value} onChange={(e) => setValue(e.target.value)} />
           <div className="modal-actions">
-            <button type="button" className="btn btn-ghost" onClick={props.onClose}>
+            <Button type="button" variant="ghost" onClick={props.onClose}>
               Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={busy || !value.trim()}>
+            </Button>
+            <Button type="submit" disabled={busy || !value.trim()}>
               {props.submitLabel}
-            </button>
+            </Button>
           </div>
         </form>
       </div>
@@ -73,16 +74,16 @@ export function Confirm(props: {
         <h2>{props.title}</h2>
         {props.sub && <p className="modal-sub">{props.sub}</p>}
         <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={props.onClose}>
+          <Button variant="ghost" onClick={props.onClose}>
             Cancel
-          </button>
-          <button
-            className={props.danger ? "btn btn-danger" : "btn btn-primary"}
+          </Button>
+          <Button
+            variant={props.danger ? "destructive" : "default"}
             onClick={confirm}
             disabled={busy}
           >
             {props.confirmLabel}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

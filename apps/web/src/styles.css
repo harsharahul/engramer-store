@@ -147,145 +147,6 @@ a {
 
 /* ---------- shared atoms ---------- */
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 36px;
-  padding: 0 14px;
-  border-radius: 8px;
-  border: 1px solid var(--hairline-strong);
-  background: var(--ink-2);
-  color: var(--paper);
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: 0;
-  white-space: nowrap;
-  user-select: none;
-  transition:
-    background-color 120ms cubic-bezier(0.23, 1, 0.32, 1),
-    border-color 120ms cubic-bezier(0.23, 1, 0.32, 1),
-    color 120ms cubic-bezier(0.23, 1, 0.32, 1),
-    box-shadow 120ms cubic-bezier(0.23, 1, 0.32, 1);
-}
-
-/* Control icons: 16px boxes pair with a 14px label (cap-height match), and
-   a firmer stroke keeps them from reading wispy next to 500-weight text. */
-.btn > svg {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  stroke-width: 2;
-}
-
-/* An icon carries its own interior air; ease the padding when one is present. */
-.btn:has(> svg) {
-  padding: 0 12px;
-}
-
-.btn:hover {
-  background: var(--ink-3);
-  border-color: var(--hairline-strong);
-}
-
-.btn:active {
-  transform: translateY(1px);
-  transition-duration: 0ms;
-}
-
-.btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.btn:disabled {
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-  background: var(--ink-1);
-  border-color: var(--hairline);
-  color: var(--paper-faint);
-}
-
-.btn-primary {
-  /* A uniform accent fill; depth comes only from the crisp darker border
-     and a hard 1px inset top edge. Nothing paints across the label. */
-  background-color: color-mix(in srgb, var(--accent) 90%, #000);
-  border: 1px solid color-mix(in srgb, var(--accent) 55%, #000);
-  color: #ffffff;
-  font-weight: 540;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    0 1px 1px rgba(0, 0, 0, 0.28);
-}
-
-.btn-primary:hover {
-  background-color: var(--accent);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 1px 1px rgba(0, 0, 0, 0.28);
-}
-
-.btn-primary:active {
-  background-color: color-mix(in srgb, var(--accent) 80%, #000);
-  transform: translateY(1px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-:root[data-theme="light"] .btn-primary {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    0 1px 2px rgba(15, 23, 42, 0.18);
-}
-
-.btn-danger {
-  color: var(--danger);
-  border-color: var(--danger-dim);
-}
-
-.btn-danger:hover {
-  background: var(--danger-dim);
-}
-
-.btn-ghost {
-  border-color: transparent;
-  background: transparent;
-  color: var(--paper-dim);
-  box-shadow: none;
-}
-
-.btn-ghost:hover {
-  background: var(--ink-2);
-  color: var(--paper);
-}
-
-.btn-ghost:focus-visible {
-  outline-offset: -1px;
-}
-
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  color: var(--paper-dim);
-  transition: background 0.12s ease, color 0.12s ease;
-}
-
-.icon-btn:hover {
-  background: var(--ink-3);
-  color: var(--paper);
-}
-
-.icon-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-}
-
 .spinner {
   width: 16px;
   height: 16px;
@@ -469,7 +330,9 @@ a {
    lifts the sidebar out of the grid (position: absolute) to overlay the
    content; without pinned tracks the main column and the details pane
    slid one track left while the pointer stayed there. */
-@media (min-width: 761px) {
+/* Everything that is not the phone layout: the exact complement of the
+   phone query, so no fractional width falls between the two. */
+@media not all and (max-width: 760px) {
   .frame > .main {
     grid-column: 2;
     grid-row: 1;
@@ -612,7 +475,6 @@ body.resizing {
     transition-duration: 0.01ms !important;
   }
 }
-
 
 .details-meta .integrity-bad {
   color: #ff6b60;
@@ -1143,10 +1005,6 @@ body.resizing {
 
 .album-option-title {
   flex: 1;
-}
-
-.icon-btn.fav-active {
-  color: var(--accent);
 }
 
 .auth-server {
@@ -1902,10 +1760,6 @@ body.resizing {
   border-color: var(--accent);
 }
 
-.icon-btn.danger:hover {
-  color: var(--danger, #ef4444);
-}
-
 /* ---------- shared view (links + file requests) ---------- */
 
 .shared-view {
@@ -2479,6 +2333,9 @@ body.resizing {
   position: fixed;
   inset: 0;
   z-index: var(--z-modal);
+  /* A full-screen layer sits outside the frame, so it clears the status
+     bar and the multitasking handle itself (zero on the Mac and the web). */
+  padding-top: env(safe-area-inset-top, 0px);
   background: rgba(8, 9, 11, 0.92);
   /* The backdrop is dark in both themes, so the overlay carries the dark
      palette: in the light theme the file name, the toolbars and every
@@ -3437,10 +3294,6 @@ button.tag:hover {
   flex-shrink: 0;
 }
 
-.star-inline.on {
-  color: var(--accent);
-}
-
 .details-actions {
   display: flex;
   align-items: center;
@@ -3878,14 +3731,6 @@ span.item-menu {
 /* ---------- touch ergonomics (any coarse pointer) ---------- */
 
 @media (pointer: coarse) {
-  .icon-btn {
-    width: 40px;
-    height: 40px;
-  }
-
-  .btn {
-    min-height: 44px;
-  }
 
   .seg button {
     width: 44px;
@@ -3896,35 +3741,6 @@ span.item-menu {
     min-height: 38px;
   }
 
-  /* The header controls wrap onto their own line instead of running off
-     the right edge and clipping the grid/list toggle: touch sizing adds
-     enough width that a folder title and the full control row cannot
-     share 390px. (This rule once targeted .toolbar-row, a class no
-     component ever rendered, so it never fired.) */
-  .viewbar {
-    flex-wrap: wrap;
-    row-gap: 4px;
-  }
-
-  .viewbar .crumbs {
-    min-width: 0;
-  }
-
-  /* A long folder name yields to one truncating line, not a stack of
-     three cramped ones. */
-  .crumbs .current {
-    max-width: 100%;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .view-controls {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    margin-left: auto;
-  }
-
   /* A finger gets an answer the moment it lands, not on release. */
   .card:active,
   .photo-tile:active,
@@ -3933,8 +3749,7 @@ span.item-menu {
   }
 
   .ctx-item:active,
-.tab:active,
-.btn:active {
+  .tab:active {
     opacity: 0.6;
   }
 
@@ -3990,6 +3805,34 @@ span.item-menu {
   .frame,
   .frame.with-details {
     grid-template-columns: 1fr;
+  }
+
+  /* The header controls wrap onto their own line instead of running off
+     the right edge and clipping the grid/list toggle: a folder title and
+     the full control row cannot share a phone's width. Keyed on the
+     width, like the rest of the phone layout, not on the pointer. */
+  .viewbar {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .viewbar .crumbs {
+    min-width: 0;
+  }
+
+  /* A long folder name yields to one truncating line, not a stack of
+     three cramped ones. */
+  .crumbs .current {
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .view-controls {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: auto;
   }
 
   /* Topbar: search only; every action lives in the tab bar and sheets.
@@ -4107,7 +3950,7 @@ span.item-menu {
     color: var(--accent);
   }
 
-  /* Same uniform accent fill as .btn-primary. */
+  /* Same uniform accent fill as the default Button. */
   .tab-add {
     width: 48px;
     height: 48px;
@@ -4299,7 +4142,7 @@ span.item-menu {
   }
 
   .preview-top {
-    padding-top: calc(12px + env(safe-area-inset-top));
+    padding-top: 12px;
   }
 
   .preview-shell,
@@ -4343,10 +4186,6 @@ span.item-menu {
   font-size: 13px;
   color: var(--paper);
   animation: fade-rise 0.25s ease both;
-}
-
-.media-advice .btn {
-  flex-shrink: 0;
 }
 
 /* The thumbnail standing in, sharp, while the true file downloads. It is
@@ -4921,23 +4760,6 @@ span.item-menu {
 .linky[disabled] {
   color: var(--paper-faint);
   cursor: default;
-}
-
-.btn-small {
-  height: 28px;
-  padding: 0 10px;
-  font-size: 12px;
-}
-
-.btn-quiet {
-  border-color: transparent;
-  background: transparent;
-  color: var(--paper-faint);
-}
-
-.btn-quiet:hover {
-  border-color: var(--hairline);
-  color: var(--paper-dim);
 }
 
 /* ------------------------------------------- pending queue, grown up a bit */
@@ -5563,11 +5385,6 @@ span.item-menu {
   font-size: 11.5px;
 }
 
-.activity-stop {
-  padding: 2px 10px;
-  height: 26px;
-}
-
 .activity-bar {
   margin-top: 8px;
   height: 4px;
@@ -5647,7 +5464,6 @@ span.item-menu {
 
 .activity-clear {
   margin: 4px 12px 4px auto;
-  display: block;
 }
 
 button.link {

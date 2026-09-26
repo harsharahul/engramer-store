@@ -80,6 +80,7 @@ import {
 } from "../watchfolders";
 import { diagEntries, diagText, onDiag } from "../diag";
 import { AdminBody } from "./AdminPanel";
+import { Button, buttonVariants } from "./ui/button";
 import {
   ClockGlyph,
   KeyGlyph,
@@ -646,26 +647,26 @@ export function ProfileView(props: {
         </div>
         <div className="profile-head-actions">
           {unlockState === "on" && (
-            <button className="btn" title="Touch ID or your passkey reopens the vault" onClick={props.onLock}>
+            <Button variant="secondary" title="Touch ID or your passkey reopens the vault" onClick={props.onLock}>
               <LockGlyph size={14} /> Lock
-            </button>
+            </Button>
           )}
-          <button
-            className="btn"
+          <Button
+            variant="secondary"
             title="Full sign-out: removes device unlock; password required next time"
             onClick={props.onSignOut}
           >
             Sign out
-          </button>
-          <button
-            className="btn"
+          </Button>
+          <Button
+            variant="secondary"
             title="Every other device and browser is signed out now; this one stays in"
             disabled={signingOutEverywhere}
             onClick={() => void signOutEverywhere()}
           >
             {signingOutEverywhere ? <span className="spinner" /> : null}
             Sign out everywhere
-          </button>
+          </Button>
         </div>
       </section>
 
@@ -684,8 +685,8 @@ export function ProfileView(props: {
             value={nameDraft}
             onChange={(e) => setNameDraft(e.target.value)}
           />
-          <button
-            className="btn"
+          <Button
+            variant="secondary"
             disabled={savingName}
             onClick={() => {
               setSavingName(true);
@@ -697,7 +698,7 @@ export function ProfileView(props: {
             }}
           >
             Save
-          </button>
+          </Button>
         </div>
       </section>
 
@@ -727,8 +728,8 @@ export function ProfileView(props: {
                   playback left behind, reclaimed on its own when space is needed.
                 </div>
               </div>
-              <button
-                className="btn"
+              <Button
+                variant="secondary"
                 onClick={() => {
                   void store.clearOfflineCache().then((freed) =>
                     props.onToast(
@@ -738,7 +739,7 @@ export function ProfileView(props: {
                 }}
               >
                 Clear cache
-              </button>
+              </Button>
             </div>
           )}
         </section>
@@ -754,9 +755,9 @@ export function ProfileView(props: {
               files and recovery key stay the same.
             </div>
           </div>
-          <button className="btn" onClick={() => setChangingPassword(true)}>
+          <Button variant="secondary" onClick={() => setChangingPassword(true)}>
             <KeyGlyph size={13} /> Change
-          </button>
+          </Button>
         </div>
         <div className="profile-row">
           <div className="profile-row-main">
@@ -765,9 +766,9 @@ export function ProfileView(props: {
               Time-based codes protect sign-in; your vault keys never depend on them.
             </div>
           </div>
-          <button className="btn" onClick={props.onOpenTwoFactor}>
+          <Button variant="secondary" onClick={props.onOpenTwoFactor}>
             <KeyGlyph size={13} /> Manage
-          </button>
+          </Button>
         </div>
         <div className="profile-row">
           <div className="profile-row-main">
@@ -777,9 +778,9 @@ export function ProfileView(props: {
               anything you want to keep first.
             </div>
           </div>
-          <button className="btn danger" onClick={() => setDeletingAccount(true)}>
+          <Button variant="destructive" onClick={() => setDeletingAccount(true)}>
             Delete…
-          </button>
+          </Button>
         </div>
         <div className="profile-row">
           <div className="profile-row-main">
@@ -803,13 +804,13 @@ export function ProfileView(props: {
             </div>
           </div>
           {unlockState === "on" ? (
-            <button className="btn" onClick={turnOffUnlock}>
+            <Button variant="secondary" onClick={turnOffUnlock}>
               Turn off
-            </button>
+            </Button>
           ) : unlockState === "available" || unlockState === "native" ? (
-            <button className="btn btn-primary" disabled={enrolling} onClick={() => void setUpUnlock()}>
+            <Button disabled={enrolling} onClick={() => void setUpUnlock()}>
               {enrolling ? "Waiting…" : "Set up"}
-            </button>
+            </Button>
           ) : null}
         </div>
         <div className="profile-row">
@@ -858,8 +859,8 @@ export function ProfileView(props: {
             </div>
           </div>
           <div className="profile-row-actions">
-            <button
-              className="btn"
+            <Button
+              variant="secondary"
               onClick={() => {
                 setRkError(null);
                 setRkPassword("");
@@ -867,9 +868,9 @@ export function ProfileView(props: {
               }}
             >
               Show
-            </button>
-            <button
-              className="btn"
+            </Button>
+            <Button
+              variant="secondary"
               onClick={() => {
                 setRkError(null);
                 setRkPassword("");
@@ -877,7 +878,7 @@ export function ProfileView(props: {
               }}
             >
               Rotate
-            </button>
+            </Button>
           </div>
         </div>
       </section>
@@ -890,10 +891,10 @@ export function ProfileView(props: {
             <div className="profile-row-sub">Theme and accent apply to this device.</div>
           </div>
           <div className="profile-appearance">
-            <button className="btn" onClick={props.onToggleTheme}>
+            <Button variant="secondary" onClick={props.onToggleTheme}>
               {props.theme === "dark" ? <MoonGlyph size={13} /> : <SunGlyph size={13} />}
               {props.theme === "dark" ? " Night" : " Day"}
-            </button>
+            </Button>
             <div className="profile-accents">
               {ACCENTS.map((a) => (
                 <button
@@ -1021,9 +1022,9 @@ export function ProfileView(props: {
                 already exist in the vault is skipped.
               </div>
             </div>
-            <button className="btn btn-primary" onClick={() => void addWatchedFolder()}>
+            <Button onClick={() => void addWatchedFolder()}>
               Add folder
-            </button>
+            </Button>
           </div>
           {watched.map((path) => (
             <div key={path} className="profile-row">
@@ -1057,8 +1058,8 @@ export function ProfileView(props: {
                     : `Files are filed by what they are, tagged "${folderName(path)}" so you can find them.`}
                 </div>
               </div>
-              <button
-                className="btn"
+              <Button
+                variant="secondary"
                 onClick={() =>
                   void watchedRemove(path).then((rest) => {
                     setWatched(rest);
@@ -1067,7 +1068,7 @@ export function ProfileView(props: {
                 }
               >
                 Stop watching
-              </button>
+              </Button>
             </div>
           ))}
         </section>
@@ -1132,8 +1133,8 @@ export function ProfileView(props: {
               stale.
             </div>
           </div>
-          <button
-            className="btn"
+          <Button
+            variant="secondary"
             onClick={() => {
               props.onToast("Resyncing your library…");
               void store
@@ -1143,7 +1144,7 @@ export function ProfileView(props: {
             }}
           >
             Resync
-          </button>
+          </Button>
         </div>
         {macAppUrl !== null && (
           <div className="profile-row">
@@ -1155,7 +1156,7 @@ export function ProfileView(props: {
                 always. A notarized app; download, drag to Applications, done.
               </div>
             </div>
-            <a className="btn" href={macAppUrl}>
+            <a className={buttonVariants({ variant: "secondary" })} href={macAppUrl}>
               Download
             </a>
           </div>
@@ -1174,8 +1175,8 @@ export function ProfileView(props: {
                 in iCloud. It stays through a lock; signing out removes it.
               </div>
             </div>
-            <button
-              className="btn"
+            <Button
+              variant="secondary"
               onClick={() => {
                 const session = store.session;
                 if (!session) {
@@ -1197,7 +1198,7 @@ export function ProfileView(props: {
               }}
             >
               {handoffOn ? "Turn off" : "Turn on"}
-            </button>
+            </Button>
           </div>
         )}
         {handoffOn === true && (
@@ -1213,8 +1214,8 @@ export function ProfileView(props: {
                       "sheet and the Files app ask for it.")}
               </div>
             </div>
-            <button
-              className="btn"
+            <Button
+              variant="secondary"
               disabled={reconnecting}
               onClick={() => {
                 const session = store.session;
@@ -1242,7 +1243,7 @@ export function ProfileView(props: {
               }}
             >
               {reconnecting ? "Checking…" : "Reconnect"}
-            </button>
+            </Button>
           </div>
         )}
         {store.liveFeed !== "off" && (
@@ -1332,8 +1333,8 @@ export function ProfileView(props: {
                       Clearing that history makes photos you deleted forever upload again on the
                       next pass; anything in the Trash can simply be restored instead.
                       <div className="profile-head-actions">
-                        <button
-                          className="btn"
+                        <Button
+                          variant="secondary"
                           onClick={() => {
                             resetBackupLedger(store.session?.email ?? "");
                             forgetBackupFailures(store.session?.email ?? "");
@@ -1342,16 +1343,16 @@ export function ProfileView(props: {
                           }}
                         >
                           Clear history
-                        </button>
-                        <button className="btn btn-ghost" onClick={() => setResetArmed(false)}>
+                        </Button>
+                        <Button variant="ghost" onClick={() => setResetArmed(false)}>
                           Keep it
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   ) : (
-                    <button className="btn btn-ghost" onClick={() => setResetArmed(true)}>
+                    <Button variant="ghost" onClick={() => setResetArmed(true)}>
                       Reset backup history
-                    </button>
+                    </Button>
                   )}
                 </div>
               )}
@@ -1366,8 +1367,8 @@ export function ProfileView(props: {
             <div className="profile-head-actions">
               {policy.enabled ? (
                 <>
-                  <button
-                    className="btn"
+                  <Button
+                    variant="secondary"
                     onClick={() => {
                       if (backupRun) {
                         if (backupAbort.current) {
@@ -1379,18 +1380,15 @@ export function ProfileView(props: {
                     }}
                   >
                     {backupRun ? "Stop" : "Back up now"}
-                  </button>
-                  <button className="btn btn-ghost" onClick={() => updatePolicy({ enabled: false })}>
+                  </Button>
+                  <Button variant="ghost" onClick={() => updatePolicy({ enabled: false })}>
                     Turn off
-                  </button>
+                  </Button>
                 </>
               ) : (
-                <button
-                  className="btn btn-primary"
-                  onClick={() => void startBackup(updatePolicy({ enabled: true }))}
-                >
+                <Button onClick={() => void startBackup(updatePolicy({ enabled: true }))}>
                   Turn on
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -1435,8 +1433,8 @@ export function ProfileView(props: {
               </ul>
             )}
           </div>
-          <button
-            className="btn"
+          <Button
+            variant="secondary"
             onClick={() => {
               if (verifying) {
                 verifyAbort.current?.abort();
@@ -1446,7 +1444,7 @@ export function ProfileView(props: {
             }}
           >
             {verifying ? "Stop" : "Check stored files"}
-          </button>
+          </Button>
         </div>
         <div className="profile-row">
           <div className="profile-row-main">
@@ -1458,13 +1456,13 @@ export function ProfileView(props: {
               , so it is worth doing on a connection you do not pay by the megabyte.
             </div>
           </div>
-          <button
-            className="btn"
+          <Button
+            variant="secondary"
             disabled={verifying}
             onClick={() => void runVerify()}
           >
             Deep check
-          </button>
+          </Button>
         </div>
         {digestless.count > 0 && (
           <div className="profile-row">
@@ -1479,13 +1477,13 @@ export function ProfileView(props: {
                 these files held before now.
               </div>
             </div>
-            <button
-              className="btn"
+            <Button
+              variant="secondary"
               disabled={verifying}
               onClick={() => void runBackfill()}
             >
               Record
-            </button>
+            </Button>
           </div>
         )}
       </section>
@@ -1524,8 +1522,8 @@ export function ProfileView(props: {
               work by hand.
             </div>
           </div>
-          <button
-            className="btn"
+          <Button
+            variant="secondary"
             onClick={() => {
               const next = !autoFill;
               setAutoBackfillEnabled(next);
@@ -1543,7 +1541,7 @@ export function ProfileView(props: {
             }}
           >
             {autoFill ? "Turn off" : "Turn on"}
-          </button>
+          </Button>
         </div>
         <div className="profile-row">
           <div className="profile-row-main">
@@ -1560,8 +1558,8 @@ export function ProfileView(props: {
               </div>
             )}
           </div>
-          <button
-            className="btn"
+          <Button
+            variant="secondary"
             disabled={
               !processing &&
               autoPending.thumbs === 0 &&
@@ -1584,7 +1582,7 @@ export function ProfileView(props: {
             }}
           >
             {processing ? "Stop" : "Fill in now"}
-          </button>
+          </Button>
         </div>
         <div className="profile-row">
           <div className="profile-row-main">
@@ -1663,8 +1661,8 @@ export function ProfileView(props: {
             </div>
           </div>
           <div className="profile-head-actions">
-            <button
-              className="btn"
+            <Button
+              variant="secondary"
               onClick={() => {
                 void navigator.clipboard.writeText(diagText()).then(
                   () => props.onToast("Activity log copied."),
@@ -1673,10 +1671,10 @@ export function ProfileView(props: {
               }}
             >
               Copy
-            </button>
-            <button className="btn" onClick={() => setShowDiag((v) => !v)}>
+            </Button>
+            <Button variant="secondary" onClick={() => setShowDiag((v) => !v)}>
               {showDiag ? "Hide" : "Show"}
-            </button>
+            </Button>
           </div>
         </div>
         {showDiag && (
@@ -1765,16 +1763,16 @@ export function ProfileView(props: {
               </label>
               {delError && <div className="error-text">{delError}</div>}
               <div className="modal-actions">
-                <button type="button" className="btn" onClick={() => setDeletingAccount(false)} disabled={delBusy}>
+                <Button type="button" variant="secondary" onClick={() => setDeletingAccount(false)} disabled={delBusy}>
                   Keep my account
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  className="btn danger"
+                  variant="destructive"
                   disabled={delBusy || !delPassword || !delConfirm}
                 >
                   {delBusy ? "Deleting…" : "Delete everything"}
-                </button>
+                </Button>
               </div>
             </form>
           </div>
@@ -1828,22 +1826,21 @@ export function ProfileView(props: {
               />
               {pwError && <div className="error-text">{pwError}</div>}
               <div className="modal-actions">
-                <button
+                <Button
                   type="button"
-                  className="btn btn-ghost"
+                  variant="ghost"
                   disabled={pwBusy}
                   onClick={() => setChangingPassword(false)}
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  className="btn btn-primary"
                   disabled={pwBusy || !pwCurrent || !pwNext}
                 >
                   {pwBusy ? <span className="spinner" /> : null}
                   {pwBusy ? "Changing" : "Change password"}
-                </button>
+                </Button>
               </div>
             </form>
           </div>
@@ -1884,15 +1881,15 @@ export function ProfileView(props: {
               />
               {rkError && <div className="error-text">{rkError}</div>}
               <div className="modal-actions">
-                <button
+                <Button
                   type="button"
-                  className="btn btn-ghost"
+                  variant="ghost"
                   disabled={rkBusy}
                   onClick={() => setRecoveryAction(null)}
                 >
                   Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={rkBusy || !rkPassword}>
+                </Button>
+                <Button type="submit" disabled={rkBusy || !rkPassword}>
                   {rkBusy ? <span className="spinner" /> : null}
                   {rkBusy
                     ? recoveryAction === "view"
@@ -1901,7 +1898,7 @@ export function ProfileView(props: {
                     : recoveryAction === "view"
                       ? "Show recovery key"
                       : "Rotate recovery key"}
-                </button>
+                </Button>
               </div>
             </form>
           </div>

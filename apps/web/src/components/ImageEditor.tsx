@@ -19,6 +19,8 @@ import {
 } from "../imageedit";
 import { XGlyph } from "./Icon";
 import { Confirm } from "./Dialogs";
+import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
 
 /**
  * Rotate, flip, crop and mark up a picture. Edits are kept as data and
@@ -218,23 +220,23 @@ export function ImageEditor(props: {
         )}
         <div className="grow" />
         {error && <span className="error-text">{error}</span>}
-        <button className="btn btn-primary" onClick={() => void save()} disabled={!dirty || busy}>
+        <Button onClick={() => void save()} disabled={!dirty || busy}>
           {busy ? "Encrypting" : "Save"}
-        </button>
-        <button className="icon-btn" title="Close" onClick={() => (dirty ? setPendingClose(true) : props.onClose())}>
+        </Button>
+        <IconButton label="Close" onClick={() => (dirty ? setPendingClose(true) : props.onClose())}>
           <XGlyph />
-        </button>
+        </IconButton>
       </div>
       <div className="imgedit-tools" role="toolbar" aria-label="Image tools">
-        <button className="btn btn-ghost" onClick={() => setEdits((e) => ({ ...e, turn: nextTurn(e.turn, -90), crop: null }))}>
+        <Button variant="ghost" onClick={() => setEdits((e) => ({ ...e, turn: nextTurn(e.turn, -90), crop: null }))}>
           Rotate left
-        </button>
-        <button className="btn btn-ghost" onClick={() => setEdits((e) => ({ ...e, turn: nextTurn(e.turn, 90), crop: null }))}>
+        </Button>
+        <Button variant="ghost" onClick={() => setEdits((e) => ({ ...e, turn: nextTurn(e.turn, 90), crop: null }))}>
           Rotate right
-        </button>
-        <button className="btn btn-ghost" onClick={() => setEdits((e) => ({ ...e, flipH: !e.flipH }))}>
+        </Button>
+        <Button variant="ghost" onClick={() => setEdits((e) => ({ ...e, flipH: !e.flipH }))}>
           Flip
-        </button>
+        </Button>
         <span className="imgedit-sep" />
         {(
           [
@@ -245,9 +247,9 @@ export function ImageEditor(props: {
             ["blur", "Blur"],
           ] as Array<[Tool, string]>
         ).map(([id, label]) => (
-          <button key={id} className={`btn btn-ghost${tool === id ? " active" : ""}`} onClick={() => setTool(tool === id ? "none" : id)}>
+          <Button key={id} variant="ghost" aria-pressed={tool === id} onClick={() => setTool(tool === id ? "none" : id)}>
             {label}
-          </button>
+          </Button>
         ))}
         {tool === "crop" && size && (
           <>
@@ -260,15 +262,16 @@ export function ImageEditor(props: {
                 ["3:4", 3 / 4],
               ] as Array<[string, number]>
             ).map(([label, aspect]) => (
-              <button
+              <Button
                 key={label}
-                className="btn btn-ghost small"
+                variant="ghost"
+                className="small"
                 onClick={() =>
                   setEdits((e) => ({ ...e, crop: aspect ? aspectCrop(size.width, size.height, aspect) : null }))
                 }
               >
                 {label}
-              </button>
+              </Button>
             ))}
           </>
         )}
@@ -286,14 +289,14 @@ export function ImageEditor(props: {
           </span>
         )}
         {edits.marks.length > 0 && (
-          <button className="btn btn-ghost" onClick={() => setEdits((e) => ({ ...e, marks: e.marks.slice(0, -1) }))}>
+          <Button variant="ghost" onClick={() => setEdits((e) => ({ ...e, marks: e.marks.slice(0, -1) }))}>
             Undo mark
-          </button>
+          </Button>
         )}
         {dirty && (
-          <button className="btn btn-ghost" onClick={() => setEdits(NO_EDITS)}>
+          <Button variant="ghost" onClick={() => setEdits(NO_EDITS)}>
             Reset
-          </button>
+          </Button>
         )}
         <span className="pdfv-hint">
           {tool === "none"

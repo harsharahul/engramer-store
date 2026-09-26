@@ -15,6 +15,7 @@ import { fileKind, formatBytes } from "../format";
 import { triggerDownload } from "../download";
 import { DownloadGlyph, KeyGlyph } from "./Icon";
 import { BrandMark } from "./FileArt";
+import { Button } from "./ui/button";
 
 export function ShareView() {
   const { token } = useParams<{ token: string }>();
@@ -169,9 +170,9 @@ export function ShareView() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
-              <button className="btn btn-primary" type="submit" disabled={unlocking || !password}>
+              <Button type="submit" disabled={unlocking || !password}>
                 {unlocking ? "Unlocking…" : "Unlock"}
-              </button>
+              </Button>
             </form>
             {passwordError && <p className="error-text">{passwordError}</p>}
           </>
@@ -184,13 +185,13 @@ export function ShareView() {
               {formatBytes(meta.size)} · shared end-to-end encrypted · decrypted in your browser
             </p>
             <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-              <button className="btn btn-primary" onClick={download} disabled={busy}>
+              <Button onClick={download} disabled={busy}>
                 <DownloadGlyph /> Download
-              </button>
+              </Button>
               {canPreview && !previewUrl && previewText === null && (
-                <button className="btn" onClick={preview} disabled={busy}>
+                <Button variant="secondary" onClick={preview} disabled={busy}>
                   Preview
-                </button>
+                </Button>
               )}
             </div>
             {(previewUrl || previewText !== null) && (

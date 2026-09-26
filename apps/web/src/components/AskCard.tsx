@@ -1,4 +1,5 @@
 import { SparkGlyph } from "./Icon";
+import { Button } from "./ui/button";
 
 /**
  * The answer card above the search results when the query is a question
@@ -51,9 +52,9 @@ export function AskCard(props: {
                   : "From your files"}
             </span>
             {status.kind === "running" && (
-              <button className="btn btn-ghost ask-stop" onClick={props.onStop}>
+              <Button variant="ghost" className="ask-stop" onClick={props.onStop}>
                 Stop
-              </button>
+              </Button>
             )}
           </div>
           <p className="ask-answer-text">{status.answer || (status.kind === "running" ? "…" : "")}</p>
