@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { api } from "../api";
 import { CopyGlyph, XGlyph } from "./Icon";
+import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
 
 type Stage =
   | { kind: "loading" }
@@ -82,9 +84,9 @@ export function TwoFactorDialog(props: { onToast: (message: string) => void; onC
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
           <h2>Two-factor authentication</h2>
-          <button className="icon-btn" onClick={props.onClose}>
+          <IconButton label="Close" onClick={props.onClose}>
             <XGlyph />
-          </button>
+          </IconButton>
         </div>
 
         {stage.kind === "loading" && !error && <div className="spinner" style={{ margin: "18px auto" }} />}
@@ -97,12 +99,12 @@ export function TwoFactorDialog(props: { onToast: (message: string) => void; onC
               your password.
             </p>
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={props.onClose}>
+              <Button variant="ghost" onClick={props.onClose}>
                 Cancel
-              </button>
-              <button className="btn btn-primary" onClick={() => void begin()} disabled={busy}>
+              </Button>
+              <Button onClick={() => void begin()} disabled={busy}>
                 {busy ? "Preparing…" : "Turn on"}
-              </button>
+              </Button>
             </div>
           </>
         )}
@@ -130,16 +132,15 @@ export function TwoFactorDialog(props: { onToast: (message: string) => void; onC
             />
             {error && <div className="error-text">{error}</div>}
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={props.onClose}>
+              <Button variant="ghost" onClick={props.onClose}>
                 Cancel
-              </button>
-              <button
-                className="btn btn-primary"
+              </Button>
+              <Button
                 onClick={() => void confirm()}
                 disabled={busy || code.trim().length < 6}
               >
                 {busy ? "Checking…" : "Verify and enable"}
-              </button>
+              </Button>
             </div>
           </>
         )}
@@ -154,24 +155,23 @@ export function TwoFactorDialog(props: { onToast: (message: string) => void; onC
               {stage.codes.join("\n")}
             </div>
             <div className="modal-actions">
-              <button
-                className="btn"
+              <Button
+                variant="secondary"
                 onClick={() => {
                   void navigator.clipboard.writeText(stage.codes.join("\n"));
                   props.onToast("Recovery codes copied.");
                 }}
               >
                 <CopyGlyph size={14} /> Copy all
-              </button>
-              <button
-                className="btn btn-primary"
+              </Button>
+              <Button
                 onClick={() => {
                   props.onToast("Two-factor is on.");
                   props.onClose();
                 }}
               >
                 I saved them
-              </button>
+              </Button>
             </div>
           </>
         )}
@@ -194,16 +194,16 @@ export function TwoFactorDialog(props: { onToast: (message: string) => void; onC
             />
             {error && <div className="error-text">{error}</div>}
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={props.onClose}>
+              <Button variant="ghost" onClick={props.onClose}>
                 Close
-              </button>
-              <button
-                className="btn btn-danger"
+              </Button>
+              <Button
+                variant="destructive"
                 onClick={() => void disable()}
                 disabled={busy || !code.trim()}
               >
                 {busy ? "Checking…" : "Turn off"}
-              </button>
+              </Button>
             </div>
           </>
         )}

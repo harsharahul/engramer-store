@@ -1,0 +1,36 @@
+# A UI test that walks every screen of the INSTALLED Engram Store app on
+# a simulator and saves a screenshot of each. It drives the app by bundle
+# id, so it builds in seconds and never touches the release project; the
+# host app exists only because Xcode requires a UI test to have one.
+# See README.md for how to run it.
+name: ScreenWalk
+options:
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    CODE_SIGNING_ALLOWED: "NO"
+targets:
+  WalkHost:
+    type: application
+    platform: iOS
+    sources: [Host]
+    info:
+      path: Host/Info.plist
+      properties:
+        UILaunchScreen: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.harsharahul.engramstore.walkhost
+        GENERATE_INFOPLIST_FILE: "NO"
+  ScreenWalk:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Walk]
+    dependencies:
+      - target: WalkHost
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.harsharahul.engramstore.screenwalk
+        TEST_TARGET_NAME: WalkHost
+        GENERATE_INFOPLIST_FILE: "YES"

@@ -9,6 +9,8 @@ import { downloadAndDecrypt } from "../transfer";
 import { openSharedContent } from "../openshared";
 import { formatDate } from "../format";
 import { CopyGlyph, KeyGlyph, PeopleGlyph, TrashGlyph, XGlyph } from "./Icon";
+import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
 
 const EXPIRY_CHOICES = [
   { label: "Never expires", ms: null },
@@ -296,9 +298,9 @@ export function ShareDialog(props: {
       <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
           <h2>Share “{file.name}”</h2>
-          <button className="icon-btn" onClick={props.onClose}>
+          <IconButton label="Close" onClick={props.onClose}>
             <XGlyph />
-          </button>
+          </IconButton>
         </div>
         <p className="modal-sub">
           Links serve ciphertext only. Open links keep the key in the fragment after “#”, which
@@ -316,13 +318,13 @@ export function ShareDialog(props: {
                   <span className="share-row-token">{person.email}</span>
                   <span className="badge">{person.role === "editor" ? "can edit" : "can view"}</span>
                 </div>
-                <button
-                  className="icon-btn danger"
-                  title="Remove access"
+                <IconButton
+                  tone="danger"
+                  label="Remove access"
                   onClick={() => void removePerson(person.userId)}
                 >
                   <TrashGlyph size={14} />
-                </button>
+                </IconButton>
               </div>
             ))}
           </div>
@@ -347,16 +349,17 @@ export function ShareDialog(props: {
                     )}
                     <span className="share-row-meta">waiting for you to release the key</span>
                   </div>
-                  <button className="btn" onClick={() => void approve(claim.token)}>
+                  <Button variant="secondary" onClick={() => void approve(claim.token)}>
                     Release the key
-                  </button>
-                  <button
-                    className="icon-btn danger"
+                  </Button>
+                  <IconButton
+                    tone="danger"
+                    label="Refuse invitation"
                     title="Refuse and revoke this invitation"
                     onClick={() => void revokeInvite(claim.token)}
                   >
                     <TrashGlyph size={14} />
-                  </button>
+                  </IconButton>
                 </div>
                 {keyChange?.token === claim.token && (
                   <div className="share-row share-key-change">
@@ -368,12 +371,12 @@ export function ShareDialog(props: {
                       <span className="share-row-meta mono">before: {keyChange.before}</span>
                       <span className="share-row-meta mono">now: {keyChange.after}</span>
                     </div>
-                    <button className="btn" onClick={() => void approve(claim.token, true)}>
+                    <Button variant="secondary" onClick={() => void approve(claim.token, true)}>
                       Trust the new key
-                    </button>
-                    <button className="btn btn-ghost" onClick={() => setKeyChange(null)}>
+                    </Button>
+                    <Button variant="ghost" onClick={() => setKeyChange(null)}>
                       Not now
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
@@ -397,9 +400,8 @@ export function ShareDialog(props: {
                   </span>
                   <span className="share-row-meta">waiting to be claimed</span>
                 </div>
-                <button
-                  className="icon-btn"
-                  title="Copy invitation"
+                <IconButton
+                  label="Copy invitation"
                   onClick={() =>
                     void navigator.clipboard
                       .writeText(inviteLink(invite.token))
@@ -407,14 +409,14 @@ export function ShareDialog(props: {
                   }
                 >
                   <CopyGlyph size={14} />
-                </button>
-                <button
-                  className="icon-btn danger"
-                  title="Revoke invitation"
+                </IconButton>
+                <IconButton
+                  tone="danger"
+                  label="Revoke invitation"
                   onClick={() => void revokeInvite(invite.token)}
                 >
                   <TrashGlyph size={14} />
-                </button>
+                </IconButton>
               </div>
             ))}
           </div>
@@ -428,12 +430,12 @@ export function ShareDialog(props: {
           />
         </div>
         <div className="share-option-row">
-          <button className="btn" disabled={inviting} onClick={() => void invitePerson("editor")}>
+          <Button variant="secondary" disabled={inviting} onClick={() => void invitePerson("editor")}>
             Invite to co-edit
-          </button>
-          <button className="btn" disabled={inviting} onClick={() => void invitePerson("viewer")}>
+          </Button>
+          <Button variant="secondary" disabled={inviting} onClick={() => void invitePerson("viewer")}>
             Invite to view
-          </button>
+          </Button>
         </div>
         <p className="modal-sub">
           An invitation carries no key. The person claims it signed in, and the key is released
@@ -459,16 +461,16 @@ export function ShareDialog(props: {
                   )}
                   <span className="share-row-meta">{describeShare(share)}</span>
                 </div>
-                <button className="icon-btn" title="Copy link" onClick={() => void copy(share)}>
+                <IconButton label="Copy link" onClick={() => void copy(share)}>
                   <CopyGlyph size={14} />
-                </button>
-                <button
-                  className="icon-btn danger"
-                  title="Revoke link"
+                </IconButton>
+                <IconButton
+                  tone="danger"
+                  label="Revoke link"
                   onClick={() => void revoke(share.token)}
                 >
                   <TrashGlyph size={14} />
-                </button>
+                </IconButton>
               </div>
             ))}
           </div>
@@ -503,13 +505,13 @@ export function ShareDialog(props: {
         {error && <div className="error-text">{error}</div>}
 
         <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={props.onClose}>
+          <Button variant="ghost" onClick={props.onClose}>
             Done
-          </button>
-          <button className="btn" onClick={() => void shareSnapshot()} disabled={snapshotting}>
+          </Button>
+          <Button variant="secondary" onClick={() => void shareSnapshot()} disabled={snapshotting}>
             {snapshotting ? "Freezing…" : "Snapshot link"}
-          </button>
-          <button className="btn btn-primary" onClick={() => void create()} disabled={creating}>
+          </Button>
+          <Button onClick={() => void create()} disabled={creating}>
             {creating
               ? password.trim()
                 ? "Securing…"
@@ -517,7 +519,7 @@ export function ShareDialog(props: {
               : links && links.length > 0
                 ? "New link"
                 : "Create link"}
-          </button>
+          </Button>
         </div>
       </div>
       {rotateAsk && (
@@ -529,12 +531,12 @@ export function ShareDialog(props: {
               from now on, and clears the document's live-session history.
             </p>
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={keepKey} disabled={rotating}>
+              <Button variant="ghost" onClick={keepKey} disabled={rotating}>
                 Keep the key
-              </button>
-              <button className="btn btn-primary" onClick={() => void rotateNow()} disabled={rotating}>
+              </Button>
+              <Button onClick={() => void rotateNow()} disabled={rotating}>
                 {rotating ? "Rotating…" : "Rotate the key"}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

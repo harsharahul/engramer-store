@@ -16,10 +16,15 @@ import { thumbnailUrl } from "../thumbs";
 import { ZoomableImage } from "./ZoomableImage";
 import { parseLinkFile } from "../links";
 import { PdfViewer } from "./pdf/PdfViewer";
+import { Button, buttonVariants } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
+import { ContextMenu, type MenuItem } from "./ContextMenu";
+import { MOBILE_QUERY, useMediaQuery } from "../media";
 import { IDENTITY, zoomAt, type Box, type ZoomState } from "../zoom";
 import {
   ChevronLeftGlyph,
   ChevronRightGlyph,
+  DotsGlyph,
   DownloadGlyph,
   InfoGlyph,
   LinkGlyph,
@@ -60,7 +65,12 @@ function LinkBody(props: { body: string; name: string }) {
       <LinkGlyph size={28} />
       <h3>{link.title}</h3>
       <p className="link-url">{link.url}</p>
-      <a className="btn" href={link.url} target="_blank" rel="noopener noreferrer">
+      <a
+        className={buttonVariants({ variant: "secondary" })}
+        href={link.url}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
         Open in the browser
       </a>
     </div>
@@ -514,6 +524,28 @@ export function Preview(props: {
     return () => window.removeEventListener("keydown", onKey);
   }, [props]);
 
+  // The phone header keeps what a thumb reaches (Close, the name, Edit)
+  // and folds the rest into one menu; stepping is a swipe there. The
+  // desktop row has room for every action.
+  const phone = useMediaQuery(MOBILE_QUERY);
+  const [more, setMore] = useState<{ x: number; y: number } | null>(null);
+  const moreItems: MenuItem[] = [
+    ...(props.onFavorite
+      ? [
+          {
+            id: "favorite",
+            label: file.favorite ? "Remove from favorites" : "Add to favorites",
+            icon: <StarGlyph size={14} />,
+            run: props.onFavorite,
+          },
+        ]
+      : []),
+    { id: "share", label: "Share", icon: <ShareGlyph size={14} />, run: props.onShare },
+    { id: "details", label: "Details and tags", icon: <InfoGlyph size={14} />, run: props.onDetails },
+    { id: "rename", label: "Rename", icon: <PencilGlyph size={14} />, run: props.onRename },
+    { id: "download", label: "Download", icon: <DownloadGlyph size={14} />, run: () => void download() },
+  ];
+
   const download = async () => {
     // One shared path: the shell exports through the share sheet, the
     // browser keeps its anchor, and a failed integrity check still hands
@@ -530,62 +562,91 @@ export function Preview(props: {
   return (
     <div className="preview-shell">
       <div className="preview-top">
+        {phone && (
+          <IconButton label="Close" onClick={props.onClose}>
+            <XGlyph />
+          </IconButton>
+        )}
         <span className="name">{file.name}</span>
         <span className="meta">{formatBytes(file.size)}</span>
         <div className="grow" />
-        {onStep && (
+        {!phone && onStep && (
           <>
-            <button
-              className="icon-btn"
+            <IconButton
+              label="Previous"
               title="Previous (left arrow)"
               disabled={props.canStepBack === false}
               onClick={() => onStep(-1)}
             >
               <ChevronLeftGlyph />
-            </button>
-            <button
-              className="icon-btn"
+            </IconButton>
+            <IconButton
+              label="Next"
               title="Next (right arrow)"
               disabled={props.canStepOn === false}
               onClick={() => onStep(1)}
             >
               <ChevronRightGlyph />
-            </button>
+            </IconButton>
           </>
         )}
         {props.onEdit && (
-          <button className="btn" onClick={props.onEdit}>
+          <Button variant="secondary" onClick={props.onEdit}>
             <PencilGlyph size={14} /> Edit
-          </button>
+          </Button>
         )}
-        {props.onFavorite && (
-          <button
-            className={`icon-btn${file.favorite ? " fav-active" : ""}`}
-            title={file.favorite ? "Remove from favorites" : "Add to favorites"}
-            onClick={props.onFavorite}
+        {phone ? (
+          <IconButton
+            label="More"
+            aria-haspopup="menu"
+            onClick={(event) => {
+              const at = event.currentTarget.getBoundingClientRect();
+              setMore({ x: at.right, y: at.bottom + 6 });
+            }}
           >
-            <StarGlyph />
-          </button>
+            <DotsGlyph />
+          </IconButton>
+        ) : (
+          <>
+            {props.onFavorite && (
+              <IconButton
+                tone={file.favorite ? "accent" : "default"}
+                label={file.favorite ? "Remove from favorites" : "Add to favorites"}
+                onClick={props.onFavorite}
+              >
+                <StarGlyph />
+              </IconButton>
+            )}
+            <IconButton label="Share" onClick={props.onShare}>
+              <ShareGlyph />
+            </IconButton>
+            <IconButton label="Details" onClick={props.onDetails}>
+              <InfoGlyph />
+            </IconButton>
+            <IconButton label="Edit tags" onClick={props.onDetails}>
+              <TagGlyph />
+            </IconButton>
+            <IconButton label="Rename" onClick={props.onRename}>
+              <PencilGlyph />
+            </IconButton>
+            <IconButton label="Download" onClick={download}>
+              <DownloadGlyph />
+            </IconButton>
+            <IconButton label="Close" onClick={props.onClose}>
+              <XGlyph />
+            </IconButton>
+          </>
         )}
-        <button className="icon-btn" title="Share" onClick={props.onShare}>
-          <ShareGlyph />
-        </button>
-        <button className="icon-btn" title="Details" onClick={props.onDetails}>
-          <InfoGlyph />
-        </button>
-        <button className="icon-btn" title="Edit tags" onClick={props.onDetails}>
-          <TagGlyph />
-        </button>
-        <button className="icon-btn" title="Rename" onClick={props.onRename}>
-          <PencilGlyph />
-        </button>
-        <button className="icon-btn" title="Download" onClick={download}>
-          <DownloadGlyph />
-        </button>
-        <button className="icon-btn" title="Close" onClick={props.onClose}>
-          <XGlyph />
-        </button>
       </div>
+      {more && (
+        <ContextMenu
+          x={more.x}
+          y={more.y}
+          title={file.name}
+          items={moreItems}
+          onClose={() => setMore(null)}
+        />
+      )}
       <div
         className="preview-body"
         onTouchStart={(event) => {
@@ -739,8 +800,8 @@ export function Preview(props: {
                   Your connection is slower than this video. Keep it offline and watch it
                   when it&apos;s ready?
                 </span>
-                <button
-                  className="btn"
+                <Button
+                  variant="secondary"
                   onClick={() => {
                     setAdviceDismissed(true);
                     void useStore
@@ -756,14 +817,10 @@ export function Preview(props: {
                   }}
                 >
                   Keep offline
-                </button>
-                <button
-                  className="icon-btn"
-                  title="Dismiss"
-                  onClick={() => setAdviceDismissed(true)}
-                >
+                </Button>
+                <IconButton label="Dismiss" onClick={() => setAdviceDismissed(true)}>
                   <XGlyph />
-                </button>
+                </IconButton>
               </div>
             )}
           </>
@@ -796,13 +853,13 @@ export function Preview(props: {
             <br />
             <div className="preview-fallback-actions">
               {props.onOpenElsewhere && (
-                <button className="btn" onClick={props.onOpenElsewhere}>
+                <Button variant="secondary" onClick={props.onOpenElsewhere}>
                   Open in another app
-                </button>
+                </Button>
               )}
-              <button className="btn" onClick={download}>
+              <Button variant="secondary" onClick={download}>
                 <DownloadGlyph /> Download decrypted copy
-              </button>
+              </Button>
             </div>
           </div>
         )}

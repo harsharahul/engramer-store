@@ -6,6 +6,7 @@ import { beginRecovery, type RecoveryStep, type SetPasswordStep } from "../recov
 import { useStore } from "../store";
 import { BrandMark, Wordmark } from "./FileArt";
 import { RecoveryKeyModal } from "./RecoveryKeyModal";
+import { Button } from "./ui/button";
 
 type Mode = "signin" | "signup" | "forgot";
 type RegistrationMode = "open" | "invite" | "closed";
@@ -226,14 +227,10 @@ export function Auth() {
                 onChange={(e) => setCode(e.target.value)}
               />
               {error && <div className="error-text">{error}</div>}
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={busy !== null || holding || !code.trim()}
-              >
+              <Button type="submit" disabled={busy !== null || holding || !code.trim()}>
                 {busy ? <span className="spinner" /> : null}
                 {busy ? "Verifying" : "Verify"}
-              </button>
+              </Button>
               {busy && <div className="auth-note">{busy}</div>}
             </form>
           ) : (
@@ -259,10 +256,10 @@ export function Auth() {
                 onChange={(e) => setConfirm(e.target.value)}
               />
               {error && <div className="error-text">{error}</div>}
-              <button className="btn btn-primary" type="submit" disabled={busy !== null || holding}>
+              <Button type="submit" disabled={busy !== null || holding}>
                 {busy ? <span className="spinner" /> : null}
                 {busy ? "Saving" : "Set password and open my vault"}
-              </button>
+              </Button>
               {busy && <div className="auth-note">{busy}</div>}
             </form>
           )}
@@ -309,10 +306,10 @@ export function Auth() {
               onChange={(e) => setCode(e.target.value)}
             />
             {error && <div className="error-text">{error}</div>}
-            <button className="btn btn-primary" type="submit" disabled={busy !== null || holding || !code.trim()}>
+            <Button type="submit" disabled={busy !== null || holding || !code.trim()}>
               {busy ? <span className="spinner" /> : null}
               {busy ? "Verifying" : "Verify"}
-            </button>
+            </Button>
             {busy && <div className="auth-note">{busy}</div>}
           </form>
           <div className="auth-switch">
@@ -429,7 +426,7 @@ export function Auth() {
             </>
           )}
           {error && <div className="error-text">{error}</div>}
-          <button className="btn btn-primary" type="submit" disabled={busy !== null || holding}>
+          <Button type="submit" disabled={busy !== null || holding}>
             {busy ? <span className="spinner" /> : null}
             {busy
               ? mode === "signup"
@@ -442,7 +439,7 @@ export function Auth() {
                 : mode === "forgot"
                   ? "Continue"
                   : "Unlock"}
-          </button>
+          </Button>
           {busy && <div className="auth-note">{busy}</div>}
         </form>
 
@@ -495,12 +492,12 @@ export function Auth() {
                   placeholder="https://vault.example.com"
                   onChange={(e) => setServerDraft(e.target.value)}
                 />
-                <button type="submit" className="btn btn-primary">
+                <Button type="submit">
                   Connect
-                </button>
-                <button type="button" className="btn btn-ghost" onClick={() => setServerEditing(false)}>
+                </Button>
+                <Button type="button" variant="ghost" onClick={() => setServerEditing(false)}>
                   Cancel
-                </button>
+                </Button>
                 {serverError && <span className="auth-server-error">{serverError}</span>}
               </form>
             ) : (

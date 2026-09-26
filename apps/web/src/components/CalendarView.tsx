@@ -20,6 +20,7 @@ import type { FileEntry } from "../store";
 import { DATED_KINDS, type Fact } from "../intel/facts";
 import { describeFact, shown } from "../intel/describe";
 import { factsFingerprint, tripTitle } from "../intel/trips";
+import { Button } from "./ui/button";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = [
@@ -191,24 +192,25 @@ export function CalendarView(props: { files: FileEntry[]; onOpen: (id: string) =
   return (
     <div className="calendar" aria-label="Calendar of tracked dates">
       <header className="cal-nav">
-        <button className="btn btn-small btn-quiet" onClick={() => turn(-1)} aria-label="Previous month">
+        <Button variant="quiet" size="xs" onClick={() => turn(-1)} aria-label="Previous month">
           ‹
-        </button>
+        </Button>
         <h3>
           {MONTHS[cursor.m]} {cursor.y}
         </h3>
-        <button className="btn btn-small btn-quiet" onClick={() => turn(1)} aria-label="Next month">
+        <Button variant="quiet" size="xs" onClick={() => turn(1)} aria-label="Next month">
           ›
-        </button>
-        <button
-          className="btn btn-small"
+        </Button>
+        <Button
+          variant="secondary"
+          size="xs"
           onClick={() => {
             setCursor({ y: today.getFullYear(), m: today.getMonth() });
             focusDay(todayIso);
           }}
         >
           Today
-        </button>
+        </Button>
       </header>
 
       <div role="grid" aria-label={`${MONTHS[cursor.m]} ${cursor.y}`} className="cal-grid">

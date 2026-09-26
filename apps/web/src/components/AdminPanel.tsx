@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type AdminInviteInfo, type AdminUserInfo } from "../api";
 import { formatBytes } from "../format";
+import { Button } from "./ui/button";
 
 /**
  * Operator surface: accounts and invites. Everything here is server-visible
@@ -15,9 +16,9 @@ export function AdminPanel(props: { onClose: () => void; onToast: (message: stri
         <h2>Server administration</h2>
         <AdminBody onToast={props.onToast} />
         <div className="modal-actions">
-          <button className="btn" onClick={props.onClose}>
+          <Button variant="secondary" onClick={props.onClose}>
             Close
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -81,15 +82,15 @@ export function AdminBody(props: { onToast: (message: string) => void }) {
           access and quotas here, but no one, including you, can read a vault or reset its password.
         </p>
         <div className="tab-row">
-          <button className={tab === "users" ? "btn btn-primary" : "btn"} onClick={() => setTab("users")}>
+          <Button variant={tab === "users" ? "default" : "secondary"} onClick={() => setTab("users")}>
             Accounts ({users.length})
-          </button>
-          <button
-            className={tab === "invites" ? "btn btn-primary" : "btn"}
+          </Button>
+          <Button
+            variant={tab === "invites" ? "default" : "secondary"}
             onClick={() => setTab("invites")}
           >
             Invites ({pending.length})
-          </button>
+          </Button>
         </div>
         {error && <div className="error-text">{error}</div>}
 
@@ -120,8 +121,8 @@ export function AdminBody(props: { onToast: (message: string) => void }) {
                           onChange={(e) => setQuotaEdit({ id: user.id, gb: e.target.value })}
                           placeholder="GB"
                         />
-                        <button
-                          className="btn"
+                        <Button
+                          variant="secondary"
                           onClick={() => {
                             const gb = Number(quotaEdit.gb);
                             const bytes = Number.isFinite(gb) && gb > 0 ? Math.round(gb * 1024 ** 3) : null;
@@ -130,15 +131,15 @@ export function AdminBody(props: { onToast: (message: string) => void }) {
                           }}
                         >
                           Set
-                        </button>
+                        </Button>
                       </>
                     ) : (
-                      <button className="btn" onClick={() => setQuotaEdit({ id: user.id, gb: "" })}>
+                      <Button variant="secondary" onClick={() => setQuotaEdit({ id: user.id, gb: "" })}>
                         Quota
-                      </button>
+                      </Button>
                     )}
-                    <button
-                      className="btn"
+                    <Button
+                      variant="secondary"
                       onClick={() =>
                         void act(
                           () => api.adminSetDisabled(user.id, !user.disabled),
@@ -147,10 +148,10 @@ export function AdminBody(props: { onToast: (message: string) => void }) {
                       }
                     >
                       {user.disabled ? "Enable" : "Disable"}
-                    </button>
-                    <button className="btn btn-danger" onClick={() => setConfirmDelete(user)}>
+                    </Button>
+                    <Button variant="destructive" onClick={() => setConfirmDelete(user)}>
                       Delete
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
@@ -160,9 +161,9 @@ export function AdminBody(props: { onToast: (message: string) => void }) {
 
         {tab === "invites" && (
           <div className="admin-list">
-            <button className="btn btn-primary" onClick={() => void mintInvite()}>
+            <Button onClick={() => void mintInvite()}>
               New invite link
-            </button>
+            </Button>
             {pending.length === 0 && <p className="modal-sub">No pending invites.</p>}
             {pending.map((invite) => (
               <div key={invite.token} className="admin-row">
@@ -175,21 +176,21 @@ export function AdminBody(props: { onToast: (message: string) => void }) {
                   </div>
                 </div>
                 <div className="admin-row-actions">
-                  <button
-                    className="btn"
+                  <Button
+                    variant="secondary"
                     onClick={() => {
                       void navigator.clipboard.writeText(`${location.origin}/#invite=${invite.token}`);
                       props.onToast("Invite link copied.");
                     }}
                   >
                     Copy link
-                  </button>
-                  <button
-                    className="btn btn-danger"
+                  </Button>
+                  <Button
+                    variant="destructive"
                     onClick={() => void act(() => api.adminRevokeInvite(invite.token), "Invite revoked.")}
                   >
                     Revoke
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))}
@@ -207,11 +208,11 @@ export function AdminBody(props: { onToast: (message: string) => void }) {
               {formatBytes(confirmDelete.usedBytes)}). There is no undo.
             </p>
             <div className="modal-actions">
-              <button className="btn" onClick={() => setConfirmDelete(null)}>
+              <Button variant="secondary" onClick={() => setConfirmDelete(null)}>
                 Cancel
-              </button>
-              <button
-                className="btn btn-danger"
+              </Button>
+              <Button
+                variant="destructive"
                 onClick={() => {
                   const target = confirmDelete;
                   setConfirmDelete(null);
@@ -219,7 +220,7 @@ export function AdminBody(props: { onToast: (message: string) => void }) {
                 }}
               >
                 Delete forever
-              </button>
+              </Button>
             </div>
           </div>
         </div>

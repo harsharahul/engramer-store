@@ -1,4 +1,6 @@
 import { DownloadGlyph, MoveGlyph, PhotoGlyph, StarGlyph, TrashGlyph, XGlyph } from "./Icon";
+import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
 
 /**
  * The bar that stands in for the tab bar while files are being gathered.
@@ -28,33 +30,33 @@ export function SelectionBar(props: {
         <small className="bulk-hint">Click adds or removes · ⌘-click too · Esc clears</small>
       </span>
       {props.count < props.total && (
-        <button className="btn btn-ghost" onClick={props.onSelectAll}>
+        <Button variant="ghost" onClick={props.onSelectAll}>
           All {props.total}
-        </button>
+        </Button>
       )}
-      <button className="btn btn-ghost" disabled={none} onClick={props.onFavorite}>
+      <Button variant="ghost" disabled={none} onClick={props.onFavorite}>
         <StarGlyph size={13} /> Favorite
-      </button>
-      <button className="btn btn-ghost" disabled={none} onClick={props.onAlbum}>
+      </Button>
+      <Button variant="ghost" disabled={none} onClick={props.onAlbum}>
         <PhotoGlyph size={13} /> Album
-      </button>
-      <button className="btn btn-ghost" disabled={none} onClick={props.onMove}>
+      </Button>
+      <Button variant="ghost" disabled={none} onClick={props.onMove}>
         <MoveGlyph size={13} /> Move
-      </button>
-      <button className="btn btn-ghost" disabled={none} onClick={props.onDownload}>
+      </Button>
+      <Button variant="ghost" disabled={none} onClick={props.onDownload}>
         <DownloadGlyph size={13} /> Save
-      </button>
+      </Button>
       {props.onCombinePdf && (
-        <button className="btn btn-ghost" onClick={props.onCombinePdf} title="One PDF from the selected ones, in view order">
+        <Button variant="ghost" onClick={props.onCombinePdf} title="One PDF from the selected ones, in view order">
           Combine PDFs
-        </button>
+        </Button>
       )}
-      <button className="btn btn-ghost danger" disabled={none} onClick={props.onTrash}>
+      <Button variant="ghost" className="danger" disabled={none} onClick={props.onTrash}>
         <TrashGlyph size={13} /> Trash
-      </button>
-      <button className="icon-btn" title="Done" onClick={props.onDone}>
+      </Button>
+      <IconButton label="Done" onClick={props.onDone}>
         <XGlyph size={13} />
-      </button>
+      </IconButton>
     </div>
   );
 }

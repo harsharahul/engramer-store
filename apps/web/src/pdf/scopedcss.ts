@@ -47,14 +47,24 @@ function scopeRules(rules: CSSRuleList, scope: string): void {
   }
 }
 
-/** Injects `cssText` once, scoped under `scope`; safe to call repeatedly. */
+/** The cascade layer third-party sheets land in: below the app's own
+ * rules (see app.css), so a vendor rule never outranks them. */
+export const VENDOR_LAYER = "vendor";
+
+/** The sheet wrapped in the vendor layer. */
+export function vendorLayered(cssText: string): string {
+  return `@layer ${VENDOR_LAYER} {\n${cssText}\n}`;
+}
+
+/** Injects `cssText` once, in the vendor layer and scoped under `scope`;
+ * safe to call repeatedly. */
 export function ensureScopedStylesheet(id: string, cssText: string, scope: string): void {
   if (typeof document === "undefined" || document.querySelector(`style[${SCOPE_MARK}="${id}"]`)) {
     return;
   }
   const style = document.createElement("style");
   style.setAttribute(SCOPE_MARK, id);
-  style.textContent = cssText;
+  style.textContent = vendorLayered(cssText);
   document.head.appendChild(style);
   if (style.sheet) {
     scopeRules(style.sheet.cssRules, scope);

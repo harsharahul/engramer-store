@@ -5,6 +5,10 @@ import { formatDate } from "../format";
 import { loadSeen, markSeen, noticeKeys, NOTICES_SEEN_EVENT, noticeEvents, unseenCount } from "../notices";
 import { LibraryIntel } from "./FactsPanel";
 import { InboxGlyph, XGlyph } from "./Icon";
+import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
+import { capsuleIcon } from "./chrome/glass";
+import { cn } from "@/lib/utils";
 
 /**
  * The bell: what the app wants to tell you, in one place, on the Mac and
@@ -51,17 +55,19 @@ export function ActivityBell(props: { open: boolean; onToggle: () => void }) {
   const done = job?.done ?? (batch ? batch.done + batch.failed : 0);
   const fraction = total > 0 ? Math.min(1, done / total) : 0;
   return (
-    <button
-      className={`icon-btn activity-bell${props.open ? " active" : ""}${busy ? " busy" : ""}`}
+    <IconButton
+      size="md"
+      className={cn("activity-bell", capsuleIcon, busy && "busy")}
+      label="Notices"
       title={busy ? `${job?.title ?? "Uploading"} · ${done} of ${total}` : "Notices"}
-      aria-label="Notices"
       aria-expanded={props.open}
+      aria-pressed={props.open}
       onClick={props.onToggle}
       style={{ "--progress": fraction } as React.CSSProperties}
     >
       <InboxGlyph size={16} />
       {unread > 0 && <span className="activity-badge">{unread > 99 ? "99+" : unread}</span>}
-    </button>
+    </IconButton>
   );
 }
 
@@ -145,9 +151,9 @@ export function ActivityPanel(props: {
     <div className={`activity-panel${props.sheet ? " sheet" : ""}`} ref={panelRef} role="dialog" aria-label="Notices">
       <header>
         <span className="details-title">Notices</span>
-        <button className="icon-btn" title="Close" onClick={props.onClose}>
+        <IconButton label="Close" onClick={props.onClose}>
           <XGlyph size={14} />
-        </button>
+        </IconButton>
       </header>
       {/* One scrolling body under the fixed header: notices, the running
           jobs, and the log scroll together, so nothing is ever cut off
@@ -170,9 +176,9 @@ export function ActivityPanel(props: {
                   {job.failed > 0 ? ` · ${job.failed} failed` : ""}
                 </span>
                 {job.stop && (
-                  <button className="btn btn-ghost activity-stop" onClick={job.stop}>
+                  <Button variant="ghost" size="xs" onClick={job.stop}>
                     Stop
-                  </button>
+                  </Button>
                 )}
               </div>
               <div className="activity-bar" aria-hidden="true">
@@ -201,15 +207,15 @@ export function ActivityPanel(props: {
               {entry.detail && <div className="activity-entry-detail">{entry.detail}</div>}
               <div className="activity-entry-when">{formatDate(entry.at)}</div>
             </div>
-            <button className="icon-btn" title="Dismiss" aria-label="Dismiss" onClick={() => dismiss(entry.id)}>
+            <IconButton label="Dismiss" onClick={() => dismiss(entry.id)}>
               <XGlyph size={12} />
-            </button>
+            </IconButton>
           </div>
         ))}
         {activity.log.length > 1 && (
-          <button className="btn btn-ghost activity-clear" onClick={clear}>
+          <Button variant="ghost" className="activity-clear" onClick={clear}>
             Clear all
-          </button>
+          </Button>
         )}
       </section>
       </div>

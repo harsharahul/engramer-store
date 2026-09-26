@@ -11,6 +11,8 @@ import { extension, fileKind, formatBytes, formatDate } from "../format";
 import { triggerDownload } from "../download";
 import { SheetArt } from "./FileArt";
 import { Confirm } from "./Dialogs";
+import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
 import {
   ClockGlyph,
   DownloadGlyph,
@@ -116,9 +118,9 @@ export function DetailsPanel(props: {
           <span className="details-title">
             {props.selectionCount > 1 ? `${props.selectionCount} selected` : "Details"}
           </span>
-          <button className="icon-btn" title="Close" onClick={props.onClose}>
+          <IconButton label="Close" onClick={props.onClose}>
             <XGlyph size={14} />
-          </button>
+          </IconButton>
         </header>
         <div className="details-empty">
           {props.selectionCount > 1 ? (
@@ -156,9 +158,9 @@ export function DetailsPanel(props: {
       <div className="sheet-grip details-grip" aria-hidden="true" {...handleProps} />
       <header {...handleProps}>
         <span className="details-title">Details</span>
-        <button className="icon-btn" title="Close" onClick={props.onClose}>
+        <IconButton label="Close" onClick={props.onClose}>
           <XGlyph size={14} />
-        </button>
+        </IconButton>
       </header>
 
       <div className="details-art" onDoubleClick={() => props.onOpen(file.id)}>
@@ -168,13 +170,14 @@ export function DetailsPanel(props: {
       <div className="details-name" title={file.name}>
         {file.name}
         {(!file.shared || file.role === "editor") && (
-          <button
-            className={`icon-btn star-inline${file.favorite ? " on" : ""}`}
-            title={file.favorite ? "Unfavorite" : "Favorite"}
+          <IconButton
+            className="star-inline"
+            tone={file.favorite ? "accent" : "default"}
+            label={file.favorite ? "Unfavorite" : "Favorite"}
             onClick={() => void toggleFavorite(file.id)}
           >
             <StarGlyph filled={file.favorite} size={15} />
-          </button>
+          </IconButton>
         )}
       </div>
 
@@ -194,26 +197,26 @@ export function DetailsPanel(props: {
       )}
 
       <div className="details-actions">
-        <button className="btn" onClick={() => props.onOpen(file.id)}>
+        <Button variant="secondary" onClick={() => props.onOpen(file.id)}>
           Open
-        </button>
+        </Button>
         {kind === "text" && (
-          <button className="btn" onClick={() => props.onEdit(file.id)}>
+          <Button variant="secondary" onClick={() => props.onEdit(file.id)}>
             <PencilGlyph size={13} /> Edit
-          </button>
+          </Button>
         )}
-        <button className="icon-btn" title="Download" onClick={() => props.onDownload(file)}>
+        <IconButton label="Download" onClick={() => props.onDownload(file)}>
           <DownloadGlyph />
-        </button>
+        </IconButton>
         {!file.shared && (
-          <button className="icon-btn" title="Share" onClick={() => props.onShare(file.id)}>
+          <IconButton label="Share" onClick={() => props.onShare(file.id)}>
             <ShareGlyph />
-          </button>
+          </IconButton>
         )}
         {!file.shared && (
-          <button className="icon-btn" title="Move to trash" onClick={() => props.onTrash(file.id)}>
+          <IconButton label="Move to trash" onClick={() => props.onTrash(file.id)}>
             <TrashGlyph />
-          </button>
+          </IconButton>
         )}
       </div>
 
@@ -339,8 +342,8 @@ export function DetailsPanel(props: {
                 <span className="history-when">{formatDate(version.createdAt)}</span>
                 <span className="history-size">{formatBytes(version.contentSize)}</span>
               </div>
-              <button
-                className="icon-btn"
+              <IconButton
+                label="Download version"
                 title="Download a copy of this version"
                 onClick={() => {
                   void api
@@ -356,16 +359,16 @@ export function DetailsPanel(props: {
                 }}
               >
                 <DownloadGlyph size={13} />
-              </button>
+              </IconButton>
               {!file.shared && (
-                <button
-                  className="icon-btn"
+                <IconButton
+                  label="Restore version"
                   title="Restore this version"
                   disabled={restoring}
                   onClick={() => setPendingRestore(version.generation)}
                 >
                   <RestoreGlyph size={13} />
-                </button>
+                </IconButton>
               )}
             </div>
           ))}
@@ -373,9 +376,9 @@ export function DetailsPanel(props: {
       )}
 
       {(!file.shared || file.role === "editor") && (
-        <button className="btn btn-ghost details-rename" onClick={() => props.onRename(file.id)}>
+        <Button variant="ghost" className="details-rename" onClick={() => props.onRename(file.id)}>
           <PencilGlyph size={13} /> Rename
-        </button>
+        </Button>
       )}
 
       {pendingRestore !== null && (

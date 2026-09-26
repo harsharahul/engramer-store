@@ -6,6 +6,8 @@ import { useStore } from "../store";
 import { formatDate } from "../format";
 import { describeShare, shareLink, ShareDialog } from "./ShareDialog";
 import { CopyGlyph, InboxGlyph, KeyGlyph, LinkGlyph, PeopleGlyph, PlusGlyph, TrashGlyph } from "./Icon";
+import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
 
 const EXPIRY_CHOICES = [
   { label: "Never expires", ms: null },
@@ -135,13 +137,13 @@ export function SharedView(props: { onToast: (message: string) => void }) {
                     </span>
                     <span className="share-row-meta">since {formatDate(person.createdAt)}</span>
                   </div>
-                  <button
-                    className="btn"
+                  <Button
+                    variant="secondary"
                     disabled={!file}
                     onClick={() => setManageId(person.fileId)}
                   >
                     Manage
-                  </button>
+                  </Button>
                 </div>
               );
             })}
@@ -175,16 +177,15 @@ export function SharedView(props: { onToast: (message: string) => void }) {
                   </div>
                   {share.protected && <span className="row-tag">password</span>}
                   <div className="row-actions" style={{ opacity: 1 }}>
-                    <button className="icon-btn" title="Copy link" onClick={() => void copyShare(share)}>
+                    <IconButton label="Copy link" onClick={() => void copyShare(share)}>
                       <CopyGlyph size={14} />
-                    </button>
-                    <button
-                      className="icon-btn"
-                      title="Revoke link"
+                    </IconButton>
+                    <IconButton
+                      label="Revoke link"
                       onClick={() => void revokeShare(share.token)}
                     >
                       <TrashGlyph size={14} />
-                    </button>
+                    </IconButton>
                   </div>
                 </div>
               );
@@ -199,12 +200,12 @@ export function SharedView(props: { onToast: (message: string) => void }) {
             <InboxGlyph size={15} /> File requests
           </h3>
           <div className="grow" />
-          <button className="btn btn-ghost" onClick={() => void checkNow()}>
+          <Button variant="ghost" onClick={() => void checkNow()}>
             Check for arrivals
-          </button>
-          <button className="btn" onClick={() => setNewRequestOpen(true)}>
+          </Button>
+          <Button variant="secondary" onClick={() => setNewRequestOpen(true)}>
             <PlusGlyph size={14} /> New request
-          </button>
+          </Button>
         </div>
         {activeRequests.length === 0 ? (
           <p className="shared-empty">
@@ -234,16 +235,15 @@ export function SharedView(props: { onToast: (message: string) => void }) {
                   </div>
                 </div>
                 <div className="row-actions" style={{ opacity: 1 }}>
-                  <button className="icon-btn" title="Copy link" onClick={() => void copyRequest(entry)}>
+                  <IconButton label="Copy link" onClick={() => void copyRequest(entry)}>
                     <CopyGlyph size={14} />
-                  </button>
-                  <button
-                    className="icon-btn"
-                    title="Close request"
+                  </IconButton>
+                  <IconButton
+                    label="Close request"
                     onClick={() => void revokeRequest(entry.token)}
                   >
                     <TrashGlyph size={14} />
-                  </button>
+                  </IconButton>
                 </div>
               </div>
             ))}
@@ -356,12 +356,12 @@ export function NewRequestDialog(props: {
             </select>
           </div>
           <div className="modal-actions">
-            <button type="button" className="btn btn-ghost" onClick={props.onClose}>
+            <Button type="button" variant="ghost" onClick={props.onClose}>
               Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={busy || !label.trim()}>
+            </Button>
+            <Button type="submit" disabled={busy || !label.trim()}>
               Create and copy link
-            </button>
+            </Button>
           </div>
         </form>
       </div>

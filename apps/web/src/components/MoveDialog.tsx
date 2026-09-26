@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useStore, type BulkResult } from "../store";
 import { FolderGlyph } from "./Icon";
+import { Button } from "./ui/button";
 
 /** Pick a destination folder for one or more files. */
 export function MoveDialog(props: {
@@ -67,9 +68,9 @@ export function MoveDialog(props: {
           ))}
         </div>
         <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={props.onClose}>
+          <Button variant="ghost" onClick={props.onClose}>
             Cancel
-          </button>
+          </Button>
         </div>
       </div>
     </div>

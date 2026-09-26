@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { extractArchive, listArchive, totalSize, type ArchiveEntry, type ExtractedEntry } from "../archive";
 import { formatBytes } from "../format";
+import { Button } from "./ui/button";
 
 /**
  * An archive shown as what is inside it, with one action: extract the
@@ -38,8 +39,8 @@ export function ArchiveBody(props: {
           {files.length} {files.length === 1 ? "file" : "files"}, {formatBytes(totalSize(files))} unpacked
         </span>
         {props.onExtract && files.length > 0 && (
-          <button
-            className="btn"
+          <Button
+            variant="secondary"
             disabled={busy}
             onClick={() => {
               setBusy(true);
@@ -50,7 +51,7 @@ export function ArchiveBody(props: {
             }}
           >
             {busy ? "Extracting…" : "Extract here"}
-          </button>
+          </Button>
         )}
       </div>
       <ul className="archive-list">

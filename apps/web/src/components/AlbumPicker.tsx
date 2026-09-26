@@ -3,6 +3,7 @@ import { albumTag, type Album } from "../albums";
 import { MOBILE_QUERY, useMediaQuery } from "../media";
 import { useSheetDrag } from "../sheetdrag";
 import { PhotoGlyph, PlusGlyph } from "./Icon";
+import { Button } from "./ui/button";
 
 /**
  * Where a set of files is headed: an existing album, or one named on the
@@ -60,12 +61,12 @@ export function AlbumPicker(props: {
             onChange={(e) => setDraft(e.target.value)}
           />
           <div className="modal-actions">
-            <button type="button" className="btn btn-ghost" onClick={props.onClose}>
+            <Button type="button" variant="ghost" onClick={props.onClose}>
               Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={!draftTag}>
+            </Button>
+            <Button type="submit" disabled={!draftTag}>
               <PlusGlyph size={13} /> Create and add
-            </button>
+            </Button>
           </div>
         </form>
       </div>

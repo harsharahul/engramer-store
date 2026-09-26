@@ -10,6 +10,8 @@ import { formatBytes } from "../format";
 import { languageFor, renderMarkdown } from "../textkinds";
 import { XGlyph } from "./Icon";
 import { Confirm } from "./Dialogs";
+import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
 
 /**
  * In-app editor for text, Markdown and code. The plaintext exists only in
@@ -189,18 +191,18 @@ export function Editor(props: {
         <div className="grow" />
         {error && <span className="error-text">{error}</span>}
         {isMarkdown && (
-          <button className={`btn btn-ghost${preview ? " active" : ""}`} onClick={() => setPreview((p) => !p)}>
+          <Button variant="ghost" aria-pressed={preview} onClick={() => setPreview((p) => !p)}>
             {preview ? "Hide preview" : "Preview"}
-          </button>
+          </Button>
         )}
-        <button className="btn btn-primary" onClick={save} disabled={!dirty || busy}>
+        <Button onClick={save} disabled={!dirty || busy}>
           {busy ? <span className="spinner" /> : null}
           {busy ? "Encrypting" : "Save"}
           {!busy && <kbd className="mono save-kbd">⌘S</kbd>}
-        </button>
-        <button className="icon-btn" title="Close" onClick={close}>
+        </Button>
+        <IconButton label="Close" onClick={close}>
           <XGlyph />
-        </button>
+        </IconButton>
       </div>
       <div className={`editor-body${isMarkdown && preview ? " split" : ""}`}>
         {error && text === null ? (

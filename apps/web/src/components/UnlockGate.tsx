@@ -5,6 +5,7 @@ import { loadUnlockRecord } from "../unlock";
 import { nativeShell } from "../native";
 import { BrandMark, Wordmark } from "./FileArt";
 import { KeyGlyph } from "./Icon";
+import { Button } from "./ui/button";
 
 /**
  * Shown instead of the login form when this device holds a passkey-wrapped
@@ -67,13 +68,13 @@ export function UnlockGate(props: { onUsePassword: () => void }) {
         </div>
         <div className="auth-form">
           {error && <div className="error-text">{error}</div>}
-          <button className="btn btn-primary" onClick={() => void unlock()} disabled={busy}>
+          <Button onClick={() => void unlock()} disabled={busy}>
             {busy ? <span className="spinner" /> : <KeyGlyph size={15} />}
             {busy ? "Unlocking" : "Unlock this vault"}
-          </button>
-          <button className="btn btn-ghost" onClick={props.onUsePassword} disabled={busy}>
+          </Button>
+          <Button variant="ghost" onClick={props.onUsePassword} disabled={busy}>
             Use password instead
-          </button>
+          </Button>
         </div>
       </div>
     </div>

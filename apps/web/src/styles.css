@@ -73,7 +73,7 @@ body::after {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 999;
+  z-index: var(--z-grain);
   opacity: 0.05;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
 }
@@ -124,7 +124,7 @@ a {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
@@ -135,7 +135,7 @@ a {
   }
   to {
     opacity: 1;
-    transform: scale(1) translateY(0);
+    transform: none;
   }
 }
 
@@ -146,145 +146,6 @@ a {
 }
 
 /* ---------- shared atoms ---------- */
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 36px;
-  padding: 0 14px;
-  border-radius: 8px;
-  border: 1px solid var(--hairline-strong);
-  background: var(--ink-2);
-  color: var(--paper);
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 20px;
-  letter-spacing: 0;
-  white-space: nowrap;
-  user-select: none;
-  transition:
-    background-color 120ms cubic-bezier(0.23, 1, 0.32, 1),
-    border-color 120ms cubic-bezier(0.23, 1, 0.32, 1),
-    color 120ms cubic-bezier(0.23, 1, 0.32, 1),
-    box-shadow 120ms cubic-bezier(0.23, 1, 0.32, 1);
-}
-
-/* Control icons: 16px boxes pair with a 14px label (cap-height match), and
-   a firmer stroke keeps them from reading wispy next to 500-weight text. */
-.btn > svg {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  stroke-width: 2;
-}
-
-/* An icon carries its own interior air; ease the padding when one is present. */
-.btn:has(> svg) {
-  padding: 0 12px;
-}
-
-.btn:hover {
-  background: var(--ink-3);
-  border-color: var(--hairline-strong);
-}
-
-.btn:active {
-  transform: translateY(1px);
-  transition-duration: 0ms;
-}
-
-.btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.btn:disabled {
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-  background: var(--ink-1);
-  border-color: var(--hairline);
-  color: var(--paper-faint);
-}
-
-.btn-primary {
-  /* A uniform accent fill; depth comes only from the crisp darker border
-     and a hard 1px inset top edge. Nothing paints across the label. */
-  background-color: color-mix(in srgb, var(--accent) 90%, #000);
-  border: 1px solid color-mix(in srgb, var(--accent) 55%, #000);
-  color: #ffffff;
-  font-weight: 540;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    0 1px 1px rgba(0, 0, 0, 0.28);
-}
-
-.btn-primary:hover {
-  background-color: var(--accent);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 1px 1px rgba(0, 0, 0, 0.28);
-}
-
-.btn-primary:active {
-  background-color: color-mix(in srgb, var(--accent) 80%, #000);
-  transform: translateY(1px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-:root[data-theme="light"] .btn-primary {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    0 1px 2px rgba(15, 23, 42, 0.18);
-}
-
-.btn-danger {
-  color: var(--danger);
-  border-color: var(--danger-dim);
-}
-
-.btn-danger:hover {
-  background: var(--danger-dim);
-}
-
-.btn-ghost {
-  border-color: transparent;
-  background: transparent;
-  color: var(--paper-dim);
-  box-shadow: none;
-}
-
-.btn-ghost:hover {
-  background: var(--ink-2);
-  color: var(--paper);
-}
-
-.btn-ghost:focus-visible {
-  outline-offset: -1px;
-}
-
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  color: var(--paper-dim);
-  transition: background 0.12s ease, color 0.12s ease;
-}
-
-.icon-btn:hover {
-  background: var(--ink-3);
-  color: var(--paper);
-}
-
-.icon-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-}
 
 .spinner {
   width: 16px;
@@ -456,13 +317,22 @@ a {
   grid-template-columns: var(--sidebar-w, 232px) 1fr;
   height: 100%;
   position: relative;
+  /* The window's own chrome stays clear on every form factor: the iPad
+     status bar and multitasking handle above, a phone's rounded corners
+     at the sides in landscape. Fixed-position sheets and bars add the
+     insets themselves; on the Mac and in a browser these are zero. */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 /* Each column is pinned to its track. Resting the pointer on the rail
    lifts the sidebar out of the grid (position: absolute) to overlay the
    content; without pinned tracks the main column and the details pane
    slid one track left while the pointer stayed there. */
-@media (min-width: 761px) {
+/* Everything that is not the phone layout: the exact complement of the
+   phone query, so no fractional width falls between the two. */
+@media not all and (max-width: 760px) {
   .frame > .main {
     grid-column: 2;
     grid-row: 1;
@@ -495,7 +365,7 @@ a {
   right: 0;
   bottom: 0;
   width: var(--details-w, 300px);
-  z-index: 240;
+  z-index: var(--z-pane);
   border-left: 1px solid var(--hairline-strong);
   box-shadow: -18px 0 50px rgba(0, 0, 0, 0.35);
 }
@@ -510,7 +380,7 @@ a {
   bottom: 0;
   width: 9px;
   cursor: col-resize;
-  z-index: 60;
+  z-index: calc(var(--z-toolbar) + 1);
   touch-action: none;
 }
 
@@ -578,7 +448,7 @@ body.resizing {
   bottom: 0;
   left: 0;
   width: 240px;
-  z-index: 230;
+  z-index: var(--z-pane);
   box-shadow: var(--glass-shadow), 24px 0 70px rgba(8, 9, 11, 0.35);
 }
 
@@ -605,7 +475,6 @@ body.resizing {
     transition-duration: 0.01ms !important;
   }
 }
-
 
 .details-meta .integrity-bad {
   color: #ff6b60;
@@ -656,7 +525,7 @@ body.resizing {
   position: absolute;
   top: 10px;
   left: 10px;
-  z-index: 2;
+  z-index: var(--z-raised);
   padding: 3px 8px;
   border-radius: 999px;
   font-size: 10px;
@@ -674,7 +543,7 @@ body.resizing {
   left: 50%;
   transform: translateX(-50%);
   bottom: calc(18px + env(safe-area-inset-bottom));
-  z-index: 60;
+  z-index: var(--z-floating);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -818,6 +687,12 @@ body.resizing {
 /* Liquid Glass: the toolbar is a row of floating capsules, no bar. Its
    height is the platform token the traffic lights are centred on. */
 .topbar {
+  /* Every glass capsule's backdrop blur makes it a stacking context, which
+     traps the search panel's own z-index inside the capsule. The toolbar
+     is one layer above the content, so its panels and menus open over the
+     cards, shelves and sticky headers below. */
+  position: relative;
+  z-index: var(--z-toolbar);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1004,7 +879,7 @@ body.resizing {
 .photo-month {
   position: sticky;
   top: 8px;
-  z-index: 5;
+  z-index: var(--z-sticky);
   width: fit-content;
   margin: 8px 0 6px 2px;
   padding: 5px 12px;
@@ -1132,10 +1007,6 @@ body.resizing {
   flex: 1;
 }
 
-.icon-btn.fav-active {
-  color: var(--accent);
-}
-
 .auth-server {
   margin-top: 16px;
   text-align: center;
@@ -1185,7 +1056,7 @@ body.resizing {
 .ptr-indicator {
   position: sticky;
   top: 0;
-  z-index: 6;
+  z-index: calc(var(--z-sticky) + 1);
   width: fit-content;
   margin: 0 auto 8px;
   padding: 6px 14px;
@@ -1622,7 +1493,7 @@ body.resizing {
   content: "Drop to encrypt and upload";
   position: fixed;
   inset: 12px;
-  z-index: 200;
+  z-index: var(--z-veil);
   display: grid;
   place-items: center;
   font-family: var(--font-display);
@@ -1645,7 +1516,7 @@ body.resizing {
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-modal);
-  z-index: 150;
+  z-index: var(--z-floating);
   overflow: hidden;
   animation: fade-rise 0.3s ease both;
 }
@@ -1742,7 +1613,7 @@ body.resizing {
   backdrop-filter: blur(6px);
   display: grid;
   place-items: center;
-  z-index: 300;
+  z-index: var(--z-modal);
   padding: 24px;
 }
 
@@ -1889,10 +1760,6 @@ body.resizing {
   border-color: var(--accent);
 }
 
-.icon-btn.danger:hover {
-  color: var(--danger, #ef4444);
-}
-
 /* ---------- shared view (links + file requests) ---------- */
 
 .shared-view {
@@ -2012,12 +1879,9 @@ body.resizing {
   position: relative;
 }
 
+/* Rendered through a Popover (ui/popover.tsx): anchored under the search
+   field, portaled, at the popover tier. It carries only its looks here. */
 .search-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  z-index: 220;
   background: var(--ink-1);
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-lg);
@@ -2328,7 +2192,7 @@ body.resizing {
   bottom: 74px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 400;
+  z-index: var(--z-toast);
   display: flex;
   align-items: center;
   gap: 9px;
@@ -2356,7 +2220,7 @@ body.resizing {
   position: fixed;
   bottom: 74px;
   right: 20px;
-  z-index: 400;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2468,7 +2332,10 @@ body.resizing {
 .preview-shell {
   position: fixed;
   inset: 0;
-  z-index: 300;
+  z-index: var(--z-modal);
+  /* A full-screen layer sits outside the frame, so it clears the status
+     bar and the multitasking handle itself (zero on the Mac and the web). */
+  padding-top: env(safe-area-inset-top, 0px);
   background: rgba(8, 9, 11, 0.92);
   /* The backdrop is dark in both themes, so the overlay carries the dark
      palette: in the light theme the file name, the toolbars and every
@@ -2687,7 +2554,7 @@ body.resizing {
   border-radius: 999px;
   padding: 9px 18px;
   font-size: 13px;
-  z-index: 400;
+  z-index: var(--z-toast);
   animation: fade-rise 0.25s ease both;
   box-shadow: var(--shadow-modal);
 }
@@ -3109,7 +2976,7 @@ button.tag:hover {
   border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
   border-radius: 14px;
   box-shadow: var(--shadow-modal);
-  z-index: 250;
+  z-index: var(--z-floating);
   cursor: pointer;
   animation: fade-rise 0.45s cubic-bezier(0.3, 1.45, 0.5, 1) both;
 }
@@ -3194,11 +3061,6 @@ button.tag:hover {
 .seg button.active {
   background: var(--accent-dim);
   color: var(--accent-bright);
-}
-
-.info-toggle.active {
-  color: var(--accent);
-  background: var(--accent-dim);
 }
 
 /* ---------- selection ---------- */
@@ -3326,7 +3188,7 @@ button.tag:hover {
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: none;
   }
 }
 
@@ -3432,10 +3294,6 @@ button.tag:hover {
   flex-shrink: 0;
 }
 
-.star-inline.on {
-  color: var(--accent);
-}
-
 .details-actions {
   display: flex;
   align-items: center;
@@ -3513,7 +3371,7 @@ button.tag:hover {
   border-radius: 999px;
   padding: 7px 10px 7px 18px;
   box-shadow: var(--shadow-modal);
-  z-index: 260;
+  z-index: calc(var(--z-floating) + 1);
   animation: fade-rise 0.22s ease both;
 }
 
@@ -3531,7 +3389,7 @@ button.tag:hover {
 
 .ctx-menu {
   position: fixed;
-  z-index: 400;
+  z-index: var(--z-popover);
   background: var(--ink-2);
   border: 1px solid var(--hairline-strong);
   border-radius: 12px;
@@ -3854,7 +3712,7 @@ span.item-menu {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
@@ -3863,23 +3721,16 @@ span.item-menu {
   display: none;
 }
 
-/* Outside the phone layout the stack is not a real box: each child keeps
-   its own position: fixed rule exactly as before this wrapper existed. */
-.bottom-stack {
+/* Outside the phone layout the stacks are not real boxes: each child keeps
+   its own position: fixed rule exactly as before the wrappers existed. */
+.bottom-stack,
+.toast-stack {
   display: contents;
 }
 
 /* ---------- touch ergonomics (any coarse pointer) ---------- */
 
 @media (pointer: coarse) {
-  .icon-btn {
-    width: 40px;
-    height: 40px;
-  }
-
-  .btn {
-    min-height: 44px;
-  }
 
   .seg button {
     width: 44px;
@@ -3890,35 +3741,6 @@ span.item-menu {
     min-height: 38px;
   }
 
-  /* The header controls wrap onto their own line instead of running off
-     the right edge and clipping the grid/list toggle: touch sizing adds
-     enough width that a folder title and the full control row cannot
-     share 390px. (This rule once targeted .toolbar-row, a class no
-     component ever rendered, so it never fired.) */
-  .viewbar {
-    flex-wrap: wrap;
-    row-gap: 4px;
-  }
-
-  .viewbar .crumbs {
-    min-width: 0;
-  }
-
-  /* A long folder name yields to one truncating line, not a stack of
-     three cramped ones. */
-  .crumbs .current {
-    max-width: 100%;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .view-controls {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    margin-left: auto;
-  }
-
   /* A finger gets an answer the moment it lands, not on release. */
   .card:active,
   .photo-tile:active,
@@ -3927,8 +3749,7 @@ span.item-menu {
   }
 
   .ctx-item:active,
-.tab:active,
-.btn:active {
+  .tab:active {
     opacity: 0.6;
   }
 
@@ -3941,13 +3762,6 @@ span.item-menu {
   .tag-add-album {
     width: 28px;
     height: 28px;
-  }
-
-  /* iOS zooms the page on focus for inputs under 16px. */
-  input,
-  textarea,
-  select {
-    font-size: 16px;
   }
 
   .accent-dot {
@@ -3993,10 +3807,39 @@ span.item-menu {
     grid-template-columns: 1fr;
   }
 
-  /* Topbar: search only; every action lives in the tab bar and sheets. */
+  /* The header controls wrap onto their own line instead of running off
+     the right edge and clipping the grid/list toggle: a folder title and
+     the full control row cannot share a phone's width. Keyed on the
+     width, like the rest of the phone layout, not on the pointer. */
+  .viewbar {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .viewbar .crumbs {
+    min-width: 0;
+  }
+
+  /* A long folder name yields to one truncating line, not a stack of
+     three cramped ones. */
+  .crumbs .current {
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .view-controls {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: auto;
+  }
+
+  /* Topbar: search only; every action lives in the tab bar and sheets.
+     The frame already clears the status bar. */
   .topbar {
     gap: 10px;
-    padding: calc(12px + env(safe-area-inset-top)) 14px 12px;
+    padding: 12px 14px;
   }
 
   /* A phone-width Mac window: no safe area up here, and the capsules stay
@@ -4008,12 +3851,6 @@ span.item-menu {
 
   /* No keyboard shortcut on a phone: the field keeps its full width. */
   .searchbox .search-kbd {
-    display: none;
-  }
-
-  .topbar .btn,
-  .topbar .info-toggle,
-  .topbar .sidebar-toggle {
     display: none;
   }
 
@@ -4049,7 +3886,7 @@ span.item-menu {
     bottom: 0;
     left: 0;
     width: min(84vw, 320px);
-    z-index: 290;
+    z-index: var(--z-drawer);
     transform: translateX(-100%);
     transition: transform 0.24s ease;
     padding-top: calc(20px + env(safe-area-inset-top));
@@ -4069,7 +3906,7 @@ span.item-menu {
   .drawer-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 285;
+    z-index: calc(var(--z-drawer) - 1);
     background: rgba(8, 9, 11, 0.55);
     backdrop-filter: blur(2px);
     -webkit-backdrop-filter: blur(2px);
@@ -4087,7 +3924,7 @@ span.item-menu {
     left: 0;
     right: 0;
     bottom: 0;
-    z-index: 240;
+    z-index: var(--z-pane);
     padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
     background: color-mix(in srgb, var(--ink-1) 94%, transparent);
     backdrop-filter: blur(14px);
@@ -4113,7 +3950,7 @@ span.item-menu {
     color: var(--accent);
   }
 
-  /* Same uniform accent fill as .btn-primary. */
+  /* Same uniform accent fill as the default Button. */
   .tab-add {
     width: 48px;
     height: 48px;
@@ -4133,7 +3970,7 @@ span.item-menu {
     left: 12px;
     right: 12px;
     bottom: calc(var(--tabbar-h, 74px) + env(safe-area-inset-bottom));
-    z-index: 250;
+    z-index: var(--z-floating);
     display: flex;
     flex-direction: column-reverse;
     gap: 8px;
@@ -4141,6 +3978,30 @@ span.item-menu {
   }
 
   .bottom-stack > * {
+    pointer-events: auto;
+    position: static;
+    bottom: auto;
+    left: auto;
+    right: auto;
+    transform: none;
+  }
+
+  /* Toasts and save narration answer an action wherever it was taken, so
+     they stack in their own column at the toast tier: over the preview or
+     dialog they came from, which the widget stack must stay under. */
+  .toast-stack {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: calc(var(--tabbar-h, 74px) + env(safe-area-inset-bottom));
+    z-index: var(--z-toast);
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 8px;
+    pointer-events: none;
+  }
+
+  .toast-stack > * {
     pointer-events: auto;
     position: static;
     bottom: auto;
@@ -4181,7 +4042,7 @@ span.item-menu {
     top: auto;
     max-height: 72vh;
     max-height: 72dvh;
-    z-index: 260;
+    z-index: var(--z-sheet);
     border: 1px solid var(--hairline-strong);
     border-radius: 18px;
     box-shadow: 0 -18px 60px rgba(8, 9, 11, 0.45);
@@ -4201,7 +4062,7 @@ span.item-menu {
   .sheet-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 390;
+    z-index: calc(var(--z-popover) - 1);
     background: rgba(8, 9, 11, 0.5);
   }
 
@@ -4281,7 +4142,7 @@ span.item-menu {
   }
 
   .preview-top {
-    padding-top: calc(12px + env(safe-area-inset-top));
+    padding-top: 12px;
   }
 
   .preview-shell,
@@ -4325,10 +4186,6 @@ span.item-menu {
   font-size: 13px;
   color: var(--paper);
   animation: fade-rise 0.25s ease both;
-}
-
-.media-advice .btn {
-  flex-shrink: 0;
 }
 
 /* The thumbnail standing in, sharp, while the true file downloads. It is
@@ -4576,7 +4433,7 @@ span.item-menu {
   gap: 10px;
   color: var(--muted);
   background: var(--ink-1);
-  z-index: 1;
+  z-index: var(--z-raised);
 }
 
 /* ------------------------------------------------- Dates worth tracking
@@ -4903,23 +4760,6 @@ span.item-menu {
 .linky[disabled] {
   color: var(--paper-faint);
   cursor: default;
-}
-
-.btn-small {
-  height: 28px;
-  padding: 0 10px;
-  font-size: 12px;
-}
-
-.btn-quiet {
-  border-color: transparent;
-  background: transparent;
-  color: var(--paper-faint);
-}
-
-.btn-quiet:hover {
-  border-color: var(--hairline);
-  color: var(--paper-dim);
 }
 
 /* ------------------------------------------- pending queue, grown up a bit */
@@ -5344,7 +5184,7 @@ span.item-menu {
 
 .marquee {
   position: absolute;
-  z-index: 5;
+  z-index: var(--z-sticky);
   border: 1px solid color-mix(in srgb, var(--accent) 75%, transparent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border-radius: 3px;
@@ -5358,7 +5198,7 @@ span.item-menu {
   position: fixed;
   top: 0;
   left: 0;
-  z-index: -1;
+  z-index: var(--z-behind);
   width: 56px;
   height: 56px;
   border-radius: 10px;
@@ -5469,7 +5309,7 @@ span.item-menu {
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-modal);
-  z-index: 300;
+  z-index: var(--z-popover);
   overflow: hidden;
   animation: fade-rise 0.18s ease both;
 }
@@ -5543,11 +5383,6 @@ span.item-menu {
   margin-left: auto;
   font-family: var(--font-mono);
   font-size: 11.5px;
-}
-
-.activity-stop {
-  padding: 2px 10px;
-  height: 26px;
 }
 
 .activity-bar {
@@ -5629,7 +5464,6 @@ span.item-menu {
 
 .activity-clear {
   margin: 4px 12px 4px auto;
-  display: block;
 }
 
 button.link {
@@ -5652,7 +5486,7 @@ button.link {
     max-height: 80vh;
     border-radius: 18px 18px 0 0;
     padding-bottom: env(safe-area-inset-bottom);
-    z-index: 320;
+    z-index: var(--z-floating);
   }
 }
 
@@ -5758,18 +5592,6 @@ button.link {
 .album-cover-count {
   font-size: 11.5px;
   color: var(--paper-faint);
-}
-
-/* The phone's Add lives in the top bar; elsewhere the New and Upload
-   buttons carry the job. */
-.topbar .add-btn {
-  display: none;
-}
-
-@media (max-width: 760px) {
-  .topbar .add-btn {
-    display: inline-flex;
-  }
 }
 
 /* ---------- PDF viewer ---------- */

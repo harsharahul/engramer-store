@@ -115,6 +115,9 @@ import { HeadsUp, TripHeadsUp } from "./HeadsUp";
 import { extension, fileKind, formatBytes } from "../format";
 import { albumTitle, albumsFrom, type Album } from "../albums";
 import { orderCollections } from "../sidebar";
+import { Popover, PopoverContent } from "./ui/popover";
+import { Button } from "./ui/button";
+import { IconButton } from "./ui/icon-button";
 import { PhotoGrid } from "./PhotoGrid";
 import { AlbumPicker } from "./AlbumPicker";
 import { SelectionBar } from "./SelectionBar";
@@ -497,6 +500,7 @@ export function Vault() {
   const cameraInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
+  const searchBox = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const persist = (key: string, value: unknown) => {
@@ -2469,16 +2473,18 @@ export function Vault() {
         <div className="topbar" ref={topbarRef} data-tauri-drag-region>
           {/* Liquid Glass: the controls float in capsules, no bar behind them. */}
           <div className={cn(capsule, "tw:max-[760px]:hidden")}>
-            <button
-              className={cn(`icon-btn sidebar-toggle${plan.sidebar === "rail" ? " active" : ""}`, capsuleIcon)}
+            <IconButton
+              size="md"
+              className={cn("sidebar-toggle", capsuleIcon)}
+              label={plan.sidebar === "rail" ? "Show sidebar" : "Hide sidebar"}
               title={plan.sidebar === "rail" ? "Show sidebar (⌘⌥S)" : "Hide sidebar (⌘⌥S)"}
-              aria-label={plan.sidebar === "rail" ? "Show sidebar" : "Hide sidebar"}
               onClick={toggleSidebar}
             >
               <SidebarGlyph size={16} />
-            </button>
+            </IconButton>
           </div>
           <div
+            ref={searchBox}
             className={cn(
               "searchbox",
               capsule,
@@ -2526,8 +2532,16 @@ export function Vault() {
                 }
               }}
             />
-            {searchFocused && !searching && (
-              <div className="search-panel" onMouseDown={(e) => e.preventDefault()}>
+            {/* Anchored under the field and portaled, so no capsule or pane
+                can cover it; it never takes focus from the field. */}
+            <Popover open={searchFocused && !searching} modal={false}>
+              <PopoverContent
+                anchor={searchBox}
+                className="search-panel tw:w-(--anchor-width)"
+                initialFocus={false}
+                finalFocus={false}
+                onMouseDown={(e) => e.preventDefault()}
+              >
                 {recentSearches.length > 0 && (
                   <>
                     <div className="search-panel-label">Recent</div>
@@ -2564,8 +2578,8 @@ export function Vault() {
                   Search reads names, tags, folder names, and text inside documents
                   {ocrOn ? " and images" : ""}, decrypted only on this device.
                 </div>
-              </div>
-            )}
+              </PopoverContent>
+            </Popover>
             {/* The command palette's shortcut rides inside the field, where
                 people look for it (Linear, Raycast), instead of a separate
                 button beside it. */}
@@ -2589,24 +2603,29 @@ export function Vault() {
                 setActivityOpen((open) => !open);
               }}
             />
-            <button
-              className={cn("icon-btn add-btn", capsuleIcon)}
+            <IconButton
+              size="md"
+              className={cn("add-btn tw:hidden tw:max-[760px]:inline-flex", capsuleIcon)}
+              label="Add"
               title="Add to your vault"
-              aria-label="Add"
               onClick={openAddSheet}
             >
               <PlusGlyph size={18} />
-            </button>
-            <button
-              className={cn(`icon-btn info-toggle${detailsOpen ? " active" : ""}`, capsuleIcon)}
+            </IconButton>
+            <IconButton
+              size="md"
+              className={cn("info-toggle tw:max-[760px]:hidden", capsuleIcon)}
+              label={detailsOpen ? "Hide details" : "Show details"}
               title={detailsOpen ? "Hide details (⌘⌥I)" : "Show details (⌘⌥I)"}
+              aria-pressed={detailsOpen}
               onClick={toggleDetails}
             >
               <InfoGlyph />
-            </button>
+            </IconButton>
           </div>
-          <button
-            className="btn btn-primary new-btn tw:h-10 tw:rounded-full tw:px-4 tw:shadow-(--glass-shadow)"
+          <Button
+            size="lg"
+            className="new-btn tw:rounded-full tw:shadow-(--glass-shadow) tw:max-[760px]:hidden"
             title="Upload, or create a note, document, spreadsheet or folder"
             aria-haspopup="menu"
             onClick={(event) => {
@@ -2620,7 +2639,7 @@ export function Vault() {
             <span className="new-chevron" aria-hidden="true">
               <ChevronDownGlyph size={14} />
             </span>
-          </button>
+          </Button>
           <input
             ref={fileInput}
             type="file"
@@ -2739,17 +2758,16 @@ export function Vault() {
                     }`}
             </span>
             {(searching || similarActive) && (
-              <button
-                className="icon-btn"
+              <IconButton
+                label={searching ? "Clear search" : "Back to files"}
                 onClick={() => {
                   setQuery("");
                   setSimilarTo(null);
                   setSimilarHits([]);
                 }}
-                title={searching ? "Clear search" : "Back to files"}
               >
                 <XGlyph size={13} />
-              </button>
+              </IconButton>
             )}
           </div>
           {showViewControls && (
@@ -2773,12 +2791,13 @@ export function Vault() {
                   appears. A touch screen has none of that, so it keeps an
                   explicit Select (the Files and Photos convention). */}
               {!selectMode && visibleFiles.length > 0 && (isMobile || isHandheld()) && (
-                <button
-                  className="btn btn-ghost select-toggle"
+                <Button
+                  variant="ghost"
+                  className="select-toggle"
                   onClick={() => setSelectMode(true)}
                 >
                   Select
-                </button>
+                </Button>
               )}
               <button
                 className="sort-button"
@@ -3131,12 +3150,12 @@ export function Vault() {
             <span>
               Version {updateReady} is ready. This window is running {APP_VERSION}.
             </span>
-            <button className="btn btn-primary" onClick={() => void reloadForUpdate()}>
+            <Button onClick={() => void reloadForUpdate()}>
               Reload
-            </button>
-            <button className="icon-btn" title="Later" onClick={() => setUpdateReady(null)}>
+            </Button>
+            <IconButton label="Later" onClick={() => setUpdateReady(null)}>
               <XGlyph />
-            </button>
+            </IconButton>
           </div>
         )}
         {activityOpen && (
@@ -3153,20 +3172,6 @@ export function Vault() {
             }}
           />
         )}
-        {toast &&
-          (toast.action ? (
-            <button
-              className="toast toast-action"
-              onClick={() => {
-                toast.action?.();
-                setToast(null);
-              }}
-            >
-              {toast.text} <span className="toast-go">Open</span>
-            </button>
-          ) : (
-            <div className="toast">{toast.text}</div>
-          ))}
         {store.reveal && (
           <RevealToast
             onOpen={(folderId) => {
@@ -3177,7 +3182,6 @@ export function Vault() {
           />
         )}
         <UploadTray />
-        <SaveOverlay />
         {gathering && (
           <SelectionBar
             count={selection.size}
@@ -3232,6 +3236,25 @@ export function Vault() {
             onDone={clearSelection}
           />
         )}
+      </div>
+      {/* Toasts answer an action wherever it was taken, so they stack above
+          the preview or dialog it came from; see .toast-stack. */}
+      <div className="toast-stack">
+        {toast &&
+          (toast.action ? (
+            <button
+              className="toast toast-action"
+              onClick={() => {
+                toast.action?.();
+                setToast(null);
+              }}
+            >
+              {toast.text} <span className="toast-go">Open</span>
+            </button>
+          ) : (
+            <div className="toast">{toast.text}</div>
+          ))}
+        <SaveOverlay />
       </div>
       {ctxMenu && <ContextMenu {...ctxMenu} onClose={() => setCtxMenu(null)} />}
       {moveIds && (
@@ -3526,9 +3549,9 @@ function EmptyState(props: {
           <h3>Could not reach your vault</h3>
           <p>{props.syncError}</p>
           <div className="empty-actions">
-            <button className="btn btn-primary" onClick={props.onRetry}>
+            <Button onClick={props.onRetry}>
               Try again
-            </button>
+            </Button>
           </div>
         </div>
       );
@@ -3569,9 +3592,9 @@ function EmptyState(props: {
         <h3>{props.view.kind === "album" ? "This album is empty" : "No photos yet"}</h3>
         <p>Photos and videos you add appear here as a timeline.</p>
         <div className="empty-actions">
-          <button className="btn btn-primary" onClick={props.onUpload}>
+          <Button onClick={props.onUpload}>
             Add photos
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -3582,12 +3605,12 @@ function EmptyState(props: {
       <h3>An empty shelf</h3>
       <p>Drop files anywhere, paste from the clipboard, or start writing.</p>
       <div className="empty-actions">
-        <button className="btn btn-primary" onClick={props.onUpload}>
+        <Button onClick={props.onUpload}>
           <UploadGlyph /> Upload files
-        </button>
-        <button className="btn" onClick={props.onNote}>
+        </Button>
+        <Button variant="secondary" onClick={props.onNote}>
           <NoteGlyph size={14} /> New note
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -3626,16 +3649,15 @@ function RevealToast(props: { onOpen: (folderId: string | null) => void }) {
           ))}
         </div>
       </div>
-      <button
-        className="icon-btn"
-        title="Dismiss"
+      <IconButton
+        label="Dismiss"
         onClick={(e) => {
           e.stopPropagation();
           dismiss();
         }}
       >
         <XGlyph size={14} />
-      </button>
+      </IconButton>
     </div>
   );
 }
@@ -3663,12 +3685,12 @@ function TrashList(props: {
           </div>
           <span className="row-meta">{formatBytes(file.size)}</span>
           <div className="row-actions" style={{ opacity: 1 }}>
-            <button className="icon-btn" title="Restore" onClick={() => props.onRestore(file.id)}>
+            <IconButton label="Restore" onClick={() => props.onRestore(file.id)}>
               <RestoreGlyph />
-            </button>
-            <button className="icon-btn" title="Delete forever" onClick={() => props.onDeleteForever(file.id)}>
+            </IconButton>
+            <IconButton label="Delete forever" onClick={() => props.onDeleteForever(file.id)}>
               <XGlyph />
-            </button>
+            </IconButton>
           </div>
         </div>
       ))}

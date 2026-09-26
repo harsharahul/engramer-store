@@ -26,7 +26,7 @@ function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {
     <SheetPrimitive.Backdrop
       data-slot="sheet-overlay"
       className={cn(
-        "tw:fixed tw:inset-0 tw:z-50 tw:bg-black/10 tw:transition-opacity tw:duration-150 tw:data-ending-style:opacity-0 tw:data-starting-style:opacity-0 tw:supports-backdrop-filter:backdrop-blur-xs",
+        "tw:fixed tw:inset-0 tw:z-(--z-popover) tw:bg-black/10 tw:transition-opacity tw:duration-150 tw:data-ending-style:opacity-0 tw:data-starting-style:opacity-0 tw:supports-backdrop-filter:backdrop-blur-xs",
         className
       )}
       {...props}
@@ -51,7 +51,7 @@ function SheetContent({
         data-slot="sheet-content"
         data-side={side}
         className={cn(
-          "tw:fixed tw:z-50 tw:flex tw:flex-col tw:gap-4 tw:bg-popover tw:bg-clip-padding tw:text-sm tw:text-popover-foreground tw:shadow-lg tw:transition tw:duration-200 tw:ease-in-out tw:data-ending-style:opacity-0 tw:data-starting-style:opacity-0 tw:data-[side=bottom]:inset-x-0 tw:data-[side=bottom]:bottom-0 tw:data-[side=bottom]:h-auto tw:data-[side=bottom]:border-t tw:data-[side=bottom]:data-ending-style:translate-y-[2.5rem] tw:data-[side=bottom]:data-starting-style:translate-y-[2.5rem] tw:data-[side=left]:inset-y-0 tw:data-[side=left]:left-0 tw:data-[side=left]:h-full tw:data-[side=left]:w-3/4 tw:data-[side=left]:border-r tw:data-[side=left]:data-ending-style:translate-x-[-2.5rem] tw:data-[side=left]:data-starting-style:translate-x-[-2.5rem] tw:data-[side=right]:inset-y-0 tw:data-[side=right]:right-0 tw:data-[side=right]:h-full tw:data-[side=right]:w-3/4 tw:data-[side=right]:border-l tw:data-[side=right]:data-ending-style:translate-x-[2.5rem] tw:data-[side=right]:data-starting-style:translate-x-[2.5rem] tw:data-[side=top]:inset-x-0 tw:data-[side=top]:top-0 tw:data-[side=top]:h-auto tw:data-[side=top]:border-b tw:data-[side=top]:data-ending-style:translate-y-[-2.5rem] tw:data-[side=top]:data-starting-style:translate-y-[-2.5rem] tw:data-[side=left]:sm:max-w-sm tw:data-[side=right]:sm:max-w-sm",
+          "tw:fixed tw:z-(--z-popover) tw:flex tw:flex-col tw:gap-4 tw:bg-popover tw:bg-clip-padding tw:text-sm tw:text-popover-foreground tw:shadow-lg tw:transition tw:duration-200 tw:ease-in-out tw:data-ending-style:opacity-0 tw:data-starting-style:opacity-0 tw:data-[side=bottom]:inset-x-0 tw:data-[side=bottom]:bottom-0 tw:data-[side=bottom]:h-auto tw:data-[side=bottom]:border-t tw:data-[side=bottom]:data-ending-style:translate-y-[2.5rem] tw:data-[side=bottom]:data-starting-style:translate-y-[2.5rem] tw:data-[side=left]:inset-y-0 tw:data-[side=left]:left-0 tw:data-[side=left]:h-full tw:data-[side=left]:w-3/4 tw:data-[side=left]:border-r tw:data-[side=left]:data-ending-style:translate-x-[-2.5rem] tw:data-[side=left]:data-starting-style:translate-x-[-2.5rem] tw:data-[side=right]:inset-y-0 tw:data-[side=right]:right-0 tw:data-[side=right]:h-full tw:data-[side=right]:w-3/4 tw:data-[side=right]:border-l tw:data-[side=right]:data-ending-style:translate-x-[2.5rem] tw:data-[side=right]:data-starting-style:translate-x-[2.5rem] tw:data-[side=top]:inset-x-0 tw:data-[side=top]:top-0 tw:data-[side=top]:h-auto tw:data-[side=top]:border-b tw:data-[side=top]:data-ending-style:translate-y-[-2.5rem] tw:data-[side=top]:data-starting-style:translate-y-[-2.5rem] tw:data-[side=left]:sm:max-w-sm tw:data-[side=right]:sm:max-w-sm",
           className
         )}
         {...props}
