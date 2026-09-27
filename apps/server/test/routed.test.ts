@@ -257,7 +257,7 @@ describe("content bookends", () => {
     expect(derived.blobs.size).toBe(0);
   });
 
-  it("a part upload leaves bookends sized from its parts", async () => {
+  it("a part upload leaves bookends sized from the part sizes the caller supplies", async () => {
     const primary = new FakeStore();
     const derived = new FakeStore();
     const routed = new RoutedBlobStore(primary, derived, GEOMETRY);
@@ -265,10 +265,57 @@ describe("content bookends", () => {
     const handle = await routed.beginParts("parted");
     await routed.putPart("parted", handle, 1, Readable.from(blob.subarray(0, 24)), 24);
     await routed.putPart("parted", handle, 2, Readable.from(blob.subarray(24)), 16);
-    await routed.completeParts("parted", handle, [{ partNo: 1 }, { partNo: 2 }], true);
+    await routed.completeParts(
+      "parted",
+      handle,
+      [
+        { partNo: 1, bytes: 24 },
+        { partNo: 2, bytes: 16 },
+      ],
+      true,
+    );
     await until(() => derived.blobs.has("parted.bhead") && derived.blobs.has("parted.btail"));
     expect(derived.blobs.get("parted.bhead")).toEqual(blob.subarray(0, 8));
     expect(derived.blobs.get("parted.btail")).toEqual(blob.subarray(SIZE - 16));
+  });
+
+  it("bookends are right when another instance received some of the parts", async () => {
+    // Two pods share the backends; parts land on whichever pod the client
+    // reaches, and the pod that completes the upload may have seen none
+    // of them. The sizes travel with the completion, never from memory.
+    const primary = new FakeStore();
+    const derived = new FakeStore();
+    const podA = new RoutedBlobStore(primary, derived, GEOMETRY);
+    const podB = new RoutedBlobStore(primary, derived, GEOMETRY);
+    const blob = patterned(SIZE);
+    const handle = await podA.beginParts("split");
+    await podA.putPart("split", handle, 1, Readable.from(blob.subarray(0, 24)), 24);
+    await podB.putPart("split", handle, 2, Readable.from(blob.subarray(24)), 16);
+    await podB.completeParts(
+      "split",
+      handle,
+      [
+        { partNo: 1, bytes: 24 },
+        { partNo: 2, bytes: 16 },
+      ],
+      true,
+    );
+    await until(() => derived.blobs.has("split.bhead") && derived.blobs.has("split.btail"));
+    expect(derived.blobs.get("split.btail")).toEqual(blob.subarray(SIZE - 16));
+  });
+
+  it("a completion without part sizes leaves no bookends rather than wrong ones", async () => {
+    const primary = new FakeStore();
+    const derived = new FakeStore();
+    const routed = new RoutedBlobStore(primary, derived, GEOMETRY);
+    const blob = patterned(SIZE);
+    const handle = await routed.beginParts("unsized");
+    await routed.putPart("unsized", handle, 1, Readable.from(blob.subarray(0, 24)), 24);
+    await routed.putPart("unsized", handle, 2, Readable.from(blob.subarray(24)), 16);
+    await routed.completeParts("unsized", handle, [{ partNo: 1 }, { partNo: 2 }], true);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(primary.blobs.get("unsized")).toEqual(blob);
+    expect(derived.blobs.size).toBe(0);
   });
 
   it("removing a content blob removes its bookends", async () => {

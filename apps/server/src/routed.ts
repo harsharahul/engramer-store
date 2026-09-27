@@ -1,5 +1,11 @@
 import { Readable } from "node:stream";
-import { BlobNotFoundError, type BlobRange, type BlobStore, type PartReceipt } from "./blobs.js";
+import {
+  BlobNotFoundError,
+  partsTotal,
+  type BlobRange,
+  type BlobStore,
+  type PartReceipt,
+} from "./blobs.js";
 import { inBackground } from "./budget.js";
 import { bufferUpTo } from "./streams.js";
 
@@ -33,8 +39,6 @@ export class RoutedBlobStore implements BlobStore {
 
   /** Bookend copies being written right now, deduplicated per key. */
   private readonly healing = new Set<string>();
-  /** Part sizes per open session, so completeParts knows the blob size. */
-  private readonly partBytes = new Map<string, Map<number, number>>();
 
   constructor(
     private readonly primary: BlobStore,
@@ -176,35 +180,27 @@ export class RoutedBlobStore implements BlobStore {
     source: Readable,
     length: number,
   ): Promise<PartReceipt> {
-    const receipt = await this.backendFor(key).putPart(key, handle, partNo, source, length);
-    if (!this.isDerived(key)) {
-      const session = this.partBytes.get(`${key}:${handle}`) ?? new Map<number, number>();
-      session.set(partNo, receipt.bytes);
-      this.partBytes.set(`${key}:${handle}`, session);
-    }
-    return receipt;
+    return this.backendFor(key).putPart(key, handle, partNo, source, length);
   }
 
   async completeParts(
     key: string,
     handle: string,
-    parts: { partNo: number; etag?: string }[],
+    parts: { partNo: number; etag?: string; bytes?: number }[],
     seekable?: boolean,
   ): Promise<void> {
     await this.backendFor(key).completeParts(key, handle, parts);
-    const session = this.partBytes.get(`${key}:${handle}`);
-    this.partBytes.delete(`${key}:${handle}`);
-    if (session && seekable && !this.isDerived(key)) {
-      let total = 0;
-      for (const part of parts) {
-        total += session.get(part.partNo) ?? 0;
-      }
+    // The blob's size comes with the completion, from the sizes recorded
+    // when each part landed. Parts of one upload can land on different
+    // server instances, so nothing here remembers them; a completion that
+    // does not say leaves the bookends to the demand-driven heal in get().
+    const total = partsTotal(parts);
+    if (total !== null && seekable && !this.isDerived(key)) {
       this.copyBookends(key, total);
     }
   }
 
   async abortParts(key: string, handle: string): Promise<void> {
-    this.partBytes.delete(`${key}:${handle}`);
     await this.backendFor(key).abortParts(key, handle);
   }
 }

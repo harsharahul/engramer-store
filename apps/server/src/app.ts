@@ -37,6 +37,8 @@ declare module "fastify" {
     seqEvents: SeqEvents;
     /** Identifies this process in shared presence rows. */
     podId: string;
+    /** True from the moment close() begins: the readiness probe says so. */
+    draining: boolean;
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 }
@@ -74,6 +76,10 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   const app = Fastify({
     bodyLimit: 16 * 1024 * 1024,
     trustProxy: typeof trusted === "number" ? (_address: string, hop: number) => hop < trusted : trusted,
+    // Longer than the reverse proxy's idle timeout for upstream sockets
+    // (Traefik: 90s), so the proxy never reuses a keep-alive connection
+    // Node is closing at that same moment; that race is a stray 502.
+    keepAliveTimeout: 95_000,
     // Structured request logs to stdout for whatever ships container logs
     // off the node. Off by default; even when on, entries carry only what
     // the server already sees: method, path (opaque ids), status, timing.
@@ -139,6 +145,14 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     }
   } else {
     blobs = new FsBlobStore(config.blobDir);
+    if (config.databaseUrl) {
+      // Local blobs and a shared database work for one instance only: a
+      // second pod has a different disk, and the parts of a resumable
+      // upload land as files on whichever pod received them.
+      console.warn(
+        "engramer-store: blobs are on local disk while metadata is in PostgreSQL; run one instance, or configure ENGRAMER_S3_BUCKET before adding replicas",
+      );
+    }
   }
 
   app.decorate("config", config);
@@ -150,9 +164,13 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   // mutation makes on other accounts; the change feed watches it there.
   db.onSeq = (userId, seq) => app.seqEvents.note(userId, seq);
   app.decorate("podId", randomUUID());
+  app.decorate("draining", false);
   // Held event streams would otherwise keep close() waiting forever;
-  // the websocket plugin drains its own clients the same way.
+  // the websocket plugin drains its own clients the same way. Readiness
+  // flips first, so the load balancer stops routing here while the
+  // streams end and requests in flight finish.
   app.addHook("preClose", async () => {
+    app.draining = true;
     app.seqEvents.closeAll();
   });
   app.addHook("onClose", async () => {
@@ -345,7 +363,29 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
 
   // Frames beyond this size are a protocol violation, not a big document:
   // real content travels through the blob store, never the relay.
-  await app.register(websocket, { options: { maxPayload: 256 * 1024 } });
+  // On close every socket is told 1012 ("service restart"), which the
+  // client reads as "dial again"; the plugin's own default sends no code
+  // and then waits up to 30s for peers that never answer the handshake.
+  await app.register(websocket, {
+    options: { maxPayload: 256 * 1024 },
+    preClose: function (this: FastifyInstance, done: (err?: Error) => void) {
+      const server = this.websocketServer;
+      const open = [...server.clients];
+      for (const client of open) {
+        client.close(1012, "service restart");
+      }
+      const terminate = setTimeout(() => {
+        for (const client of open) {
+          client.terminate();
+        }
+      }, 2_000);
+      terminate.unref();
+      server.close(() => {
+        clearTimeout(terminate);
+        done();
+      });
+    },
+  });
 
   registerAuthRoutes(app);
   registerAdminRoutes(app);
@@ -360,7 +400,20 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     registerEventsRoutes(app);
   }
 
+  // Liveness: the process answers. Never tied to the database, so a
+  // database blip does not restart pods; the server picker in the native
+  // apps and the container HEALTHCHECK read this exact body.
   app.get("/api/health", async () => ({ status: "ok" }));
+  // Readiness: this instance may receive new work. 503 only while draining
+  // (a pod leaving the set), by design not on database health: that would
+  // take every replica out of service at once for a blip the requests
+  // themselves already report.
+  app.get("/api/ready", async (_request, reply) => {
+    if (app.draining) {
+      return reply.code(503).send({ status: "draining" });
+    }
+    return { status: "ready" };
+  });
 
   if (config.webDistDir && existsSync(config.webDistDir)) {
     /**

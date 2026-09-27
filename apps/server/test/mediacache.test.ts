@@ -198,7 +198,7 @@ describe("MediaWindowCache", () => {
     expect(backing.gets).toBe(0);
   });
 
-  it("warms after a part upload completes, sized from the parts", async () => {
+  it("warms after a part upload completes, sized from the part sizes the caller supplies", async () => {
     const backing = new CountingStore();
     const half = patterned(WINDOW * 2).subarray(0, WINDOW);
     const rest = patterned(WINDOW * 2).subarray(WINDOW);
@@ -206,11 +206,47 @@ describe("MediaWindowCache", () => {
     const handle = await cache.beginParts("file-6");
     await cache.putPart("file-6", handle, 1, Readable.from(half), half.length);
     await cache.putPart("file-6", handle, 2, Readable.from(rest), rest.length);
-    await cache.completeParts("file-6", handle, [{ partNo: 1 }, { partNo: 2 }], true);
+    await cache.completeParts(
+      "file-6",
+      handle,
+      [
+        { partNo: 1, bytes: half.length },
+        { partNo: 2, bytes: rest.length },
+      ],
+      true,
+    );
     await cache.quiet();
     expect(windowFiles(dir)).toBe(2);
     backing.gets = 0;
     const tail = await read(await cache.get("file-6", { start: WINDOW, end: WINDOW * 2 - 1 }));
+    expect(tail).toEqual(rest);
+    expect(backing.gets).toBe(0);
+  });
+
+  it("warms the right windows when another instance received the parts", async () => {
+    // The completing pod may have seen none of the parts; the total comes
+    // with the completion, so a pod-local record is never consulted.
+    const backing = new CountingStore();
+    const half = patterned(WINDOW * 2).subarray(0, WINDOW);
+    const rest = patterned(WINDOW * 2).subarray(WINDOW);
+    const { cache: podA } = makeCache(backing);
+    const { cache: podB, dir: dirB } = makeCache(backing);
+    const handle = await podA.beginParts("file-9");
+    await podA.putPart("file-9", handle, 1, Readable.from(half), half.length);
+    await podA.putPart("file-9", handle, 2, Readable.from(rest), rest.length);
+    await podB.completeParts(
+      "file-9",
+      handle,
+      [
+        { partNo: 1, bytes: half.length },
+        { partNo: 2, bytes: rest.length },
+      ],
+      true,
+    );
+    await podB.quiet();
+    expect(windowFiles(dirB)).toBe(2);
+    backing.gets = 0;
+    const tail = await read(await podB.get("file-9", { start: WINDOW, end: WINDOW * 2 - 1 }));
     expect(tail).toEqual(rest);
     expect(backing.gets).toBe(0);
   });

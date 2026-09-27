@@ -17,6 +17,29 @@ All notable changes to Engram Store are documented here, following
   icon rail ran a 200 ms linear slide while the content columns and the
   toolbar's inset jumped. All of them now move together over 300 ms on
   one easing curve; reduced-motion settings keep the instant switch.
+- **The server stops cleanly and survives a database failover.** On
+  SIGTERM it stops taking new work (`/api/ready` answers 503), ends its
+  change feeds and channel sockets on purpose (websockets close with
+  1012, "service restart", which the editor reads as "dial again"), lets
+  requests in flight finish, and exits. A dropped idle PostgreSQL
+  connection, as a failover leaves behind, is reconnected on the next
+  query instead of ending the process, and a transaction PostgreSQL
+  aborts as a deadlock victim runs once more instead of failing the
+  save. The container runs Node as its first process so the signal
+  reaches the server directly.
+- **Settings that only work for one server instance are refused with
+  PostgreSQL.** A missing `ENGRAMER_JWT_SECRET` (each instance would sign
+  sessions with its own key) and `ENGRAMER_DERIVED_BACKEND=fs` (each
+  instance would keep its own thumbnails) stop the server at startup
+  with the reason; blobs on local disk with PostgreSQL log a warning.
+- **A resumable upload completed by a different server instance keeps
+  its bytes right.** Part sizes now travel with the completion instead
+  of being remembered by the instance that received the parts; the
+  upload's session rows are removed in the same transaction as the
+  commit, so a retry after a crash no longer reports a conflict for
+  bytes that were saved. Sharing changes (role, revoke, leave) and
+  account deletion announce themselves only once their rows are
+  committed.
 
 ## [0.57.0] - 2026-09-25
 

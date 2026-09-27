@@ -27,6 +27,13 @@ export class PostgresDb implements Db {
   constructor(connectionString: string) {
     this.pool = new pg.Pool({
       connectionString,
+      max: 10,
+      // A request must not wait forever for a connection while the
+      // database fails over; five seconds is longer than any switchover
+      // the operator performs, short enough to surface as an error.
+      connectionTimeoutMillis: 5_000,
+      idleTimeoutMillis: 30_000,
+      keepAlive: true,
       types: {
         getTypeParser: (oid: number, format?: string) => {
           if (oid === 20 || oid === 1700) {
@@ -38,6 +45,12 @@ export class PostgresDb implements Db {
           );
         },
       } as unknown as pg.CustomTypesConfig,
+    });
+    // An idle connection dropped by a failover or a restart raises an error
+    // on the pool; without a listener Node treats it as uncaught and the
+    // whole process dies with it. The next checkout simply opens a new one.
+    this.pool.on("error", (err) => {
+      console.warn(`postgres: idle connection error, reconnecting on next use: ${err.message}`);
     });
   }
 
@@ -86,6 +99,21 @@ export class PostgresDb implements Db {
   }
 
   async tx<T>(fn: (t: Db) => Promise<T>): Promise<T> {
+    try {
+      return await this.runTx(fn);
+    } catch (err) {
+      // Two writers that lock the same user rows in different orders
+      // deadlock, and PostgreSQL aborts one of them (40P01). The callback
+      // only touched the database, and the rollback undid all of it, so
+      // running it once more is the right answer, not a 500.
+      if ((err as { code?: string }).code === "40P01") {
+        return await this.runTx(fn);
+      }
+      throw err;
+    }
+  }
+
+  private async runTx<T>(fn: (t: Db) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");

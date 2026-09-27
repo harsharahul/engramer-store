@@ -178,8 +178,10 @@ export function registerStorageRoutes(app: FastifyInstance): void {
    * from its member's counter. Runs inside the mutation's transaction.
    */
   const touchCollaborators = async (t: Db, fileId: string, now: number) => {
+    // Members in id order: two writers bumping the same accounts in
+    // different orders is how row locks deadlock on PostgreSQL.
     for (const member of await t.all<{ user_id: number }>(
-      "SELECT user_id FROM file_collaborators WHERE file_id = ? AND revoked = 0",
+      "SELECT user_id FROM file_collaborators WHERE file_id = ? AND revoked = 0 ORDER BY user_id",
       fileId,
     )) {
       await t.run(
@@ -592,6 +594,11 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     contentHash: string | null,
     channel?: ChannelAction,
     meta?: { metaUpdate: string | null; role: string },
+    /** Rows that must vanish in the same transaction as the commit (an
+     * upload session, once its bytes are the file): a crash between the
+     * two would otherwise leave a session whose retry is a 409 for bytes
+     * that were in fact committed. */
+    cleanup?: (t: Db) => Promise<void>,
   ) => {
     const keepsVersions = app.config.maxVersions > 0;
     const replacesContent = file.uploaded === 1;
@@ -738,6 +745,9 @@ export function registerStorageRoutes(app: FastifyInstance): void {
               );
             }
           }
+        }
+        if (cleanup) {
+          await cleanup(t);
         }
       });
     } catch (err) {
@@ -1012,17 +1022,21 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       await dropSession(row);
       return reply.code(409).send({ error: "the file changed while saving; retry" });
     }
+    // The recorded part sizes travel with the completion: the instance
+    // assembling the blob may have received none of the parts itself.
     await app.blobs.completeParts(
       row.blob_key,
       row.handle,
-      parts.map((p) => ({ partNo: Number(p.part_no), etag: p.etag ?? undefined })),
+      parts.map((p) => ({ partNo: Number(p.part_no), etag: p.etag ?? undefined, bytes: Number(p.bytes) })),
       file.seekable === 1,
     );
     const nextGen = file.uploaded === 1 ? file.generation + 1 : file.generation;
     // A blob assembled from parts was never in one stream to hash, so it has
     // no digest until something reads it. The check records one then, and
     // says so, rather than pretending the file was verified on arrival.
-    const result = await commitData(
+    // The session's rows go with the commit itself: once the bytes are the
+    // file there is nothing to resume, and nothing to retry into a 409.
+    return commitData(
       reply,
       file.user_id,
       id,
@@ -1032,10 +1046,12 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       total,
       null,
       await channelPlan(id, request.headers, uid),
+      undefined,
+      async (t) => {
+        await t.run("DELETE FROM upload_parts WHERE session_id = ?", row.id);
+        await t.run("DELETE FROM upload_sessions WHERE id = ?", row.id);
+      },
     );
-    await app.db.run("DELETE FROM upload_parts WHERE session_id = ?", row.id);
-    await app.db.run("DELETE FROM upload_sessions WHERE id = ?", row.id);
-    return result;
   });
 
   app.delete("/api/files/:id/data/parts/:session", auth, async (request, reply) => {

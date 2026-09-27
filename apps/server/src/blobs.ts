@@ -45,6 +45,20 @@ export class BlobNotFoundError extends Error {
   }
 }
 
+/** The blob's size from a completion's part sizes, or null when any part
+ * arrived without one (an older caller): a size guessed from a subset
+ * would place bookends and windows at the wrong offsets. */
+export function partsTotal(parts: { bytes?: number }[]): number | null {
+  let total = 0;
+  for (const part of parts) {
+    if (typeof part.bytes !== "number" || !Number.isFinite(part.bytes)) {
+      return null;
+    }
+    total += part.bytes;
+  }
+  return total;
+}
+
 export interface PartReceipt {
   bytes: number;
   etag?: string;
@@ -88,11 +102,14 @@ export interface BlobStore {
     length: number,
   ): Promise<PartReceipt>;
   /** Assembles the session's parts into the final blob at the key.
-   * `seekable` carries the same hint as put(). */
+   * `seekable` carries the same hint as put(); `bytes` per part is the
+   * size recorded when it landed, so a store that derives anything from
+   * the blob's size (bookends, cache windows) never has to remember parts
+   * that may have arrived on another server instance. */
   completeParts(
     key: string,
     handle: string,
-    parts: { partNo: number; etag?: string }[],
+    parts: { partNo: number; etag?: string; bytes?: number }[],
     seekable?: boolean,
   ): Promise<void>;
   /** Discards a session's parts; safe to call on unknown handles. */
