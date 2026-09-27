@@ -453,6 +453,10 @@ export const COMMON_SCHEMA = `
       created_at BIGINT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS auth_challenges_user ON auth_challenges(user_id, kind, created_at);
+    CREATE TABLE IF NOT EXISTS pods (
+      pod_id TEXT PRIMARY KEY,
+      last_seen BIGINT NOT NULL
+    );
 `;
 
 /** Embedded SQLite behind the async facade; every call is synchronous

@@ -3,7 +3,11 @@ import { rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import type { BlobRange, BlobStore, PartReceipt } from "./blobs.js";
+import type { Bus } from "./bus.js";
 import { bufferUpTo } from "./streams.js";
+
+/** The bus channel that carries "drop this key" between instances. */
+export const BLOB_CHANNEL = "engram_blob";
 
 /**
  * Read-through disk cache in front of a remote blob store, for two blob
@@ -41,17 +45,35 @@ export class DiskCachedBlobStore implements BlobStore {
   private readonly perEntryCap: number;
   private readonly cacheDerived: boolean;
   private readonly contentMaxBytes: number;
+  /** Per key, bumped by every drop: a read that began before a drop must
+   * not admit the bytes it fetched, which are the ones just overwritten. */
+  private readonly epochs = new Map<string, number>();
+  private readonly bus: Bus | null;
 
   constructor(
     private readonly backing: BlobStore,
     private readonly dir: string,
     private readonly maxBytes: number,
-    opts?: { cacheDerived?: boolean; contentMaxBytes?: number },
+    opts?: { cacheDerived?: boolean; contentMaxBytes?: number; bus?: Bus },
   ) {
     // A single entry may not squeeze everything else out of a small budget.
     this.perEntryCap = Math.min(4 * 1024 * 1024, Math.floor(maxBytes / 2));
     this.cacheDerived = opts?.cacheDerived ?? true;
     this.contentMaxBytes = opts?.contentMaxBytes ?? 0;
+    this.bus = opts?.bus ?? null;
+    if (this.bus) {
+      // Another instance overwrote or removed a key: our copy is stale.
+      this.bus.subscribe(BLOB_CHANNEL, (key) => {
+        void this.dropLocal(key);
+      });
+      // Whatever was announced while the listener was down is unknown, and
+      // derived entries are cheap to fill again.
+      this.bus.onReconnect((first) => {
+        if (!first) {
+          void this.dropDerived();
+        }
+      });
+    }
     mkdirSync(dir, { recursive: true });
     const found: Array<{ key: string; size: number; mtime: number }> = [];
     for (const name of readdirSync(dir)) {
@@ -108,6 +130,18 @@ export class DiskCachedBlobStore implements BlobStore {
    * lazy unlink is safe.
    */
   private async drop(key: string): Promise<void> {
+    await this.dropLocal(key);
+    if (this.bus) {
+      // Every other instance's copy is as stale as ours was.
+      this.bus.publish(BLOB_CHANNEL, key).catch(() => {});
+    }
+  }
+
+  private async dropLocal(key: string): Promise<void> {
+    if (!this.cacheable(key)) {
+      return;
+    }
+    this.epochs.set(key, (this.epochs.get(key) ?? 0) + 1);
     const size = this.index.get(key);
     if (size !== undefined) {
       this.index.delete(key);
@@ -116,7 +150,15 @@ export class DiskCachedBlobStore implements BlobStore {
     await unlink(this.path(key)).catch(() => {});
   }
 
-  private async admit(key: string, bytes: Buffer): Promise<void> {
+  private async dropDerived(): Promise<void> {
+    for (const key of [...this.index.keys()]) {
+      if (this.derivedClass(key)) {
+        await this.dropLocal(key);
+      }
+    }
+  }
+
+  private async admit(key: string, bytes: Buffer, epoch: number): Promise<void> {
     const tmp = join(this.dir, `.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     try {
       await writeFile(tmp, bytes, { mode: 0o600 });
@@ -124,6 +166,14 @@ export class DiskCachedBlobStore implements BlobStore {
     } catch {
       await unlink(tmp).catch(() => {});
       return; // cache admission is best-effort; the backing store answered
+    }
+    // Checked once the file is in place, with nothing awaited between here
+    // and the index: a drop that landed while these bytes were on their way
+    // means they were just overwritten, and a drop that ran before the
+    // rename could not have removed a file that was not there yet.
+    if ((this.epochs.get(key) ?? 0) !== epoch) {
+      await unlink(this.path(key)).catch(() => {});
+      return;
     }
     const prior = this.index.get(key);
     if (prior !== undefined) {
@@ -151,6 +201,7 @@ export class DiskCachedBlobStore implements BlobStore {
       this.index.set(key, size);
       return createReadStream(this.path(key));
     }
+    const epoch = this.epochs.get(key) ?? 0;
     const source = await this.backing.get(key);
     // Buffer up to the class's cap so the bytes can be both served and
     // admitted. Past the cap, serve straight through, no admission.
@@ -159,7 +210,9 @@ export class DiskCachedBlobStore implements BlobStore {
     if (result.kind === "stream") {
       return result.stream;
     }
-    await this.admit(key, result.bytes);
+    // A drop that landed while these bytes were in flight means they were
+    // just overwritten: serve them to this reader, keep them from the next.
+    await this.admit(key, result.bytes, epoch);
     return Readable.from(result.bytes);
   }
 

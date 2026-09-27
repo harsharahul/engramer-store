@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import type { WebSocket } from "ws";
 import { nextChannelSeq } from "../db.js";
 import type { Connection } from "../collabhub.js";
+import { membersFrame as buildMembersFrame } from "../presence.js";
 
 /**
  * The blind relay: an ordered, append-only channel per document.
@@ -103,38 +104,10 @@ export function registerChannelRoutes(app: FastifyInstance): void {
         socket.close(code);
       };
 
-      // Who is here, by name. Everyone on this list was invited to this
-      // document by its owner, and an editor showing "member 2" tells a
-      // person nothing about who is typing beside them. Identity travels
-      // no further than the document's own membership.
-      const membersFrame = async () => ({
-        t: "members",
-        members: (
-          await app.db.all<{
-            conn_id: string;
-            user_index: number;
-            role: string | null;
-            email: string;
-            display_name: string | null;
-          }>(
-            `SELECT p.conn_id, p.user_index, p.role, u.email, u.display_name
-               FROM channel_presence p JOIN users u ON u.id = p.user_id
-              WHERE p.file_id = ? AND p.last_seen > ?`,
-            fileId,
-            Date.now() - PRESENCE_TTL_MS,
-          )
-        ).map((row) => ({
-          connId: row.conn_id,
-          index: row.user_index,
-          // What this connection may do, so clients can elect a member
-          // that is actually allowed to write the checkpoint.
-          role: row.role ?? undefined,
-          // The name they chose, or their address if they chose none: an
-          // account has no name until someone sets one, and a blank label
-          // beside a cursor is worse than an address.
-          name: row.display_name ?? row.email,
-        })),
-      });
+      // Who is here, by name, built from the shared presence table so every
+      // instance shows the same room (see presence.ts).
+      const membersFrame = () => buildMembersFrame(app.db, fileId);
+      let recheck: NodeJS.Timeout | undefined;
 
       void (async () => {
         // Single-use claim: the delete is the authentication, and two
@@ -183,6 +156,23 @@ export function registerChannelRoutes(app: FastifyInstance): void {
         );
         app.hub.join(fileId, conn);
         joined = true;
+        // Access is checked at join and then again on a timer: a revoke
+        // reaches the socket's own instance at once through hub.evict, but
+        // one delivered to another instance can be lost with its
+        // notification, and a disabled account must lose its sockets too.
+        recheck = setInterval(() => {
+          void (async () => {
+            const role = await accessRole(fileId, claimed.user_id);
+            const account = await app.db.get<{ disabled: number }>(
+              "SELECT disabled FROM users WHERE id = ?",
+              claimed.user_id,
+            );
+            if (!role || !account || account.disabled === 1) {
+              refuse(4403);
+            }
+          })().catch(() => {});
+        }, app.config.channelRecheckMs);
+        recheck.unref?.();
         drainEarly();
         app.hub.broadcast(fileId, await membersFrame());
       })().catch(() => refuse(1011));
@@ -320,6 +310,18 @@ export function registerChannelRoutes(app: FastifyInstance): void {
               );
               return;
             }
+            case "ping": {
+              // The client's keepalive doubles as presence: a member who
+              // only reads still counts as here, and a save elsewhere still
+              // has to wait for them.
+              await app.db.run(
+                "UPDATE channel_presence SET last_seen = ? WHERE file_id = ? AND conn_id = ?",
+                Date.now(),
+                fileId,
+                connId,
+              );
+              return;
+            }
             default:
               return;
           }
@@ -350,6 +352,9 @@ export function registerChannelRoutes(app: FastifyInstance): void {
       });
 
       socket.on("close", () => {
+        if (recheck) {
+          clearInterval(recheck);
+        }
         void (async () => {
           if (!joined) {
             return;

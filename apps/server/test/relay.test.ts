@@ -76,6 +76,7 @@ class Client {
   private frames: Frame[] = [];
   private waiters: Array<() => void> = [];
   closed = false;
+  closeCode: number | undefined;
 
   constructor(ticket: string) {
     this.socket = new WebSocket(`${base}/api/collab/${fileId}/channel?ticket=${ticket}`);
@@ -83,8 +84,9 @@ class Client {
       this.frames.push(JSON.parse(String(data)) as Frame);
       this.waiters.splice(0).forEach((wake) => wake());
     });
-    this.socket.on("close", () => {
+    this.socket.on("close", (code) => {
       this.closed = true;
+      this.closeCode = code;
       this.waiters.splice(0).forEach((wake) => wake());
     });
   }
@@ -145,7 +147,7 @@ async function connect(account: TestAccount, hello: Frame = { t: "hello", lastSe
 beforeAll(async () => {
   await ready();
   dataDir = mkdtempSync(join(tmpdir(), "engramer-relay-test-"));
-  app = await buildApp({ dataDir, quotaBytes: 512 * 1024, webDistDir: null });
+  app = await buildApp({ dataDir, quotaBytes: 512 * 1024, webDistDir: null, channelRecheckMs: 300 });
   await app.listen({ port: 0, host: "127.0.0.1" });
   const address = app.server.address();
   if (typeof address === "string" || !address) {
@@ -1373,5 +1375,55 @@ describe("the room answers who it reaches", () => {
     a.close();
     b.close();
     await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+});
+
+describe("a socket keeps proving it belongs", () => {
+  const uidOf = async (account: TestAccount) =>
+    Number((await app.db.get<{ id: number }>("SELECT id FROM users WHERE email = ?", account.email))!.id);
+
+  it("counts a reader's keepalive as presence", async () => {
+    const a = await connect(member);
+    const welcome = await a.next((f) => f.t === "welcome");
+    await a.next((f) => f.t === "caught-up");
+    const before = await app.db.get<{ last_seen: number }>(
+      "SELECT last_seen FROM channel_presence WHERE conn_id = ?",
+      welcome.you,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    a.send({ t: "ping" });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const after = await app.db.get<{ last_seen: number }>(
+      "SELECT last_seen FROM channel_presence WHERE conn_id = ?",
+      welcome.you,
+    );
+    expect(Number(after!.last_seen)).toBeGreaterThan(Number(before!.last_seen));
+    a.close();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+
+  it("closes with 4403 within one re-check when access ends behind its back", async () => {
+    // A revoke that reached another instance's hub, and whose notification
+    // was lost, must still end this socket: the timer re-reads access.
+    const a = await connect(member);
+    await a.next((f) => f.t === "welcome");
+    await a.next((f) => f.t === "caught-up");
+    const uid = await uidOf(member);
+    await app.db.run(
+      "UPDATE file_collaborators SET revoked = 1 WHERE file_id = ? AND user_id = ?",
+      fileId,
+      uid,
+    );
+    const deadline = Date.now() + 2_000;
+    while (!a.closed && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(a.closed).toBe(true);
+    expect(a.closeCode).toBe(4403);
+    await app.db.run(
+      "UPDATE file_collaborators SET revoked = 0 WHERE file_id = ? AND user_id = ?",
+      fileId,
+      uid,
+    );
   });
 });

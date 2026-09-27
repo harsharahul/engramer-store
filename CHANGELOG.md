@@ -17,6 +17,20 @@ All notable changes to Engram Store are documented here, following
   busy table instead of queuing live traffic behind it.
   `ENGRAMER_DATABASE_LISTEN_URL` points the listener at the primary when
   the pool goes through a pooler.
+- **Live documents and caches stay coherent across server instances.**
+  Co-editors whose sockets sit on different instances now see each
+  other's changes, cursors, snapshot notices and the members list; a
+  document frame crosses as its position in the log and is re-read by
+  the receiving instance, so a lost notification is repaired by the next
+  one and a member's name never rides a notification. Revoking a
+  collaborator closes their socket on every instance, and every socket
+  re-checks its access once a minute besides. Each instance records a
+  heartbeat; presence rows left by an instance that died no longer hold
+  a document's saves for 90 seconds, an instance leaving on purpose
+  removes its rows, and a reader's keepalive keeps it counted as present.
+  Thumbnail, index and media-window caches drop an entry on every
+  instance when one of them overwrites or removes it, and a read that was
+  in flight during the drop never caches what it fetched.
 
 ### Fixed
 - **The Mac traffic lights stay on the toolbar's centre line.** 0.57.0
