@@ -19,9 +19,57 @@ login-failure throttle is a database table, so every instance sees the same
 counters. Queries are indexed for large libraries on both backends,
 including the folder-tree recursion and per-folder listings.
 
-Run one server instance per deployment for now; that remains the supported
-topology, and the PostgreSQL backend is what makes restarts and rescheduling
-instant since no instance-local state matters anymore.
+## Running more than one instance
+
+With metadata in PostgreSQL and blobs in an object store, several server
+instances can serve one deployment behind a load balancer, and a rolling
+update replaces them one at a time with no downtime. What has to hold:
+
+- `ENGRAMER_DATABASE_URL` and `ENGRAMER_S3_BUCKET` are set. Local-disk
+  blobs are one instance's disk; the server logs a warning when it sees
+  PostgreSQL without an object store.
+- `ENGRAMER_JWT_SECRET` is set and shared. The server refuses to start
+  without it on PostgreSQL: a per-instance secret would sign sessions one
+  instance cannot verify for the next.
+- `ENGRAMER_DERIVED_BACKEND=fs` is not used; the server refuses it on
+  PostgreSQL. Thumbnails and indexes belong on the object store (or a
+  second bucket), where every instance can reach them.
+- The instances reach the PostgreSQL primary directly. Each one holds a
+  dedicated `LISTEN` connection (`ENGRAMER_DATABASE_LISTEN_URL` when the
+  pool goes through a pooler; transaction-mode poolers drop
+  subscriptions silently).
+
+The instances coordinate through PostgreSQL itself, on `LISTEN/NOTIFY`:
+
+- The per-user sequence bump that announces a change also notifies the
+  other instances, inside the same statement, so the notification commits
+  or rolls back with the change. An instance whose listener drops
+  reconnects on its own and pokes every stream it holds with the account's
+  current sequence.
+- Live document channels deliver a frame to sockets on other instances by
+  its position in the ordered log; the receiver re-reads the rows it has
+  not delivered yet, so a lost notification is repaired by the next one.
+  Cursor and presence frames (`eph`) cross the same way; they are the
+  same end-to-end encrypted ciphertext the relay already forwards, they
+  pass through PostgreSQL's transient notification queue only until every
+  listener has read them, and they never enter a table, the write-ahead
+  log or a backup. Names never ride a notification: the members list is
+  rebuilt from the presence table on each instance.
+- Presence rows carry the instance that wrote them, and each instance
+  heartbeats a `pods` row. Rows from an instance that stopped are ignored
+  at once; an instance leaving on purpose removes its own.
+- Local disk caches (thumbnails, indexes, media windows) drop an entry on
+  every instance when one of them overwrites or removes the key.
+- Schema migrations at startup run under an advisory lock and add only
+  what is missing.
+
+Readiness is `GET /api/ready` (503 only while the instance is draining);
+liveness stays `GET /api/health`, which never depends on the database. On
+SIGTERM an instance stops taking work, ends its streams and sockets (the
+channel client redials), lets requests in flight finish and exits.
+
+A single instance remains the simplest deployment and needs none of this;
+the embedded SQLite backend is single-instance by design.
 
 ## Where bytes live
 

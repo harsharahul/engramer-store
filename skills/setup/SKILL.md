@@ -209,6 +209,12 @@ browsers is good. The rules that decide whether the deployment works:
   nothing (clients degrade to reconnect cycles), but live updates
   lose their seconds-level freshness.
 - Add HSTS at the proxy; the app does not set it.
+- Health checks: `GET /api/health` is liveness (the process answers; it
+  never depends on the database), `GET /api/ready` is readiness (503
+  only while an instance is draining). Point a load balancer at
+  `/api/ready`. The server keeps idle connections for 95 seconds; a
+  proxy that pools upstream connections should reuse them for less than
+  that, or it may pick one the server is closing.
 
 ### Module C: verification gates (run all that apply; do not skip)
 
