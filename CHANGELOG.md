@@ -19,6 +19,14 @@ All notable changes to Engram Store are documented here, following
   the pool goes through a pooler.
 
 ### Fixed
+- **A folder made in the Files app keeps the name you gave it.** Files
+  creates a new folder as "untitled folder" and renames it a moment
+  later; the iPhone and Mac drive sent that rename down the file route,
+  the server refused it, and Files showed the folder in error under the
+  typed name until it paused syncing, while the app showed "untitled".
+  Folders in the drive now take a rename or a move through the folder
+  route, and a folder moved to the vault's root actually lands there
+  (the server read a null parent as "no change").
 - **The Mac traffic lights stay on the toolbar's centre line.** 0.57.0
   placed them there only while the window's content view was repainting,
   which a web view never lets happen, so the shipped app showed them at

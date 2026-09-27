@@ -239,13 +239,16 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       }
     }
     await app.db.tx(async (t) => {
+      // A null parent is a move to the root, distinct from no move at all;
+      // COALESCE cannot tell the two apart, so the flag carries the intent.
       await t.run(
         `UPDATE folders SET
-           parent_id = COALESCE(?, parent_id),
+           parent_id = CASE WHEN ? = 1 THEN ? ELSE parent_id END,
            encrypted_meta = COALESCE(?, encrypted_meta),
            update_seq = ?, updated_at = ?
          WHERE id = ?`,
-        body.parentId !== undefined ? body.parentId : null,
+        body.parentId !== undefined ? 1 : 0,
+        body.parentId ?? null,
         body.encryptedMeta ? JSON.stringify(body.encryptedMeta) : null,
         await nextSeq(t, uid),
         Date.now(),

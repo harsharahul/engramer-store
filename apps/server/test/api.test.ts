@@ -309,6 +309,45 @@ describe("files and folders", () => {
     });
     expect(response.statusCode).toBe(400);
   });
+
+  it("moves a folder to the root, and a rename alone leaves its place", async () => {
+    const makeFolder = async (parentId: string | null) => {
+      const key = generateKey();
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/folders",
+        headers: authHeader(),
+        payload: {
+          parentId,
+          encryptedKey: secretBoxSeal(key, account.masterKey),
+          encryptedMeta: encryptFolderMetadata({ name: "nested" }, key),
+        },
+      });
+      return { id: response.json().id as string, key };
+    };
+    const parent = await makeFolder(null);
+    const child = await makeFolder(parent.id);
+
+    // A rename carries no parentId; the folder stays where it is.
+    const renamed = await app.inject({
+      method: "PATCH",
+      url: `/api/folders/${child.id}`,
+      headers: authHeader(),
+      payload: { encryptedMeta: encryptFolderMetadata({ name: "Travel" }, child.key) },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json().parentId).toBe(parent.id);
+
+    // An explicit null is a move to the root, not "no change".
+    const moved = await app.inject({
+      method: "PATCH",
+      url: `/api/folders/${child.id}`,
+      headers: authHeader(),
+      payload: { parentId: null },
+    });
+    expect(moved.statusCode).toBe(200);
+    expect(moved.json().parentId).toBeNull();
+  });
 });
 
 describe("trash", () => {

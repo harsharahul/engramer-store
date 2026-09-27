@@ -322,6 +322,12 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 return
             }
 
+            if entry.isFolder {
+                self.modifyFolder(entry, to: item, changedFields: changedFields, record: record,
+                                  index: index, completionHandler: completionHandler)
+                return
+            }
+
             if changedFields.contains(.contents), let newContents {
                 // The staleness check: the base Files saved from must still
                 // be the server's current generation. The server's own 409
@@ -384,6 +390,48 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             completionHandler(EngramFilesItem(final), [], false, nil)
         }
         return progress
+    }
+
+    /// A folder's rename or move. Folders live on their own route with
+    /// their own field names (parentId, not folderId), and a folder's
+    /// metadata holds nothing but its name, so the reseal is the same
+    /// one-field edit a file rename makes. This is the second half of
+    /// "New Folder" in Files, which creates "untitled folder" and then
+    /// renames it; sending that rename down the file route was a 404
+    /// that Files showed as an error and answered by pausing sync.
+    private func modifyFolder(
+        _ entry: IndexEntry, to item: NSFileProviderItem, changedFields: NSFileProviderItemFields,
+        record: HandoffRecord, index: EngramFilesIndex,
+        completionHandler: @escaping (NSFileProviderItem?, NSFileProviderItemFields, Bool, Error?) -> Void
+    ) {
+        if changedFields.contains(.filename) || changedFields.contains(.parentItemIdentifier) {
+            var payload: [String: Any] = [:]
+            if changedFields.contains(.parentItemIdentifier) {
+                payload["parentId"] = parentFolderId(item.parentItemIdentifier) ?? NSNull()
+            }
+            if changedFields.contains(.filename) {
+                guard let sealed = resealMetadata(entry: entry, newName: item.filename) else {
+                    completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
+                    return
+                }
+                payload["encryptedMeta"] = sealed
+            }
+            guard EngramApi.json(record: record, method: "PATCH",
+                                 path: "/api/folders/\(entry.id)", payload: payload) != nil
+            else {
+                completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
+                return
+            }
+            index.refresh()
+        }
+        // Anything else Files may ask of a folder (dates, tags, contents)
+        // has no vault counterpart and is accepted as a no-op, which is
+        // what keeps it from being retried forever.
+        guard let final = index.entry(entry.id) else {
+            completionHandler(nil, [], false, NSFileProviderError(.noSuchItem))
+            return
+        }
+        completionHandler(EngramFilesItem(final), [], false, nil)
     }
 
     /// Encrypts the replacement bytes under the file's existing key and
