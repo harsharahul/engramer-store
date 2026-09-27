@@ -19,6 +19,21 @@ All notable changes to Engram Store are documented here, following
   the pool goes through a pooler.
 
 ### Fixed
+- **A session reopened with Face ID or Touch ID no longer ends after
+  thirty days.** Signing in minted a 30-day token, and unlocking with the
+  device reused that same token, so a device that never typed the
+  password again ran out at day thirty: the Files-app drive and the
+  share sheet then failed on every request, which Files showed as a
+  connection problem, and opening the app signed it out and turned
+  "Extensions on this device" off with it. A live session now renews its
+  token once a day, through the new `POST /api/auth/refresh`, when it
+  starts and on the sync heartbeat, and installs the fresh token wherever
+  a sign-in would. The extension record carries the token's real issue
+  time rather than the time of its last rewrite, so the extensions can
+  tell a stale one; the drive answers a refused token with "sign in"
+  rather than "server unreachable" and re-reads the record the app
+  rewrites; and a session the server ends keeps the extension toggle,
+  so the next sign-in reconnects the drive on its own.
 - **A folder made in the Files app keeps the name you gave it.** Files
   creates a new folder as "untitled folder" and renames it a moment
   later; the iPhone and Mac drive sent that rename down the file route,

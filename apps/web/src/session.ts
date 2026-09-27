@@ -11,6 +11,7 @@ import { diag } from "./diag";
 import { clearHandoff, refreshHandoff } from "./handoff";
 import { clearNativeUnlock, deviceUnlock, updateUnlockToken } from "./unlock";
 import { nativeMediaClear } from "./native";
+import { RENEW_AFTER_MS, tokenDueForRenewal } from "./token";
 import {
   decodeSessionKey,
   openTabSession,
@@ -182,14 +183,45 @@ export async function restoreSession(): Promise<Session | null> {
   }
 }
 
-export function clearSession(email?: string): void {
+/** When this tab last renewed. A device clock set far ahead makes every
+ * token read as old; this keeps such a device at one request a day. */
+let lastRenewalAt = 0;
+
+/**
+ * Asks for a fresh token once the current one has been in service for
+ * a day. This is how a device that only ever reopens with Face ID or
+ * Touch ID keeps a live session past the thirty days its first token
+ * was minted for. Returns the session with the new token, or null when
+ * nothing was due or the server could not be asked; a 401 ends the
+ * session through the global handler, since a token past its end
+ * cannot be renewed and the password takes over. Nothing is installed
+ * here: the caller checks the session is still the current one and
+ * then activates it, so a sign-out during the request is never undone
+ * by a late answer.
+ */
+export async function renewSessionIfDue(session: Session): Promise<Session | null> {
+  if (!tokenDueForRenewal(session.token) || Date.now() - lastRenewalAt < RENEW_AFTER_MS) {
+    return null;
+  }
+  try {
+    const { token } = await api.refreshSession();
+    lastRenewalAt = Date.now();
+    return { ...session, token };
+  } catch (err) {
+    diag("session", `renewal not completed: ${err instanceof Error ? err.message : "unknown"}`);
+    return null;
+  }
+}
+
+
+export function clearSession(email?: string, options: { keepExtensions?: boolean } = {}): void {
   // Signing out is the revocation gesture: the tab's reload record, its
   // server-held key, the shell's Keychain secret, and the extension
   // handoff item all go.
   releaseStoredSessionKey();
   clearNativeUnlock();
   if (email) {
-    clearHandoff(email);
+    clearHandoff(email, options.keepExtensions ?? false);
   }
   void nativeMediaClear();
   setAuthToken(null);

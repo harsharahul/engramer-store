@@ -33,7 +33,10 @@ export function App() {
     const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
     diag("app", `page loaded by ${nav?.type ?? "unknown"}`);
 
-    setUnauthorizedHandler(() => logout());
+    // A session the server no longer honors ends here, without the
+    // choices a deliberate sign-out makes: the extension toggle stays,
+    // so the next sign-in reconnects the drive on its own.
+    setUnauthorizedHandler(() => logout("expired"));
     void restoreSession()
       .then(async (restored) => {
         if (restored) {

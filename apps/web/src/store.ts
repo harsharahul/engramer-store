@@ -40,7 +40,13 @@ import { clearCache, loadCache, storeSyncRows } from "./cache";
 import { clearDecisions } from "./decisions";
 import { deletionProof } from "./accountdeletion";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
-import { activateSession, clearSession, suspendSession, type Session } from "./session";
+import {
+  activateSession,
+  clearSession,
+  renewSessionIfDue,
+  suspendSession,
+  type Session,
+} from "./session";
 import { checkPin, KeyChangedError, pinKey, pinnedKey } from "./keypins";
 import { autoReleaseMatches, forgetAutoRelease } from "./autorelease";
 import { holdTransferLock, releaseTransferLock } from "./wakelock";
@@ -373,7 +379,13 @@ interface StoreState {
   indexWarm: { done: number; total: number } | null;
 
   startSession: (session: Session) => Promise<void>;
-  logout: () => void;
+  /** Signs this device out. "expired" is the server's verdict rather
+   * than the person's choice, and keeps the extension toggle so the
+   * next sign-in reconnects the drive on its own. */
+  logout: (reason?: "expired") => void;
+  /** Asks for a fresh token once the current one has served a day, and
+   * installs it everywhere; nothing happens when none is due. */
+  renewToken: () => Promise<void>;
   /** Locks the vault but keeps device-unlock enrolled; Touch ID reopens it. */
   lockVault: () => void;
   /** Signs every other device out; this tab carries on with a fresh token. */
@@ -1309,6 +1321,25 @@ export const useStore = create<StoreState>((set, get) => {
       } catch {
         // refresh() already recorded syncError; nothing else to do here.
       }
+      // A session reopened with Face ID or Touch ID carries the token
+      // it signed in with; this is where it stops aging.
+      void get().renewToken();
+    },
+
+    renewToken: async () => {
+      const session = get().session;
+      if (!session) {
+        return;
+      }
+      const renewed = await renewSessionIfDue(session);
+      // Only the session that asked adopts the answer: a sign-out or a
+      // different sign-in during the request must not have a token
+      // installed over it. Activation puts the token wherever a sign-in
+      // would (unlock record, extension handoff, reload record).
+      if (renewed && get().session?.token === session.token) {
+        activateSession(renewed);
+        set({ session: renewed });
+      }
     },
 
     signOutEverywhere: async () => {
@@ -1343,7 +1374,7 @@ export const useStore = create<StoreState>((set, get) => {
       set({ session: next });
     },
 
-    logout: () => {
+    logout: (reason) => {
       const account = get().session?.email;
       if (account) {
         void clearCache(account);
@@ -1352,7 +1383,7 @@ export const useStore = create<StoreState>((set, get) => {
       // kept files belong to a signed-in account, not the device.
       void nativeOfflineClear();
       moveCursor(0);
-      clearSession(account);
+      clearSession(account, { keepExtensions: reason === "expired" });
       // The device's mirror of the account's decisions holds plaintext
       // fragments of the library (search terms, notice keys); it must
       // not outlive the session on a shared device. The account's copy

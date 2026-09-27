@@ -91,6 +91,10 @@ export function installAutoSync(): void {
         // switch flipped or a notice dismissed on another device lands
         // here with the refresh, not at the next launch.
         await pullSettings(after.session.email, after.session.masterKey).catch(() => {});
+        // The heartbeat is also where the token stops aging: a window
+        // that stays open for weeks, or the Mac app parked in the tray,
+        // renews here without ever seeing the unlock gate.
+        await useStore.getState().renewToken();
       }
       if (
         after.session &&

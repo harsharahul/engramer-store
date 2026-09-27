@@ -57,6 +57,8 @@ vi.mock("./store", () => {
       // that read the server before the announced change had landed.
       state.syncSeq = rig.reachedSeq;
     },
+    // The heartbeat renews the token when one is due; nothing is here.
+    renewToken: async () => {},
   };
   return {
     useStore: {

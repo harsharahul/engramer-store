@@ -41,12 +41,60 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     private func reconnectIfNeeded() {
         reconnectLock.lock()
         defer { reconnectLock.unlock() }
+        if index != nil, let refused = refusedToken {
+            // The server refused the token this index was built with.
+            // Until the app has stored another, the listing keeps
+            // serving from the index and every write answers "sign
+            // in"; the moment it has, the index is rebuilt on the new
+            // record, from its persisted state, so no full re-sync.
+            guard let fresh = EngramHandoff.read(), fresh.token != refused else { return }
+            record = fresh
+            index = EngramFilesIndex(record: fresh)
+            refusedToken = nil
+            return
+        }
         guard index == nil else { return }
         record = EngramHandoff.read()
         index = record.flatMap(EngramFilesIndex.init)
     }
 
     func invalidate() {}
+
+    /// The token the server last refused, if any. A provider process can
+    /// outlive the app's renewal by days; a refusal makes every later
+    /// call look at the keychain again (see reconnectIfNeeded) instead
+    /// of presenting the dead token until the system kills the process.
+    private var refusedToken: String?
+
+    private func noteRefusedToken() {
+        reconnectLock.lock()
+        defer { reconnectLock.unlock() }
+        refusedToken = record?.token
+    }
+
+    /// The system's word for a failed call. A token the server no
+    /// longer honors is "not authenticated", which Files shows as a
+    /// sign-in prompt that opens the app; everything else is the
+    /// connection problem it always was. Before this distinction an
+    /// expired token read as "server unreachable", and there was nothing
+    /// for the person to reconnect.
+    private func providerError(_ failure: EngramApiFailure) -> NSFileProviderError {
+        switch failure {
+        case .notAuthenticated:
+            noteRefusedToken()
+            return NSFileProviderError(.notAuthenticated)
+        case .unreachable:
+            return NSFileProviderError(.serverUnreachable)
+        }
+    }
+
+    private func providerError(_ outcome: EngramUploadOutcome) -> NSFileProviderError {
+        if case .notAuthenticated = outcome {
+            noteRefusedToken()
+            return NSFileProviderError(.notAuthenticated)
+        }
+        return NSFileProviderError(.serverUnreachable)
+    }
 
     // Deliberately NOT observing materializedItemsDidChange: reacting to
     // it with a redelivery perturbs the very set being observed, and the
@@ -132,6 +180,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 return
             }
             if http.statusCode == 401 {
+                self.noteRefusedToken()
                 completionHandler(nil, nil, NSFileProviderError(.notAuthenticated))
                 return
             }
@@ -224,13 +273,24 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     ) {
         guard let envelope = try? folderEnvelope(name: name, masterKey: master),
               let key = try? JSONSerialization.jsonObject(with: Data(envelope.encryptedKeyJson.utf8)),
-              let meta = try? JSONSerialization.jsonObject(with: Data(envelope.encryptedMetaJson.utf8)),
-              let created = EngramApi.json(record: record, method: "POST", path: "/api/folders", payload: [
-                  "parentId": parent ?? NSNull(),
-                  "encryptedKey": key,
-                  "encryptedMeta": meta,
-              ]),
-              let dto = try? JSONSerialization.jsonObject(with: created) as? [String: Any],
+              let meta = try? JSONSerialization.jsonObject(with: Data(envelope.encryptedMetaJson.utf8))
+        else {
+            completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
+            return
+        }
+        let created: Data
+        switch EngramApi.call(record: record, method: "POST", path: "/api/folders", payload: [
+            "parentId": parent ?? NSNull(),
+            "encryptedKey": key,
+            "encryptedMeta": meta,
+        ]) {
+        case .success(let data):
+            created = data
+        case .failure(let why):
+            completionHandler(nil, [], false, providerError(why))
+            return
+        }
+        guard let dto = try? JSONSerialization.jsonObject(with: created) as? [String: Any],
               let folderId = dto["id"] as? String
         else {
             completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
@@ -270,25 +330,37 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             sourceId: nil
         ),
             let key = try? JSONSerialization.jsonObject(with: Data(envelope.encryptedKeyJson.utf8)),
-            let meta = try? JSONSerialization.jsonObject(with: Data(envelope.encryptedMetaJson.utf8)),
-            let created = EngramApi.json(record: record, method: "POST", path: "/api/files", payload: [
-                "folderId": parent ?? NSNull(),
-                "encryptedKey": key,
-                "encryptedMeta": meta,
-            ]),
-            let dto = try? JSONSerialization.jsonObject(with: created) as? [String: Any],
-            let fileId = dto["id"] as? String
+            let meta = try? JSONSerialization.jsonObject(with: Data(envelope.encryptedMetaJson.utf8))
         else {
             completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
             return
         }
-        switch EngramApi.uploadContent(record: record, fileId: fileId, blob: scratch) {
+        let created: Data
+        switch EngramApi.call(record: record, method: "POST", path: "/api/files", payload: [
+            "folderId": parent ?? NSNull(),
+            "encryptedKey": key,
+            "encryptedMeta": meta,
+        ]) {
+        case .success(let data):
+            created = data
+        case .failure(let why):
+            completionHandler(nil, [], false, providerError(why))
+            return
+        }
+        guard let dto = try? JSONSerialization.jsonObject(with: created) as? [String: Any],
+              let fileId = dto["id"] as? String
+        else {
+            completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
+            return
+        }
+        let uploaded = EngramApi.uploadContent(record: record, fileId: fileId, blob: scratch)
+        switch uploaded {
         case .ok:
             break
-        case .conflict, .failed:
+        case .conflict, .failed, .notAuthenticated:
             // The record exists without content; the index skips
             // not-uploaded rows, and a later save retries cleanly.
-            completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
+            completionHandler(nil, [], false, providerError(uploaded))
             return
         }
         index.refresh()
@@ -341,8 +413,9 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                                              completionHandler: completionHandler)
                     return
                 }
-                switch self.uploadReplacement(entry: entry, contents: newContents,
-                                              record: record, master: master) {
+                let replaced = self.uploadReplacement(entry: entry, contents: newContents,
+                                                      record: record, master: master)
+                switch replaced {
                 case .ok:
                     break
                 case .conflict:
@@ -350,8 +423,8 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                                              master: master, index: index,
                                              completionHandler: completionHandler)
                     return
-                case .failed:
-                    completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
+                case .failed, .notAuthenticated:
+                    completionHandler(nil, [], false, self.providerError(replaced))
                     return
                 }
                 index.refresh()
@@ -374,10 +447,10 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                     }
                     payload["encryptedMeta"] = sealed
                 }
-                guard EngramApi.json(record: record, method: "PATCH",
-                                     path: "/api/files/\(entry.id)", payload: payload) != nil
-                else {
-                    completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
+                if case .failure(let why) = EngramApi.call(
+                    record: record, method: "PATCH", path: "/api/files/\(entry.id)", payload: payload
+                ) {
+                    completionHandler(nil, [], false, self.providerError(why))
                     return
                 }
                 index.refresh()
@@ -416,10 +489,10 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 }
                 payload["encryptedMeta"] = sealed
             }
-            guard EngramApi.json(record: record, method: "PATCH",
-                                 path: "/api/folders/\(entry.id)", payload: payload) != nil
-            else {
-                completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
+            if case .failure(let why) = EngramApi.call(
+                record: record, method: "PATCH", path: "/api/folders/\(entry.id)", payload: payload
+            ) {
+                completionHandler(nil, [], false, providerError(why))
                 return
             }
             index.refresh()
@@ -569,9 +642,10 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             }
             // Server-side trash: restorable from the web app's Trash, so a
             // slip in Files is never a permanent loss.
-            guard EngramApi.json(record: record, method: "DELETE",
-                                 path: "/api/files/\(entry.id)", payload: [:]) != nil else {
-                completionHandler(NSFileProviderError(.serverUnreachable))
+            if case .failure(let why) = EngramApi.call(
+                record: record, method: "DELETE", path: "/api/files/\(entry.id)", payload: [:]
+            ) {
+                completionHandler(self.providerError(why))
                 return
             }
             index.refresh()

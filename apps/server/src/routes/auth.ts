@@ -650,6 +650,25 @@ export function registerAuthRoutes(app: FastifyInstance): void {
   });
 
   /**
+   * Renews a live session: a fresh 30-day token at the account's current
+   * epoch, for a session that is still standing. Nothing else moves, so
+   * every other device stays signed in. This is what keeps a device that
+   * reopens with Face ID or Touch ID, and never types the password again,
+   * from hitting the end of the token it signed in with; the extensions
+   * that act for the account while the app is closed read the token the
+   * app last stored, so the app renews on their behalf. A token past its
+   * expiry, revoked by "sign out everywhere", or minted before a password
+   * change is refused here exactly as everywhere else: renewal extends a
+   * session, it never revives one.
+   */
+  app.post("/api/auth/refresh", auth, async (request, reply) => {
+    const user = await getUser(request.user.uid);
+    return reply.code(200).send({
+      token: app.jwt.sign({ uid: user.id, ep: user.token_epoch ?? 0 }),
+    });
+  });
+
+  /**
    * Rotates the recovery key from a signed-in session. The current
    * password is proven, then only the two recovery wraps are re-sealed;
    * the password wrapping and the keypair are untouched, so the session
