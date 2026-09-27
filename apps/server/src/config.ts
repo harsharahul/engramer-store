@@ -136,6 +136,9 @@ export interface ConfigOverrides {
   webDistDir?: string | null;
   macAppDmgUrl?: string | null;
   hsts?: boolean;
+  /** The session signing key, for tests that run several instances against
+   * one PostgreSQL database; deployments set ENGRAMER_JWT_SECRET. */
+  jwtSecret?: string;
 }
 
 export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
@@ -143,7 +146,15 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
   const blobDir = join(dataDir, "blobs");
   mkdirSync(blobDir, { recursive: true });
   const s3 = loadS3Settings();
-  const derivedFsDir = loadDerivedFsDir(dataDir);
+  // A connection string is the replicated shape: several server instances
+  // may share this database, so anything that only works for one process
+  // is refused rather than left to fail on the second pod.
+  const databaseUrl =
+    overrides.databaseUrl !== undefined
+      ? overrides.databaseUrl
+      : (process.env.ENGRAMER_DATABASE_URL ?? null);
+  const replicated = databaseUrl !== null;
+  const derivedFsDir = loadDerivedFsDir(dataDir, replicated);
 
   return {
     port: overrides.port ?? Number(process.env.ENGRAMER_PORT ?? 3080),
@@ -151,7 +162,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
     dataDir,
     blobDir,
     dbPath: join(dataDir, "engramer.db"),
-    jwtSecret: loadOrCreateJwtSecret(dataDir),
+    jwtSecret: loadOrCreateJwtSecret(dataDir, overrides.jwtSecret, replicated),
     quotaBytes:
       overrides.quotaBytes ?? Number(process.env.ENGRAMER_QUOTA_BYTES ?? 10 * 1024 ** 3),
     maxBlobBytes:
@@ -180,10 +191,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
       overrides.webDistDir !== undefined
         ? overrides.webDistDir
         : (process.env.ENGRAMER_WEB_DIST ?? null),
-    databaseUrl:
-      overrides.databaseUrl !== undefined
-        ? overrides.databaseUrl
-        : (process.env.ENGRAMER_DATABASE_URL ?? null),
+    databaseUrl,
     registration: registrationMode(process.env.ENGRAMER_REGISTRATION),
     macAppDmgUrl:
       overrides.macAppDmgUrl !== undefined
@@ -306,13 +314,21 @@ function positiveOrZero(raw: string | undefined): number {
  * mistake, not a preference, and half the derived data quietly landing
  * in each would look like random cache misses forever.
  */
-function loadDerivedFsDir(dataDir: string): string | null {
+function loadDerivedFsDir(dataDir: string, replicated: boolean): string | null {
   const backend = (process.env.ENGRAMER_DERIVED_BACKEND ?? "").trim();
   if (backend === "" || backend === "s3") {
     return null;
   }
   if (backend !== "fs") {
     throw new Error(`ENGRAMER_DERIVED_BACKEND must be "fs" or "s3", not "${backend}"`);
+  }
+  if (replicated) {
+    // With several instances the local disk would be the only copy of every
+    // thumbnail and index this instance made: unseen by the others and gone
+    // with the pod.
+    throw new Error(
+      "ENGRAMER_DERIVED_BACKEND=fs keeps derived blobs on one instance's disk; with ENGRAMER_DATABASE_URL set, use a derived S3 bucket or no split",
+    );
   }
   if (process.env.ENGRAMER_S3_DERIVED_BUCKET) {
     throw new Error(
@@ -356,12 +372,24 @@ function loadDerivedS3Settings(primary: S3Settings | null): S3Settings | null {
   };
 }
 
-function loadOrCreateJwtSecret(dataDir: string): string {
+function loadOrCreateJwtSecret(
+  dataDir: string,
+  override: string | undefined,
+  replicated: boolean,
+): string {
   // An explicit secret wins: replicas must share one signing key, and in
   // Kubernetes that means a Secret in the environment, not a per-pod file.
-  const fromEnv = process.env.ENGRAMER_JWT_SECRET?.trim();
+  const fromEnv = override?.trim() || process.env.ENGRAMER_JWT_SECRET?.trim();
   if (fromEnv) {
     return fromEnv;
+  }
+  if (replicated) {
+    // A per-directory file would give every instance its own key: a
+    // session signed by one pod is a 401 on the next, and the decoy
+    // key-attribute derivation for unknown emails would differ per pod.
+    throw new Error(
+      "ENGRAMER_JWT_SECRET is required with ENGRAMER_DATABASE_URL: every instance must sign sessions with the same key",
+    );
   }
   const path = join(dataDir, "jwt-secret");
   if (existsSync(path)) {

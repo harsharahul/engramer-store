@@ -52,7 +52,13 @@ describe.skipIf(!adminUrl)("postgres metadata backend", () => {
     const url = new URL(adminUrl!);
     url.pathname = `/${dbName}`;
     dataDir = mkdtempSync(join(tmpdir(), "engramer-pg-"));
-    app = await buildApp({ dataDir, webDistDir: null, databaseUrl: url.toString() });
+    // Replicas share one signing key; the per-directory file is refused here.
+    app = await buildApp({
+      dataDir,
+      webDistDir: null,
+      databaseUrl: url.toString(),
+      jwtSecret: "postgres-test-secret",
+    });
     keys = generateAccountKeys("a postgres test password");
   });
 
@@ -370,4 +376,40 @@ describe.skipIf(!adminUrl)("postgres metadata backend", () => {
     expect(sharedRow.role).toBe("editor");
     expect(sharedRow.revoked).toBe(false);
   });
+
+  it("retries a transaction PostgreSQL aborted as a deadlock victim", async () => {
+    // Two writers bumping the same two accounts in opposite order (a save
+    // touches owner then members, a trash touches members then owner) can
+    // deadlock; PostgreSQL kills one with 40P01. The victim runs again
+    // instead of surfacing as a 500 to whoever was saving.
+    const now = Date.now();
+    const ids: number[] = [];
+    for (const email of ["deadlock-a@example.com", "deadlock-b@example.com"]) {
+      const row = await app.db.get<{ id: number }>(
+        "INSERT INTO users (email, login_key_digest, key_attributes, created_at) VALUES (?, ?, ?, ?) RETURNING id",
+        email,
+        "digest",
+        "{}",
+        now,
+      );
+      ids.push(Number(row!.id));
+    }
+    const [a, b] = ids as [number, number];
+    let attempts = 0;
+    const bump = (first: number, second: number) =>
+      app.db.tx(async (t) => {
+        attempts++;
+        await t.run("UPDATE users SET last_seq = last_seq + 1 WHERE id = ?", first);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        await t.run("UPDATE users SET last_seq = last_seq + 1 WHERE id = ?", second);
+      });
+    await Promise.all([bump(a, b), bump(b, a)]);
+    expect(attempts).toBe(3);
+    const rows = await app.db.all<{ id: number; last_seq: number }>(
+      "SELECT id, last_seq FROM users WHERE id IN (?, ?) ORDER BY id",
+      a,
+      b,
+    );
+    expect(rows.map((r) => Number(r.last_seq))).toEqual([2, 2]);
+  }, 20_000);
 });

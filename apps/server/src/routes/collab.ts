@@ -275,15 +275,19 @@ export function registerCollabRoutes(app: FastifyInstance): void {
     };
   });
 
-  /** Bumps one member's seq so the change reaches them through delta sync. */
+  /** Bumps one member's seq so the change reaches them through delta sync.
+   * The bump and the row it announces commit together: announced first, a
+   * pull in the gap would advance past a row it never saw. */
   const touchMember = async (fileId: string, memberUid: number, now: number) => {
-    await app.db.run(
-      "UPDATE file_collaborators SET update_seq = ?, updated_at = ? WHERE file_id = ? AND user_id = ?",
-      await nextSeq(app.db, memberUid),
-      now,
-      fileId,
-      memberUid,
-    );
+    await app.db.tx(async (t) => {
+      await t.run(
+        "UPDATE file_collaborators SET update_seq = ?, updated_at = ? WHERE file_id = ? AND user_id = ?",
+        await nextSeq(t, memberUid),
+        now,
+        fileId,
+        memberUid,
+      );
+    });
   };
 
   app.patch("/api/collab/files/:fileId/collaborators/:uid", auth, async (request, reply) => {

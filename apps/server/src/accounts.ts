@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { blobKey } from "./blobs.js";
+import { nextSeq } from "./db.js";
 
 /**
  * Removing an account: every row that names the user, then every blob
@@ -42,7 +43,7 @@ export async function deleteUserCascade(app: FastifyInstance, userId: number): P
     );
     await t.run("DELETE FROM file_collaborators WHERE owner_id = ? OR user_id = ?", userId, userId);
     for (const { user_id } of collaborators) {
-      await t.run("UPDATE users SET last_seq = last_seq + 1 WHERE id = ?", user_id);
+      await nextSeq(t, user_id);
     }
     await t.run("DELETE FROM collab_tickets WHERE user_id = ?", userId);
     await t.run("DELETE FROM auth_challenges WHERE user_id = ?", userId);

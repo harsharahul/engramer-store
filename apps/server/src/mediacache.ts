@@ -4,7 +4,7 @@ import { rename, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { BlobRange, BlobStore, PartReceipt } from "./blobs.js";
+import { partsTotal, type BlobRange, type BlobStore, type PartReceipt } from "./blobs.js";
 import { inBackground } from "./budget.js";
 
 /**
@@ -34,8 +34,6 @@ export class MediaWindowCache implements BlobStore {
   private readonly inflight = new Map<string, Promise<boolean>>();
   private fillsActive = 0;
   private static readonly FILLS_MAX = 3;
-  /** Part sizes per open session, so completeParts knows the blob size. */
-  private readonly partBytes = new Map<string, Map<number, number>>();
 
   constructor(
     private readonly backing: BlobStore,
@@ -260,35 +258,25 @@ export class MediaWindowCache implements BlobStore {
     source: Readable,
     length: number,
   ): Promise<PartReceipt> {
-    const receipt = await this.backing.putPart(key, handle, partNo, source, length);
-    if (this.cacheable(key)) {
-      const session = this.partBytes.get(`${key}:${handle}`) ?? new Map<number, number>();
-      session.set(partNo, receipt.bytes);
-      this.partBytes.set(`${key}:${handle}`, session);
-    }
-    return receipt;
+    return this.backing.putPart(key, handle, partNo, source, length);
   }
 
   async completeParts(
     key: string,
     handle: string,
-    parts: { partNo: number; etag?: string }[],
+    parts: { partNo: number; etag?: string; bytes?: number }[],
     seekable?: boolean,
   ): Promise<void> {
     await this.backing.completeParts(key, handle, parts, seekable);
-    const session = this.partBytes.get(`${key}:${handle}`);
-    this.partBytes.delete(`${key}:${handle}`);
-    if (session && seekable) {
-      let total = 0;
-      for (const part of parts) {
-        total += session.get(part.partNo) ?? 0;
-      }
+    // The size comes with the completion (parts of one upload can land on
+    // different server instances); without it the windows fill on demand.
+    const total = partsTotal(parts);
+    if (total !== null && seekable && this.cacheable(key)) {
       this.warm(key, total);
     }
   }
 
   async abortParts(key: string, handle: string): Promise<void> {
-    this.partBytes.delete(`${key}:${handle}`);
     await this.backing.abortParts(key, handle);
   }
 }

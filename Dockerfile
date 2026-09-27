@@ -72,4 +72,6 @@ VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
     CMD node -e "fetch('http://127.0.0.1:3080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["./node_modules/.bin/tsx", "src/index.ts"]
+# Node itself is PID 1 so a SIGTERM reaches the server's own drain handler;
+# the tsx launcher would relay the signal and kill the child moments later.
+CMD ["node", "--import", "tsx", "src/index.ts"]
