@@ -184,6 +184,13 @@ export interface Db {
    * never announces a change a pull could fail to find.
    */
   onSeq?: (userId: number, seq: number) => void;
+  /**
+   * The per-user sequence bump, when a backend spells it differently from
+   * the shared statement in nextSeq(): PostgreSQL adds the notification
+   * that carries the poke to other instances, inside the same statement,
+   * so it commits or rolls back with the change.
+   */
+  allocateSeq?(userId: number): Promise<number>;
 }
 
 /**
@@ -582,12 +589,18 @@ export async function nextChannelSeq(db: Db, fileId: string): Promise<number> {
 }
 
 export async function nextSeq(db: Db, userId: number): Promise<number> {
-  const row = await db.get<{ last_seq: number }>(
-    "UPDATE users SET last_seq = last_seq + 1 WHERE id = ? RETURNING last_seq",
-    userId,
-  );
-  db.onSeq?.(userId, row!.last_seq);
-  return row!.last_seq;
+  let seq: number;
+  if (db.allocateSeq) {
+    seq = await db.allocateSeq(userId);
+  } else {
+    const row = await db.get<{ last_seq: number }>(
+      "UPDATE users SET last_seq = last_seq + 1 WHERE id = ? RETURNING last_seq",
+      userId,
+    );
+    seq = row!.last_seq;
+  }
+  db.onSeq?.(userId, seq);
+  return seq;
 }
 
 /** The user's effective quota: their override, or the server default. */

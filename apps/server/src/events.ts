@@ -63,6 +63,11 @@ export class SeqEvents {
     };
   }
 
+  /** The accounts with at least one live stream here, for a resync. */
+  subscribedUsers(): number[] {
+    return [...this.sinks.keys()];
+  }
+
   /** Ends every live stream so a closing server never hangs on one. */
   closeAll(): void {
     if (this.flush) {

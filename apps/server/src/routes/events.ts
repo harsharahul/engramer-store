@@ -22,12 +22,15 @@ export function registerEventsRoutes(app: FastifyInstance): void {
 
   app.get("/api/events", auth, async (request, reply) => {
     const uid = request.user.uid;
+    // Subscribed before the opening read: a bump flushed during that read
+    // would otherwise fall between the sequence the first event states and
+    // the first poke the stream can hear.
+    const stream = new PassThrough();
+    const unsubscribe = app.seqEvents.subscribe(uid, stream);
     const row = await app.db.get<{ last_seq: number }>(
       "SELECT last_seq FROM users WHERE id = ?",
       uid,
     );
-    const stream = new PassThrough();
-    const unsubscribe = app.seqEvents.subscribe(uid, stream);
     const heartbeat = setInterval(() => {
       void (async () => {
         const state = await app.db.get<{ disabled: number; token_epoch: number }>(
