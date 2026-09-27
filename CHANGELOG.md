@@ -5,6 +5,19 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Added
+- **Change-feed pokes reach every server instance.** On PostgreSQL the
+  sequence bump that announces a change also notifies the other
+  instances, inside the same statement, so the notification commits or
+  rolls back with the change. Each instance listens on one dedicated
+  connection, reconnects on its own after a database failover, and after
+  a gap pokes every stream it holds with the account's current sequence.
+  Schema migrations at startup take an advisory lock, run only the
+  statements whose table, index or column is missing, and wait out a
+  busy table instead of queuing live traffic behind it.
+  `ENGRAMER_DATABASE_LISTEN_URL` points the listener at the primary when
+  the pool goes through a pooler.
+
 ### Fixed
 - **The Mac traffic lights stay on the toolbar's centre line.** 0.57.0
   placed them there only while the window's content view was repainting,

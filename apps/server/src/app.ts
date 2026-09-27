@@ -27,6 +27,8 @@ import { registerChannelRoutes } from "./routes/channel.js";
 import { registerEventsRoutes } from "./routes/events.js";
 import { InProcessHub, type ChannelHub } from "./collabhub.js";
 import { SeqEvents } from "./events.js";
+import { InProcessBus, PgBus, type Bus } from "./bus.js";
+import { attachSeqFanout } from "./seqfanout.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -35,6 +37,8 @@ declare module "fastify" {
     blobs: BlobStore;
     hub: ChannelHub;
     seqEvents: SeqEvents;
+    /** The bus to the other server instances (a no-op with one). */
+    bus: Bus;
     /** Identifies this process in shared presence rows. */
     podId: string;
     /** True from the moment close() begins: the readiness probe says so. */
@@ -53,11 +57,14 @@ declare module "@fastify/jwt" {
 export async function buildApp(overrides: ConfigOverrides = {}): Promise<FastifyInstance> {
   await ready();
   const config = loadConfig(overrides);
+  // This instance's identity: named in presence rows and in every
+  // notification it sends to the other instances.
+  const podId = randomUUID();
   // Embedded SQLite is the single-binary default; a connection string moves
   // the metadata to PostgreSQL so replicated deployments share one store.
   let db: Db;
   if (config.databaseUrl) {
-    const postgres = new PostgresDb(config.databaseUrl);
+    const postgres = new PostgresDb(config.databaseUrl, { origin: podId });
     await postgres.migrate();
     db = postgres;
   } else {
@@ -163,8 +170,26 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   // The allocator sees every sequence advance, including the ones a
   // mutation makes on other accounts; the change feed watches it there.
   db.onSeq = (userId, seq) => app.seqEvents.note(userId, seq);
-  app.decorate("podId", randomUUID());
+  app.decorate("podId", podId);
   app.decorate("draining", false);
+  // The bus to the other instances: PostgreSQL LISTEN/NOTIFY on a shared
+  // database, nothing at all for the embedded one. Boot waits a moment for
+  // its first connection and proceeds regardless: pokes from other
+  // instances pause while it is down, and everything else keeps working.
+  const bus: Bus =
+    config.databaseUrl && config.databaseListenUrl
+      ? new PgBus({ listenUrl: config.databaseListenUrl, origin: podId })
+      : new InProcessBus();
+  app.decorate("bus", bus);
+  if (config.databaseUrl) {
+    attachSeqFanout(app);
+    bus.start();
+    if (!(await bus.ready(5_000))) {
+      console.warn(
+        "engramer-store: the change bus has not connected yet; pokes from other instances arrive once it does",
+      );
+    }
+  }
   // Held event streams would otherwise keep close() waiting forever;
   // the websocket plugin drains its own clients the same way. Readiness
   // flips first, so the load balancer stops routing here while the
@@ -174,6 +199,7 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     app.seqEvents.closeAll();
   });
   app.addHook("onClose", async () => {
+    await bus.close();
     await db.close();
   });
   app.decorate("authenticate", async (request: FastifyRequest, reply: FastifyReply) => {

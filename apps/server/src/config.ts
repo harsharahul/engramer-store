@@ -59,6 +59,9 @@ export interface ServerConfig {
   webDistDir: string | null;
   /** PostgreSQL connection string; unset means embedded SQLite. */
   databaseUrl: string | null;
+  /** Where the change bus listens: a direct connection to the primary,
+   * defaulting to databaseUrl. Set when the pool goes through a pooler. */
+  databaseListenUrl: string | null;
   /** Who may create accounts: open (default), invite, or closed. */
   registration: "open" | "invite" | "closed";
   /// Where the Mac app's DMG is hosted, or null when this deployment
@@ -192,6 +195,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
         ? overrides.webDistDir
         : (process.env.ENGRAMER_WEB_DIST ?? null),
     databaseUrl,
+    databaseListenUrl: process.env.ENGRAMER_DATABASE_LISTEN_URL?.trim() || databaseUrl,
     registration: registrationMode(process.env.ENGRAMER_REGISTRATION),
     macAppDmgUrl:
       overrides.macAppDmgUrl !== undefined
