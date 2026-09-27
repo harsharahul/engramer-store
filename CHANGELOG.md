@@ -34,6 +34,10 @@ All notable changes to Engram Store are documented here, following
   rather than "server unreachable" and re-reads the record the app
   rewrites; and a session the server ends keeps the extension toggle,
   so the next sign-in reconnects the drive on its own.
+- **The local S3 bridge stays signed in.** It held the token from its
+  one sign-in and stopped at day thirty with every request refused. It
+  now renews the token once a day and, when a session is ended elsewhere,
+  signs in again with the password it holds and retries the request.
 - **A folder made in the Files app keeps the name you gave it.** Files
   creates a new folder as "untitled folder" and renames it a moment
   later; the iPhone and Mac drive sent that rename down the file route,
