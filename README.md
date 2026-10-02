@@ -128,11 +128,14 @@ Configuration via environment variables:
 | `ENGRAMER_MAX_BLOB_BYTES` | `21474836480` | Hard cap for a single upload |
 | `ENGRAMER_WEB_DIST` | auto-detected | Path to a built web client to serve |
 | `ENGRAMER_S3_BUCKET` | unset | Store blobs in an S3-compatible bucket instead of local disk |
-| `ENGRAMER_DERIVED_BACKEND` | unset | `fs` keeps thumbnails and search indexes on local disk while content lives on a remote store |
+| `ENGRAMER_DERIVED_BACKEND` | unset | `fs` keeps thumbnails and search indexes on local disk while content lives on a remote store (single instance only) |
 | `ENGRAMER_CONTENT_CACHE_MAX_BYTES` | unset | Cache content blobs at or under this size on local disk, so repeat document opens are instant |
 | `ENGRAMER_PUBLIC_ORIGINS` | unset | Origins browsers reach this server on, when a proxy rewrites the Host header (Word and Excel editing needs this) |
-| `ENGRAMER_DATABASE_URL` | unset | PostgreSQL connection string; replaces SQLite for replicated deployments |
-| `ENGRAMER_JWT_SECRET` | generated | Session-signing secret; set it explicitly when running more than one instance |
+| `ENGRAMER_DATABASE_URL` | unset | PostgreSQL connection string; replaces SQLite for replicated deployments (see `docs/storage.md`) |
+| `ENGRAMER_DATABASE_LISTEN_URL` | `ENGRAMER_DATABASE_URL` | Direct connection to the PostgreSQL primary for the change bus, when the pool goes through a pooler |
+| `ENGRAMER_JWT_SECRET` | generated | Session-signing secret; required with `ENGRAMER_DATABASE_URL`, shared by every instance |
+| `ENGRAMER_CHANNEL_RECHECK_MS` | `60000` | How often a live document socket re-checks that its account still has access |
+| `ENGRAMER_DRAIN_DEADLINE_MS` | `40000` | How long a stopping instance waits for requests and streams before closing what is left |
 | `ENGRAMER_REGISTRATION` | `open` | `open`, `invite`, or `closed` |
 | `ENGRAMER_ADMIN_EMAILS` | unset | Comma-separated admin accounts; enables the inline admin panel |
 | `ENGRAMER_MAX_VERSIONS` | `10` | Versions kept per file; `0` disables history |
