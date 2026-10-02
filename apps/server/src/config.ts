@@ -53,6 +53,9 @@ export interface ServerConfig {
   /** Change-feed heartbeat cadence; also how often a held stream
    * re-checks that its session is still valid. */
   eventsHeartbeatMs: number;
+  /** How often a live channel socket re-checks that its account still
+   * has access to the document. */
+  channelRecheckMs: number;
   /** Ceiling on a document channel's stored frames, in bytes. */
   channelMaxBytes: number;
   /** Directory of a built web client to serve, if any. */
@@ -134,6 +137,7 @@ export interface ConfigOverrides {
   collabRelay?: boolean;
   events?: boolean;
   eventsHeartbeatMs?: number;
+  channelRecheckMs?: number;
   channelMaxBytes?: number;
   port?: number;
   webDistDir?: string | null;
@@ -180,6 +184,8 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
     eventsHeartbeatMs:
       overrides.eventsHeartbeatMs ??
       Number(process.env.ENGRAMER_EVENTS_HEARTBEAT_MS ?? 25_000),
+    channelRecheckMs:
+      overrides.channelRecheckMs ?? Number(process.env.ENGRAMER_CHANNEL_RECHECK_MS ?? 60_000),
     hsts: overrides.hsts ?? ["on", "1", "true"].includes((process.env.ENGRAMER_HSTS ?? "off").toLowerCase()),
     // A ceiling smaller than one checkpoint crossing's worth of typing
     // puts a busy room into a trim-reload spiral no client can follow:

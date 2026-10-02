@@ -25,10 +25,11 @@ import { registerRequestRoutes } from "./routes/requests.js";
 import { registerCollabRoutes } from "./routes/collab.js";
 import { registerChannelRoutes } from "./routes/channel.js";
 import { registerEventsRoutes } from "./routes/events.js";
-import { InProcessHub, type ChannelHub } from "./collabhub.js";
+import { InProcessHub, PgNotifyHub, type ChannelHub } from "./collabhub.js";
 import { SeqEvents } from "./events.js";
 import { InProcessBus, PgBus, type Bus } from "./bus.js";
 import { attachSeqFanout } from "./seqfanout.js";
+import { PodHeartbeat, membersFrame, sweepPresence } from "./presence.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -97,6 +98,14 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     disableRequestLogging: process.env.ENGRAMER_LOG_REQUESTS !== "true",
   });
 
+  // The bus to the other instances: PostgreSQL LISTEN/NOTIFY on a shared
+  // database, nothing at all for the embedded one. Built before the blob
+  // caches so they can hear each other's invalidations.
+  const bus: Bus =
+    config.databaseUrl && config.databaseListenUrl
+      ? new PgBus({ listenUrl: config.databaseListenUrl, origin: podId })
+      : new InProcessBus();
+
   let blobs: BlobStore;
   if (config.s3) {
     const s3Primary = new S3BlobStore(config.s3);
@@ -137,6 +146,7 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
       ? new DiskCachedBlobStore(store, config.blobCacheDir, config.blobCacheBytes, {
           cacheDerived: !derivedIsLocal,
           contentMaxBytes: config.contentCacheMaxBytes,
+          bus,
         })
       : store;
     // Opt-in content tier: media windows cached on local disk, so range
@@ -148,6 +158,7 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
         config.mediaCacheDir,
         config.mediaCacheBytes,
         config.mediaWindowBytes,
+        { bus },
       );
     }
   } else {
@@ -165,21 +176,23 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   app.decorate("config", config);
   app.decorate("blobs", blobs);
   app.decorate("db", db);
-  app.decorate("hub", new InProcessHub());
+  // Channel fan-out: local sockets always; the other instances' sockets
+  // through the bus on a shared database.
+  app.decorate(
+    "hub",
+    config.databaseUrl
+      ? new PgNotifyHub({ bus, db, podId, membersFrame: (fileId) => membersFrame(db, fileId) })
+      : new InProcessHub(),
+  );
   app.decorate("seqEvents", new SeqEvents());
   // The allocator sees every sequence advance, including the ones a
   // mutation makes on other accounts; the change feed watches it there.
   db.onSeq = (userId, seq) => app.seqEvents.note(userId, seq);
   app.decorate("podId", podId);
   app.decorate("draining", false);
-  // The bus to the other instances: PostgreSQL LISTEN/NOTIFY on a shared
-  // database, nothing at all for the embedded one. Boot waits a moment for
-  // its first connection and proceeds regardless: pokes from other
-  // instances pause while it is down, and everything else keeps working.
-  const bus: Bus =
-    config.databaseUrl && config.databaseListenUrl
-      ? new PgBus({ listenUrl: config.databaseListenUrl, origin: podId })
-      : new InProcessBus();
+  // Boot waits a moment for the bus's first connection and proceeds
+  // regardless: pokes and frames from other instances pause while it is
+  // down, and everything else keeps working.
   app.decorate("bus", bus);
   if (config.databaseUrl) {
     attachSeqFanout(app);
@@ -190,6 +203,13 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
       );
     }
   }
+  // This instance's row in `pods`: presence readers on every instance
+  // ignore rows from instances that stopped heartbeating, and the rows
+  // this one owns go when it stops. Rows nobody can see any more are
+  // swept once per boot.
+  const heartbeat = new PodHeartbeat(db, podId);
+  await heartbeat.start();
+  await sweepPresence(db).catch(() => {});
   // Held event streams would otherwise keep close() waiting forever;
   // the websocket plugin drains its own clients the same way. Readiness
   // flips first, so the load balancer stops routing here while the
@@ -199,6 +219,8 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     app.seqEvents.closeAll();
   });
   app.addHook("onClose", async () => {
+    await heartbeat.stop();
+    await app.hub.close();
     await bus.close();
     await db.close();
   });

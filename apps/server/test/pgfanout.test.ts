@@ -4,8 +4,17 @@ import { join } from "node:path";
 import { Writable } from "node:stream";
 import type { FastifyInstance } from "fastify";
 import pg from "pg";
+import WebSocket from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ready } from "@engramer/crypto";
+import {
+  ready,
+  generateAccountKeys,
+  generateKey,
+  secretBoxSeal,
+  encryptBytes,
+  encryptFileMetadata,
+  utf8Encode,
+} from "@engramer/crypto";
 import { buildApp } from "../src/app.js";
 import { nextSeq } from "../src/db.js";
 import { PostgresDb } from "../src/pgdb.js";
@@ -207,4 +216,153 @@ describe.skipIf(!adminUrl)("two instances on one postgres", () => {
       await two.close();
     }
   }, 30_000);
+
+  describe("document channels across instances", () => {
+    let token: string;
+    let fileId: string;
+    let baseA: string;
+    let baseB: string;
+
+    /** A socket on one instance, with the frames it received. */
+    class Socket {
+      readonly frames: Array<Record<string, unknown>> = [];
+      closeCode: number | undefined;
+      private readonly ws: WebSocket;
+      /** Settles when the socket opens, however early that happens. */
+      private readonly opened: Promise<void>;
+
+      constructor(base: string, ticket: string) {
+        this.ws = new WebSocket(`${base}/api/collab/${fileId}/channel?ticket=${ticket}`);
+        this.ws.on("message", (data) => this.frames.push(JSON.parse(String(data)) as Record<string, unknown>));
+        this.ws.on("close", (code) => (this.closeCode = code));
+        this.opened = new Promise<void>((resolve, reject) => {
+          this.ws.once("open", () => resolve());
+          this.ws.once("error", reject);
+          this.ws.once("close", (code) => reject(new Error(`socket closed before open: ${code}`)));
+        });
+        this.opened.catch(() => {});
+      }
+
+      async open(): Promise<void> {
+        await this.opened;
+        this.ws.send(JSON.stringify({ t: "hello", lastSeq: 0 }));
+        await this.next((f) => f.t === "caught-up");
+      }
+
+      send(frame: Record<string, unknown>): void {
+        this.ws.send(JSON.stringify(frame));
+      }
+
+      async next(match: (f: Record<string, unknown>) => boolean, ms = 4000): Promise<Record<string, unknown>> {
+        const deadline = Date.now() + ms;
+        for (;;) {
+          const hit = this.frames.find(match);
+          if (hit) {
+            return hit;
+          }
+          if (Date.now() > deadline) {
+            throw new Error(`no matching frame within ${ms}ms; saw ${this.frames.map((f) => f.t).join(",")}`);
+          }
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+      }
+
+      close(): void {
+        this.ws.close();
+      }
+    }
+
+    const ticket = async (app: FastifyInstance) => {
+      const minted = await app.inject({
+        method: "POST",
+        url: `/api/collab/${fileId}/ticket`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: {},
+      });
+      return minted.json().ticket as string;
+    };
+
+    beforeAll(async () => {
+      await a.listen({ port: 0, host: "127.0.0.1" });
+      await b.listen({ port: 0, host: "127.0.0.1" });
+      const port = (app: FastifyInstance) => (app.server.address() as { port: number }).port;
+      baseA = `ws://127.0.0.1:${port(a)}`;
+      baseB = `ws://127.0.0.1:${port(b)}`;
+      const keys = generateAccountKeys("fanout channel phrase");
+      const registered = await a.inject({
+        method: "POST",
+        url: "/api/auth/register",
+        payload: { email: "channels@example.com", loginKey: keys.loginKey, keyAttributes: keys.keyAttributes },
+      });
+      token = registered.json().token as string;
+      const fileKey = generateKey();
+      const content = utf8Encode("channel body");
+      const created = await a.inject({
+        method: "POST",
+        url: "/api/files",
+        headers: { authorization: `Bearer ${token}` },
+        payload: {
+          folderId: null,
+          encryptedKey: secretBoxSeal(fileKey, keys.masterKey),
+          encryptedMeta: encryptFileMetadata(
+            { name: "doc.docx", mime: "application/octet-stream", size: content.length, mtime: 1 },
+            fileKey,
+          ),
+        },
+      });
+      fileId = created.json().id as string;
+      // The same token works on B: one database, one signing key.
+      const uploaded = await b.inject({
+        method: "PUT",
+        url: `/api/files/${fileId}/data`,
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/octet-stream" },
+        payload: Buffer.from(encryptBytes(content, fileKey)),
+      });
+      expect(uploaded.statusCode).toBe(200);
+    }, 30_000);
+
+    it("delivers a post made on A to a socket on B, and cursors too", async () => {
+      const onA = new Socket(baseA, await ticket(a));
+      const onB = new Socket(baseB, await ticket(b));
+      await onA.open();
+      await onB.open();
+      // Each instance lists both sockets as present, but broadcasts to its own.
+      onA.send({ t: "who" });
+      const who = (await onA.next((f) => f.t === "who")).local as string[];
+      expect(who).toHaveLength(1);
+      onA.send({ t: "post", ref: "r1", payload: "Y2lwaGVy" });
+      const log = await onB.next((f) => f.t === "log");
+      expect(log.payload).toBe("Y2lwaGVy");
+      expect(onA.frames.filter((f) => f.t === "log")).toEqual([]);
+      onA.send({ t: "eph", payload: "Y3Vyc29y" });
+      expect((await onB.next((f) => f.t === "eph")).payload).toBe("Y3Vyc29y");
+      // Joining on B refreshed A's members list from the shared table.
+      const members = onA.frames.filter((f) => f.t === "members");
+      expect(members.length).toBeGreaterThan(0);
+      onA.close();
+      onB.close();
+    }, 20_000);
+
+    it("delivers what B posted while A's listener was down once A is back", async () => {
+      const onA = new Socket(baseA, await ticket(a));
+      const onB = new Socket(baseB, await ticket(b));
+      await onA.open();
+      await onB.open();
+      const admin = new pg.Client({ connectionString: url });
+      await admin.connect();
+      await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = $1", [
+        `engram-listener-${a.podId}`,
+      ]);
+      await admin.end();
+      // A local post on A in between must not let A skip B's frame.
+      onB.send({ t: "post", ref: "b1", payload: "ZnJvbS1i" });
+      await onB.next((f) => f.t === "ack");
+      onA.send({ t: "post", ref: "a1", payload: "ZnJvbS1h" });
+      await onA.next((f) => f.t === "ack");
+      const fromB = await onA.next((f) => f.t === "log" && f.payload === "ZnJvbS1i", 10_000);
+      expect(fromB.payload).toBe("ZnJvbS1i");
+      onA.close();
+      onB.close();
+    }, 30_000);
+  });
 });

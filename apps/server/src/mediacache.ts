@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { partsTotal, type BlobRange, type BlobStore, type PartReceipt } from "./blobs.js";
+import type { Bus } from "./bus.js";
+
+/** The bus channel that carries "drop this key's windows" between instances. */
+export const MEDIA_CHANNEL = "engram_media";
 import { inBackground } from "./budget.js";
 
 /**
@@ -35,12 +39,24 @@ export class MediaWindowCache implements BlobStore {
   private fillsActive = 0;
   private static readonly FILLS_MAX = 3;
 
+  /** Per key, bumped by every drop, so a fill that began before the drop
+   * never lands a window of the bytes just replaced. */
+  private readonly epochs = new Map<string, number>();
+  private readonly bus: Bus | null;
+
   constructor(
     private readonly backing: BlobStore,
     private readonly dir: string,
     private readonly maxBytes: number,
     private readonly windowBytes = 32 * 1024 * 1024,
+    opts?: { bus?: Bus },
   ) {
+    this.bus = opts?.bus ?? null;
+    if (this.bus) {
+      this.bus.subscribe(MEDIA_CHANNEL, (key) => {
+        void this.dropWindows(key);
+      });
+    }
     mkdirSync(dir, { recursive: true });
     const found: Array<{ name: string; size: number; mtime: number }> = [];
     for (const name of readdirSync(dir)) {
@@ -119,6 +135,7 @@ export class MediaWindowCache implements BlobStore {
       }
       this.fillsActive++;
       const tmp = this.path(`.fill-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      const epoch = this.epochs.get(key) ?? 0;
       try {
         const start = window * this.windowBytes;
         const source = await this.backing.get(
@@ -129,6 +146,14 @@ export class MediaWindowCache implements BlobStore {
         await pipeline(source, createWriteStream(tmp, { mode: 0o600 }));
         const written = (await stat(tmp)).size;
         await rename(tmp, this.path(name));
+        // Checked after the file is in place, with nothing awaited between
+        // here and the index: a drop that landed while these bytes were on
+        // their way means they are the old ones, and a drop that lands
+        // before the rename cannot see a file that is not there yet.
+        if ((this.epochs.get(key) ?? 0) !== epoch) {
+          await unlink(this.path(name)).catch(() => {});
+          return false;
+        }
         const prior = this.index.get(name);
         if (prior !== undefined) {
           this.index.delete(name);
@@ -209,6 +234,13 @@ export class MediaWindowCache implements BlobStore {
 
   async put(key: string, source: Readable, maxBytes: number, seekable?: boolean): Promise<number> {
     const written = await this.backing.put(key, source, maxBytes, seekable);
+    // A content key is nearly always new, but a version restore followed
+    // by a save re-mints one: whatever windows exist for it, here or on
+    // another instance, hold the bytes just replaced.
+    if (this.cacheable(key)) {
+      await this.dropWindows(key);
+      this.bus?.publish(MEDIA_CHANNEL, key).catch(() => {});
+    }
     // Warming is eager work, spent only where a ranged read can follow; a
     // non-seekable blob is always fetched whole and would only evict real
     // media windows. Demand-driven fills in get() stay open to every blob.
@@ -237,6 +269,17 @@ export class MediaWindowCache implements BlobStore {
     if (!this.cacheable(key)) {
       return;
     }
+    await this.dropWindows(key);
+    this.bus?.publish(MEDIA_CHANNEL, key).catch(() => {});
+  }
+
+  /** Forgets every window of the key held here; fills in flight for it
+   * finish without landing. */
+  private async dropWindows(key: string): Promise<void> {
+    if (!this.cacheable(key)) {
+      return;
+    }
+    this.epochs.set(key, (this.epochs.get(key) ?? 0) + 1);
     const prefix = `${key}.w`;
     for (const [name, size] of [...this.index]) {
       if (name.startsWith(prefix) && MediaWindowCache.WINDOW_FILE.test(name)) {

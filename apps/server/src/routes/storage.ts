@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { PassThrough, type Readable } from "node:stream";
 import { z } from "zod";
 import { BlobTooLargeError, blobKey, type BlobKind } from "../blobs.js";
+import { livePresence } from "../presence.js";
 import {
   nextSeq,
   storageUsed,
@@ -162,15 +163,8 @@ export function registerStorageRoutes(app: FastifyInstance): void {
    * Read from the shared presence table, never from process memory, so
    * the answer holds when the writer's request lands on another pod.
    */
-  const CHANNEL_PRESENCE_TTL_MS = 90_000;
-  const liveChannelMembers = async (fileId: string): Promise<number> => {
-    const row = await app.db.get<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM channel_presence WHERE file_id = ? AND last_seen > ?",
-      fileId,
-      Date.now() - CHANNEL_PRESENCE_TTL_MS,
-    );
-    return Number(row?.n ?? 0);
-  };
+  const liveChannelMembers = async (fileId: string): Promise<number> =>
+    (await livePresence(app.db, fileId)).length;
 
   /**
    * A change to a shared file must reach every member's delta sync, and
@@ -494,11 +488,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       // there is no one to coordinate with, and a log the bytes fully
       // contain serves nobody. Two rows of one account are still two
       // connections, and each deserves the other's coordination.
-      const live = await app.db.all<{ user_id: number }>(
-        "SELECT user_id FROM channel_presence WHERE file_id = ? AND last_seen > ?",
-        fileId,
-        Date.now() - CHANNEL_PRESENCE_TTL_MS,
-      );
+      const live = await livePresence(app.db, fileId);
       checkpoint = live.length === 1 && Number(live[0]!.user_id) === uid;
     }
     // The connection a save names is skipped by the broadcasts that
