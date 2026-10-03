@@ -44,6 +44,15 @@ rclone ls engram:Documents    # list files in a folder
 rclone copy engram:Documents/report.pdf .
 ```
 
+## Sessions
+
+The bridge signs in once with the password and keeps the session alive on
+its own: the token is renewed once a day, and a session ended elsewhere
+("sign out everywhere", a password change) is answered by signing in
+again with the password it holds. An account with two-factor enabled is
+the exception, since `ENGRAM_TOTP` was one code: renewal still works, but
+a revoked session needs the bridge restarted with a fresh code.
+
 ## Why local
 
 An S3 endpoint must be able to read the bytes it serves, so a hosted S3 endpoint

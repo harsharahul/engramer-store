@@ -53,6 +53,24 @@ against the account's token epoch and disabled flag on every request, so a
 credential change, a revocation, or an administrator disabling the account
 ends existing sessions immediately.
 
+A live session renews itself: once its token has been in service for a
+day, the client asks `POST /api/auth/refresh` for a fresh 30-day token at
+the same epoch and installs it wherever a sign-in would (the unlock
+record, the extension handoff, the tab's reload record). Renewal happens
+when a session starts and on the sync heartbeat, so a device that only
+ever reopens with Face ID or Touch ID, or a Mac app parked in the tray,
+never reaches the end of the token it signed in with. Renewal extends a
+standing session and never revives one: a token past its expiry, one
+minted before "sign out everywhere", or one from before a password change
+is refused there like everywhere else, and the password takes over. The
+trade-off is deliberate: a token that keeps being renewed lives as long
+as the device keeps using it, where before it ended within thirty days
+no matter what, so the epoch is the way to end a session you no longer
+trust: **Sign out everywhere** or a password change. When
+the server does end a session, the device keeps its "Extensions on this
+device" choice, so the next sign-in reconnects the Files-app drive and
+the share sheet without a trip to Profile.
+
 The decrypted keys live in the tab's memory. So that a reload does not
 cost the password, the tab keeps a reload record in sessionStorage: the
 keys sealed under a random 32-byte session key that the server mints for

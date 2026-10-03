@@ -182,6 +182,7 @@ final class EngramFilesIndex {
         defer { refreshGate.unlock() }
         var changed: [String] = []
         var hops = 0
+        var fetchedAny = false
         while hops < 200 {
             hops += 1
             let since = withState { self.cursor }
@@ -189,6 +190,7 @@ final class EngramFilesIndex {
                 indexLog.error("refresh: page fetch failed at cursor \(since, privacy: .public)")
                 break
             }
+            fetchedAny = true
             indexLog.info("refresh: page seq=\(page.seq, privacy: .public) folders=\(page.folders.count, privacy: .public) files=\(page.files.count, privacy: .public) cursor=\(since, privacy: .public)")
             let done: Bool = withState {
                 for folder in page.folders {
@@ -206,8 +208,13 @@ final class EngramFilesIndex {
             if done { break }
         }
         withState {
-            self.dedupeNames()
-            self.save()
+            // A refresh that fetched nothing has nothing new to persist,
+            // and writing anyway could put this instance's older cursor
+            // over one a newer instance in the same process just saved.
+            if fetchedAny {
+                self.dedupeNames()
+                self.save()
+            }
             self.lastRefreshEnd = Date()
         }
         return changed
@@ -287,7 +294,15 @@ final class EngramFilesIndex {
         // races nothing.
         EngramApi.blockingSession.dataTask(with: request) { data, response, _ in
             defer { done.signal() }
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200, let data else { return }
+            guard let http = response as? HTTPURLResponse else { return }
+            if http.statusCode == 401 {
+                // The stored token has ended. The listing keeps serving
+                // from the persisted index; every write answers "sign
+                // in", and the app replaces the token when opened.
+                indexLog.error("refresh: the stored token is no longer honored; open the app to renew it")
+                return
+            }
+            guard http.statusCode == 200, let data else { return }
             result = try? JSONDecoder().decode(SyncPage.self, from: data)
         }.resume()
         if done.wait(timeout: .now() + 120) == .timedOut {

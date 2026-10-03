@@ -162,3 +162,47 @@ describe("sign out everywhere", () => {
     expect(stillThere.statusCode).toBe(200);
   });
 });
+
+describe("session renewal", () => {
+  const claims = (t: string) => app.jwt.decode(t) as { uid: number; ep: number; iat: number; exp: number };
+  let token: string;
+  beforeAll(async () => {
+    token = await registerAccount("renew@example.com");
+  });
+
+  it("hands a live session a fresh 30-day token at the same epoch, and the old one keeps working", async () => {
+    const before = token;
+    // A token signed a second later differs even with identical claims.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const renewed = await app.inject({ method: "POST", url: "/api/auth/refresh", headers: auth(before) });
+    expect(renewed.statusCode).toBe(200);
+    const fresh = renewed.json().token as string;
+    expect(fresh).not.toBe(before);
+    expect(claims(fresh).uid).toBe(claims(before).uid);
+    expect(claims(fresh).ep).toBe(claims(before).ep);
+    expect(claims(fresh).iat).toBeGreaterThan(claims(before).iat);
+    expect((claims(fresh).exp - claims(fresh).iat) / 86400).toBeCloseTo(30, 5);
+    // Renewal extends; it revokes nothing, so the other devices stay in.
+    const still = await app.inject({ method: "GET", url: "/api/user", headers: auth(before) });
+    expect(still.statusCode).toBe(200);
+    const live = await app.inject({ method: "GET", url: "/api/user", headers: auth(fresh) });
+    expect(live.statusCode).toBe(200);
+    token = fresh;
+  });
+
+  it("refuses an expired token and one from before a revocation", async () => {
+    const { uid, ep } = claims(token);
+    const expired = app.jwt.sign({ uid, ep }, { expiresIn: "-1s" });
+    const dead = await app.inject({ method: "POST", url: "/api/auth/refresh", headers: auth(expired) });
+    expect(dead.statusCode).toBe(401);
+
+    const earlier = token;
+    const revoked = await app.inject({ method: "POST", url: "/api/auth/sessions/revoke-all", headers: auth(earlier) });
+    token = revoked.json().token as string;
+    const gone = await app.inject({ method: "POST", url: "/api/auth/refresh", headers: auth(earlier) });
+    expect(gone.statusCode).toBe(401);
+
+    const anonymous = await app.inject({ method: "POST", url: "/api/auth/refresh" });
+    expect(anonymous.statusCode).toBe(401);
+  });
+});

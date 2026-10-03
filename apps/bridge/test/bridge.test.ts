@@ -36,6 +36,9 @@ let bridgeApp: Awaited<ReturnType<typeof buildBridge>>;
 let dataDir: string;
 let s3: S3Client;
 let bridgeUrl: string;
+let vault: Vault;
+/** The provisioning session's token, kept to revoke every session later. */
+let ownerToken: string;
 
 beforeAll(async () => {
   await ready();
@@ -51,6 +54,7 @@ beforeAll(async () => {
     payload: { email: EMAIL, loginKey: keys.loginKey, keyAttributes: keys.keyAttributes },
   });
   const token = reg.json().token as string;
+  ownerToken = token;
   const auth = { authorization: `Bearer ${token}` };
 
   const folderKey = generateKey();
@@ -89,7 +93,7 @@ beforeAll(async () => {
   });
 
   // The bridge connects to the server as this user and serves S3.
-  const vault = new Vault(serverUrl, EMAIL, PASSWORD);
+  vault = new Vault(serverUrl, EMAIL, PASSWORD);
   await vault.connect();
   bridgeApp = buildBridge(vault, { accessKeyId: "AKIABRIDGE", secretAccessKey: "bridge-secret-key" });
   bridgeUrl = await bridgeApp.listen({ port: 0, host: "127.0.0.1" });
@@ -142,6 +146,35 @@ describe("local S3 bridge, read path", () => {
     );
     expect(out.ContentRange).toBe(`bytes 0-9/${utf8Encode(CONTENT).length}`);
     expect(await streamToString(out.Body)).toBe(CONTENT.slice(0, 10));
+  });
+
+  it("renews its token once a day and keeps serving", async () => {
+    const inner = vault as unknown as { token: string; tokenObtainedAt: number };
+    const before = inner.token;
+    // A token signed a second later differs even with identical claims.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    inner.tokenObtainedAt = 0;
+    await vault.sync();
+    expect(inner.token).not.toBe(before);
+    expect(inner.tokenObtainedAt).toBeGreaterThan(0);
+    const listed = await s3.send(new ListObjectsV2Command({ Bucket: "Documents" }));
+    expect(listed.Contents?.map((o) => o.Key)).toEqual(["report.txt"]);
+  });
+
+  it("signs in again after its session is revoked elsewhere", async () => {
+    const inner = vault as unknown as { token: string };
+    const before = inner.token;
+    const revoked = await serverApp.inject({
+      method: "POST",
+      url: "/api/auth/sessions/revoke-all",
+      headers: { authorization: `Bearer ${ownerToken}` },
+    });
+    expect(revoked.statusCode).toBe(200);
+    ownerToken = revoked.json().token as string;
+    // The bridge's token is dead; the next read signs in again and serves.
+    const got = await s3.send(new GetObjectCommand({ Bucket: "Documents", Key: "report.txt" }));
+    expect(await streamToString(got.Body)).toBe(CONTENT);
+    expect(inner.token).not.toBe(before);
   });
 
   it("rejects a client using the wrong secret", async () => {

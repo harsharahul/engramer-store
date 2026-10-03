@@ -54,8 +54,15 @@ export interface VaultFolder {
   name: string;
 }
 
+/** Renew once a token has served a day. A bridge runs for months; the
+ * server's tokens end at thirty days, and a renewed one is minted at
+ * the same epoch so nothing else changes. */
+const RENEW_AFTER_MS = 24 * 3600 * 1000;
+
 export class Vault {
   private token = "";
+  /** When the current token was obtained, by sign-in or renewal. */
+  private tokenObtainedAt = 0;
   private masterKey: Uint8Array = new Uint8Array();
   readonly folders = new Map<string, VaultFolder>();
   readonly files = new Map<string, VaultFile>();
@@ -72,6 +79,19 @@ export class Vault {
 
   async connect(): Promise<void> {
     await ready();
+    await this.login();
+    await this.sync();
+  }
+
+  /**
+   * Signs in with the password and unlocks the master key locally. Also
+   * the answer to a refused token: a session ended elsewhere ("sign out
+   * everywhere", a password change) comes back through the password this
+   * process already holds. An account with a second factor cannot sign
+   * in again unattended, since ENGRAM_TOTP was one code; the error says
+   * which of the two it was.
+   */
+  private async login(): Promise<void> {
     const attrRes = await fetch(
       this.url(`/api/auth/attributes?email=${encodeURIComponent(this.email)}`),
     );
@@ -114,14 +134,50 @@ export class Vault {
       login = (await twoFaRes.json()) as { token: string; keyAttributes: KeyAttributes };
     }
     this.token = login.token;
+    this.tokenObtainedAt = Date.now();
     this.masterKey = secretBoxOpen(login.keyAttributes.encryptedMasterKey, kek);
-    await this.sync();
+  }
+
+  private send(path: string, init: RequestInit = {}): Promise<Response> {
+    return fetch(this.url(path), {
+      ...init,
+      headers: { ...(init.headers as Record<string, string> | undefined), authorization: `Bearer ${this.token}` },
+    });
+  }
+
+  /**
+   * A fresh token for a session still standing. A refusal here is left
+   * to the request that follows: it will be a 401, and that signs in
+   * again with the password.
+   */
+  private async renew(): Promise<void> {
+    const res = await this.send("/api/auth/refresh", { method: "POST" });
+    if (res.ok) {
+      this.token = ((await res.json()) as { token: string }).token;
+      this.tokenObtainedAt = Date.now();
+    }
+  }
+
+  /**
+   * An authorized request. The token renews once it has served a day,
+   * and a refused one is answered with one fresh sign-in and a retry, so
+   * a bridge left running never dies at the end of the token it started
+   * with, and a session revoked elsewhere recovers on the next request.
+   */
+  private async authorized(path: string, init: RequestInit = {}): Promise<Response> {
+    if (Date.now() - this.tokenObtainedAt > RENEW_AFTER_MS) {
+      await this.renew();
+    }
+    const first = await this.send(path, init);
+    if (first.status !== 401) {
+      return first;
+    }
+    await this.login();
+    return this.send(path, init);
   }
 
   async sync(): Promise<void> {
-    const res = await fetch(this.url("/api/sync?since=0"), {
-      headers: { authorization: `Bearer ${this.token}` },
-    });
+    const res = await this.authorized("/api/sync?since=0");
     if (!res.ok) {
       throw new Error(`sync failed (${res.status})`);
     }
@@ -156,9 +212,7 @@ export class Vault {
 
   /** Downloads and decrypts a file's content. */
   async read(file: VaultFile): Promise<Uint8Array> {
-    const res = await fetch(this.url(`/api/files/${file.id}/data`), {
-      headers: { authorization: `Bearer ${this.token}` },
-    });
+    const res = await this.authorized(`/api/files/${file.id}/data`);
     if (!res.ok) {
       throw new Error(`download failed (${res.status})`);
     }

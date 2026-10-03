@@ -33,6 +33,33 @@ All notable changes to Engram Store are documented here, following
   in flight during the drop never caches what it fetched.
 
 ### Fixed
+- **A session reopened with Face ID or Touch ID no longer ends after
+  thirty days.** Signing in minted a 30-day token, and unlocking with the
+  device reused that same token, so a device that never typed the
+  password again ran out at day thirty: the Files-app drive and the
+  share sheet then failed on every request, which Files showed as a
+  connection problem, and opening the app signed it out and turned
+  "Extensions on this device" off with it. A live session now renews its
+  token once a day, through the new `POST /api/auth/refresh`, when it
+  starts and on the sync heartbeat, and installs the fresh token wherever
+  a sign-in would. The extension record carries the token's real issue
+  time rather than the time of its last rewrite, so the extensions can
+  tell a stale one; the drive answers a refused token with "sign in"
+  rather than "server unreachable" and re-reads the record the app
+  rewrites; and a session the server ends keeps the extension toggle,
+  so the next sign-in reconnects the drive on its own.
+- **The local S3 bridge stays signed in.** It held the token from its
+  one sign-in and stopped at day thirty with every request refused. It
+  now renews the token once a day and, when a session is ended elsewhere,
+  signs in again with the password it holds and retries the request.
+- **A folder made in the Files app keeps the name you gave it.** Files
+  creates a new folder as "untitled folder" and renames it a moment
+  later; the iPhone and Mac drive sent that rename down the file route,
+  the server refused it, and Files showed the folder in error under the
+  typed name until it paused syncing, while the app showed "untitled".
+  Folders in the drive now take a rename or a move through the folder
+  route, and a folder moved to the vault's root actually lands there
+  (the server read a null parent as "no change").
 - **The Mac traffic lights stay on the toolbar's centre line.** 0.57.0
   placed them there only while the window's content view was repainting,
   which a web view never lets happen, so the shipped app showed them at

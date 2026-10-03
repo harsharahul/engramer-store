@@ -12,6 +12,7 @@ import {
 } from "./native";
 import type { Session } from "./session";
 import { useStore } from "./store";
+import { tokenIssuedAtMs } from "./token";
 
 /**
  * The extension handoff: everything a Files-app provider, share
@@ -86,7 +87,11 @@ function buildRecord(session: Session, inboxFolderId?: string): HandoffRecord {
     email: session.email,
     origin: window.location.origin,
     token: session.token,
-    tokenIssuedAt: Date.now(),
+    // The token's own issue time, not the moment of this write: the
+    // record is rewritten on every foreground with whatever token the
+    // session holds, and stamping "now" each time told the extensions a
+    // token was fresh right up to the request it failed on.
+    tokenIssuedAt: tokenIssuedAtMs(session.token) ?? Date.now(),
     masterKey: toB64(session.masterKey),
     publicKey: session.publicKey,
     // The same wrap the account hierarchy uses; resealed here so the
@@ -167,10 +172,18 @@ export async function reconnectHandoff(session: Session): Promise<HandoffProbeRe
   return nativeHandoffProbe();
 }
 
-/** Sign-out revocation: removes the record regardless of the toggle. */
-export function clearHandoff(email: string): void {
+/**
+ * Sign-out revocation: removes the record regardless of the toggle. A
+ * deliberate sign-out also turns the toggle off, because it is the
+ * gesture that says "nothing of this account stays on the device". A
+ * session the server ended (an expired token) is not that gesture: the
+ * record still goes, since it carries a credential that no longer
+ * works, but the toggle stays so the next sign-in writes a fresh record
+ * and the drive comes back without a trip to Profile.
+ */
+export function clearHandoff(email: string, keepEnabled = false): void {
   void nativeHandoffClear(email);
-  if (handoffEnabled(email)) {
+  if (!keepEnabled && handoffEnabled(email)) {
     localStorage.removeItem(ENABLED_KEY);
   }
 }

@@ -62,9 +62,16 @@ final class EngramFilesItem: NSObject, NSFileProviderItem {
 
     var capabilities: NSFileProviderItemCapabilities {
         if entry.isFolder {
-            // Folder rename/move/delete wait for their own pass; adding
-            // items into a folder works now.
-            return [.allowsReading, .allowsContentEnumerating, .allowsAddingSubItems]
+            // Rename and move are declared because Files performs them
+            // whether or not they are: a new folder is created as
+            // "untitled folder" and renamed a moment later, and a folder
+            // that cannot take that rename sits in error until syncing
+            // pauses. Delete stays out: the server tombstones the whole
+            // subtree, which a slip in Files must not be able to do.
+            return [
+                .allowsReading, .allowsContentEnumerating, .allowsAddingSubItems,
+                .allowsRenaming, .allowsReparenting,
+            ]
         }
         var caps: NSFileProviderItemCapabilities = [
             .allowsReading, .allowsWriting, .allowsRenaming, .allowsReparenting, .allowsDeleting,

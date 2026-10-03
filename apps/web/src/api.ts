@@ -293,6 +293,10 @@ export const api = {
     request<{ key: string }>(`/api/auth/session-key/${encodeURIComponent(id)}`, { quiet: true }),
   deleteSessionKey: (id: string) =>
     request<void>(`/api/auth/session-key/${encodeURIComponent(id)}`, { method: "DELETE", quiet: true }),
+  /** A fresh 30-day token for a session still standing; nothing else
+   * moves, so every other device stays signed in. A 401 here means the
+   * session has ended and the password takes over. */
+  refreshSession: () => request<{ token: string }>("/api/auth/refresh", { method: "POST" }),
   /** Signs every device out; the caller gets a fresh token and stays in. */
   revokeAllSessions: () =>
     request<{ token: string }>("/api/auth/sessions/revoke-all", { method: "POST" }),
