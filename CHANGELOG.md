@@ -5,6 +5,8 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-10-02
+
 ### Added
 - **Change-feed pokes reach every server instance.** On PostgreSQL the
   sequence bump that announces a change also notifies the other
