@@ -176,7 +176,7 @@ async fn teardown_previous(app: &AppHandle, email: String) {
     crate::watched::clear_all(app);
 }
 
-fn navigate_main(app: &AppHandle, url: url::Url) -> Result<(), String> {
+pub(crate) fn navigate_main(app: &AppHandle, url: url::Url) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "no main window".to_string())?;

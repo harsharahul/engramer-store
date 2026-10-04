@@ -156,6 +156,18 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The socket exists before the webview's first request so a baked
+    // loopback window URL never races the listener; axum takes it over in
+    // setup, once the app's paths are known. ENGRAM_LOCAL_SPIKE_PORT lets a
+    // run pick another port than the one baked into the capability (Task 5).
+    #[cfg(feature = "local-spike")]
+    let spike_listener = {
+        let preferred = std::env::var("ENGRAM_LOCAL_SPIKE_PORT")
+            .ok()
+            .and_then(|p| p.trim().parse::<u16>().ok())
+            .unwrap_or(localspike::DEFAULT_PORT);
+        localspike::bind(preferred).expect("local spike: cannot bind a loopback port")
+    };
     let builder = tauri::Builder::default();
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_autostart::init(
@@ -227,14 +239,17 @@ pub fn run() {
             intel::intel_generate,
             intel::intel_cancel,
         ])
-        .setup(|app| {
+        .setup(move |app| {
             watched::rebuild_watchers(app.handle());
             // The window's first URL is "home": the bundled picker in a
             // generic build, the baked deployment otherwise. Clearing the
             // server override returns to it.
             let home = app.get_webview_window("main").and_then(|w| w.url().ok());
             app.manage(serverurl::HomeUrl(home));
+            #[cfg(not(feature = "local-spike"))]
             serverurl::apply_stored(app.handle());
+            #[cfg(feature = "local-spike")]
+            localspike::boot(app.handle(), spike_listener)?;
             #[cfg(target_os = "ios")]
             if let Some(window) = app.get_webview_window("main") {
                 chrome::extend_under_safe_area(&window);

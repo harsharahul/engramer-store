@@ -177,6 +177,37 @@ pub fn sqlite_probe(dir: &Path) -> Result<i64, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Held by the app so the listener lives as long as the process.
+pub struct SpikeState(pub Bound);
+
+/// Resolves the dist and data directories now that the app exists, records
+/// the start in SQLite, hands the pre-bound socket to axum, remembers the
+/// port, and points the main window at the loopback origin.
+pub fn boot(app: &tauri::AppHandle, listener: StdListener) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::Manager;
+    let data_dir = app.path().app_data_dir()?.join("local-spike");
+    let dist = match std::env::var("ENGRAM_LOCAL_SPIKE_DIST") {
+        Ok(path) if !path.trim().is_empty() => PathBuf::from(path.trim()),
+        _ => app.path().resource_dir()?.join("webdist"),
+    };
+    if !dist.join("index.html").is_file() {
+        return Err(format!("local spike: no index.html under {}", dist.display()).into());
+    }
+    let starts = sqlite_probe(&data_dir)?;
+    let bound = serve(listener, dist.clone())?;
+    write_port(&data_dir, bound.port)?;
+    let origin = format!("http://127.0.0.1:{}/", bound.port);
+    eprintln!(
+        "local spike: serving {} at {origin} (sqlite ok, start #{starts}, data {})",
+        dist.display(),
+        data_dir.display()
+    );
+    let url = url::Url::parse(&origin)?;
+    app.manage(SpikeState(bound));
+    crate::serverurl::navigate_main(app, url)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
