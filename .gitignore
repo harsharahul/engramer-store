@@ -32,6 +32,10 @@ apps/desktop/src-tauri/macos/EngramMacExtensions.xcodeproj/
 # a build never leaves the builder's own address in a tracked file.
 apps/desktop/src-tauri/tauri.instance.json
 apps/desktop/src-tauri/capabilities/instance.json
+# Local-first spike: a trimmed copy of apps/web/dist served by the loopback
+# listener, and the merged Tauri config the iOS run uses.
+apps/desktop/src-tauri/webdist-spike/
+apps/desktop/src-tauri/tauri.spike.json
 
 # Local code index
 .intentdb/
