@@ -25,6 +25,8 @@ mod ranges;
 mod saveout;
 mod serverurl;
 mod intel;
+#[cfg(feature = "local-spike")]
+mod localspike;
 mod unlock;
 mod watched;
 
