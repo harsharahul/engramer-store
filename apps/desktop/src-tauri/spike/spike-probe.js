@@ -21,6 +21,7 @@
       origin: location.origin,
       tauri: typeof window.__TAURI__,
       invoke: invoke,
+      swApi: "serviceWorker" in navigator,
       controller: !!(navigator.serviceWorker && navigator.serviceWorker.controller),
       theme: document.documentElement.getAttribute("data-theme"),
       classes: document.documentElement.className,
