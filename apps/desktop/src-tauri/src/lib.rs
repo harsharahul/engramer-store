@@ -159,7 +159,7 @@ pub fn run() {
     // The socket exists before the webview's first request so a baked
     // loopback window URL never races the listener; axum takes it over in
     // setup, once the app's paths are known. ENGRAM_LOCAL_SPIKE_PORT lets a
-    // run pick another port than the one baked into the capability (Task 5).
+    // run pick another port than the one baked into the capability.
     #[cfg(feature = "local-spike")]
     let spike_listener = {
         let preferred = std::env::var("ENGRAM_LOCAL_SPIKE_PORT")

@@ -1,7 +1,6 @@
-//! Local-first spike: a loopback HTTP listener inside the shell that serves
-//! the web client and the few API routes the first paint needs. Throwaway;
-//! compiled only with the `local-spike` cargo feature. Findings are recorded
-//! in docs/local-first.local.md.
+//! Prototype loopback HTTP listener for local mode: serves the web client
+//! and the few API routes the first paint needs from inside the shell.
+//! Compiled only with the `local-spike` cargo feature.
 
 pub mod csp;
 
@@ -110,8 +109,8 @@ async fn api_not_found() -> Response {
     (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "not found" }))).into_response()
 }
 
-/// The in-page probe (spike-probe.js, injected into the served copy of
-/// index.html by Task 4) posts what only the page can observe: the IPC
+/// The in-page probe (spike-probe.js, injected into a served copy of
+/// index.html for prototype runs) posts what only the page can observe: the IPC
 /// bridge, the service worker controller, CSP violations. Logged so a shell
 /// run is checkable from stderr alone.
 async fn spike_report(Json(report): Json<serde_json::Value>) -> StatusCode {
