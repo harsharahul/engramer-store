@@ -16,6 +16,12 @@ All notable changes to Engram Store are documented here, following
   writes `packs.json` with the size and sha256 of each archive and of
   every file in it. It refuses a build whose `version.json` does not
   match the release version and an output folder that overlaps the build.
+- **On-device backend foundation.** A Rust crate (`crates/engram-local`)
+  opens the server's own SQLite schema, exported from the server and
+  checked by its test suite, and serves the health, readiness and sign-up
+  discovery routes on 127.0.0.1 only. A conformance suite
+  (`apps/server/test/conformance`) runs the same HTTP tests against the
+  Node server in every test run and against the Rust backend in CI.
 
 ## [0.58.0] - 2026-10-02
 
