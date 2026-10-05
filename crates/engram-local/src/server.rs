@@ -11,16 +11,16 @@ use axum::extract::Request;
 use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get};
+use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use crate::error::ApiError;
-use crate::headers;
 use crate::store::{Store, DB_FILE};
 use crate::token::Tokens;
+use crate::{accounts, headers, sessions, settings};
 
 /// Server defaults; the binary and the shell set them.
 pub struct ServerConfig {
@@ -111,6 +111,23 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         .route("/api/health", get(health))
         .route("/api/ready", get(ready))
         .route("/api/auth/registration", get(registration))
+        .route("/api/auth/register", post(accounts::register))
+        .route("/api/auth/attributes", get(accounts::attributes))
+        .route("/api/auth/login", post(accounts::login))
+        .route("/api/auth/refresh", post(accounts::refresh))
+        .route("/api/auth/session-key", post(sessions::mint))
+        .route(
+            "/api/auth/session-key/{id}",
+            get(sessions::fetch).delete(sessions::remove),
+        )
+        .route("/api/auth/sessions/revoke-all", post(sessions::revoke_all))
+        .route("/api/user", get(accounts::user).patch(accounts::patch_user))
+        .route("/api/user/key-attributes", get(accounts::key_attributes))
+        .route(
+            "/api/settings",
+            get(settings::get_settings).put(settings::put_settings),
+        )
+        .route("/api/sync", get(settings::sync))
         .route("/api/{*rest}", any(needs_server))
         .method_not_allowed_fallback(needs_server)
         .fallback(not_found)

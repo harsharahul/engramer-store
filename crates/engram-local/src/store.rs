@@ -118,6 +118,24 @@ pub fn next_seq(conn: &Connection, user_id: i64) -> rusqlite::Result<i64> {
     )
 }
 
+/// Milliseconds since the Unix epoch, the server's timestamp unit.
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Bytes the account holds, as the server counts them: live files with
+/// their thumbnails and indexes, unconsumed file-request uploads, and
+/// stored versions.
+pub fn storage_used(conn: &Connection, user_id: i64) -> rusqlite::Result<i64> {
+    let sum = |sql: &str| conn.query_row(sql, params![user_id], |row| row.get::<_, i64>(0));
+    Ok(sum("SELECT COALESCE(SUM(size + thumb_size + index_size), 0) FROM files WHERE user_id = ?1 AND deleted = 0")?
+        + sum("SELECT COALESCE(SUM(size + thumb_size + index_size), 0) FROM request_uploads WHERE user_id = ?1 AND consumed = 0")?
+        + sum("SELECT COALESCE(SUM(size), 0) FROM file_versions WHERE user_id = ?1")?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
