@@ -1,0 +1,12 @@
+[package]
+name = "engram-local"
+version = "0.1.0"
+description = "On-device Engram Store backend: the server API over the server's own SQLite schema"
+license = "AGPL-3.0-only"
+edition = "2021"
+publish = false
+
+[dependencies]
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
