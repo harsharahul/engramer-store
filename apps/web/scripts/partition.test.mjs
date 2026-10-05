@@ -119,6 +119,11 @@ describe("checkDist", () => {
     );
   });
 
+  it("fails when the service worker's precache list cannot be read", () => {
+    const sw = `self.m=[{url:"index.html",revision:"a1"}];`;
+    expect(() => checkDist(fixture({ "sw.js": sw }))).toThrow(/could not read the precache list/);
+  });
+
   it("skips the precache rule when there is no service worker", () => {
     expect(() => checkDist(fixture({}, ["sw.js"]))).not.toThrow();
   });

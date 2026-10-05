@@ -100,7 +100,14 @@ export function checkDist(dist, { coreBudgetBytes = CORE_BUDGET_BYTES } = {}) {
   }
   const swPath = join(dist, "sw.js");
   if (existsSync(swPath)) {
-    for (const url of precachePaths(readFileSync(swPath, "utf8"))) {
+    const urls = precachePaths(readFileSync(swPath, "utf8"));
+    if (urls.length === 0 || !urls.includes("index.html")) {
+      problems.push(
+        "could not read the precache list from sw.js (no entries, or no index.html); " +
+          "update precachePaths for the worker's current format",
+      );
+    }
+    for (const url of urls) {
       const name = classify(url);
       if (name !== "core") {
         problems.push(

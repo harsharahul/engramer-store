@@ -11,10 +11,11 @@ const SW = `self.m=[{"revision":"a1","url":"index.html"}];`;
 const LONG = `office/web-apps/apps/documenteditor/main/resources/img/toolbar/${"x".repeat(60)}.svg`;
 const SPACED = "office/fonts/Noto Sans Café.ttf";
 
-function fixture(extra = {}, omitPrefix = null) {
-  const dist = mkdtempSync(join(tmpdir(), "engram-packs-"));
+function fixture(extra = {}, omitPrefix = null, dist = mkdtempSync(join(tmpdir(), "engram-packs-"))) {
+  mkdirSync(dist, { recursive: true });
   const files = {
     "index.html": "<!doctype html>",
+    "version.json": '{"version":"0.59.0"}',
     "sw.js": SW,
     "assets/index-abc.js": "a",
     "brand/ocean.png": "p",
@@ -144,6 +145,43 @@ describe("buildLocal", () => {
     await expect(
       buildLocal({ dist: fixture({}, "office/"), out: outDir(), version: "0.59.0", env: {} }),
     ).rejects.toThrow(/the office pack is empty/);
+  });
+
+  it("leaves unrelated files in the output directory alone", async () => {
+    const out = outDir();
+    writeFileSync(join(out, "notes.txt"), "keep");
+    await buildLocal({ dist: fixture(), out, version: "0.59.0", env: {} });
+    expect(readFileSync(join(out, "notes.txt"), "utf8")).toBe("keep");
+  });
+
+  it("refuses an output directory that is, contains or sits inside the build", async () => {
+    // Everything lives under one throwaway root, so even an unguarded
+    // recursive delete of the parent stays inside it.
+    const root = mkdtempSync(join(tmpdir(), "engram-packs-root-"));
+    const dist = fixture({}, null, join(root, "dist"));
+    for (const out of [dist, root, join(dist, "local")]) {
+      await expect(buildLocal({ dist, out, version: "0.59.0", env: {} }), out).rejects.toThrow(
+        /overlaps the build/,
+      );
+    }
+    expect(existsSync(join(dist, "index.html"))).toBe(true);
+  });
+
+  it("refuses a build whose version.json names another version", async () => {
+    await expect(
+      buildLocal({
+        dist: fixture({ "version.json": '{"version":"0.58.0"}' }),
+        out: outDir(),
+        version: "0.59.0",
+        env: {},
+      }),
+    ).rejects.toThrow(/the build is version 0\.58\.0, not 0\.59\.0/);
+  });
+
+  it("refuses a build without version.json", async () => {
+    await expect(
+      buildLocal({ dist: fixture({}, "version.json"), out: outDir(), version: "0.59.0", env: {} }),
+    ).rejects.toThrow(/no version\.json/);
   });
 
   it("fails on a partition problem before writing anything", async () => {

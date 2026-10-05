@@ -5,7 +5,9 @@
  * packs.json, the manifest the app bundles with the core. The manifest
  * names each pack's archive with its size and sha256, and every file in
  * it with its path, size and sha256, so the app can verify each file
- * before it serves it. The same files always give the same archive bytes.
+ * before it serves it. The same files, file modes and Node version give
+ * the same archive bytes. Only the core/ and packs/ folders inside the
+ * output directory are replaced; nothing else in it is touched.
  *
  *   pnpm --filter @engramer/web local:packs [-- --dist dist --out dist-local]
  *
@@ -13,8 +15,8 @@
  * (default: this version's GitHub release).
  */
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as tar from "tar";
 import { checkDist, PACK_NAMES, summary } from "./partition.mjs";
@@ -56,8 +58,21 @@ export async function writeArchive(dist, paths, file) {
   );
 }
 
+/** True when `inner` is `outer` or lies inside it. */
+function within(outer, inner) {
+  const rel = relative(outer, inner);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
 export async function buildLocal({ dist, out, version, env = process.env }) {
-  const groups = checkDist(dist);
+  const distDir = resolve(dist);
+  const outDir = resolve(out);
+  if (within(outDir, distDir) || within(distDir, outDir)) {
+    throw new Error(
+      `local-packs: the output directory ${outDir} overlaps the build ${distDir}; choose another --out`,
+    );
+  }
+  const groups = checkDist(distDir);
   for (const name of PACK_NAMES) {
     if (groups[name].length === 0) {
       throw new Error(
@@ -66,7 +81,18 @@ export async function buildLocal({ dist, out, version, env = process.env }) {
       );
     }
   }
-  rmSync(out, { recursive: true, force: true });
+  const versionFile = join(distDir, "version.json");
+  const built = existsSync(versionFile) ? JSON.parse(readFileSync(versionFile, "utf8")).version : null;
+  if (built !== version) {
+    throw new Error(
+      `local-packs: the build is version ${built ?? "unknown (no version.json)"}, not ${version}; ` +
+        "rebuild the web client before packaging",
+    );
+  }
+  rmSync(join(outDir, "core"), { recursive: true, force: true });
+  rmSync(join(outDir, "packs"), { recursive: true, force: true });
+  dist = distDir;
+  out = outDir;
   const coreDir = join(out, "core");
   for (const { path } of groups.core) {
     mkdirSync(dirname(join(coreDir, path)), { recursive: true });
