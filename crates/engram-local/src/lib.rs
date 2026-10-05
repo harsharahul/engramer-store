@@ -4,4 +4,6 @@
 //! device. Every cryptographic operation stays in the client, as with a
 //! server: this backend stores ciphertext and wrapped keys only.
 
+pub mod error;
+pub mod server;
 pub mod store;
