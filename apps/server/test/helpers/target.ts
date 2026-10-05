@@ -34,6 +34,8 @@ export interface Target {
 
 export interface TargetOptions {
   quotaBytes?: number;
+  /** How often an open change feed is checked and kept warm. */
+  eventsHeartbeatMs?: number;
   /** The backend binary; defaults to ENGRAM_CONFORMANCE_BIN. */
   bin?: string;
   /** How long a binary may take to announce its port. */
@@ -51,20 +53,21 @@ export const conformanceBin = (process.env.ENGRAM_CONFORMANCE_BIN ?? "").trim();
 export async function startTarget(options: TargetOptions = {}): Promise<Target> {
   const dataDir = mkdtempSync(join(tmpdir(), "engram-conformance-"));
   const quotaBytes = options.quotaBytes ?? 512 * 1024;
+  const heartbeatMs = options.eventsHeartbeatMs ?? 25_000;
   const bin = options.bin ?? conformanceBin;
   try {
     if (bin) {
-      return await startLocal(bin, dataDir, quotaBytes, options.startTimeoutMs ?? 20_000);
+      return await startLocal(bin, dataDir, quotaBytes, heartbeatMs, options.startTimeoutMs ?? 20_000);
     }
-    return await startNode(dataDir, quotaBytes);
+    return await startNode(dataDir, quotaBytes, heartbeatMs);
   } catch (err) {
     rmSync(dataDir, { recursive: true, force: true });
     throw err;
   }
 }
 
-async function startNode(dataDir: string, quotaBytes: number): Promise<Target> {
-  const app = await buildApp({ dataDir, quotaBytes, webDistDir: null });
+async function startNode(dataDir: string, quotaBytes: number, eventsHeartbeatMs: number): Promise<Target> {
+  const app = await buildApp({ dataDir, quotaBytes, eventsHeartbeatMs, webDistDir: null });
   try {
     await app.listen({ port: 0, host: "127.0.0.1" });
   } catch (err) {
@@ -90,11 +93,21 @@ async function startLocal(
   bin: string,
   dataDir: string,
   quotaBytes: number,
+  eventsHeartbeatMs: number,
   startTimeoutMs: number,
 ): Promise<Target> {
   const child = spawn(
     bin,
-    ["--data-dir", dataDir, "--port", "0", "--quota-bytes", String(quotaBytes)],
+    [
+      "--data-dir",
+      dataDir,
+      "--port",
+      "0",
+      "--quota-bytes",
+      String(quotaBytes),
+      "--events-heartbeat-ms",
+      String(eventsHeartbeatMs),
+    ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
   let stderr = "";

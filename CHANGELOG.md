@@ -29,6 +29,14 @@ All notable changes to Engram Store are documented here, following
   read side, all with the server's request rules, answers and security
   headers. Five conformance suites, ported from the server's own tests,
   pass against both backends.
+- **On-device folders, files and the change feed.** The on-device
+  backend now creates, renames, moves and deletes folders; creates,
+  re-labels, moves and re-keys files; moves files to the trash, restores
+  them and deletes them for good; applies batch moves, trashing and
+  restores; and streams the change feed, so a desktop drive hears about
+  a change as soon as it commits. Answers, sequences and feed behaviour
+  match the server, checked by five more conformance suites that run
+  against both backends.
 
 ## [0.58.0] - 2026-10-02
 

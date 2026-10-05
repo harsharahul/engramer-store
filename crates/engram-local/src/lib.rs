@@ -5,12 +5,15 @@
 //! server: this backend stores ciphertext and wrapped keys only.
 
 pub mod accounts;
+pub mod dto;
 pub mod error;
+pub mod events;
 pub mod extract;
 pub mod headers;
 pub mod server;
 pub mod sessions;
 pub mod settings;
+pub mod storage;
 pub mod store;
 pub mod token;
 pub mod validate;

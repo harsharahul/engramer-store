@@ -18,20 +18,24 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use crate::error::ApiError;
+use crate::events::SeqEvents;
 use crate::store::{Store, DB_FILE};
 use crate::token::Tokens;
-use crate::{accounts, headers, sessions, settings};
+use crate::{accounts, events, headers, sessions, settings, storage};
 
 /// Server defaults; the binary and the shell set them.
 pub struct ServerConfig {
     pub data_dir: PathBuf,
     pub quota_bytes: u64,
+    /// How often an open change feed is checked and kept warm.
+    pub events_heartbeat_ms: u64,
 }
 
 /// Everything a request handler can reach.
 pub struct AppState {
     pub store: Store,
     pub tokens: Tokens,
+    pub events: Arc<SeqEvents>,
     pub config: ServerConfig,
 }
 
@@ -49,6 +53,7 @@ impl AppState {
         Ok(AppState {
             store,
             tokens,
+            events: Arc::new(SeqEvents::default()),
             config,
         })
     }
@@ -57,13 +62,16 @@ impl AppState {
 /// A running server. Dropping it does not stop it; call `stop`.
 pub struct Bound {
     pub port: u16,
+    events: Arc<SeqEvents>,
     shutdown: Option<oneshot::Sender<()>>,
     task: JoinHandle<()>,
 }
 
 impl Bound {
-    /// Stops accepting connections and waits for in-flight requests.
+    /// Ends every open change feed, stops accepting connections and waits
+    /// for in-flight requests.
     pub async fn stop(mut self) {
+        self.events.close_all();
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(());
         }
@@ -86,6 +94,9 @@ pub async fn start(listener: StdListener, state: Arc<AppState>) -> io::Result<Bo
     listener.set_nonblocking(true)?;
     let port = listener.local_addr()?.port();
     let listener = tokio::net::TcpListener::from_std(listener)?;
+    let events = Arc::clone(&state.events);
+    // A state stopped before takes streams again.
+    events.reopen();
     let app = router(state, format!("127.0.0.1:{port}"));
     let (tx, rx) = oneshot::channel::<()>();
     let task = tokio::spawn(async move {
@@ -98,6 +109,7 @@ pub async fn start(listener: StdListener, state: Arc<AppState>) -> io::Result<Bo
     });
     Ok(Bound {
         port,
+        events,
         shutdown: Some(tx),
         task,
     })
@@ -128,6 +140,23 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
             get(settings::get_settings).put(settings::put_settings),
         )
         .route("/api/sync", get(settings::sync))
+        .route("/api/events", get(events::stream))
+        .route("/api/folders", post(storage::create_folder))
+        .route(
+            "/api/folders/{id}",
+            axum::routing::patch(storage::patch_folder).delete(storage::delete_folder),
+        )
+        .route("/api/files", post(storage::create_file))
+        .route("/api/files/batch", post(storage::batch))
+        .route(
+            "/api/files/{id}",
+            axum::routing::patch(storage::patch_file).delete(storage::trash_file),
+        )
+        .route("/api/trash/{id}/restore", post(storage::restore_file))
+        .route(
+            "/api/trash/{id}",
+            axum::routing::delete(storage::delete_forever),
+        )
         .route("/api/{*rest}", any(needs_server))
         .method_not_allowed_fallback(needs_server)
         .fallback(not_found)
@@ -215,6 +244,7 @@ pub(crate) mod tests {
                 AppState::open(ServerConfig {
                     data_dir: dir.clone(),
                     quota_bytes: 512 * 1024,
+                    events_heartbeat_ms: 25_000,
                 })
                 .unwrap(),
             );
