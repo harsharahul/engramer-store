@@ -5,6 +5,18 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Added
+- **Web build partition for on-device installs.** The web build now sorts
+  every output file into the core bundle or one of two download packs
+  (office editor, on-device intelligence) and fails on any file no rule
+  claims, on a service worker precache entry outside the core, on a
+  precache list it cannot read, and on a core larger than 20 MB.
+  `pnpm --filter @engramer/web local:packs` packages a finished build: it
+  copies the core, writes one reproducible gzipped archive per pack, and
+  writes `packs.json` with the size and sha256 of each archive and of
+  every file in it. It refuses a build whose `version.json` does not
+  match the release version and an output folder that overlaps the build.
+
 ## [0.58.0] - 2026-10-02
 
 ### Added
