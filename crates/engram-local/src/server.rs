@@ -18,7 +18,9 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use crate::error::ApiError;
-use crate::store::Store;
+use crate::headers;
+use crate::store::{Store, DB_FILE};
+use crate::token::Tokens;
 
 /// Server defaults; the binary and the shell set them.
 pub struct ServerConfig {
@@ -29,7 +31,27 @@ pub struct ServerConfig {
 /// Everything a request handler can reach.
 pub struct AppState {
     pub store: Store,
+    pub tokens: Tokens,
     pub config: ServerConfig,
+}
+
+impl AppState {
+    /// Opens the vault in `config.data_dir` (creating the directory, the
+    /// database and the session secret on first use).
+    pub fn open(config: ServerConfig) -> Result<AppState, String> {
+        std::fs::create_dir_all(&config.data_dir)
+            .map_err(|err| format!("cannot create {}: {err}", config.data_dir.display()))?;
+        engram_core::init();
+        let store = Store::open(&config.data_dir.join(DB_FILE))
+            .map_err(|err| format!("cannot open the vault: {err}"))?;
+        let tokens = Tokens::load_or_create(&config.data_dir)
+            .map_err(|err| format!("cannot read the session secret: {err}"))?;
+        Ok(AppState {
+            store,
+            tokens,
+            config,
+        })
+    }
 }
 
 /// A running server. Dropping it does not stop it; call `stop`.
@@ -121,7 +143,7 @@ async fn not_found() -> ApiError {
 
 /// Refuses any request not addressed to this listener's own host:port,
 /// so a page elsewhere cannot reach it through a DNS name that resolves
-/// to loopback.
+/// to loopback, and gives every answer the server's response headers.
 async fn host_guard(expected: String, req: Request, next: Next) -> Response {
     let ok = req
         .headers()
@@ -132,7 +154,9 @@ async fn host_guard(expected: String, req: Request, next: Next) -> Response {
     if !ok {
         return StatusCode::MISDIRECTED_REQUEST.into_response();
     }
-    next.run(req).await
+    let mut response = next.run(req).await;
+    headers::apply(response.headers_mut(), &expected);
+    response
 }
 
 #[cfg(test)]
@@ -170,14 +194,13 @@ pub(crate) mod tests {
     impl Running {
         pub(crate) fn new() -> Running {
             let dir = temp_dir("server");
-            let store = Store::open(&dir.join(crate::store::DB_FILE)).unwrap();
-            let state = Arc::new(AppState {
-                store,
-                config: ServerConfig {
+            let state = Arc::new(
+                AppState::open(ServerConfig {
                     data_dir: dir.clone(),
                     quota_bytes: 512 * 1024,
-                },
-            });
+                })
+                .unwrap(),
+            );
             let rt = tokio::runtime::Runtime::new().unwrap();
             let bound = rt.block_on(start(bind(0).unwrap(), state)).unwrap();
             let port = bound.port;
