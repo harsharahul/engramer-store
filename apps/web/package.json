@@ -5,7 +5,7 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && vite build",
+    "build": "tsc -p tsconfig.json && vite build && node scripts/partition.mjs --check dist",
     "dev": "vite",
     "preview": "vite preview",
     "ui:catalog": "node scripts/ui-catalog.mjs",

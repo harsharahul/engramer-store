@@ -5,6 +5,13 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Added
+- **Web build partition for on-device installs.** The web build now sorts
+  every output file into the core bundle or one of two download packs
+  (office editor, on-device intelligence) and fails on any file no rule
+  claims, on a service worker precache entry outside the core, and on a
+  core larger than 20 MB.
+
 ## [0.58.0] - 2026-10-02
 
 ### Added
