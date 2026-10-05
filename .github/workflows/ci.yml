@@ -91,6 +91,32 @@ jobs:
       - name: Cross-language vectors, Rust to TypeScript
         run: pnpm --filter @engramer/crypto test
 
+  local-backend:
+    name: On-device backend conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt -p engram-local -- --check
+      - run: cargo clippy -p engram-local --all-targets -- -D warnings
+      - run: cargo test -p engram-local
+      - run: cargo build -p engram-local
+      - name: Conformance suite against the on-device backend
+        run: pnpm --filter @engramer/server test:conformance
+        env:
+          ENGRAM_CONFORMANCE_BIN: ${{ github.workspace }}/target/debug/engram-local
+
   ios-core:
     name: iOS core cross-build
     runs-on: macos-15

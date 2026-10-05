@@ -541,11 +541,9 @@ class SqliteTxDb implements Db {
   }
 }
 
-export function openDatabase(path: string): SqliteDb {
-  const db = new Database(path);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.exec(`
+/** The SQLite users table; Postgres declares its own in pgdb.ts. Exported
+ * so the on-device backend's schema copy can include it. */
+export const SQLITE_USERS_TABLE = `
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY,
       email TEXT NOT NULL UNIQUE,
@@ -553,9 +551,13 @@ export function openDatabase(path: string): SqliteDb {
       key_attributes TEXT NOT NULL,
       last_seq BIGINT NOT NULL DEFAULT 0,
       created_at BIGINT NOT NULL
-    );
-    ${COMMON_SCHEMA}
-  `);
+    );`;
+
+export function openDatabase(path: string): SqliteDb {
+  const db = new Database(path);
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  db.exec(`${SQLITE_USERS_TABLE}\n${COMMON_SCHEMA}`);
   // Additive migrations for databases created before these columns existed.
   const existingColumns = (table: string) =>
     new Set((db.pragma(`table_info(${table})`) as Array<{ name: string }>).map((c) => c.name));
