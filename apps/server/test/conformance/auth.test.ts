@@ -138,7 +138,10 @@ describe("signing in", () => {
 
 describe("a session", () => {
   it("is required, and a damaged token is refused", async () => {
-    const tampered = `${alice.token.slice(0, -1)}${alice.token.endsWith("A") ? "B" : "A"}`;
+    // The signature's first character carries six signature bits; its last
+    // carries two unused ones, so changing that one can leave the bytes intact.
+    const [head, body, signature = ""] = alice.token.split(".");
+    const tampered = `${head}.${body}.${signature.startsWith("A") ? "B" : "A"}${signature.slice(1)}`;
     for (const headers of [undefined, bearer("not-a-token"), bearer(tampered), { authorization: "Basic abc" }]) {
       const response = await target.inject({ method: "GET", url: "/api/user", headers });
       expect(response.statusCode).toBe(401);

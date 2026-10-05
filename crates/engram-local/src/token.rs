@@ -16,6 +16,8 @@ use sha2::Sha256;
 pub const SECRET_FILE: &str = "jwt-secret";
 /// Tokens are minted for thirty days, as on the server.
 pub const TOKEN_LIFETIME_SECS: i64 = 30 * 24 * 3600;
+/// The shortest secret accepted; a generated one is 43 characters.
+pub const MIN_SECRET_LEN: usize = 32;
 const HEADER: &str = r#"{"alg":"HS256","typ":"JWT"}"#;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -56,11 +58,20 @@ impl Tokens {
     }
 
     /// Reads `<data_dir>/jwt-secret`, or creates it (32 random bytes,
-    /// base64url, owner-only) when it does not exist yet.
+    /// base64url, owner-only) when it does not exist yet. A file holding
+    /// fewer than `MIN_SECRET_LEN` characters is refused: an empty or
+    /// guessable key would let any local process sign a session token.
     pub fn load_or_create(data_dir: &Path) -> io::Result<Tokens> {
         let path = data_dir.join(SECRET_FILE);
         match std::fs::read_to_string(&path) {
-            Ok(text) => Ok(Tokens::new(text.trim())),
+            Ok(text) if text.trim().len() >= MIN_SECRET_LEN => Ok(Tokens::new(text.trim())),
+            Ok(_) => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "{} holds fewer than {MIN_SECRET_LEN} characters; remove it to create a new one (every session then ends)",
+                    path.display()
+                ),
+            )),
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
                 let secret = to_b64url(&engram_core::backend::random_bytes(32));
                 write_private(&path, &secret)?;
@@ -130,16 +141,27 @@ pub fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
+/// Writes an owner-only file all at once: the text goes to a temporary
+/// file first, then a hard link gives it its name, so a crash never
+/// leaves a partly written secret and an existing one is never replaced.
 fn write_private(path: &Path, text: &str) -> io::Result<()> {
     use std::io::Write;
+    let temp = path.with_extension(format!("tmp-{}", std::process::id()));
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
+    options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    options.open(path)?.write_all(text.as_bytes())
+    let written = (|| {
+        let mut file = options.open(&temp)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        std::fs::hard_link(&temp, path)
+    })();
+    let _ = std::fs::remove_file(&temp);
+    written
 }
 
 #[cfg(test)]
@@ -237,6 +259,25 @@ mod tests {
                 .permissions()
                 .mode();
             assert_eq!(mode & 0o777, 0o600);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn refuses_an_empty_or_short_secret_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "engram-local-token-short-{}-{}",
+            std::process::id(),
+            now_secs()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        // An empty key would let any local process sign a token for any account.
+        for text in ["", "  \n", "too-short"] {
+            std::fs::write(dir.join(SECRET_FILE), text).unwrap();
+            let err = Tokens::load_or_create(&dir)
+                .err()
+                .expect("a short secret is refused");
+            assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{text:?}");
         }
         std::fs::remove_dir_all(&dir).unwrap();
     }

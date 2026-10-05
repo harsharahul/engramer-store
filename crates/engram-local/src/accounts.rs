@@ -140,7 +140,7 @@ pub async fn login(
         Ok(store
             .conn()
             .query_row(
-                "SELECT id, login_key_digest, key_attributes, disabled, token_epoch FROM users WHERE email = ?1",
+                "SELECT id, login_key_digest, key_attributes, disabled, token_epoch, totp_enabled FROM users WHERE email = ?1",
                 params![email],
                 |r| {
                     Ok((
@@ -149,13 +149,14 @@ pub async fn login(
                         r.get::<_, String>(2)?,
                         r.get::<_, Option<i64>>(3)?,
                         r.get::<_, Option<i64>>(4)?,
+                        r.get::<_, Option<i64>>(5)?,
                     ))
                 },
             )
             .optional()?)
     })
     .await?;
-    let Some((uid, stored, attributes, disabled_flag, epoch)) = row else {
+    let Some((uid, stored, attributes, disabled_flag, epoch, totp)) = row else {
         return Err(invalid_login());
     };
     if !digests_match(&digest, &stored) {
@@ -163,6 +164,11 @@ pub async fn login(
     }
     if disabled_flag == Some(1) {
         return Err(disabled());
+    }
+    // The device cannot check a second factor, so an account that has one
+    // is refused rather than signed in on the first factor alone.
+    if totp == Some(1) {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "needs a server"));
     }
     let key_attributes: Value =
         serde_json::from_str(&attributes).map_err(|_| ApiError::internal())?;
@@ -322,5 +328,33 @@ mod tests {
         assert!(digests_match("abc", "abc"));
         assert!(!digests_match("abc", "abd"));
         assert!(!digests_match("abc", "abcd"));
+    }
+
+    #[test]
+    fn an_account_with_two_factor_is_refused_rather_than_signed_in_without_it() {
+        // A device cannot check a second factor; an account that has one
+        // (a server's data directory, for instance) must not sign in here.
+        let server = crate::server::tests::Running::new();
+        let sb = r#"{"ciphertext":"c","nonce":"n"}"#;
+        let attributes = format!(
+            r#"{{"kdf":{{"salt":"0123456789abcdef","opsLimit":3,"memLimit":268435456}},"encryptedMasterKey":{sb},"masterKeyEncryptedWithRecoveryKey":{sb},"recoveryKeyEncryptedWithMasterKey":{sb},"publicKey":"p","encryptedPrivateKey":{sb}}}"#
+        );
+        let key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let register = format!(
+            r#"{{"email":"tfa@example.com","loginKey":"{key}","keyAttributes":{attributes}}}"#
+        );
+        let (status, _, _) = server.request("POST", "/api/auth/register", Some(&register));
+        assert_eq!(status, 201);
+        rusqlite::Connection::open(server.dir.join(crate::store::DB_FILE))
+            .unwrap()
+            .execute(
+                "UPDATE users SET totp_enabled = 1 WHERE email = 'tfa@example.com'",
+                [],
+            )
+            .unwrap();
+        let login = format!(r#"{{"email":"tfa@example.com","loginKey":"{key}"}}"#);
+        let (status, _, body) = server.request("POST", "/api/auth/login", Some(&login));
+        assert_eq!(status, 404);
+        assert_eq!(body, r#"{"error":"needs a server"}"#);
     }
 }
