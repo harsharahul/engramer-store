@@ -12,7 +12,6 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use engram_local::server::{bind, start, AppState, ServerConfig};
-use engram_local::store::{Store, DB_FILE};
 
 const USAGE: &str = "usage: engram-local --data-dir <dir> [--port <n>] [--quota-bytes <n>]";
 const DEFAULT_QUOTA_BYTES: u64 = 10 * 1024 * 1024 * 1024;
@@ -54,27 +53,16 @@ async fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    if let Err(err) = std::fs::create_dir_all(&args.data_dir) {
-        eprintln!(
-            "engram-local: cannot create {}: {err}",
-            args.data_dir.display()
-        );
-        return ExitCode::FAILURE;
-    }
-    let store = match Store::open(&args.data_dir.join(DB_FILE)) {
-        Ok(store) => store,
+    let state = match AppState::open(ServerConfig {
+        data_dir: args.data_dir,
+        quota_bytes: args.quota_bytes,
+    }) {
+        Ok(state) => Arc::new(state),
         Err(err) => {
-            eprintln!("engram-local: cannot open the vault: {err}");
+            eprintln!("engram-local: {err}");
             return ExitCode::FAILURE;
         }
     };
-    let state = Arc::new(AppState {
-        store,
-        config: ServerConfig {
-            data_dir: args.data_dir,
-            quota_bytes: args.quota_bytes,
-        },
-    });
     let bound = match bind(args.port) {
         Ok(listener) => match start(listener, state).await {
             Ok(bound) => bound,

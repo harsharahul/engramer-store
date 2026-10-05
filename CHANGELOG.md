@@ -22,6 +22,13 @@ All notable changes to Engram Store are documented here, following
   discovery routes on 127.0.0.1 only. A conformance suite
   (`apps/server/test/conformance`) runs the same HTTP tests against the
   Node server in every test run and against the Rust backend in CI.
+- **On-device accounts and settings.** The on-device backend now creates
+  an account, serves the pre-login key attributes (with the same decoy
+  for unknown emails), signs in, renews and revokes sessions, keeps
+  session keys and the sealed settings blob, and serves the change feed's
+  read side, all with the server's request rules, answers and security
+  headers. Five conformance suites, ported from the server's own tests,
+  pass against both backends.
 
 ## [0.58.0] - 2026-10-02
 

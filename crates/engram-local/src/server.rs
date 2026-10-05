@@ -11,14 +11,16 @@ use axum::extract::Request;
 use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get};
+use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use crate::error::ApiError;
-use crate::store::Store;
+use crate::store::{Store, DB_FILE};
+use crate::token::Tokens;
+use crate::{accounts, headers, sessions, settings};
 
 /// Server defaults; the binary and the shell set them.
 pub struct ServerConfig {
@@ -29,7 +31,27 @@ pub struct ServerConfig {
 /// Everything a request handler can reach.
 pub struct AppState {
     pub store: Store,
+    pub tokens: Tokens,
     pub config: ServerConfig,
+}
+
+impl AppState {
+    /// Opens the vault in `config.data_dir` (creating the directory, the
+    /// database and the session secret on first use).
+    pub fn open(config: ServerConfig) -> Result<AppState, String> {
+        std::fs::create_dir_all(&config.data_dir)
+            .map_err(|err| format!("cannot create {}: {err}", config.data_dir.display()))?;
+        engram_core::init();
+        let store = Store::open(&config.data_dir.join(DB_FILE))
+            .map_err(|err| format!("cannot open the vault: {err}"))?;
+        let tokens = Tokens::load_or_create(&config.data_dir)
+            .map_err(|err| format!("cannot read the session secret: {err}"))?;
+        Ok(AppState {
+            store,
+            tokens,
+            config,
+        })
+    }
 }
 
 /// A running server. Dropping it does not stop it; call `stop`.
@@ -89,6 +111,23 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         .route("/api/health", get(health))
         .route("/api/ready", get(ready))
         .route("/api/auth/registration", get(registration))
+        .route("/api/auth/register", post(accounts::register))
+        .route("/api/auth/attributes", get(accounts::attributes))
+        .route("/api/auth/login", post(accounts::login))
+        .route("/api/auth/refresh", post(accounts::refresh))
+        .route("/api/auth/session-key", post(sessions::mint))
+        .route(
+            "/api/auth/session-key/{id}",
+            get(sessions::fetch).delete(sessions::remove),
+        )
+        .route("/api/auth/sessions/revoke-all", post(sessions::revoke_all))
+        .route("/api/user", get(accounts::user).patch(accounts::patch_user))
+        .route("/api/user/key-attributes", get(accounts::key_attributes))
+        .route(
+            "/api/settings",
+            get(settings::get_settings).put(settings::put_settings),
+        )
+        .route("/api/sync", get(settings::sync))
         .route("/api/{*rest}", any(needs_server))
         .method_not_allowed_fallback(needs_server)
         .fallback(not_found)
@@ -121,7 +160,7 @@ async fn not_found() -> ApiError {
 
 /// Refuses any request not addressed to this listener's own host:port,
 /// so a page elsewhere cannot reach it through a DNS name that resolves
-/// to loopback.
+/// to loopback, and gives every answer the server's response headers.
 async fn host_guard(expected: String, req: Request, next: Next) -> Response {
     let ok = req
         .headers()
@@ -132,7 +171,9 @@ async fn host_guard(expected: String, req: Request, next: Next) -> Response {
     if !ok {
         return StatusCode::MISDIRECTED_REQUEST.into_response();
     }
-    next.run(req).await
+    let mut response = next.run(req).await;
+    headers::apply(response.headers_mut(), &expected);
+    response
 }
 
 #[cfg(test)]
@@ -170,14 +211,13 @@ pub(crate) mod tests {
     impl Running {
         pub(crate) fn new() -> Running {
             let dir = temp_dir("server");
-            let store = Store::open(&dir.join(crate::store::DB_FILE)).unwrap();
-            let state = Arc::new(AppState {
-                store,
-                config: ServerConfig {
+            let state = Arc::new(
+                AppState::open(ServerConfig {
                     data_dir: dir.clone(),
                     quota_bytes: 512 * 1024,
-                },
-            });
+                })
+                .unwrap(),
+            );
             let rt = tokio::runtime::Runtime::new().unwrap();
             let bound = rt.block_on(start(bind(0).unwrap(), state)).unwrap();
             let port = bound.port;
