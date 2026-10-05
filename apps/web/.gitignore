@@ -1,1 +1,3 @@
 public/models/
+# Core copy, pack archives and packs.json for on-device installs (scripts/local-packs.mjs).
+dist-local/
