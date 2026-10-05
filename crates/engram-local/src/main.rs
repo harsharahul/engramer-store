@@ -2,6 +2,7 @@
 //! development:
 //!
 //!   engram-local --data-dir <dir> [--port <n>] [--quota-bytes <n>]
+//!                [--events-heartbeat-ms <n>]
 //!
 //! Prints `listening on 127.0.0.1:<port>` once it accepts connections and
 //! runs until interrupted.
@@ -13,19 +14,22 @@ use std::sync::Arc;
 
 use engram_local::server::{bind, start, AppState, ServerConfig};
 
-const USAGE: &str = "usage: engram-local --data-dir <dir> [--port <n>] [--quota-bytes <n>]";
+const USAGE: &str = "usage: engram-local --data-dir <dir> [--port <n>] [--quota-bytes <n>] [--events-heartbeat-ms <n>]";
 const DEFAULT_QUOTA_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+const DEFAULT_EVENTS_HEARTBEAT_MS: u64 = 25_000;
 
 struct Args {
     data_dir: PathBuf,
     port: u16,
     quota_bytes: u64,
+    events_heartbeat_ms: u64,
 }
 
 fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut data_dir = None;
     let mut port = 0u16;
     let mut quota_bytes = DEFAULT_QUOTA_BYTES;
+    let mut events_heartbeat_ms = DEFAULT_EVENTS_HEARTBEAT_MS;
     while let Some(flag) = args.next() {
         let value = args.next().ok_or_else(|| format!("{flag} needs a value"))?;
         match flag.as_str() {
@@ -34,6 +38,11 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--quota-bytes" => {
                 quota_bytes = value.parse().map_err(|_| format!("bad quota {value}"))?
             }
+            "--events-heartbeat-ms" => {
+                events_heartbeat_ms = value
+                    .parse()
+                    .map_err(|_| format!("bad heartbeat {value}"))?
+            }
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -41,6 +50,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         data_dir: data_dir.ok_or("--data-dir is required")?,
         port,
         quota_bytes,
+        events_heartbeat_ms,
     })
 }
 
@@ -56,6 +66,7 @@ async fn main() -> ExitCode {
     let state = match AppState::open(ServerConfig {
         data_dir: args.data_dir,
         quota_bytes: args.quota_bytes,
+        events_heartbeat_ms: args.events_heartbeat_ms,
     }) {
         Ok(state) => Arc::new(state),
         Err(err) => {
@@ -100,11 +111,14 @@ mod tests {
             "38765",
             "--quota-bytes",
             "524288",
+            "--events-heartbeat-ms",
+            "200",
         ])
         .unwrap();
         assert_eq!(parsed.data_dir, PathBuf::from("/tmp/v"));
         assert_eq!(parsed.port, 38765);
         assert_eq!(parsed.quota_bytes, 524288);
+        assert_eq!(parsed.events_heartbeat_ms, 200);
     }
 
     #[test]
@@ -112,6 +126,7 @@ mod tests {
         let parsed = args(&["--data-dir", "/tmp/v"]).unwrap();
         assert_eq!(parsed.port, 0);
         assert_eq!(parsed.quota_bytes, DEFAULT_QUOTA_BYTES);
+        assert_eq!(parsed.events_heartbeat_ms, DEFAULT_EVENTS_HEARTBEAT_MS);
     }
 
     #[test]

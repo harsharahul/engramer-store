@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 axum = "0.8"
+futures-util = "0.3"
 engram-core = { path = "../engram-core" }
 hmac = "0.12"
 regex = "1"

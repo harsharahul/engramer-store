@@ -6,6 +6,7 @@
 
 pub mod accounts;
 pub mod error;
+pub mod events;
 pub mod extract;
 pub mod headers;
 pub mod server;
