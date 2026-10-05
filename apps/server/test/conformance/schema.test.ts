@@ -17,7 +17,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await target.close();
+  // Undefined when the start failed; that error is the one to read.
+  await target?.close();
 });
 
 function shape(path: string) {

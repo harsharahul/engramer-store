@@ -81,13 +81,16 @@ pub async fn start(listener: StdListener, state: Arc<AppState>) -> io::Result<Bo
     })
 }
 
-/// The routes, behind the Host guard for `host` ("127.0.0.1:<port>").
+/// The routes, behind the Host guard for `host` ("127.0.0.1:<port>"). A
+/// served path called with a method it does not serve answers like any
+/// other route a vault cannot serve, never with a bodyless 405.
 pub fn router(state: Arc<AppState>, host: String) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/ready", get(ready))
         .route("/api/auth/registration", get(registration))
         .route("/api/{*rest}", any(needs_server))
+        .method_not_allowed_fallback(needs_server)
         .fallback(not_found)
         .with_state(state)
         .layer(middleware::from_fn(move |req, next| {
@@ -155,11 +158,13 @@ pub(crate) mod tests {
         dir
     }
 
-    /// A server on a fresh vault, with its own runtime.
+    /// A server on a fresh vault, with its own runtime. Dropping it stops
+    /// the server and removes the vault's directory.
     pub(crate) struct Running {
         pub rt: tokio::runtime::Runtime,
         pub bound: Option<Bound>,
         pub port: u16,
+        pub dir: PathBuf,
     }
 
     impl Running {
@@ -169,7 +174,7 @@ pub(crate) mod tests {
             let state = Arc::new(AppState {
                 store,
                 config: ServerConfig {
-                    data_dir: dir,
+                    data_dir: dir.clone(),
                     quota_bytes: 512 * 1024,
                 },
             });
@@ -180,6 +185,7 @@ pub(crate) mod tests {
                 rt,
                 bound: Some(bound),
                 port,
+                dir,
             }
         }
 
@@ -205,6 +211,7 @@ pub(crate) mod tests {
             if let Some(bound) = self.bound.take() {
                 self.rt.block_on(bound.stop());
             }
+            let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
 
@@ -256,6 +263,14 @@ pub(crate) mod tests {
     fn api_routes_a_vault_cannot_serve_say_so() {
         let server = Running::new();
         let (status, _, body) = server.request("POST", "/api/admin/users", Some("{}"));
+        assert_eq!(status, 404);
+        assert_eq!(body, r#"{"error":"needs a server"}"#);
+    }
+
+    #[test]
+    fn a_served_path_called_with_another_method_needs_a_server() {
+        let server = Running::new();
+        let (status, _, body) = server.request("POST", "/api/health", Some("{}"));
         assert_eq!(status, 404);
         assert_eq!(body, r#"{"error":"needs a server"}"#);
     }

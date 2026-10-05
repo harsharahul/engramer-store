@@ -34,18 +34,43 @@ export interface Target {
 
 export interface TargetOptions {
   quotaBytes?: number;
+  /** The backend binary; defaults to ENGRAM_CONFORMANCE_BIN. */
+  bin?: string;
+  /** How long a binary may take to announce its port. */
+  startTimeoutMs?: number;
 }
 
 export const conformanceBin = (process.env.ENGRAM_CONFORMANCE_BIN ?? "").trim();
 
+/**
+ * Starts a target on a fresh data directory. A target that fails to
+ * start leaves nothing behind: its process is killed and its directory
+ * removed before the error, which carries the backend's own output, is
+ * thrown.
+ */
 export async function startTarget(options: TargetOptions = {}): Promise<Target> {
   const dataDir = mkdtempSync(join(tmpdir(), "engram-conformance-"));
   const quotaBytes = options.quotaBytes ?? 512 * 1024;
-  if (conformanceBin) {
-    return startLocal(dataDir, quotaBytes);
+  const bin = options.bin ?? conformanceBin;
+  try {
+    if (bin) {
+      return await startLocal(bin, dataDir, quotaBytes, options.startTimeoutMs ?? 20_000);
+    }
+    return await startNode(dataDir, quotaBytes);
+  } catch (err) {
+    rmSync(dataDir, { recursive: true, force: true });
+    throw err;
   }
+}
+
+async function startNode(dataDir: string, quotaBytes: number): Promise<Target> {
   const app = await buildApp({ dataDir, quotaBytes, webDistDir: null });
-  await app.listen({ port: 0, host: "127.0.0.1" });
+  try {
+    await app.listen({ port: 0, host: "127.0.0.1" });
+  } catch (err) {
+    await app.close();
+    throw err;
+  }
   const address = app.server.address();
   const port = typeof address === "object" && address ? address.port : 0;
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -61,9 +86,14 @@ export async function startTarget(options: TargetOptions = {}): Promise<Target> 
   };
 }
 
-async function startLocal(dataDir: string, quotaBytes: number): Promise<Target> {
+async function startLocal(
+  bin: string,
+  dataDir: string,
+  quotaBytes: number,
+  startTimeoutMs: number,
+): Promise<Target> {
   const child = spawn(
-    conformanceBin,
+    bin,
     ["--data-dir", dataDir, "--port", "0", "--quota-bytes", String(quotaBytes)],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
@@ -73,26 +103,42 @@ async function startLocal(dataDir: string, quotaBytes: number): Promise<Target> 
   });
   const port = await new Promise<number>((resolve, reject) => {
     let stdout = "";
+    let settled = false;
+    // Rejects only once the process is gone: a backend still running
+    // after a failed start would hold its port and its data directory.
+    const fail = (message: string) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      const running = child.pid !== undefined && child.exitCode === null && child.signalCode === null;
+      if (!running) {
+        reject(new Error(message));
+        return;
+      }
+      child.once("close", () => reject(new Error(message)));
+      child.kill("SIGKILL");
+    };
     const timer = setTimeout(
-      () => reject(new Error(`engram-local did not start within 20 s\n${stderr}`)),
-      20_000,
+      () => fail(`engram-local did not start within ${startTimeoutMs} ms\n${stderr}`),
+      startTimeoutMs,
     );
     child.stdout.on("data", (chunk) => {
+      if (settled) {
+        return;
+      }
       stdout += String(chunk);
       const match = /listening on 127\.0\.0\.1:(\d+)/.exec(stdout);
       if (match) {
+        settled = true;
         clearTimeout(timer);
         resolve(Number(match[1]));
       }
     });
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    child.on("exit", (code) => {
-      clearTimeout(timer);
-      reject(new Error(`engram-local exited with ${code}\n${stderr}`));
-    });
+    child.on("error", (err) => fail(`engram-local could not start: ${err.message}`));
+    // "close" waits for stdout and stderr to drain, so the message is whole.
+    child.on("close", (code) => fail(`engram-local exited with ${code}\n${stderr}`));
   });
   const baseUrl = `http://127.0.0.1:${port}`;
   return {

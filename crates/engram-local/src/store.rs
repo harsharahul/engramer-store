@@ -123,9 +123,33 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    /// A vault path whose directory is removed when the test ends.
+    struct TempVault(PathBuf);
+
+    impl std::ops::Deref for TempVault {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl AsRef<Path> for TempVault {
+        fn as_ref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempVault {
+        fn drop(&mut self) {
+            if let Some(dir) = self.0.parent() {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+        }
+    }
+
     /// A fresh vault path per call. The counter keeps parallel tests apart
     /// when the clock (microseconds on macOS) gives two of them one value.
-    fn temp_db() -> PathBuf {
+    fn temp_db() -> TempVault {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
@@ -137,7 +161,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        dir.join(DB_FILE)
+        TempVault(dir.join(DB_FILE))
     }
 
     fn add_user(conn: &Connection, email: &str) -> i64 {
@@ -167,7 +191,8 @@ mod tests {
 
     #[test]
     fn open_creates_every_table() {
-        let store = Store::open(&temp_db()).unwrap();
+        let vault = temp_db();
+        let store = Store::open(&vault).unwrap();
         let conn = store.conn();
         for table in schema_tables() {
             let found: i64 = conn
@@ -183,7 +208,8 @@ mod tests {
 
     #[test]
     fn every_migration_column_exists() {
-        let store = Store::open(&temp_db()).unwrap();
+        let vault = temp_db();
+        let store = Store::open(&vault).unwrap();
         let conn = store.conn();
         let migrations = column_migrations();
         assert!(!migrations.is_empty());
@@ -195,6 +221,42 @@ mod tests {
                 m.column
             );
         }
+    }
+
+    #[test]
+    fn opening_an_older_vault_adds_the_missing_columns_and_keeps_its_rows() {
+        let path = temp_db();
+        {
+            // A vault from before any column migration: the base users table only.
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE users (
+                   id INTEGER PRIMARY KEY,
+                   email TEXT NOT NULL UNIQUE,
+                   login_key_digest TEXT NOT NULL,
+                   key_attributes TEXT NOT NULL,
+                   last_seq BIGINT NOT NULL DEFAULT 0,
+                   created_at BIGINT NOT NULL
+                 );
+                 INSERT INTO users (email, login_key_digest, key_attributes, last_seq, created_at)
+                   VALUES ('old@example.com', 'd', '{}', 7, 1);",
+            )
+            .unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let conn = store.conn();
+        let columns = table_columns(&conn, "users").unwrap();
+        for m in column_migrations().iter().filter(|m| m.table == "users") {
+            assert!(columns.contains(&m.column), "users.{}", m.column);
+        }
+        let row: (String, i64, i64, i64) = conn
+            .query_row(
+                "SELECT email, last_seq, token_epoch, disabled FROM users",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("old@example.com".to_string(), 7, 0, 0));
     }
 
     #[test]
@@ -214,7 +276,8 @@ mod tests {
 
     #[test]
     fn wal_and_foreign_keys_are_on() {
-        let store = Store::open(&temp_db()).unwrap();
+        let vault = temp_db();
+        let store = Store::open(&vault).unwrap();
         let conn = store.conn();
         let mode: String = conn
             .query_row("PRAGMA journal_mode", [], |row| row.get(0))
@@ -228,7 +291,8 @@ mod tests {
 
     #[test]
     fn next_seq_counts_from_one_per_user() {
-        let store = Store::open(&temp_db()).unwrap();
+        let vault = temp_db();
+        let store = Store::open(&vault).unwrap();
         let conn = store.conn();
         let a = add_user(&conn, "a@example.com");
         let b = add_user(&conn, "b@example.com");
@@ -239,7 +303,8 @@ mod tests {
 
     #[test]
     fn a_failed_transaction_leaves_nothing_behind() {
-        let store = Store::open(&temp_db()).unwrap();
+        let vault = temp_db();
+        let store = Store::open(&vault).unwrap();
         let user = add_user(&store.conn(), "a@example.com");
         let result: Result<(), rusqlite::Error> = store.tx(|tx| {
             next_seq(tx, user)?;

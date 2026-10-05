@@ -12,7 +12,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await target.close();
+  // Undefined when the start failed; that error is the one to read.
+  await target?.close();
 });
 
 describe("health and discovery", () => {
@@ -33,6 +34,12 @@ describe("health and discovery", () => {
     const response = await target.inject({ method: "GET", url: "/api/auth/registration" });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ mode: "open", macAppUrl: null });
+  });
+
+  it("answers a served path called with another method with a JSON 404", async () => {
+    const response = await target.inject({ method: "POST", url: "/api/health", payload: {} });
+    expect(response.statusCode).toBe(404);
+    expect(typeof response.json().error).toBe("string");
   });
 
   it("answers an unknown API route with a JSON 404", async () => {
