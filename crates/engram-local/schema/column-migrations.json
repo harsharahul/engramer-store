@@ -1,0 +1,127 @@
+[
+  {
+    "table": "files",
+    "column": "generation",
+    "type": "BIGINT NOT NULL DEFAULT 0"
+  },
+  {
+    "table": "files",
+    "column": "index_size",
+    "type": "BIGINT NOT NULL DEFAULT 0"
+  },
+  {
+    "table": "files",
+    "column": "content_hash",
+    "type": "TEXT"
+  },
+  {
+    "table": "request_uploads",
+    "column": "index_size",
+    "type": "BIGINT NOT NULL DEFAULT 0"
+  },
+  {
+    "table": "users",
+    "column": "totp_secret",
+    "type": "TEXT"
+  },
+  {
+    "table": "users",
+    "column": "totp_enabled",
+    "type": "BIGINT NOT NULL DEFAULT 0"
+  },
+  {
+    "table": "users",
+    "column": "totp_last_step",
+    "type": "BIGINT NOT NULL DEFAULT 0"
+  },
+  {
+    "table": "users",
+    "column": "recovery_code_digests",
+    "type": "TEXT"
+  },
+  {
+    "table": "users",
+    "column": "disabled",
+    "type": "BIGINT NOT NULL DEFAULT 0"
+  },
+  {
+    "table": "users",
+    "column": "quota_bytes",
+    "type": "BIGINT"
+  },
+  {
+    "table": "users",
+    "column": "settings_blob",
+    "type": "TEXT"
+  },
+  {
+    "table": "users",
+    "column": "settings_updated_ms",
+    "type": "BIGINT NOT NULL DEFAULT 0"
+  },
+  {
+    "table": "users",
+    "column": "display_name",
+    "type": "TEXT"
+  },
+  {
+    "table": "shares",
+    "column": "expires_at",
+    "type": "BIGINT"
+  },
+  {
+    "table": "shares",
+    "column": "max_downloads",
+    "type": "BIGINT"
+  },
+  {
+    "table": "shares",
+    "column": "download_count",
+    "type": "BIGINT NOT NULL DEFAULT 0"
+  },
+  {
+    "table": "shares",
+    "column": "password_digest",
+    "type": "TEXT"
+  },
+  {
+    "table": "shares",
+    "column": "password_kdf",
+    "type": "TEXT"
+  },
+  {
+    "table": "shares",
+    "column": "wrapped_key",
+    "type": "TEXT"
+  },
+  {
+    "table": "files",
+    "column": "key_epoch",
+    "type": "BIGINT NOT NULL DEFAULT 0"
+  },
+  {
+    "table": "files",
+    "column": "seekable",
+    "type": "BIGINT NOT NULL DEFAULT 0"
+  },
+  {
+    "table": "users",
+    "column": "token_epoch",
+    "type": "BIGINT NOT NULL DEFAULT 0"
+  },
+  {
+    "table": "channel_state",
+    "column": "content_generation",
+    "type": "BIGINT NOT NULL DEFAULT 0"
+  },
+  {
+    "table": "channel_state",
+    "column": "content_channel_seq",
+    "type": "BIGINT NOT NULL DEFAULT 0"
+  },
+  {
+    "table": "channel_presence",
+    "column": "role",
+    "type": "TEXT"
+  }
+]
