@@ -242,7 +242,7 @@ pub async fn user(
             "totpEnabled": totp_enabled,
             "recoveryCodesLeft": codes_left,
             "collab": { "relay": false },
-            "events": false,
+            "events": true,
         }))
     })
     .await?;

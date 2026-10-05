@@ -6,6 +6,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::{Map, Value};
 
 use crate::error::ApiError;
 
@@ -117,6 +118,75 @@ impl KeyAttributes {
     }
 }
 
+/// A request body that must be a JSON object.
+pub fn object(body: &Value) -> Result<&Map<String, Value>, ApiError> {
+    body.as_object().ok_or_else(ApiError::invalid_request)
+}
+
+/// `secretBoxSchema.optional()`: absent is None; present must be an
+/// object with string `ciphertext` and `nonce` (null is refused, as zod's
+/// `optional()` refuses it); other keys are dropped.
+pub fn optional_secret_box(
+    body: &Map<String, Value>,
+    key: &str,
+) -> Result<Option<SecretBox>, ApiError> {
+    match body.get(key) {
+        None => Ok(None),
+        Some(value) => serde_json::from_value(value.clone())
+            .map(Some)
+            .map_err(|_| ApiError::invalid_request()),
+    }
+}
+
+/// `secretBoxSchema`: required.
+pub fn secret_box(body: &Map<String, Value>, key: &str) -> Result<SecretBox, ApiError> {
+    optional_secret_box(body, key)?.ok_or_else(ApiError::invalid_request)
+}
+
+/// `z.string().nullable().optional()`: absent is None, null is
+/// `Some(None)`, a string is `Some(Some(text))`.
+pub fn nullable_string(
+    body: &Map<String, Value>,
+    key: &str,
+) -> Result<Option<Option<String>>, ApiError> {
+    match body.get(key) {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(None)),
+        Some(Value::String(text)) => Ok(Some(Some(text.clone()))),
+        Some(_) => Err(ApiError::invalid_request()),
+    }
+}
+
+/// `z.boolean().optional()`.
+pub fn optional_bool(body: &Map<String, Value>, key: &str) -> Result<Option<bool>, ApiError> {
+    match body.get(key) {
+        None => Ok(None),
+        Some(Value::Bool(flag)) => Ok(Some(*flag)),
+        Some(_) => Err(ApiError::invalid_request()),
+    }
+}
+
+/// `z.string()`: required.
+pub fn string(body: &Map<String, Value>, key: &str) -> Result<String, ApiError> {
+    match body.get(key) {
+        Some(Value::String(text)) => Ok(text.clone()),
+        _ => Err(ApiError::invalid_request()),
+    }
+}
+
+/// `z.array(item).min(min).max(max)` over the value at `key`.
+pub fn list<'a>(
+    body: &'a Map<String, Value>,
+    key: &str,
+    min: usize,
+    max: usize,
+) -> Result<&'a Vec<Value>, ApiError> {
+    match body.get(key) {
+        Some(Value::Array(items)) if (min..=max).contains(&items.len()) => Ok(items),
+        _ => Err(ApiError::invalid_request()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +284,40 @@ mod tests {
         assert_eq!(js_len("é"), 1);
         assert_eq!(js_len("😀"), 2);
         assert_eq!(js_trim("\u{feff} name \n"), "name");
+    }
+
+    #[test]
+    fn body_fields_follow_zod() {
+        let body = serde_json::json!({
+            "box": { "ciphertext": "c", "nonce": "n", "extra": 1 },
+            "nullish": null,
+            "text": "t",
+            "flag": true,
+            "ids": ["a", "b"]
+        });
+        let body = object(&body).unwrap();
+        let sealed = secret_box(body, "box").unwrap();
+        assert_eq!(
+            serde_json::to_string(&sealed).unwrap(),
+            r#"{"ciphertext":"c","nonce":"n"}"#
+        );
+        assert!(secret_box(body, "missing").is_err());
+        assert!(optional_secret_box(body, "missing").unwrap().is_none());
+        assert!(
+            optional_secret_box(body, "nullish").is_err(),
+            "null is not absent"
+        );
+        assert_eq!(nullable_string(body, "nullish").unwrap(), Some(None));
+        assert_eq!(
+            nullable_string(body, "text").unwrap(),
+            Some(Some("t".to_string()))
+        );
+        assert_eq!(nullable_string(body, "missing").unwrap(), None);
+        assert!(nullable_string(body, "flag").is_err());
+        assert_eq!(optional_bool(body, "flag").unwrap(), Some(true));
+        assert!(optional_bool(body, "text").is_err());
+        assert_eq!(list(body, "ids", 1, 2).unwrap().len(), 2);
+        assert!(list(body, "ids", 3, 5).is_err());
+        assert!(object(&serde_json::json!([1])).is_err());
     }
 }

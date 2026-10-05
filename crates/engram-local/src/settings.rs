@@ -8,10 +8,11 @@ use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::Json;
-use rusqlite::{params, Connection, Row};
-use serde::{Deserialize, Serialize};
+use rusqlite::{params, Connection};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::dto::{file_from, folder_from, FILES_WITH_COLLABORATORS};
 use crate::error::ApiError;
 use crate::extract::{blocking, AuthUser, JsonBody};
 use crate::server::AppState;
@@ -56,90 +57,18 @@ pub async fn put_settings(
         return Err(ApiError::invalid_request());
     }
     let updated = now_ms();
-    blocking(&state, move |store| {
+    let seq = blocking(&state, move |store| {
         store.tx(|tx| {
             tx.execute(
                 "UPDATE users SET settings_blob = ?1, settings_updated_ms = ?2 WHERE id = ?3",
                 params![body.blob, updated, auth.uid],
             )?;
-            next_seq(tx, auth.uid)?;
-            Ok::<(), ApiError>(())
+            Ok::<i64, ApiError>(next_seq(tx, auth.uid)?)
         })
     })
     .await?;
+    state.events.note(auth.uid, seq);
     Ok(Json(json!({ "updatedAt": updated })))
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FolderDto {
-    pub id: String,
-    pub parent_id: Option<String>,
-    pub encrypted_key: Value,
-    pub encrypted_meta: Value,
-    pub deleted: bool,
-    pub update_seq: i64,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileDto {
-    pub id: String,
-    pub folder_id: Option<String>,
-    pub encrypted_key: Value,
-    pub encrypted_meta: Value,
-    pub key_epoch: i64,
-    pub generation: i64,
-    pub size: i64,
-    pub thumb_size: i64,
-    pub index_size: i64,
-    pub uploaded: bool,
-    pub trashed: bool,
-    pub deleted: bool,
-    pub update_seq: i64,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub has_collaborators: bool,
-}
-
-fn parse_json(text: String) -> Value {
-    serde_json::from_str(&text).unwrap_or(Value::Null)
-}
-
-fn folder_from(row: &Row<'_>) -> rusqlite::Result<FolderDto> {
-    Ok(FolderDto {
-        id: row.get("id")?,
-        parent_id: row.get("parent_id")?,
-        encrypted_key: parse_json(row.get("encrypted_key")?),
-        encrypted_meta: parse_json(row.get("encrypted_meta")?),
-        deleted: row.get::<_, i64>("deleted")? == 1,
-        update_seq: row.get("update_seq")?,
-        created_at: row.get("created_at")?,
-        updated_at: row.get("updated_at")?,
-    })
-}
-
-fn file_from(row: &Row<'_>) -> rusqlite::Result<FileDto> {
-    Ok(FileDto {
-        id: row.get("id")?,
-        folder_id: row.get("folder_id")?,
-        encrypted_key: parse_json(row.get("encrypted_key")?),
-        encrypted_meta: parse_json(row.get("encrypted_meta")?),
-        key_epoch: row.get("key_epoch")?,
-        generation: row.get("generation")?,
-        size: row.get("size")?,
-        thumb_size: row.get("thumb_size")?,
-        index_size: row.get("index_size")?,
-        uploaded: row.get::<_, i64>("uploaded")? == 1,
-        trashed: row.get::<_, i64>("trashed")? == 1,
-        deleted: row.get::<_, i64>("deleted")? == 1,
-        update_seq: row.get("update_seq")?,
-        created_at: row.get("created_at")?,
-        updated_at: row.get("updated_at")?,
-        has_collaborators: row.get::<_, i64>("has_collaborators")? != 0,
-    })
 }
 
 /// `Number(text)` for the query parameters: absent or unreadable is 0.
@@ -174,12 +103,9 @@ pub fn sync_page(conn: &Connection, uid: i64, since: i64, limit: i64) -> rusqlit
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut files = conn
         .prepare(&format!(
-            "SELECT files.*, EXISTS(
-               SELECT 1 FROM file_collaborators c WHERE c.file_id = files.id AND c.revoked = 0
-             ) AS has_collaborators
-             FROM files WHERE user_id = ?1 AND update_seq > ?2 AND update_seq <= ?3 ORDER BY update_seq{probe}"
+            "{FILES_WITH_COLLABORATORS} WHERE user_id = ?1 AND update_seq > ?2 AND update_seq <= ?3 ORDER BY update_seq{probe}"
         ))?
-        .query_map(params![uid, since, up_to], file_from)?
+        .query_map(params![uid, since, up_to], |row| file_from(row, true))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut seq = up_to;
     if limit > 0 {

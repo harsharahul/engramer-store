@@ -21,7 +21,7 @@ use crate::error::ApiError;
 use crate::events::SeqEvents;
 use crate::store::{Store, DB_FILE};
 use crate::token::Tokens;
-use crate::{accounts, events, headers, sessions, settings};
+use crate::{accounts, events, headers, sessions, settings, storage};
 
 /// Server defaults; the binary and the shell set them.
 pub struct ServerConfig {
@@ -139,6 +139,22 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         )
         .route("/api/sync", get(settings::sync))
         .route("/api/events", get(events::stream))
+        .route("/api/folders", post(storage::create_folder))
+        .route(
+            "/api/folders/{id}",
+            axum::routing::patch(storage::patch_folder).delete(storage::delete_folder),
+        )
+        .route("/api/files", post(storage::create_file))
+        .route("/api/files/batch", post(storage::batch))
+        .route(
+            "/api/files/{id}",
+            axum::routing::patch(storage::patch_file).delete(storage::trash_file),
+        )
+        .route("/api/trash/{id}/restore", post(storage::restore_file))
+        .route(
+            "/api/trash/{id}",
+            axum::routing::delete(storage::delete_forever),
+        )
         .route("/api/{*rest}", any(needs_server))
         .method_not_allowed_fallback(needs_server)
         .fallback(not_found)
