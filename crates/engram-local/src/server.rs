@@ -95,6 +95,8 @@ pub async fn start(listener: StdListener, state: Arc<AppState>) -> io::Result<Bo
     let port = listener.local_addr()?.port();
     let listener = tokio::net::TcpListener::from_std(listener)?;
     let events = Arc::clone(&state.events);
+    // A state stopped before takes streams again.
+    events.reopen();
     let app = router(state, format!("127.0.0.1:{port}"));
     let (tx, rx) = oneshot::channel::<()>();
     let task = tokio::spawn(async move {
