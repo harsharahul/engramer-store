@@ -123,9 +123,13 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    /// A fresh vault path per call. The counter keeps parallel tests apart
+    /// when the clock (microseconds on macOS) gives two of them one value.
     fn temp_db() -> PathBuf {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
-            "engram-local-store-{}-{}",
+            "engram-local-store-{}-{n}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
