@@ -421,6 +421,8 @@ mod tests {
                 data_dir: dir.clone(),
                 quota_bytes: 512 * 1024,
                 events_heartbeat_ms: 25_000,
+                max_versions: 10,
+                max_blob_bytes: 20 * 1024 * 1024 * 1024,
             })
             .unwrap(),
         );
@@ -454,6 +456,8 @@ mod tests {
                 data_dir: dir.clone(),
                 quota_bytes: 512 * 1024,
                 events_heartbeat_ms: 25_000,
+                max_versions: 10,
+                max_blob_bytes: 20 * 1024 * 1024 * 1024,
             })
             .unwrap(),
         );

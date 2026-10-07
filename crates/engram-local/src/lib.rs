@@ -5,6 +5,7 @@
 //! server: this backend stores ciphertext and wrapped keys only.
 
 pub mod accounts;
+pub mod blobs;
 pub mod dto;
 pub mod error;
 pub mod events;

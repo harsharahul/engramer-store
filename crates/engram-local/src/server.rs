@@ -7,7 +7,7 @@ use std::net::TcpListener as StdListener;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::extract::Request;
+use axum::extract::{DefaultBodyLimit, Request};
 use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use crate::blobs::{BlobStore, BLOBS_DIR};
 use crate::error::ApiError;
 use crate::events::SeqEvents;
 use crate::store::{Store, DB_FILE};
@@ -29,6 +30,10 @@ pub struct ServerConfig {
     pub quota_bytes: u64,
     /// How often an open change feed is checked and kept warm.
     pub events_heartbeat_ms: u64,
+    /// Content versions kept per file; 0 keeps none.
+    pub max_versions: usize,
+    /// The most bytes one blob may hold.
+    pub max_blob_bytes: u64,
 }
 
 /// Everything a request handler can reach.
@@ -36,6 +41,7 @@ pub struct AppState {
     pub store: Store,
     pub tokens: Tokens,
     pub events: Arc<SeqEvents>,
+    pub blobs: BlobStore,
     pub config: ServerConfig,
 }
 
@@ -50,10 +56,13 @@ impl AppState {
             .map_err(|err| format!("cannot open the vault: {err}"))?;
         let tokens = Tokens::load_or_create(&config.data_dir)
             .map_err(|err| format!("cannot read the session secret: {err}"))?;
+        let blobs = BlobStore::open(config.data_dir.join(BLOBS_DIR))
+            .map_err(|err| format!("cannot open the blob directory: {err}"))?;
         Ok(AppState {
             store,
             tokens,
             events: Arc::new(SeqEvents::default()),
+            blobs,
             config,
         })
     }
@@ -161,6 +170,9 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         .method_not_allowed_fallback(needs_server)
         .fallback(not_found)
         .with_state(state)
+        // The blob routes stream their bodies and bound them by the quota;
+        // JSON bodies bound themselves (see `extract::JSON_BODY_LIMIT`).
+        .layer(DefaultBodyLimit::disable())
         .layer(middleware::from_fn(move |req, next| {
             host_guard(host.clone(), req, next)
         }))
@@ -245,6 +257,8 @@ pub(crate) mod tests {
                     data_dir: dir.clone(),
                     quota_bytes: 512 * 1024,
                     events_heartbeat_ms: 25_000,
+                    max_versions: 10,
+                    max_blob_bytes: 20 * 1024 * 1024 * 1024,
                 })
                 .unwrap(),
             );
