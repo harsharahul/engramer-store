@@ -157,6 +157,7 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         )
         .route("/api/files", post(storage::create_file))
         .route("/api/files/batch", post(storage::batch))
+        .route("/api/files/verify", post(content::verify))
         .route(
             "/api/files/{id}",
             axum::routing::patch(storage::patch_file).delete(storage::trash_file),
@@ -172,6 +173,28 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         .route(
             "/api/files/{id}/index",
             axum::routing::put(content::put_index).get(content::get_index),
+        )
+        .route("/api/files/{id}/data/parts", post(content::begin_parts))
+        .route(
+            "/api/files/{id}/data/parts/{session}",
+            axum::routing::delete(content::abort_parts),
+        )
+        .route(
+            "/api/files/{id}/data/parts/{session}/complete",
+            post(content::complete_parts),
+        )
+        .route(
+            "/api/files/{id}/data/parts/{session}/{part}",
+            axum::routing::put(content::put_part),
+        )
+        .route("/api/files/{id}/versions", get(content::list_versions))
+        .route(
+            "/api/files/{id}/versions/{gen}/data",
+            get(content::version_data),
+        )
+        .route(
+            "/api/files/{id}/versions/{gen}/restore",
+            post(content::restore_version),
         )
         .route("/api/trash/{id}/restore", post(storage::restore_file))
         .route(

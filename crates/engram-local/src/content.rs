@@ -13,13 +13,14 @@ use axum::Json;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::{json, Value};
 
-use crate::blobs::{blob_key, BlobKind, PutError};
+use crate::blobs::{blob_key, sha256_file, BlobKind, BlobStore, PutError};
+use crate::dto::FileDto;
 use crate::error::ApiError;
-use crate::extract::{blocking, AuthUser};
+use crate::extract::{blocking, AuthUser, JsonBody};
 use crate::server::AppState;
-use crate::storage::file_dto;
+use crate::storage::{file_dto, uuid_v4};
 use crate::store::{next_seq, now_ms, storage_used};
-use crate::validate::SecretBox;
+use crate::validate::{self, SecretBox};
 
 fn not_found(message: &str) -> ApiError {
     ApiError::new(StatusCode::NOT_FOUND, message)
@@ -45,11 +46,14 @@ struct ContentFile {
     size: i64,
     thumb_size: i64,
     index_size: i64,
+    trashed: bool,
+    encrypted_meta: String,
+    updated_at: i64,
 }
 
 fn own_file(conn: &Connection, id: &str, uid: i64) -> rusqlite::Result<Option<ContentFile>> {
     conn.query_row(
-        "SELECT generation, uploaded, size, thumb_size, index_size
+        "SELECT generation, uploaded, size, thumb_size, index_size, trashed, encrypted_meta, updated_at
          FROM files WHERE id = ?1 AND user_id = ?2 AND deleted = 0",
         params![id, uid],
         |r| {
@@ -59,6 +63,9 @@ fn own_file(conn: &Connection, id: &str, uid: i64) -> rusqlite::Result<Option<Co
                 size: r.get(2)?,
                 thumb_size: r.get(3)?,
                 index_size: r.get(4)?,
+                trashed: r.get::<_, i64>(5)? == 1,
+                encrypted_meta: r.get(6)?,
+                updated_at: r.get(7)?,
             })
         },
     )
@@ -557,6 +564,492 @@ async fn download(
     let mut response = octet_stream(StatusCode::OK, size, body);
     name_generation(&mut response);
     Ok(response)
+}
+
+// ----- parts: large content in bounded requests -----
+
+/// Numbered parts one session may hold, as on the server.
+pub const MAX_PARTS: i64 = 10_000;
+/// A parts session nobody finished within a day is swept.
+pub const SESSION_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+/// Files one verify request may check.
+pub const VERIFY_MAX: usize = 50;
+
+#[derive(Debug, Clone)]
+struct UploadSession {
+    id: String,
+    blob_key: String,
+    handle: String,
+    declared_bytes: i64,
+    base_generation: i64,
+    base_uploaded: bool,
+}
+
+fn session_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<UploadSession> {
+    Ok(UploadSession {
+        id: r.get("id")?,
+        blob_key: r.get("blob_key")?,
+        handle: r.get("handle")?,
+        declared_bytes: r.get("declared_bytes")?,
+        base_generation: r.get("base_generation")?,
+        base_uploaded: r.get::<_, i64>("base_uploaded")? == 1,
+    })
+}
+
+fn own_session(
+    conn: &Connection,
+    session: &str,
+    file_id: &str,
+    uid: i64,
+) -> rusqlite::Result<Option<UploadSession>> {
+    conn.query_row(
+        "SELECT * FROM upload_sessions WHERE id = ?1 AND file_id = ?2 AND user_id = ?3",
+        params![session, file_id, uid],
+        session_from,
+    )
+    .optional()
+}
+
+/// Forgets a session: its parts on disk and its rows.
+fn drop_session(
+    conn: &Connection,
+    blobs: &BlobStore,
+    session: &UploadSession,
+) -> rusqlite::Result<()> {
+    blobs.abort_parts(&session.blob_key, &session.handle);
+    conn.execute(
+        "DELETE FROM upload_parts WHERE session_id = ?1",
+        params![session.id],
+    )?;
+    conn.execute(
+        "DELETE FROM upload_sessions WHERE id = ?1",
+        params![session.id],
+    )?;
+    Ok(())
+}
+
+fn sessions_where(
+    conn: &Connection,
+    sql: &str,
+    p: impl rusqlite::Params,
+) -> rusqlite::Result<Vec<UploadSession>> {
+    conn.prepare(sql)?.query_map(p, session_from)?.collect()
+}
+
+/// `POST /api/files/:id/data/parts`: opens a session for content of the
+/// declared size. One session per file: a fresh begin supersedes a stale
+/// one, and sessions abandoned for a day are swept on the way.
+pub async fn begin_parts(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path(id): Path<String>,
+    JsonBody(body): JsonBody<Value>,
+) -> Result<Response, ApiError> {
+    let body = validate::object(&body)?;
+    let size = validate::positive_int(body, "size")?;
+    let keeps_versions = state.config.max_versions > 0;
+    let max_blob = state.config.max_blob_bytes as i64;
+    let default_quota = state.config.quota_bytes;
+    let app = Arc::clone(&state);
+    let session = blocking(&state, move |store| {
+        let conn = store.conn();
+        let file = own_file(&conn, &id, auth.uid)?.ok_or_else(|| not_found("file not found"))?;
+        let replaces = file.uploaded;
+        let reclaimable = if replaces && !keeps_versions { file.size } else { 0 };
+        let room = quota_room(&conn, auth.uid, default_quota, reclaimable)?;
+        if room.min(max_blob) <= 0 || size > room.min(max_blob) {
+            return Err(quota_exceeded());
+        }
+        let stale = sessions_where(
+            &conn,
+            "SELECT * FROM upload_sessions WHERE file_id = ?1",
+            params![id],
+        )?;
+        let abandoned = sessions_where(
+            &conn,
+            "SELECT * FROM upload_sessions WHERE created_at < ?1",
+            params![now_ms() - SESSION_TTL_MS],
+        )?;
+        for session in stale.iter().chain(abandoned.iter()) {
+            drop_session(&conn, &app.blobs, session)?;
+        }
+        let next_gen = if replaces { file.generation + 1 } else { file.generation };
+        let session = uuid_v4();
+        conn.execute(
+            "INSERT INTO upload_sessions (id, user_id, file_id, blob_key, handle, declared_bytes, base_generation, base_uploaded, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                session,
+                auth.uid,
+                id,
+                blob_key(&id, BlobKind::Data, next_gen),
+                BlobStore::new_handle(),
+                size,
+                file.generation,
+                i64::from(file.uploaded),
+                now_ms()
+            ],
+        )?;
+        Ok(session)
+    })
+    .await?;
+    Ok((StatusCode::CREATED, Json(json!({ "session": session }))).into_response())
+}
+
+/// `PUT /api/files/:id/data/parts/:session/:part`: one numbered part,
+/// exactly as long as its `Content-Length` says; a retry replaces it.
+pub async fn put_part(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path((id, session, part)): Path<(String, String, String)>,
+    req: Request,
+) -> Result<Json<Value>, ApiError> {
+    let (parts, body) = req.into_parts();
+    let row = blocking(&state, move |store| {
+        Ok(own_session(&store.conn(), &session, &id, auth.uid)?)
+    })
+    .await?
+    .ok_or_else(|| not_found("upload session not found"))?;
+    let part_no: i64 = match part.parse() {
+        Ok(n) if (1..=MAX_PARTS).contains(&n) => n,
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid part number",
+            ))
+        }
+    };
+    let length = content_length(&parts.headers);
+    if length == 0 {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "content-length required",
+        ));
+    }
+    let session_id = row.id.clone();
+    let others = blocking(&state, move |store| {
+        Ok(store.conn().query_row(
+            "SELECT COALESCE(SUM(bytes), 0) FROM upload_parts WHERE session_id = ?1 AND part_no != ?2",
+            params![session_id, part_no],
+            |r| r.get::<_, i64>(0),
+        )?)
+    })
+    .await?;
+    if others + length as i64 > row.declared_bytes {
+        return Err(ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "parts exceed the declared size",
+        ));
+    }
+    let written = state
+        .blobs
+        .put_part(
+            &row.blob_key,
+            &row.handle,
+            part_no,
+            body.into_data_stream(),
+            length,
+        )
+        .await
+        .map_err(|err| match err {
+            PutError::TooLarge => ApiError::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "part exceeds its declared length",
+            ),
+            other => put_error(other),
+        })?;
+    let session_id = row.id.clone();
+    blocking(&state, move |store| {
+        store.conn().execute(
+            "INSERT INTO upload_parts (session_id, part_no, etag, bytes) VALUES (?1, ?2, NULL, ?3)
+             ON CONFLICT (session_id, part_no) DO UPDATE SET etag = excluded.etag, bytes = excluded.bytes",
+            params![session_id, part_no, written as i64],
+        )?;
+        Ok(())
+    })
+    .await?;
+    Ok(Json(json!({ "part": part_no, "size": written })))
+}
+
+/// `POST /api/files/:id/data/parts/:session/complete`: joins the parts
+/// and commits them as the file's content through the same commit as a
+/// single upload. Joined bytes carry no digest until a check records one.
+pub async fn complete_parts(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path((id, session)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    let app = Arc::clone(&state);
+    let file_id = id.clone();
+    let (row, file, part_numbers, total) = blocking(&state, move |store| {
+        let conn = store.conn();
+        let row = own_session(&conn, &session, &file_id, auth.uid)?
+            .ok_or_else(|| not_found("upload session not found"))?;
+        let parts = conn
+            .prepare(
+                "SELECT part_no, bytes FROM upload_parts WHERE session_id = ?1 ORDER BY part_no",
+            )?
+            .query_map(params![row.id], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let total: i64 = parts.iter().map(|p| p.1).sum();
+        let contiguous = parts
+            .iter()
+            .enumerate()
+            .all(|(i, (part_no, _))| *part_no == i as i64 + 1);
+        if parts.is_empty() || !contiguous || total != row.declared_bytes {
+            return Err(ApiError::new(StatusCode::BAD_REQUEST, "upload incomplete"));
+        }
+        let Some(file) = own_file(&conn, &file_id, auth.uid)? else {
+            drop_session(&conn, &app.blobs, &row)?;
+            return Err(not_found("file not found"));
+        };
+        // Another write moved the file meanwhile; the commit re-checks the
+        // same condition inside its transaction.
+        if file.generation != row.base_generation || file.uploaded != row.base_uploaded {
+            drop_session(&conn, &app.blobs, &row)?;
+            return Err(conflict());
+        }
+        let numbers: Vec<i64> = parts.iter().map(|p| p.0).collect();
+        Ok((row, file, numbers, total))
+    })
+    .await?;
+    state
+        .blobs
+        .complete_parts(&row.blob_key, &row.handle, &part_numbers)
+        .await
+        .map_err(io_error)?;
+    let next_gen = if file.uploaded {
+        file.generation + 1
+    } else {
+        file.generation
+    };
+    commit_data(
+        &state,
+        auth,
+        id,
+        Base {
+            generation: file.generation,
+            uploaded: file.uploaded,
+        },
+        next_gen,
+        row.blob_key,
+        total,
+        None,
+        None,
+        Some(row.id),
+    )
+    .await
+}
+
+/// `DELETE /api/files/:id/data/parts/:session`: forgets the session.
+pub async fn abort_parts(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path((id, session)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    let app = Arc::clone(&state);
+    blocking(&state, move |store| {
+        let conn = store.conn();
+        let row = own_session(&conn, &session, &id, auth.uid)?
+            .ok_or_else(|| not_found("upload session not found"))?;
+        drop_session(&conn, &app.blobs, &row)?;
+        Ok(())
+    })
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ----- versions -----
+
+/// `GET /api/files/:id/versions`: history, newest first.
+pub async fn list_versions(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let versions = blocking(&state, move |store| {
+        let conn = store.conn();
+        if own_file(&conn, &id, auth.uid)?.is_none() {
+            return Err(not_found("file not found"));
+        }
+        let rows = conn
+            .prepare(
+                "SELECT generation, size, encrypted_meta, created_at FROM file_versions
+                 WHERE file_id = ?1 AND user_id = ?2 ORDER BY generation DESC",
+            )?
+            .query_map(params![id, auth.uid], |r| {
+                Ok(json!({
+                    "generation": r.get::<_, i64>(0)?,
+                    "size": r.get::<_, i64>(1)?,
+                    "encryptedMeta": serde_json::from_str::<Value>(&r.get::<_, String>(2)?).unwrap_or(Value::Null),
+                    "createdAt": r.get::<_, i64>(3)?,
+                }))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    })
+    .await?;
+    Ok(Json(json!({ "versions": versions })))
+}
+
+/// `GET /api/files/:id/versions/:gen/data`: one version's bytes.
+pub async fn version_data(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path((id, generation)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    let generation: Option<i64> = generation.parse().ok();
+    let file_id = id.clone();
+    let (generation, size) = blocking(&state, move |store| {
+        let conn = store.conn();
+        if own_file(&conn, &file_id, auth.uid)?.is_none() {
+            return Err(not_found("file not found"));
+        }
+        let generation = generation.ok_or_else(|| not_found("version not found"))?;
+        let size: Option<i64> = conn
+            .query_row(
+                "SELECT size FROM file_versions WHERE file_id = ?1 AND user_id = ?2 AND generation = ?3",
+                params![file_id, auth.uid, generation],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let size = size.ok_or_else(|| not_found("version not found"))?;
+        Ok((generation, size as u64))
+    })
+    .await?;
+    let body = state
+        .blobs
+        .get(&blob_key(&id, BlobKind::Data, generation), None)
+        .await
+        .map_err(io_error)?;
+    Ok(octet_stream(StatusCode::OK, size, body))
+}
+
+/// `POST /api/files/:id/versions/:gen/restore`: a pointer swap inside one
+/// transaction. The displaced current content becomes a version itself,
+/// so a restore is undoable, and no content blob is written, moved or
+/// removed. The client supplies the merged metadata, and the preview of
+/// the displaced bytes is dropped.
+pub async fn restore_version(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Path((id, generation)): Path<(String, String)>,
+    JsonBody(body): JsonBody<Value>,
+) -> Result<Json<FileDto>, ApiError> {
+    let body = validate::object(&body)?;
+    let meta = sealed(&validate::secret_box(body, "encryptedMeta")?);
+    let generation: Option<i64> = generation.parse().ok();
+    let app = Arc::clone(&state);
+    let file_id = id.clone();
+    let (dto, seq) = blocking(&state, move |store| {
+        let (dto, seq, thumb_size) = store.tx(|tx| {
+            // As on the server: a file the account owns but cannot restore
+            // (no content yet, or in the trash) gets the owner-only refusal.
+            let file = match own_file(tx, &file_id, auth.uid)? {
+                Some(file) if file.uploaded && !file.trashed => file,
+                Some(_) => {
+                    return Err(ApiError::new(
+                        StatusCode::FORBIDDEN,
+                        "only the owner can restore a version",
+                    ))
+                }
+                None => return Err(not_found("file not found")),
+            };
+            let generation = generation.ok_or_else(|| not_found("version not found"))?;
+            let size: Option<i64> = tx
+                .query_row(
+                    "SELECT size FROM file_versions WHERE file_id = ?1 AND user_id = ?2 AND generation = ?3",
+                    params![file_id, auth.uid, generation],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let size = size.ok_or_else(|| not_found("version not found"))?;
+            tx.execute(
+                "INSERT INTO file_versions (file_id, user_id, generation, size, encrypted_meta, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT (file_id, generation) DO UPDATE SET
+                   user_id = excluded.user_id, size = excluded.size,
+                   encrypted_meta = excluded.encrypted_meta, created_at = excluded.created_at",
+                params![file_id, auth.uid, file.generation, file.size, file.encrypted_meta, file.updated_at],
+            )?;
+            tx.execute(
+                "DELETE FROM file_versions WHERE file_id = ?1 AND generation = ?2",
+                params![file_id, generation],
+            )?;
+            let seq = next_seq(tx, auth.uid)?;
+            // The preview described the displaced bytes; a zero size turns
+            // the client's preview backfill back on.
+            tx.execute(
+                "UPDATE files SET generation = ?1, size = ?2, encrypted_meta = ?3, thumb_size = 0,
+                   update_seq = ?4, updated_at = ?5 WHERE id = ?6",
+                params![generation, size, meta, seq, now_ms(), file_id],
+            )?;
+            Ok::<_, ApiError>((file_dto(tx, &file_id, false)?, seq, file.thumb_size))
+        })?;
+        if thumb_size > 0 {
+            app.blobs.remove(&blob_key(&file_id, BlobKind::Thumb, 0));
+        }
+        Ok((dto, seq))
+    })
+    .await?;
+    state.events.note(auth.uid, seq);
+    Ok(Json(dto))
+}
+
+// ----- verify -----
+
+/// `POST /api/files/verify`: checks stored content against the digest
+/// recorded when it was written, without reading a byte to the client.
+/// Content with no digest yet (parts uploads) gets one recorded, and the
+/// answer says so rather than calling it verified.
+pub async fn verify(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    JsonBody(body): JsonBody<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let body = validate::object(&body)?;
+    let ids = validate::string_list(body, "ids", 1, VERIFY_MAX)?;
+    let app = Arc::clone(&state);
+    let results = blocking(&state, move |store| {
+        let mut results = Vec::with_capacity(ids.len());
+        for id in ids {
+            let row: Option<(i64, bool, Option<String>)> = store
+                .conn()
+                .query_row(
+                    "SELECT generation, uploaded, content_hash FROM files WHERE id = ?1 AND user_id = ?2 AND deleted = 0",
+                    params![id, auth.uid],
+                    |r| Ok((r.get(0)?, r.get::<_, i64>(1)? == 1, r.get(2)?)),
+                )
+                .optional()?;
+            let Some((generation, true, recorded)) = row else {
+                results.push(json!({ "id": id, "verdict": "missing" }));
+                continue;
+            };
+            // The connection is not held while the bytes are read.
+            let path = app.blobs.path(&blob_key(&id, BlobKind::Data, generation));
+            let Ok(actual) = sha256_file(&path) else {
+                results.push(json!({ "id": id, "verdict": "unreadable" }));
+                continue;
+            };
+            let verdict = match recorded {
+                None => {
+                    store.conn().execute(
+                        "UPDATE files SET content_hash = ?1 WHERE id = ?2",
+                        params![actual, id],
+                    )?;
+                    "recorded"
+                }
+                Some(recorded) if recorded == actual => "intact",
+                Some(_) => "changed",
+            };
+            results.push(json!({ "id": id, "verdict": verdict }));
+        }
+        Ok(results)
+    })
+    .await?;
+    Ok(Json(json!({ "results": results })))
 }
 
 #[cfg(test)]
