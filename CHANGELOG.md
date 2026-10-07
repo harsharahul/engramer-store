@@ -37,6 +37,14 @@ All notable changes to Engram Store are documented here, following
   a change as soon as it commits. Answers, sequences and feed behaviour
   match the server, checked by five more conformance suites that run
   against both backends.
+- **On-device file content and history.** The on-device backend now stores
+  and serves file content, previews and search indexes, whole or in
+  numbered parts and whole or by byte range, keeps content history with
+  restore, removes a file's bytes when it is deleted for good, and checks
+  stored content against the digest recorded when it was written. Blobs
+  live under the vault directory with the server's own file names, so a
+  vault directory is a server data directory. Four more conformance
+  suites run against both backends.
 
 ## [0.58.0] - 2026-10-02
 
