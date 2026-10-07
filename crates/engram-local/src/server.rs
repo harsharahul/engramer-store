@@ -341,13 +341,29 @@ pub(crate) mod tests {
         host: &str,
         body: Option<&str>,
     ) -> (u16, String, String) {
+        raw_with(port, method, path, host, body, &[])
+    }
+
+    /// One raw HTTP/1.1 request with extra headers: (status, lowercased
+    /// head, body).
+    pub(crate) fn raw_with(
+        port: u16,
+        method: &str,
+        path: &str,
+        host: &str,
+        body: Option<&str>,
+        headers: &[(&str, &str)],
+    ) -> (u16, String, String) {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         let body = body.unwrap_or("");
-        let content = if body.is_empty() {
+        let mut content = if body.is_empty() {
             String::new()
         } else {
             "Content-Type: application/json\r\n".to_string()
         };
+        for (name, value) in headers {
+            content.push_str(&format!("{name}: {value}\r\n"));
+        }
         write!(
             stream,
             "{method} {path} HTTP/1.1\r\nHost: {host}\r\n{content}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -360,6 +376,22 @@ pub(crate) mod tests {
         let (head, rest) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
         let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
         (status, head.to_ascii_lowercase(), rest.to_string())
+    }
+
+    /// Registers an account over HTTP and returns its session token.
+    pub(crate) fn signed_in(port: u16, email: &str) -> String {
+        let sb = r#"{"ciphertext":"c","nonce":"n"}"#;
+        let attributes = format!(
+            r#"{{"kdf":{{"salt":"0123456789abcdef","opsLimit":3,"memLimit":268435456}},"encryptedMasterKey":{sb},"masterKeyEncryptedWithRecoveryKey":{sb},"recoveryKeyEncryptedWithMasterKey":{sb},"publicKey":"p","encryptedPrivateKey":{sb}}}"#
+        );
+        let body = format!(
+            r#"{{"email":"{email}","loginKey":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","keyAttributes":{attributes}}}"#
+        );
+        let host = format!("127.0.0.1:{port}");
+        let (status, _, body) = raw(port, "POST", "/api/auth/register", &host, Some(&body));
+        assert_eq!(status, 201);
+        let value: Value = serde_json::from_str(&body).unwrap();
+        value["token"].as_str().unwrap().to_string()
     }
 
     #[test]

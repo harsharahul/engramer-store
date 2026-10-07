@@ -353,22 +353,7 @@ mod tests {
         });
     }
 
-    /// Registers an account over HTTP and returns its session token.
-    fn signed_in(port: u16, email: &str) -> String {
-        let sb = r#"{"ciphertext":"c","nonce":"n"}"#;
-        let attributes = format!(
-            r#"{{"kdf":{{"salt":"0123456789abcdef","opsLimit":3,"memLimit":268435456}},"encryptedMasterKey":{sb},"masterKeyEncryptedWithRecoveryKey":{sb},"recoveryKeyEncryptedWithMasterKey":{sb},"publicKey":"p","encryptedPrivateKey":{sb}}}"#
-        );
-        let body = format!(
-            r#"{{"email":"{email}","loginKey":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","keyAttributes":{attributes}}}"#
-        );
-        let host = format!("127.0.0.1:{port}");
-        let (status, _, body) =
-            crate::server::tests::raw(port, "POST", "/api/auth/register", &host, Some(&body));
-        assert_eq!(status, 201);
-        let value: serde_json::Value = serde_json::from_str(&body).unwrap();
-        value["token"].as_str().unwrap().to_string()
-    }
+    use crate::server::tests::signed_in;
 
     /// Opens the change feed over a raw connection and reads its first event.
     fn open_feed(port: u16, token: &str) -> std::net::TcpStream {

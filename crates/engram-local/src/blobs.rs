@@ -61,6 +61,13 @@ pub struct Written {
     pub sha256: String,
 }
 
+/// Bytes that reached disk under a staging name and wait for their commit.
+#[derive(Debug)]
+pub struct Staged {
+    pub path: PathBuf,
+    pub written: Written,
+}
+
 pub struct BlobStore {
     dir: PathBuf,
 }
@@ -101,24 +108,54 @@ impl BlobStore {
         destination.with_file_name(format!("{name}.upload-{}-{n}", std::process::id()))
     }
 
-    /// Streams `body` into the blob at `key`, refusing more than `max_bytes`.
-    /// On any failure nothing is left under `key` or beside it.
-    pub async fn put<S, E>(&self, key: &str, body: S, max_bytes: u64) -> Result<Written, PutError>
+    /// Streams `body` to a staging file beside `key`, refusing more than
+    /// `max_bytes`. The bytes become the blob only when `commit_staged`
+    /// renames them into place; until then nothing under `key` changes,
+    /// so two writers racing for one key can never overwrite each other.
+    /// On any failure nothing is left beside `key`.
+    pub async fn stage<S, E>(&self, key: &str, body: S, max_bytes: u64) -> Result<Staged, PutError>
     where
         S: Stream<Item = Result<Bytes, E>> + Unpin,
     {
-        let destination = self.path(key);
-        let tmp = self.temp_path(&destination);
+        let tmp = self.temp_path(&self.path(key));
         match write_stream(&tmp, body, max_bytes).await {
-            Ok(written) => {
-                fs::rename(&tmp, &destination).await?;
-                Ok(written)
-            }
+            Ok(written) => Ok(Staged { path: tmp, written }),
             Err(err) => {
                 let _ = fs::remove_file(&tmp).await;
                 Err(err)
             }
         }
+    }
+
+    /// Renames a staged file into place as the blob at `key`; on failure
+    /// the staged file is removed.
+    pub fn commit_staged(&self, staged: &Path, key: &str) -> io::Result<()> {
+        std::fs::rename(staged, self.path(key)).inspect_err(|_| {
+            let _ = std::fs::remove_file(staged);
+        })
+    }
+
+    /// Removes a staged file whose commit did not happen.
+    pub fn discard(&self, staged: &Path) {
+        match std::fs::remove_file(staged) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => eprintln!(
+                "engram-local: cannot remove staged blob {}: {err}",
+                staged.display()
+            ),
+        }
+    }
+
+    /// Streams `body` into the blob at `key` in one step, for blobs no
+    /// generation check guards (previews and indexes).
+    pub async fn put<S, E>(&self, key: &str, body: S, max_bytes: u64) -> Result<Written, PutError>
+    where
+        S: Stream<Item = Result<Bytes, E>> + Unpin,
+    {
+        let staged = self.stage(key, body, max_bytes).await?;
+        self.commit_staged(&staged.path, key)?;
+        Ok(staged.written)
     }
 
     /// The blob's bytes, whole or one inclusive byte range. A missing blob
@@ -181,12 +218,12 @@ impl BlobStore {
         }
     }
 
-    /// Joins the session's parts, in the order given, into the blob at
-    /// `key`, then removes the parts. The joined bytes are what one upload
-    /// of the same bytes would have stored.
-    pub async fn complete_parts(&self, key: &str, handle: &str, parts: &[i64]) -> io::Result<()> {
-        let destination = self.path(key);
-        let tmp = self.temp_path(&destination);
+    /// Joins the session's parts, in the order given, into a staging file
+    /// beside `key`, then removes the parts. The joined bytes are what one
+    /// upload of the same bytes would have staged, and `commit_staged`
+    /// makes them the blob.
+    pub async fn join_parts(&self, key: &str, handle: &str, parts: &[i64]) -> io::Result<PathBuf> {
+        let tmp = self.temp_path(&self.path(key));
         let joined = async {
             let mut sink = File::create(&tmp).await?;
             for part in parts {
@@ -200,11 +237,10 @@ impl BlobStore {
             let _ = fs::remove_file(&tmp).await;
             return Err(err);
         }
-        fs::rename(&tmp, &destination).await?;
         for part in parts {
             let _ = fs::remove_file(self.part_path(key, handle, *part)).await;
         }
-        Ok(())
+        Ok(tmp)
     }
 
     /// Removes every part a session stored.
@@ -389,7 +425,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn parts_join_in_order_and_are_removed() {
+    async fn a_staged_write_lands_only_when_committed() {
+        let (store, dir) = store();
+        let staged = store
+            .stage("later", chunks(&[b"soon"]), 1024)
+            .await
+            .unwrap();
+        assert_eq!(staged.written.bytes, 4);
+        assert!(
+            !store.path("later").exists(),
+            "nothing under the key before the commit"
+        );
+        assert!(staged.path.exists());
+        store.commit_staged(&staged.path, "later").unwrap();
+        assert_eq!(std::fs::read(store.path("later")).unwrap(), b"soon");
+        assert_eq!(files(store.dir()), vec!["later"]);
+        // A staged write that loses its commit is discarded, not renamed.
+        let loser = store
+            .stage("later", chunks(&[b"late"]), 1024)
+            .await
+            .unwrap();
+        store.discard(&loser.path);
+        store.discard(&loser.path);
+        assert_eq!(std::fs::read(store.path("later")).unwrap(), b"soon");
+        assert_eq!(files(store.dir()), vec!["later"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn parts_join_in_order_into_a_staged_file_and_are_removed() {
         let (store, dir) = store();
         let handle = BlobStore::new_handle();
         assert_eq!(handle.len(), 16);
@@ -411,10 +475,17 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(files(store.dir()).len(), 3);
-        store
-            .complete_parts("movie", &handle, &[1, 2, 3])
+        let joined = store
+            .join_parts("movie", &handle, &[1, 2, 3])
             .await
             .unwrap();
+        assert_eq!(std::fs::read(&joined).unwrap(), b"0123456789");
+        assert!(
+            !store.path("movie").exists(),
+            "the join waits for its commit"
+        );
+        assert_eq!(files(store.dir()).len(), 1, "the parts are gone");
+        store.commit_staged(&joined, "movie").unwrap();
         assert_eq!(std::fs::read(store.path("movie")).unwrap(), b"0123456789");
         assert_eq!(files(store.dir()), vec!["movie"]);
         let _ = std::fs::remove_dir_all(dir);

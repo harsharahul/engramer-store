@@ -3,6 +3,7 @@
 //! with the server's shapes, wording and sequence rules. The bytes are
 //! ciphertext the client sealed and are stored as they arrive.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -88,6 +89,21 @@ fn quota_room(
     )?;
     let quota = quota.unwrap_or(default_quota as i64);
     Ok(quota - (storage_used(conn, uid)? - reclaimable))
+}
+
+/// The generation new content lands in: one past the newest the file has
+/// ever had, so a save after a restore never re-mints a number whose
+/// history blob still exists. A first upload keeps generation 0.
+fn next_generation(conn: &Connection, id: &str, file: &ContentFile) -> rusqlite::Result<i64> {
+    if !file.uploaded {
+        return Ok(file.generation);
+    }
+    let newest: Option<i64> = conn.query_row(
+        "SELECT MAX(generation) FROM file_versions WHERE file_id = ?1",
+        params![id],
+        |r| r.get(0),
+    )?;
+    Ok(file.generation.max(newest.unwrap_or(file.generation)) + 1)
 }
 
 /// `Content-Length`, or 0 when absent or unreadable, as the server reads it.
@@ -179,7 +195,7 @@ async fn upload(
     let max_blob = state.config.max_blob_bytes as i64;
     let default_quota = state.config.quota_bytes;
     let file_id = id.clone();
-    let (file, max_bytes) = blocking(&state, move |store| {
+    let (file, max_bytes, next_gen) = blocking(&state, move |store| {
         let conn = store.conn();
         let file =
             own_file(&conn, &file_id, auth.uid)?.ok_or_else(|| not_found("file not found"))?;
@@ -191,29 +207,26 @@ async fn upload(
             BlobKind::Data => 0,
         };
         let room = quota_room(&conn, auth.uid, default_quota, reclaimable)?;
-        Ok((file, room.min(max_blob)))
+        let next_gen = match kind {
+            BlobKind::Data => next_generation(&conn, &file_id, &file)?,
+            _ => 0,
+        };
+        Ok((file, room.min(max_blob), next_gen))
     })
     .await?;
     if max_bytes <= 0 || declared > max_bytes as u64 {
         return Err(quota_exceeded());
     }
-    let replaces = kind == BlobKind::Data && file.uploaded;
-    let next_gen = if replaces {
-        file.generation + 1
-    } else {
-        file.generation
-    };
-    let key = match kind {
-        BlobKind::Data => blob_key(&id, BlobKind::Data, next_gen),
-        other => blob_key(&id, other, 0),
-    };
-    let written = state
-        .blobs
-        .put(&key, body.into_data_stream(), max_bytes as u64)
-        .await
-        .map_err(put_error)?;
+    let key = blob_key(&id, kind, next_gen);
     match kind {
         BlobKind::Data => {
+            // The bytes wait under a staging name; the commit renames them
+            // into place only once the generation check has passed.
+            let staged = state
+                .blobs
+                .stage(&key, body.into_data_stream(), max_bytes as u64)
+                .await
+                .map_err(put_error)?;
             commit_data(
                 &state,
                 auth,
@@ -224,14 +237,20 @@ async fn upload(
                 },
                 next_gen,
                 key,
-                written.bytes as i64,
-                Some(written.sha256),
+                staged.path,
+                staged.written.bytes as i64,
+                Some(staged.written.sha256),
                 meta_update,
                 None,
             )
             .await
         }
         derived => {
+            let written = state
+                .blobs
+                .put(&key, body.into_data_stream(), max_bytes as u64)
+                .await
+                .map_err(put_error)?;
             let column = if derived == BlobKind::Thumb {
                 "thumb_size"
             } else {
@@ -281,9 +300,12 @@ impl From<rusqlite::Error> for CommitError {
 /// when history is off), a preview of the displaced bytes is dropped, the
 /// pointer advances, history is pruned to the retention window, and a
 /// parts session that produced the bytes is forgotten in the same
-/// transaction. A generation conflict removes the fresh blob and answers
-/// 409; the row never moves. Displaced blobs are removed only after the
-/// commit, and best-effort: a leftover is garbage, never corruption.
+/// transaction. The staged bytes are renamed into place inside that
+/// transaction, after the generation check, so overlapping writers never
+/// rename onto one key; a generation conflict discards the staged bytes
+/// and answers 409, and the row never moves. Displaced blobs are removed
+/// only after the commit, and best-effort: a leftover is garbage, never
+/// corruption.
 #[allow(clippy::too_many_arguments)]
 async fn commit_data(
     state: &Arc<AppState>,
@@ -292,6 +314,7 @@ async fn commit_data(
     base: Base,
     next_gen: i64,
     key: String,
+    staged: PathBuf,
     written: i64,
     content_hash: Option<String>,
     meta_update: Option<String>,
@@ -301,6 +324,8 @@ async fn commit_data(
     let max_versions = state.config.max_versions;
     let with_file = meta_update.is_some();
     let file_id = id.clone();
+    let app = Arc::clone(state);
+    let staged_path = staged.clone();
     let outcome = blocking(state, move |store| {
         let committed = store.tx(|tx| {
             let (cur_gen, cur_size, cur_meta, cur_updated, cur_uploaded, cur_thumb) = tx
@@ -321,6 +346,10 @@ async fn commit_data(
             if cur_gen != base.generation || cur_uploaded != base.uploaded {
                 return Err(CommitError::Conflict);
             }
+            // The staged bytes become the blob only now, inside the commit.
+            app.blobs
+                .commit_staged(&staged_path, &key)
+                .map_err(|err| CommitError::Api(io_error(err)))?;
             let mut stale = Vec::new();
             let replaces = base.uploaded;
             if replaces {
@@ -382,9 +411,18 @@ async fn commit_data(
             }
         }
     })
-    .await?;
+    .await;
+    // A failed commit (a database error before or at the rename) leaves no
+    // staged file behind either.
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            state.blobs.discard(&staged);
+            return Err(err);
+        }
+    };
     let Some((seq, stale, file)) = outcome else {
-        state.blobs.remove(&key);
+        state.blobs.discard(&staged);
         return Err(conflict());
     };
     for stale_key in stale {
@@ -673,7 +711,7 @@ pub async fn begin_parts(
         for session in stale.iter().chain(abandoned.iter()) {
             drop_session(&conn, &app.blobs, session)?;
         }
-        let next_gen = if replaces { file.generation + 1 } else { file.generation };
+        let next_gen = next_generation(&conn, &id, &file)?;
         let session = uuid_v4();
         conn.execute(
             "INSERT INTO upload_sessions (id, user_id, file_id, blob_key, handle, declared_bytes, base_generation, base_uploaded, created_at)
@@ -781,7 +819,7 @@ pub async fn complete_parts(
 ) -> Result<Response, ApiError> {
     let app = Arc::clone(&state);
     let file_id = id.clone();
-    let (row, file, part_numbers, total) = blocking(&state, move |store| {
+    let (row, file, part_numbers, total, next_gen) = blocking(&state, move |store| {
         let conn = store.conn();
         let row = own_session(&conn, &session, &file_id, auth.uid)?
             .ok_or_else(|| not_found("upload session not found"))?;
@@ -811,20 +849,22 @@ pub async fn complete_parts(
             drop_session(&conn, &app.blobs, &row)?;
             return Err(conflict());
         }
+        // The join must land in the generation the session was opened for;
+        // history that moved meanwhile is a conflict too.
+        let next_gen = next_generation(&conn, &file_id, &file)?;
+        if blob_key(&file_id, BlobKind::Data, next_gen) != row.blob_key {
+            drop_session(&conn, &app.blobs, &row)?;
+            return Err(conflict());
+        }
         let numbers: Vec<i64> = parts.iter().map(|p| p.0).collect();
-        Ok((row, file, numbers, total))
+        Ok((row, file, numbers, total, next_gen))
     })
     .await?;
-    state
+    let staged = state
         .blobs
-        .complete_parts(&row.blob_key, &row.handle, &part_numbers)
+        .join_parts(&row.blob_key, &row.handle, &part_numbers)
         .await
         .map_err(io_error)?;
-    let next_gen = if file.uploaded {
-        file.generation + 1
-    } else {
-        file.generation
-    };
     commit_data(
         &state,
         auth,
@@ -835,6 +875,7 @@ pub async fn complete_parts(
         },
         next_gen,
         row.blob_key,
+        staged,
         total,
         None,
         None,
@@ -980,10 +1021,12 @@ pub async fn restore_version(
             )?;
             let seq = next_seq(tx, auth.uid)?;
             // The preview described the displaced bytes; a zero size turns
-            // the client's preview backfill back on.
+            // the client's preview backfill back on. The recorded digest
+            // described them too, so it goes: the next storage check records
+            // the restored bytes instead of calling them changed.
             tx.execute(
                 "UPDATE files SET generation = ?1, size = ?2, encrypted_meta = ?3, thumb_size = 0,
-                   update_seq = ?4, updated_at = ?5 WHERE id = ?6",
+                   content_hash = NULL, update_seq = ?4, updated_at = ?5 WHERE id = ?6",
                 params![generation, size, meta, seq, now_ms(), file_id],
             )?;
             Ok::<_, ApiError>((file_dto(tx, &file_id, false)?, seq, file.thumb_size))
@@ -1093,5 +1136,173 @@ mod tests {
             headers.insert("x-encrypted-meta", HeaderValue::from_str(bad).unwrap());
             assert!(sealed_meta_header(&headers).is_err(), "{bad}");
         }
+    }
+
+    use crate::server::tests::{raw_with, signed_in, Running};
+    use std::time::{Duration, Instant};
+
+    /// A sealed box as a client sends one; the backend never reads it.
+    const SEALED: &str = r#"{"ciphertext":"c","nonce":"n"}"#;
+
+    /// A running vault with one signed-in account.
+    struct Vault {
+        server: Running,
+        token: String,
+        host: String,
+    }
+
+    impl Vault {
+        fn new(email: &str) -> Vault {
+            let server = Running::new();
+            let token = signed_in(server.port, email);
+            let host = format!("127.0.0.1:{}", server.port);
+            Vault {
+                server,
+                token,
+                host,
+            }
+        }
+
+        fn call(&self, method: &str, path: &str, body: Option<&str>) -> (u16, String, String) {
+            let auth = format!("Bearer {}", self.token);
+            raw_with(
+                self.server.port,
+                method,
+                path,
+                &self.host,
+                body,
+                &[("Authorization", &auth)],
+            )
+        }
+
+        fn create_file(&self) -> String {
+            let body =
+                format!(r#"{{"folderId":null,"encryptedKey":{SEALED},"encryptedMeta":{SEALED}}}"#);
+            let (status, _, answer) = self.call("POST", "/api/files", Some(&body));
+            assert_eq!(status, 201);
+            let value: Value = serde_json::from_str(&answer).unwrap();
+            value["id"].as_str().unwrap().to_string()
+        }
+
+        fn save(&self, id: &str, text: &str) -> u16 {
+            self.call("PUT", &format!("/api/files/{id}/data"), Some(text))
+                .0
+        }
+
+        fn content(&self, id: &str) -> (u16, String) {
+            let (status, _, body) = self.call("GET", &format!("/api/files/{id}/data"), None);
+            (status, body)
+        }
+
+        fn restore(&self, id: &str, generation: i64) -> u16 {
+            let body = format!(r#"{{"encryptedMeta":{SEALED}}}"#);
+            self.call(
+                "POST",
+                &format!("/api/files/{id}/versions/{generation}/restore"),
+                Some(&body),
+            )
+            .0
+        }
+
+        fn blob_names(&self, id: &str) -> Vec<String> {
+            let mut names: Vec<String> =
+                std::fs::read_dir(self.server.dir.join(crate::blobs::BLOBS_DIR))
+                    .unwrap()
+                    .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                    .filter(|name| name.starts_with(id))
+                    .collect();
+            names.sort();
+            names
+        }
+    }
+
+    #[test]
+    fn two_overlapping_saves_keep_the_winners_bytes() {
+        use std::io::{Read, Write};
+        let vault = Vault::new("overlap@example.com");
+        let id = vault.create_file();
+        // Writer A opens a save and sends half of its bytes.
+        let mut a = std::net::TcpStream::connect(("127.0.0.1", vault.server.port)).unwrap();
+        a.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        write!(
+            a,
+            "PUT /api/files/{id}/data HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/octet-stream\r\nContent-Length: 10\r\nConnection: close\r\n\r\nAAAAA",
+            vault.host, vault.token
+        )
+        .unwrap();
+        // A is admitted once its bytes start landing on disk.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !vault.blob_names(&id).iter().any(|n| n.contains(".upload-")) {
+            assert!(Instant::now() < deadline, "writer A was not admitted");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // Writer B saves whole and wins.
+        assert_eq!(vault.save(&id, "BBBBBBBB"), 200);
+        // A finishes and must lose without touching B's bytes.
+        write!(a, "AAAAA").unwrap();
+        let mut answer = Vec::new();
+        a.read_to_end(&mut answer).unwrap();
+        let text = String::from_utf8_lossy(&answer);
+        assert!(text.starts_with("HTTP/1.1 409"), "{text}");
+        let (status, body) = vault.content(&id);
+        assert_eq!(status, 200);
+        assert_eq!(body, "BBBBBBBB");
+        assert_eq!(
+            vault.blob_names(&id),
+            vec![id.clone()],
+            "no staged file remains"
+        );
+    }
+
+    #[test]
+    fn a_restored_file_verifies_clean() {
+        let vault = Vault::new("restore-check@example.com");
+        let id = vault.create_file();
+        assert_eq!(vault.save(&id, "one"), 200);
+        assert_eq!(vault.save(&id, "two"), 200);
+        assert_eq!(vault.restore(&id, 0), 200);
+        let verdict = || {
+            let body = format!(r#"{{"ids":["{id}"]}}"#);
+            let (status, _, answer) = vault.call("POST", "/api/files/verify", Some(&body));
+            assert_eq!(status, 200);
+            let value: Value = serde_json::from_str(&answer).unwrap();
+            value["results"][0]["verdict"].as_str().unwrap().to_string()
+        };
+        // The restored bytes carry no digest of their own yet; the check
+        // records one rather than comparing against the displaced content.
+        assert_eq!(verdict(), "recorded");
+        assert_eq!(verdict(), "intact");
+    }
+
+    #[test]
+    fn a_save_after_a_restore_keeps_every_version() {
+        let vault = Vault::new("history@example.com");
+        let id = vault.create_file();
+        for text in ["v0", "v1", "v2"] {
+            assert_eq!(vault.save(&id, text), 200);
+        }
+        assert_eq!(vault.restore(&id, 0), 200);
+        assert_eq!(vault.save(&id, "v3"), 200);
+        // Every kept version still serves its own bytes.
+        for (generation, text) in [(0, "v0"), (1, "v1"), (2, "v2")] {
+            let (status, _, body) = vault.call(
+                "GET",
+                &format!("/api/files/{id}/versions/{generation}/data"),
+                None,
+            );
+            assert_eq!(status, 200, "generation {generation}");
+            assert_eq!(body, text, "generation {generation}");
+        }
+        let (_, _, listed) = vault.call("GET", &format!("/api/files/{id}/versions"), None);
+        let value: Value = serde_json::from_str(&listed).unwrap();
+        let mut generations: Vec<i64> = value["versions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v["generation"].as_i64().unwrap())
+            .collect();
+        generations.sort();
+        assert_eq!(generations, vec![0, 1, 2]);
+        assert_eq!(vault.content(&id), (200, "v3".to_string()));
     }
 }
