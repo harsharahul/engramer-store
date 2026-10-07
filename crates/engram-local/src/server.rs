@@ -22,7 +22,7 @@ use crate::error::ApiError;
 use crate::events::SeqEvents;
 use crate::store::{Store, DB_FILE};
 use crate::token::Tokens;
-use crate::{accounts, events, headers, sessions, settings, storage};
+use crate::{accounts, content, events, headers, sessions, settings, storage};
 
 /// Server defaults; the binary and the shell set them.
 pub struct ServerConfig {
@@ -160,6 +160,18 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         .route(
             "/api/files/{id}",
             axum::routing::patch(storage::patch_file).delete(storage::trash_file),
+        )
+        .route(
+            "/api/files/{id}/data",
+            axum::routing::put(content::put_data).get(content::get_data),
+        )
+        .route(
+            "/api/files/{id}/thumbnail",
+            axum::routing::put(content::put_thumbnail).get(content::get_thumbnail),
+        )
+        .route(
+            "/api/files/{id}/index",
+            axum::routing::put(content::put_index).get(content::get_index),
         )
         .route("/api/trash/{id}/restore", post(storage::restore_file))
         .route(
