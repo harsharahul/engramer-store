@@ -302,7 +302,11 @@ describe("large content", () => {
       expect(sameBytes(new Uint8Array(got.rawPayload), ciphertext)).toBe(true);
       expect(sameBytes(decryptBytes(new Uint8Array(got.rawPayload), file.key), plain)).toBe(true);
     } finally {
+      // Closing must not wait on the client's idle keep-alive connection
+      // (the in-process server's keep-alive timeout is 95 s).
+      const started = Date.now();
       await roomy.close();
+      expect(Date.now() - started).toBeLessThan(5000);
     }
   });
 });

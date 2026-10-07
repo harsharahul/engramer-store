@@ -93,6 +93,10 @@ async function startNode(
     dataDir,
     inject: (request) => send(baseUrl, request),
     close: async () => {
+      // Every request a suite made has been answered by now; the client's
+      // idle keep-alive connections would otherwise hold close() open for
+      // the server's keep-alive timeout.
+      app.server.closeAllConnections();
       await app.close();
       rmSync(dataDir, { recursive: true, force: true });
     },
