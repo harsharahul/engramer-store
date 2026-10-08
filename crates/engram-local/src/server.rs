@@ -20,9 +20,12 @@ use tokio::task::JoinHandle;
 use crate::blobs::{BlobStore, BLOBS_DIR};
 use crate::error::ApiError;
 use crate::events::SeqEvents;
+use crate::headers::OFFICE_PREFIX;
+use crate::packs::{Packs, PACKS_DIR};
 use crate::store::{Store, DB_FILE};
 use crate::token::Tokens;
-use crate::{accounts, content, events, headers, sessions, settings, storage};
+use crate::web::WebDist;
+use crate::{accounts, content, events, headers, sessions, settings, storage, web};
 
 /// Server defaults; the binary and the shell set them.
 pub struct ServerConfig {
@@ -34,6 +37,8 @@ pub struct ServerConfig {
     pub max_versions: usize,
     /// The most bytes one blob may hold.
     pub max_blob_bytes: u64,
+    /// The web client's core bundle to serve; `None` serves the API only.
+    pub web_dist: Option<PathBuf>,
 }
 
 /// Everything a request handler can reach.
@@ -42,6 +47,8 @@ pub struct AppState {
     pub tokens: Tokens,
     pub events: Arc<SeqEvents>,
     pub blobs: BlobStore,
+    pub web: Option<WebDist>,
+    pub packs: Packs,
     pub config: ServerConfig,
 }
 
@@ -58,13 +65,39 @@ impl AppState {
             .map_err(|err| format!("cannot read the session secret: {err}"))?;
         let blobs = BlobStore::open(config.data_dir.join(BLOBS_DIR))
             .map_err(|err| format!("cannot open the blob directory: {err}"))?;
+        let web = match &config.web_dist {
+            Some(dir) => Some(WebDist::open(dir.clone())?),
+            None => None,
+        };
+        let packs = Packs::open(
+            config.data_dir.join(PACKS_DIR),
+            web.as_ref().and_then(|w| w.manifest.clone()),
+        )?;
         Ok(AppState {
             store,
             tokens,
             events: Arc::new(SeqEvents::default()),
             blobs,
+            web,
+            packs,
             config,
         })
+    }
+
+    /// What the vault occupies on disk: the database, its journal and
+    /// every stored blob. Packs are not counted: they are re-downloadable.
+    pub fn vault_bytes(&self) -> u64 {
+        let mut total = 0u64;
+        for suffix in ["", "-wal", "-shm"] {
+            let path = self.config.data_dir.join(format!("{DB_FILE}{suffix}"));
+            total += std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        }
+        if let Ok(entries) = std::fs::read_dir(self.blobs.dir()) {
+            for entry in entries.flatten() {
+                total += entry.metadata().map(|m| m.len()).unwrap_or(0);
+            }
+        }
+        total
     }
 }
 
@@ -126,8 +159,16 @@ pub async fn start(listener: StdListener, state: Arc<AppState>) -> io::Result<Bo
 
 /// The routes, behind the Host guard for `host` ("127.0.0.1:<port>"). A
 /// served path called with a method it does not serve answers like any
-/// other route a vault cannot serve, never with a bodyless 405.
+/// other route a vault cannot serve, never with a bodyless 405. Paths
+/// outside `/api/` are the web client's.
 pub fn router(state: Arc<AppState>, host: String) -> Router {
+    let script_hashes: Arc<Vec<String>> = Arc::new(
+        state
+            .web
+            .as_ref()
+            .map(|web| web.script_hashes.clone())
+            .unwrap_or_default(),
+    );
     Router::new()
         .route("/api/health", get(health))
         .route("/api/ready", get(ready))
@@ -203,13 +244,13 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         )
         .route("/api/{*rest}", any(needs_server))
         .method_not_allowed_fallback(needs_server)
-        .fallback(not_found)
+        .fallback(web::serve)
         .with_state(state)
         // The blob routes stream their bodies and bound them by the quota;
         // JSON bodies bound themselves (see `extract::JSON_BODY_LIMIT`).
         .layer(DefaultBodyLimit::disable())
         .layer(middleware::from_fn(move |req, next| {
-            host_guard(host.clone(), req, next)
+            host_guard(host.clone(), Arc::clone(&script_hashes), req, next)
         }))
 }
 
@@ -221,23 +262,26 @@ async fn ready() -> Json<Value> {
     Json(json!({ "status": "ready" }))
 }
 
-/// An on-device vault always lets its owner create the vault.
+/// An on-device vault always lets its owner create the vault, and says
+/// it is one: the sign-in screen reads `local` before any account exists.
 async fn registration() -> Json<Value> {
-    Json(json!({ "mode": "open", "macAppUrl": null }))
+    Json(json!({ "mode": "open", "macAppUrl": null, "local": true }))
 }
 
 async fn needs_server() -> ApiError {
     ApiError::new(StatusCode::NOT_FOUND, "needs a server")
 }
 
-async fn not_found() -> ApiError {
-    ApiError::new(StatusCode::NOT_FOUND, "not found")
-}
-
 /// Refuses any request not addressed to this listener's own host:port,
 /// so a page elsewhere cannot reach it through a DNS name that resolves
-/// to loopback, and gives every answer the server's response headers.
-async fn host_guard(expected: String, req: Request, next: Next) -> Response {
+/// to loopback, and gives every answer the server's response headers:
+/// the strict set, or the office editor's relaxed set under its prefix.
+async fn host_guard(
+    expected: String,
+    script_hashes: Arc<Vec<String>>,
+    req: Request,
+    next: Next,
+) -> Response {
     let ok = req
         .headers()
         .get(header::HOST)
@@ -247,8 +291,13 @@ async fn host_guard(expected: String, req: Request, next: Next) -> Response {
     if !ok {
         return StatusCode::MISDIRECTED_REQUEST.into_response();
     }
+    let office = req.uri().path().starts_with(OFFICE_PREFIX);
     let mut response = next.run(req).await;
-    headers::apply(response.headers_mut(), &expected);
+    if office {
+        headers::apply_office(response.headers_mut(), &expected);
+    } else {
+        headers::apply(response.headers_mut(), &expected, &script_hashes);
+    }
     response
 }
 
@@ -286,17 +335,22 @@ pub(crate) mod tests {
 
     impl Running {
         pub(crate) fn new() -> Running {
+            Running::with(|_| {})
+        }
+
+        /// A server whose configuration `adjust` may change first.
+        pub(crate) fn with(adjust: impl FnOnce(&mut ServerConfig)) -> Running {
             let dir = temp_dir("server");
-            let state = Arc::new(
-                AppState::open(ServerConfig {
-                    data_dir: dir.clone(),
-                    quota_bytes: 512 * 1024,
-                    events_heartbeat_ms: 25_000,
-                    max_versions: 10,
-                    max_blob_bytes: 20 * 1024 * 1024 * 1024,
-                })
-                .unwrap(),
-            );
+            let mut config = ServerConfig {
+                data_dir: dir.clone(),
+                quota_bytes: 512 * 1024,
+                events_heartbeat_ms: 25_000,
+                max_versions: 10,
+                max_blob_bytes: 20 * 1024 * 1024 * 1024,
+                web_dist: None,
+            };
+            adjust(&mut config);
+            let state = Arc::new(AppState::open(config).unwrap());
             let rt = tokio::runtime::Runtime::new().unwrap();
             let bound = rt.block_on(start(bind(0).unwrap(), state)).unwrap();
             let port = bound.port;
@@ -407,7 +461,10 @@ pub(crate) mod tests {
         let (status, _, body) = server.request("GET", "/api/auth/registration", None);
         assert_eq!(status, 200);
         let value: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(value, json!({ "mode": "open", "macAppUrl": null }));
+        assert_eq!(
+            value,
+            json!({ "mode": "open", "macAppUrl": null, "local": true })
+        );
     }
 
     #[test]
