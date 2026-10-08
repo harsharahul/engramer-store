@@ -13,26 +13,26 @@
     "test:conformance": "vitest run test/conformance"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1138.0",
-    "@aws-sdk/lib-storage": "3.1138.0",
+    "@aws-sdk/client-s3": "3.1146.0",
+    "@aws-sdk/lib-storage": "3.1146.0",
     "@engramer/crypto": "workspace:*",
     "@fastify/cors": "11.3.0",
     "@fastify/jwt": "10.2.2",
-    "@fastify/static": "10.1.4",
-    "@fastify/websocket": "11.3.1",
-    "better-sqlite3": "12.11.1",
+    "@fastify/static": "10.1.5",
+    "@fastify/websocket": "11.3.3",
+    "better-sqlite3": "13.0.3",
     "fastify": "5.12.5",
-    "pg": "8.23.0",
+    "pg": "8.23.1",
     "tsx": "4.23.15",
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "7.6.13",
-    "@types/node": "26.6.2",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "26.6.4",
     "@types/pg": "8.23.1",
-    "@types/ws": "8.18.1",
+    "@types/ws": "8.18.2",
     "typescript": "7.0.2",
-    "vitest": "4.1.10",
-    "ws": "8.21.3"
+    "vitest": "5.0.3",
+    "ws": "8.22.0"
   }
 }
