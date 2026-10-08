@@ -16,7 +16,9 @@ import {
   type AccountKeys,
   type SecretBox,
 } from "@engramer/crypto";
+import { Readable } from "node:stream";
 import { buildApp } from "../src/app.js";
+import { blobKey } from "../src/blobs.js";
 
 const QUOTA_BYTES = 512 * 1024;
 const MAX_VERSIONS = 3;
@@ -284,11 +286,12 @@ describe("safety properties", () => {
       app.blobs.put = original;
       await app.db.run("UPDATE files SET generation = generation - 1 WHERE id = ?", doc.id);
     }
-    // The loser's blob was cleaned up and no version was recorded.
+    // The loser's blob was cleaned up and no version was recorded; only
+    // the current content's blob remains.
     expect(await currentContent(doc)).toEqual(utf8Encode("base"));
     expect(await listVersions(doc.id)).toHaveLength(0);
     const leftovers = readdirSync(join(dataDir, "blobs")).filter(
-      (f) => f.startsWith(doc.id) && f.includes(".g"),
+      (f) => f.startsWith(doc.id) && f !== blobKey(doc.id, "data", 1),
     );
     expect(leftovers).toEqual([]);
   });
@@ -376,11 +379,21 @@ describe("safety properties", () => {
 
 describe("legacy compatibility", () => {
   it("a generation-zero file (pre-versioning blob name) versions cleanly", async () => {
-    // createFile writes generation 0 at the bare key, exactly like every blob
-    // that existed before versioning shipped.
-    const doc = await createFile("legacy.txt", utf8Encode("ancient bytes"));
+    // A row from before versioning shipped: its content sits at the bare
+    // key as generation 0. New content now starts at generation 1, so the
+    // legacy state is set up directly.
+    const doc = await createFile("legacy.txt", utf8Encode("placeholder"));
     const blobDir = join(dataDir, "blobs");
+    const ancient = Buffer.from(encryptBytes(utf8Encode("ancient bytes"), doc.fileKey));
+    await app.blobs.put(blobKey(doc.id, "data", 0), Readable.from(ancient), 1024);
+    await app.blobs.remove(blobKey(doc.id, "data", 1));
+    await app.db.run(
+      "UPDATE files SET generation = 0, size = ?, minted_generation = 0 WHERE id = ?",
+      ancient.length,
+      doc.id,
+    );
     expect(existsSync(join(blobDir, doc.id))).toBe(true);
+    expect(await currentContent(doc)).toEqual(utf8Encode("ancient bytes"));
 
     await putContent(doc.id, doc.fileKey, utf8Encode("modern bytes"), 200);
     expect(existsSync(join(blobDir, `${doc.id}.g1`))).toBe(true);

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,7 @@ import {
   type AccountKeys,
 } from "@engramer/crypto";
 import { buildApp } from "../src/app.js";
+import { claimGeneration, mintGeneration } from "../src/db.js";
 import { totpAt } from "../src/totp.js";
 
 /**
@@ -375,6 +377,95 @@ describe.skipIf(!adminUrl)("postgres metadata backend", () => {
     expect(sharedRow).toBeDefined();
     expect(sharedRow.role).toBe("editor");
     expect(sharedRow.revoked).toBe(false);
+  });
+
+  it("mints content generations past a file's whole history", async () => {
+    // The allocator is one UPDATE ... RETURNING with correlated subqueries
+    // and a CASE, the shape that differs most between the dialects.
+    const now = Date.now();
+    const owner = await app.db.get<{ id: number }>(
+      "INSERT INTO users (email, login_key_digest, key_attributes, created_at) VALUES (?, ?, ?, ?) RETURNING id",
+      "mint@example.com",
+      "digest",
+      "{}",
+      now,
+    );
+    const uid = Number(owner!.id);
+    const fileId = randomUUID();
+    await app.db.run(
+      `INSERT INTO files (id, user_id, folder_id, encrypted_key, encrypted_meta, generation, uploaded, update_seq, created_at, updated_at)
+       VALUES (?, ?, NULL, '{}', '{}', 3, 1, 0, ?, ?)`,
+      fileId,
+      uid,
+      now,
+      now,
+    );
+    // A row from before the allocator: generation 3 current, version 5 kept.
+    await app.db.run(
+      "INSERT INTO file_versions (file_id, user_id, generation, size, encrypted_meta, created_at) VALUES (?, ?, 5, 1, '{}', ?)",
+      fileId,
+      uid,
+      now,
+    );
+    expect(await mintGeneration(app.db, fileId)).toBe(6);
+    expect(await mintGeneration(app.db, fileId)).toBe(7);
+    await app.db.run("DELETE FROM file_versions WHERE file_id = ?", fileId);
+    // The allocator remembers what it handed out even when history is gone.
+    expect(await mintGeneration(app.db, fileId)).toBe(8);
+    const fresh = randomUUID();
+    await app.db.run(
+      `INSERT INTO files (id, user_id, folder_id, encrypted_key, encrypted_meta, update_seq, created_at, updated_at)
+       VALUES (?, ?, NULL, '{}', '{}', 0, ?, ?)`,
+      fresh,
+      uid,
+      now,
+      now,
+    );
+    expect(await mintGeneration(app.db, fresh)).toBe(1);
+  });
+
+  it("lets only one of two overlapping commits claim a file's generation", async () => {
+    // Two saves that both read generation 3 commit at once. The claim is a
+    // conditional update, so PostgreSQL's row lock serializes them and the
+    // second re-reads the row the first just moved: it matches nothing and
+    // answers 409 instead of silently overwriting the first save.
+    const now = Date.now();
+    const owner = await app.db.get<{ id: number }>(
+      "INSERT INTO users (email, login_key_digest, key_attributes, created_at) VALUES (?, ?, ?, ?) RETURNING id",
+      "claim@example.com",
+      "digest",
+      "{}",
+      now,
+    );
+    const fileId = randomUUID();
+    await app.db.run(
+      `INSERT INTO files (id, user_id, folder_id, encrypted_key, encrypted_meta, generation, uploaded, update_seq, created_at, updated_at)
+       VALUES (?, ?, NULL, '{}', '{}', 3, 1, 0, ?, ?)`,
+      fileId,
+      Number(owner!.id),
+      now,
+      now,
+    );
+    let secondStarted: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      secondStarted = resolve;
+    });
+    const first = app.db.tx(async (t) => {
+      const claimed = await claimGeneration(t, fileId, 3, 1);
+      // Hold the row until the second writer is waiting on it.
+      await started;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await t.run("UPDATE files SET generation = 4 WHERE id = ?", fileId);
+      return claimed;
+    });
+    const second = app.db.tx(async (t) => {
+      secondStarted();
+      return claimGeneration(t, fileId, 3, 1);
+    });
+    expect(await first).toBe(true);
+    expect(await second).toBe(false);
+    const row = await app.db.get<{ generation: number }>("SELECT generation FROM files WHERE id = ?", fileId);
+    expect(Number(row!.generation)).toBe(4);
   });
 
   it("retries a transaction PostgreSQL aborted as a deadlock victim", async () => {

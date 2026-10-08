@@ -200,7 +200,7 @@ describe("files and folders", () => {
   it("stores only ciphertext on disk", async () => {
     const marker = "MARKER-plaintext-should-never-appear";
     const file = await uploadFile("secret.txt", utf8Encode(`${marker} content`));
-    const blob = readFileSync(join(dataDir, "blobs", file.id));
+    const blob = readFileSync(join(dataDir, "blobs", `${file.id}.g1`));
     expect(blob.includes(Buffer.from(marker))).toBe(false);
   });
 

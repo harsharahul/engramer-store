@@ -46,6 +46,20 @@ All notable changes to Engram Store are documented here, following
   vault directory is a server data directory. Four more conformance
   suites run against both backends.
 
+### Fixed
+- **Two saves of one file at the same time could lose its content.** A
+  retry racing its first attempt, or two devices saving at once, wrote
+  under one blob name, and the losing save's cleanup removed the winning
+  save's bytes. Every save now takes a generation of its own before a byte
+  lands, so blob names never collide and the losing save removes only its
+  own. The first content of a file is generation 1.
+- **A restored file no longer reads as changed.** A restore kept the digest
+  of the content it displaced, so the storage check reported an intact
+  restored file as changed. The restore clears the digest and the next
+  check records the restored bytes.
+- **A save after a restore keeps every version.** It used to reuse the name
+  of a version that still existed and overwrite that version's bytes.
+
 ## [0.58.0] - 2026-10-02
 
 ### Added

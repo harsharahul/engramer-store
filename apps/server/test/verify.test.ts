@@ -95,19 +95,19 @@ describe("verifying stored content", () => {
     const id = await upload(new Uint8Array(2048).fill(7));
     // Corruption the encryption cannot report until someone reads the file:
     // the object simply is not what it was.
-    await app.blobs.put(blobKey(id, "data", 0), Readable.from(Buffer.alloc(2048, 9)), 1 << 20);
+    await app.blobs.put(blobKey(id, "data", 1), Readable.from(Buffer.alloc(2048, 9)), 1 << 20);
     expect(await verify([id])).toEqual([{ id, verdict: "changed" }]);
   });
 
   it("notices a truncated blob", async () => {
     const id = await upload(new Uint8Array(4096).fill(3));
-    await app.blobs.put(blobKey(id, "data", 0), Readable.from(Buffer.alloc(10)), 1 << 20);
+    await app.blobs.put(blobKey(id, "data", 1), Readable.from(Buffer.alloc(10)), 1 << 20);
     expect(await verify([id])).toEqual([{ id, verdict: "changed" }]);
   });
 
   it("reports a blob that has gone missing rather than calling it intact", async () => {
     const id = await upload(new Uint8Array([9, 9, 9]));
-    await app.blobs.remove(blobKey(id, "data", 0));
+    await app.blobs.remove(blobKey(id, "data", 1));
     expect(await verify([id])).toEqual([{ id, verdict: "unreadable" }]);
   });
 

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { PassThrough, type Readable } from "node:stream";
 import { z } from "zod";
-import { BlobTooLargeError, blobKey, type BlobKind } from "../blobs.js";
+import { BlobTooLargeError, blobKey, generationOfKey, type BlobKind } from "../blobs.js";
 import { livePresence } from "../presence.js";
 import {
   nextSeq,
@@ -12,6 +12,8 @@ import {
   type FileRow,
   type FileVersionRow,
   type FolderRow,
+  claimGeneration,
+  mintGeneration,
 } from "../db.js";
 
 /** A concurrent writer advanced the file while this request streamed in. */
@@ -397,7 +399,9 @@ export function registerStorageRoutes(app: FastifyInstance): void {
             : "the owner of this document is out of storage space",
       });
     }
-    const nextGen = replacesContent ? file.generation + 1 : file.generation;
+    // Content takes a generation of its own before a byte lands, so a
+    // writer overlapping with another never shares its blob name.
+    const nextGen = kind === "data" ? await mintGeneration(app.db, id) : file.generation;
     const targetKey = kind === "data" ? blobKey(id, "data", nextGen) : blobKey(id, kind);
     let written: number;
     // The bytes are already streaming through; hashing them here costs a pass
@@ -604,6 +608,12 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     let trimmedTo = 0;
     try {
       await app.db.tx(async (t) => {
+        // The claim locks the row and checks it in one statement, so two
+        // commits overlapping on PostgreSQL cannot both pass: the second
+        // sees the row the first moved and answers 409.
+        if (!(await claimGeneration(t, id, file.generation, file.uploaded))) {
+          throw new GenerationConflictError();
+        }
         const current = (await t.get<
           Pick<
             FileRow,
@@ -915,7 +925,7 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       await dropSession(abandoned);
     }
 
-    const nextGen = replacesContent ? file.generation + 1 : file.generation;
+    const nextGen = await mintGeneration(app.db, id);
     const targetKey = blobKey(id, "data", nextGen);
     const handle = await app.blobs.beginParts(targetKey);
     const sessionId = randomUUID();
@@ -1023,7 +1033,8 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       parts.map((p) => ({ partNo: Number(p.part_no), etag: p.etag ?? undefined, bytes: Number(p.bytes) })),
       file.seekable === 1,
     );
-    const nextGen = file.uploaded === 1 ? file.generation + 1 : file.generation;
+    // The joined bytes sit under the generation the session minted at begin.
+    const nextGen = generationOfKey(id, row.blob_key);
     // A blob assembled from parts was never in one stream to hash, so it has
     // no digest until something reads it. The check records one then, and
     // says so, rather than pretending the file was verified on arrival.
@@ -1540,8 +1551,11 @@ export function registerStorageRoutes(app: FastifyInstance): void {
       // The preview described the bytes being displaced, exactly as in a
       // forward replace; zeroing thumb_size turns needsThumb back on and
       // the ordinary backfill re-derives it from the restored content.
+      // The recorded digest described the displaced bytes too, so it goes:
+      // the next storage check records the restored bytes instead of
+      // calling them changed.
       await t.run(
-        "UPDATE files SET generation = ?, size = ?, encrypted_meta = ?, thumb_size = 0, update_seq = ?, updated_at = ? WHERE id = ?",
+        "UPDATE files SET generation = ?, size = ?, encrypted_meta = ?, thumb_size = 0, content_hash = NULL, update_seq = ?, updated_at = ? WHERE id = ?",
         generation,
         version.size,
         JSON.stringify(body.encryptedMeta),

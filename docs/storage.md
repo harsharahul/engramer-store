@@ -178,19 +178,22 @@ Quota enforcement counts bytes during streaming and aborts mid-upload, so a clie
 
 ## Version history
 
-Content saves are append-only across generations. A file's current blob lives
-at its bare id (generation 0, which is also every pre-versioning blob) or at
-`<id>.g<N>`; replacing content writes the next generation's blob first and
-only then, inside a single database transaction, records the displaced
-generation as a version, advances the pointer, and bumps the sync sequence.
-The consequences are the properties that matter:
+Content saves are append-only across generations. A file's content lives at
+`<id>.g<N>`; the bare id is generation 0, a blob from before versioning
+shipped or filed from a file request. Every save takes a generation of its
+own before a byte lands, handed out by one atomic update per file, so two
+saves overlapping on one file never write under one name. The save writes
+its blob first and only then, inside a single database transaction, records
+the displaced generation as a version, advances the pointer, and bumps the
+sync sequence. The consequences are the properties that matter:
 
 - A crash or failed write at any point leaves the file serving its previous
   content. The worst possible leftover is an orphaned blob, never a file row
   that references missing or partial data. No blob a file row points at is
   ever overwritten in place.
 - A concurrent save is detected by a generation check inside the transaction
-  and rejected with HTTP 409 rather than silently losing an update.
+  and rejected with HTTP 409 rather than silently losing an update; the only
+  blob it removes is its own, under a name no other save holds.
 - Each version snapshots the file's encrypted metadata from that moment, so a
   restored version has a coherent size, modification time, and search text.
   Restore itself moves no bytes: it is a pointer swap in one transaction, the

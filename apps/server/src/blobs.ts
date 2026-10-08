@@ -26,6 +26,12 @@ export function blobKey(fileId: string, kind: BlobKind, generation = 0): string 
   return generation > 0 ? `${fileId}.g${generation}` : fileId;
 }
 
+/** The generation a content blob key names (`<id>.g<N>`), 0 for the bare id. */
+export function generationOfKey(fileId: string, key: string): number {
+  const suffix = key.startsWith(`${fileId}.g`) ? key.slice(fileId.length + 2) : "";
+  return /^\d+$/.test(suffix) ? Number(suffix) : 0;
+}
+
 export class BlobTooLargeError extends Error {
   constructor() {
     super("blob exceeds the allowed size");

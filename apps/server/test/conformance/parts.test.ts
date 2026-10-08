@@ -65,7 +65,7 @@ describe("part uploads", () => {
     }
     const done = await completeParts(target, alice.token, file.id, session);
     expect(done.statusCode).toBe(200);
-    expect(done.json()).toEqual({ size: ciphertext.length, generation: 0 });
+    expect(done.json()).toEqual({ size: ciphertext.length, generation: 1 });
     expect(sameBytes(await download(file.id, file.key), content)).toBe(true);
     const row = (await syncFor(target, alice)).files.find((f) => f.id === file.id)!;
     expect(row).toMatchObject({ uploaded: true, size: ciphertext.length });
@@ -198,7 +198,7 @@ describe("part uploads", () => {
       await putPart(target, alice.token, file.id, session, i + 1, part);
     }
     const done = await completeParts(target, alice.token, file.id, session);
-    expect(done.json()).toEqual({ size: ciphertext.length, generation: 1 });
+    expect(done.json()).toEqual({ size: ciphertext.length, generation: 2 });
     expect(sameBytes(await download(file.id, file.key), second)).toBe(true);
     expect(await listVersions(target, alice.token, file.id)).toHaveLength(1);
   });

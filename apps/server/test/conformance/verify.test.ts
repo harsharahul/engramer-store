@@ -43,19 +43,19 @@ describe("verifying stored content", () => {
 
   it("notices when stored bytes are not what was written", async () => {
     const file = await uploadFile(target, alice, "f.bin", new Uint8Array(2048).fill(7));
-    writeFileSync(blobPath(file.id), Buffer.alloc(file.ciphertext.length, 9));
+    writeFileSync(blobPath(`${file.id}.g1`), Buffer.alloc(file.ciphertext.length, 9));
     expect(await verdicts([file.id])).toEqual([{ id: file.id, verdict: "changed" }]);
   });
 
   it("notices a truncated blob", async () => {
     const file = await uploadFile(target, alice, "f.bin", new Uint8Array(4096).fill(3));
-    writeFileSync(blobPath(file.id), Buffer.from(file.ciphertext.subarray(0, 10)));
+    writeFileSync(blobPath(`${file.id}.g1`), Buffer.from(file.ciphertext.subarray(0, 10)));
     expect(await verdicts([file.id])).toEqual([{ id: file.id, verdict: "changed" }]);
   });
 
   it("reports a blob that has gone missing rather than calling it intact", async () => {
     const file = await uploadFile(target, alice, "f.bin", new Uint8Array([9, 9, 9]));
-    unlinkSync(blobPath(file.id));
+    unlinkSync(blobPath(`${file.id}.g1`));
     expect(await verdicts([file.id])).toEqual([{ id: file.id, verdict: "unreadable" }]);
   });
 

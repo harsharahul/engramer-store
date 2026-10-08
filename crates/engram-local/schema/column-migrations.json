@@ -123,5 +123,10 @@
     "table": "channel_presence",
     "column": "role",
     "type": "TEXT"
+  },
+  {
+    "table": "files",
+    "column": "minted_generation",
+    "type": "BIGINT NOT NULL DEFAULT 0"
   }
 ]
