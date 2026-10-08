@@ -45,6 +45,20 @@ All notable changes to Engram Store are documented here, following
   live under the vault directory with the server's own file names, so a
   vault directory is a server data directory. Four more conformance
   suites run against both backends.
+- **The on-device backend serves the web client.** It serves the bundled
+  client from disk with the server's content security policies (the
+  relaxed one for the office editor tree only), revalidates the page, the
+  service worker and the manifest on every load, caches hashed assets as
+  immutable, and answers a missing asset with a 404 instead of the page, so
+  an upgraded app never boots a stale page. Optional feature packs (the
+  office editor, on-device intelligence) are downloaded on request from the
+  release host, resumed if interrupted, verified by size and digest, checked
+  file by file against the bundled manifest, and installed whole or not at
+  all; a path that belongs to a pack that is not installed answers 404 with
+  `x-engram-pack` naming it. The registration answer and the user record say
+  the vault is on the device, with each pack's state and the vault's size.
+  Unfinished uploads left by a crash are removed at start, and a write the
+  disk refuses for lack of room answers 507 with a sentence.
 
 ### Fixed
 - **Two saves of one file at the same time could lose its content.** A
