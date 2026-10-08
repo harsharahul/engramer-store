@@ -13,8 +13,10 @@ import {
  * database (for example a CloudNativePG cluster) and one object store, and
  * every correctness mechanism carries over unchanged because it was designed
  * on single-row atomics: the per-user update_seq is a single-row
- * UPDATE...RETURNING that PostgreSQL serializes with a row lock, and the
- * versioning generation re-check runs inside a real transaction here.
+ * UPDATE...RETURNING that PostgreSQL serializes with a row lock, content
+ * generations are minted the same way, and a commit claims its file with
+ * a conditional UPDATE that takes the row lock before the re-check, so
+ * two overlapping commits cannot both pass it.
  *
  * SQL is written once in SQLite placeholder style; this backend translates
  * `?` to `$n`. Timestamps and sizes are BIGINT (int8) and sums are numeric,

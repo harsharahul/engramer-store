@@ -17,7 +17,7 @@ import {
   type AccountKeys,
 } from "@engramer/crypto";
 import { buildApp } from "../src/app.js";
-import { mintGeneration } from "../src/db.js";
+import { claimGeneration, mintGeneration } from "../src/db.js";
 import { totpAt } from "../src/totp.js";
 
 /**
@@ -422,6 +422,50 @@ describe.skipIf(!adminUrl)("postgres metadata backend", () => {
       now,
     );
     expect(await mintGeneration(app.db, fresh)).toBe(1);
+  });
+
+  it("lets only one of two overlapping commits claim a file's generation", async () => {
+    // Two saves that both read generation 3 commit at once. The claim is a
+    // conditional update, so PostgreSQL's row lock serializes them and the
+    // second re-reads the row the first just moved: it matches nothing and
+    // answers 409 instead of silently overwriting the first save.
+    const now = Date.now();
+    const owner = await app.db.get<{ id: number }>(
+      "INSERT INTO users (email, login_key_digest, key_attributes, created_at) VALUES (?, ?, ?, ?) RETURNING id",
+      "claim@example.com",
+      "digest",
+      "{}",
+      now,
+    );
+    const fileId = randomUUID();
+    await app.db.run(
+      `INSERT INTO files (id, user_id, folder_id, encrypted_key, encrypted_meta, generation, uploaded, update_seq, created_at, updated_at)
+       VALUES (?, ?, NULL, '{}', '{}', 3, 1, 0, ?, ?)`,
+      fileId,
+      Number(owner!.id),
+      now,
+      now,
+    );
+    let secondStarted: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      secondStarted = resolve;
+    });
+    const first = app.db.tx(async (t) => {
+      const claimed = await claimGeneration(t, fileId, 3, 1);
+      // Hold the row until the second writer is waiting on it.
+      await started;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await t.run("UPDATE files SET generation = 4 WHERE id = ?", fileId);
+      return claimed;
+    });
+    const second = app.db.tx(async (t) => {
+      secondStarted();
+      return claimGeneration(t, fileId, 3, 1);
+    });
+    expect(await first).toBe(true);
+    expect(await second).toBe(false);
+    const row = await app.db.get<{ generation: number }>("SELECT generation FROM files WHERE id = ?", fileId);
+    expect(Number(row!.generation)).toBe(4);
   });
 
   it("retries a transaction PostgreSQL aborted as a deadlock victim", async () => {

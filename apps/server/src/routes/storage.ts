@@ -12,6 +12,7 @@ import {
   type FileRow,
   type FileVersionRow,
   type FolderRow,
+  claimGeneration,
   mintGeneration,
 } from "../db.js";
 
@@ -607,6 +608,12 @@ export function registerStorageRoutes(app: FastifyInstance): void {
     let trimmedTo = 0;
     try {
       await app.db.tx(async (t) => {
+        // The claim locks the row and checks it in one statement, so two
+        // commits overlapping on PostgreSQL cannot both pass: the second
+        // sees the row the first moved and answers 409.
+        if (!(await claimGeneration(t, id, file.generation, file.uploaded))) {
+          throw new GenerationConflictError();
+        }
         const current = (await t.get<
           Pick<
             FileRow,

@@ -640,6 +640,30 @@ export async function mintGeneration(db: Db, fileId: string): Promise<number> {
   return Number(row.minted_generation);
 }
 
+/**
+ * Claims a file for a commit that began against `generation` and
+ * `uploaded`: a conditional update that matches only the row the writer
+ * read, so it both checks and locks in one statement. On PostgreSQL a
+ * writer blocked behind another re-evaluates the condition against the
+ * row that writer just moved and matches nothing; on SQLite the single
+ * writer makes the check exact by construction. False means another save
+ * landed first and this commit must answer 409.
+ */
+export async function claimGeneration(
+  db: Db,
+  fileId: string,
+  generation: number,
+  uploaded: number,
+): Promise<boolean> {
+  const claimed = await db.run(
+    "UPDATE files SET generation = generation WHERE id = ? AND generation = ? AND uploaded = ?",
+    fileId,
+    generation,
+    uploaded,
+  );
+  return claimed.changes === 1;
+}
+
 /** The user's effective quota: their override, or the server default. */
 export async function userQuota(db: Db, userId: number, defaultQuota: number): Promise<number> {
   const row = await db.get<{ quota_bytes: number | null }>(
