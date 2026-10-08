@@ -260,6 +260,11 @@ export const COLUMN_MIGRATIONS: Array<{ table: string; column: string; type: str
   // The role the connection joined with, so clients can elect a member
   // that is actually allowed to write.
   { table: "channel_presence", column: "role", type: "TEXT" },
+  // The highest content generation ever handed to a writer of this file,
+  // so two writers overlapping on one file never share a blob name and a
+  // save after a restore never reuses a kept version's name. Rows from
+  // before the allocator hold 0 and catch up on their next write.
+  { table: "files", column: "minted_generation", type: "BIGINT NOT NULL DEFAULT 0" },
 ];
 
 /** Tables shared verbatim between the two dialects. */
@@ -607,6 +612,32 @@ export async function nextSeq(db: Db, userId: number): Promise<number> {
   }
   db.onSeq?.(userId, seq);
   return seq;
+}
+
+/**
+ * Hands a content writer the next generation of a file: one past the
+ * highest the file has ever had, whether current, kept as a version, or
+ * minted to a writer that never committed. One single-row update, so two
+ * writers can never receive one number on either backend. The first
+ * content of a file is generation 1; generation 0 is a file with no
+ * content yet, or a row from before versioning shipped.
+ */
+export async function mintGeneration(db: Db, fileId: string): Promise<number> {
+  const kept = "COALESCE((SELECT MAX(generation) FROM file_versions WHERE file_id = files.id), 0)";
+  const row = await db.get<{ minted_generation: number }>(
+    `UPDATE files SET minted_generation = 1 + (
+       CASE
+         WHEN minted_generation >= generation AND minted_generation >= ${kept} THEN minted_generation
+         WHEN generation >= ${kept} THEN generation
+         ELSE ${kept}
+       END
+     ) WHERE id = ? RETURNING minted_generation`,
+    fileId,
+  );
+  if (!row) {
+    throw new Error(`no file ${fileId} to mint a generation for`);
+  }
+  return Number(row.minted_generation);
 }
 
 /** The user's effective quota: their override, or the server default. */
