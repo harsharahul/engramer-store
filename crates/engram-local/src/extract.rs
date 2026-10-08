@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 
-use axum::body::Bytes;
 use axum::extract::{FromRequest, FromRequestParts, Request};
 use axum::http::request::Parts;
 use axum::http::{header, HeaderMap, StatusCode};
@@ -94,6 +93,10 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
     }
 }
 
+/// The most a JSON body may hold, as on the server. Blob routes read the
+/// request body themselves and bound it by the quota instead.
+pub const JSON_BODY_LIMIT: usize = 16 * 1024 * 1024;
+
 /// A JSON body; anything unreadable or of the wrong shape is the server's
 /// `400 {"error":"invalid request"}`.
 pub struct JsonBody<T>(pub T);
@@ -105,8 +108,8 @@ where
 {
     type Rejection = ApiError;
 
-    async fn from_request(req: Request, state: &S) -> Result<JsonBody<T>, ApiError> {
-        let bytes = Bytes::from_request(req, state)
+    async fn from_request(req: Request, _state: &S) -> Result<JsonBody<T>, ApiError> {
+        let bytes = axum::body::to_bytes(req.into_body(), JSON_BODY_LIMIT)
             .await
             .map_err(|_| ApiError::invalid_request())?;
         serde_json::from_slice(&bytes)

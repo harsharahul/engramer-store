@@ -14,6 +14,7 @@ use axum::Json;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
+use crate::blobs::{blob_key, BlobKind};
 use crate::dto::{file_from, folder_from, FileDto, FolderDto, FILES_WITH_COLLABORATORS};
 use crate::error::ApiError;
 use crate::extract::{blocking, AuthUser, JsonBody};
@@ -107,7 +108,11 @@ fn folder_dto(conn: &Connection, id: &str) -> rusqlite::Result<FolderDto> {
     )
 }
 
-fn file_dto(conn: &Connection, id: &str, collaborators: bool) -> rusqlite::Result<FileDto> {
+pub(crate) fn file_dto(
+    conn: &Connection,
+    id: &str,
+    collaborators: bool,
+) -> rusqlite::Result<FileDto> {
     if collaborators {
         conn.query_row(
             &format!("{FILES_WITH_COLLABORATORS} WHERE id = ?1"),
@@ -401,18 +406,31 @@ fn restored_folder(
 }
 
 /// `DELETE /api/trash/:id`: deletes a trashed file for good. Its versions
-/// and share links go with it; its stored bytes are released.
+/// and share links go with it, and once the row is a tombstone its stored
+/// bytes (every content generation, the preview and the index) are
+/// removed; a leftover file is garbage, never corruption.
 pub async fn delete_forever(
     State(state): State<Arc<AppState>>,
     auth: AuthUser,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let seq = blocking(&state, move |store| {
+    let file_id = id.clone();
+    let (seq, generations) = blocking(&state, move |store| {
         store.tx(|tx| {
             match own_file(tx, &id, auth.uid)? {
                 Some(file) if file.trashed => {}
                 _ => return Err(not_found("file not found in trash")),
             }
+            let current: i64 = tx.query_row(
+                "SELECT generation FROM files WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )?;
+            let mut generations = tx
+                .prepare("SELECT generation FROM file_versions WHERE file_id = ?1")?
+                .query_map(params![id], |r| r.get::<_, i64>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            generations.push(current);
             tx.execute("UPDATE file_collaborators SET revoked = 1 WHERE file_id = ?1", params![id])?;
             tx.execute("UPDATE collab_invites SET revoked = 1 WHERE file_id = ?1", params![id])?;
             tx.execute("DELETE FROM shares WHERE file_id = ?1", params![id])?;
@@ -422,10 +440,17 @@ pub async fn delete_forever(
                 "UPDATE files SET deleted = 1, size = 0, thumb_size = 0, uploaded = 0, update_seq = ?1, updated_at = ?2 WHERE id = ?3",
                 params![seq, now_ms(), id],
             )?;
-            Ok::<i64, ApiError>(seq)
+            Ok::<(i64, Vec<i64>), ApiError>((seq, generations))
         })
     })
     .await?;
+    for generation in generations {
+        state
+            .blobs
+            .remove(&blob_key(&file_id, BlobKind::Data, generation));
+    }
+    state.blobs.remove(&blob_key(&file_id, BlobKind::Thumb, 0));
+    state.blobs.remove(&blob_key(&file_id, BlobKind::Index, 0));
     state.events.note(auth.uid, seq);
     Ok(StatusCode::NO_CONTENT)
 }

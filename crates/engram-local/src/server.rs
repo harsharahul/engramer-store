@@ -7,7 +7,7 @@ use std::net::TcpListener as StdListener;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::extract::Request;
+use axum::extract::{DefaultBodyLimit, Request};
 use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -17,11 +17,12 @@ use serde_json::{json, Value};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use crate::blobs::{BlobStore, BLOBS_DIR};
 use crate::error::ApiError;
 use crate::events::SeqEvents;
 use crate::store::{Store, DB_FILE};
 use crate::token::Tokens;
-use crate::{accounts, events, headers, sessions, settings, storage};
+use crate::{accounts, content, events, headers, sessions, settings, storage};
 
 /// Server defaults; the binary and the shell set them.
 pub struct ServerConfig {
@@ -29,6 +30,10 @@ pub struct ServerConfig {
     pub quota_bytes: u64,
     /// How often an open change feed is checked and kept warm.
     pub events_heartbeat_ms: u64,
+    /// Content versions kept per file; 0 keeps none.
+    pub max_versions: usize,
+    /// The most bytes one blob may hold.
+    pub max_blob_bytes: u64,
 }
 
 /// Everything a request handler can reach.
@@ -36,6 +41,7 @@ pub struct AppState {
     pub store: Store,
     pub tokens: Tokens,
     pub events: Arc<SeqEvents>,
+    pub blobs: BlobStore,
     pub config: ServerConfig,
 }
 
@@ -50,10 +56,13 @@ impl AppState {
             .map_err(|err| format!("cannot open the vault: {err}"))?;
         let tokens = Tokens::load_or_create(&config.data_dir)
             .map_err(|err| format!("cannot read the session secret: {err}"))?;
+        let blobs = BlobStore::open(config.data_dir.join(BLOBS_DIR))
+            .map_err(|err| format!("cannot open the blob directory: {err}"))?;
         Ok(AppState {
             store,
             tokens,
             events: Arc::new(SeqEvents::default()),
+            blobs,
             config,
         })
     }
@@ -148,9 +157,44 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         )
         .route("/api/files", post(storage::create_file))
         .route("/api/files/batch", post(storage::batch))
+        .route("/api/files/verify", post(content::verify))
         .route(
             "/api/files/{id}",
             axum::routing::patch(storage::patch_file).delete(storage::trash_file),
+        )
+        .route(
+            "/api/files/{id}/data",
+            axum::routing::put(content::put_data).get(content::get_data),
+        )
+        .route(
+            "/api/files/{id}/thumbnail",
+            axum::routing::put(content::put_thumbnail).get(content::get_thumbnail),
+        )
+        .route(
+            "/api/files/{id}/index",
+            axum::routing::put(content::put_index).get(content::get_index),
+        )
+        .route("/api/files/{id}/data/parts", post(content::begin_parts))
+        .route(
+            "/api/files/{id}/data/parts/{session}",
+            axum::routing::delete(content::abort_parts),
+        )
+        .route(
+            "/api/files/{id}/data/parts/{session}/complete",
+            post(content::complete_parts),
+        )
+        .route(
+            "/api/files/{id}/data/parts/{session}/{part}",
+            axum::routing::put(content::put_part),
+        )
+        .route("/api/files/{id}/versions", get(content::list_versions))
+        .route(
+            "/api/files/{id}/versions/{gen}/data",
+            get(content::version_data),
+        )
+        .route(
+            "/api/files/{id}/versions/{gen}/restore",
+            post(content::restore_version),
         )
         .route("/api/trash/{id}/restore", post(storage::restore_file))
         .route(
@@ -161,6 +205,9 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         .method_not_allowed_fallback(needs_server)
         .fallback(not_found)
         .with_state(state)
+        // The blob routes stream their bodies and bound them by the quota;
+        // JSON bodies bound themselves (see `extract::JSON_BODY_LIMIT`).
+        .layer(DefaultBodyLimit::disable())
         .layer(middleware::from_fn(move |req, next| {
             host_guard(host.clone(), req, next)
         }))
@@ -245,6 +292,8 @@ pub(crate) mod tests {
                     data_dir: dir.clone(),
                     quota_bytes: 512 * 1024,
                     events_heartbeat_ms: 25_000,
+                    max_versions: 10,
+                    max_blob_bytes: 20 * 1024 * 1024 * 1024,
                 })
                 .unwrap(),
             );
@@ -292,13 +341,29 @@ pub(crate) mod tests {
         host: &str,
         body: Option<&str>,
     ) -> (u16, String, String) {
+        raw_with(port, method, path, host, body, &[])
+    }
+
+    /// One raw HTTP/1.1 request with extra headers: (status, lowercased
+    /// head, body).
+    pub(crate) fn raw_with(
+        port: u16,
+        method: &str,
+        path: &str,
+        host: &str,
+        body: Option<&str>,
+        headers: &[(&str, &str)],
+    ) -> (u16, String, String) {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         let body = body.unwrap_or("");
-        let content = if body.is_empty() {
+        let mut content = if body.is_empty() {
             String::new()
         } else {
             "Content-Type: application/json\r\n".to_string()
         };
+        for (name, value) in headers {
+            content.push_str(&format!("{name}: {value}\r\n"));
+        }
         write!(
             stream,
             "{method} {path} HTTP/1.1\r\nHost: {host}\r\n{content}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -311,6 +376,22 @@ pub(crate) mod tests {
         let (head, rest) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
         let status = head.split_whitespace().nth(1).unwrap().parse().unwrap();
         (status, head.to_ascii_lowercase(), rest.to_string())
+    }
+
+    /// Registers an account over HTTP and returns its session token.
+    pub(crate) fn signed_in(port: u16, email: &str) -> String {
+        let sb = r#"{"ciphertext":"c","nonce":"n"}"#;
+        let attributes = format!(
+            r#"{{"kdf":{{"salt":"0123456789abcdef","opsLimit":3,"memLimit":268435456}},"encryptedMasterKey":{sb},"masterKeyEncryptedWithRecoveryKey":{sb},"recoveryKeyEncryptedWithMasterKey":{sb},"publicKey":"p","encryptedPrivateKey":{sb}}}"#
+        );
+        let body = format!(
+            r#"{{"email":"{email}","loginKey":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","keyAttributes":{attributes}}}"#
+        );
+        let host = format!("127.0.0.1:{port}");
+        let (status, _, body) = raw(port, "POST", "/api/auth/register", &host, Some(&body));
+        assert_eq!(status, 201);
+        let value: Value = serde_json::from_str(&body).unwrap();
+        value["token"].as_str().unwrap().to_string()
     }
 
     #[test]

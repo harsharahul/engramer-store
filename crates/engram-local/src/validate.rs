@@ -174,6 +174,32 @@ pub fn string(body: &Map<String, Value>, key: &str) -> Result<String, ApiError> 
     }
 }
 
+/// `z.number().int().positive()`: a JSON number that is a whole number
+/// above zero (JavaScript counts `1.0` as an integer too).
+pub fn positive_int(body: &Map<String, Value>, key: &str) -> Result<i64, ApiError> {
+    match body.get(key).and_then(Value::as_f64) {
+        Some(n) if n > 0.0 && n.fract() == 0.0 && n <= 9_007_199_254_740_991.0 => Ok(n as i64),
+        _ => Err(ApiError::invalid_request()),
+    }
+}
+
+/// `z.array(z.string()).min(min).max(max)` over the value at `key`.
+pub fn string_list(
+    body: &Map<String, Value>,
+    key: &str,
+    min: usize,
+    max: usize,
+) -> Result<Vec<String>, ApiError> {
+    list(body, key, min, max)?
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::to_string)
+                .ok_or_else(ApiError::invalid_request)
+        })
+        .collect()
+}
+
 /// `z.array(item).min(min).max(max)` over the value at `key`.
 pub fn list<'a>(
     body: &'a Map<String, Value>,
@@ -319,5 +345,19 @@ mod tests {
         assert_eq!(list(body, "ids", 1, 2).unwrap().len(), 2);
         assert!(list(body, "ids", 3, 5).is_err());
         assert!(object(&serde_json::json!([1])).is_err());
+    }
+
+    #[test]
+    fn lists_of_strings_and_counts_follow_zod() {
+        let body = serde_json::json!({ "ids": ["a", "b"], "mixed": ["a", 1], "size": 12.0, "zero": 0, "half": 1.5, "text": "3" });
+        let body = object(&body).unwrap();
+        assert_eq!(string_list(body, "ids", 1, 2).unwrap(), vec!["a", "b"]);
+        assert!(string_list(body, "ids", 3, 5).is_err());
+        assert!(string_list(body, "mixed", 1, 5).is_err());
+        assert!(string_list(body, "missing", 1, 5).is_err());
+        assert_eq!(positive_int(body, "size").unwrap(), 12);
+        for key in ["zero", "half", "text", "missing"] {
+            assert!(positive_int(body, key).is_err(), "{key}");
+        }
     }
 }

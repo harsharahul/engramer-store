@@ -2,7 +2,7 @@
 //! development:
 //!
 //!   engram-local --data-dir <dir> [--port <n>] [--quota-bytes <n>]
-//!                [--events-heartbeat-ms <n>]
+//!                [--events-heartbeat-ms <n>] [--max-versions <n>]
 //!
 //! Prints `listening on 127.0.0.1:<port>` once it accepts connections and
 //! runs until interrupted.
@@ -14,15 +14,19 @@ use std::sync::Arc;
 
 use engram_local::server::{bind, start, AppState, ServerConfig};
 
-const USAGE: &str = "usage: engram-local --data-dir <dir> [--port <n>] [--quota-bytes <n>] [--events-heartbeat-ms <n>]";
+const USAGE: &str = "usage: engram-local --data-dir <dir> [--port <n>] [--quota-bytes <n>] [--events-heartbeat-ms <n>] [--max-versions <n>]";
 const DEFAULT_QUOTA_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const DEFAULT_EVENTS_HEARTBEAT_MS: u64 = 25_000;
+/// The server's defaults: ten versions per file, blobs up to 20 GiB.
+const DEFAULT_MAX_VERSIONS: usize = 10;
+const MAX_BLOB_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 
 struct Args {
     data_dir: PathBuf,
     port: u16,
     quota_bytes: u64,
     events_heartbeat_ms: u64,
+    max_versions: usize,
 }
 
 fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -30,6 +34,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut port = 0u16;
     let mut quota_bytes = DEFAULT_QUOTA_BYTES;
     let mut events_heartbeat_ms = DEFAULT_EVENTS_HEARTBEAT_MS;
+    let mut max_versions = DEFAULT_MAX_VERSIONS;
     while let Some(flag) = args.next() {
         let value = args.next().ok_or_else(|| format!("{flag} needs a value"))?;
         match flag.as_str() {
@@ -43,6 +48,11 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
                     .parse()
                     .map_err(|_| format!("bad heartbeat {value}"))?
             }
+            "--max-versions" => {
+                max_versions = value
+                    .parse()
+                    .map_err(|_| format!("bad version count {value}"))?
+            }
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -51,6 +61,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         port,
         quota_bytes,
         events_heartbeat_ms,
+        max_versions,
     })
 }
 
@@ -67,6 +78,8 @@ async fn main() -> ExitCode {
         data_dir: args.data_dir,
         quota_bytes: args.quota_bytes,
         events_heartbeat_ms: args.events_heartbeat_ms,
+        max_versions: args.max_versions,
+        max_blob_bytes: MAX_BLOB_BYTES,
     }) {
         Ok(state) => Arc::new(state),
         Err(err) => {
@@ -113,12 +126,15 @@ mod tests {
             "524288",
             "--events-heartbeat-ms",
             "200",
+            "--max-versions",
+            "3",
         ])
         .unwrap();
         assert_eq!(parsed.data_dir, PathBuf::from("/tmp/v"));
         assert_eq!(parsed.port, 38765);
         assert_eq!(parsed.quota_bytes, 524288);
         assert_eq!(parsed.events_heartbeat_ms, 200);
+        assert_eq!(parsed.max_versions, 3);
     }
 
     #[test]
@@ -127,6 +143,7 @@ mod tests {
         assert_eq!(parsed.port, 0);
         assert_eq!(parsed.quota_bytes, DEFAULT_QUOTA_BYTES);
         assert_eq!(parsed.events_heartbeat_ms, DEFAULT_EVENTS_HEARTBEAT_MS);
+        assert_eq!(parsed.max_versions, DEFAULT_MAX_VERSIONS);
     }
 
     #[test]

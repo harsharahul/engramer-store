@@ -14,6 +14,8 @@ export interface TargetResponse {
   statusCode: number;
   headers: Record<string, string>;
   body: string;
+  /** The answer's bytes, for blob downloads. */
+  rawPayload: Buffer;
   json(): any;
 }
 
@@ -36,6 +38,8 @@ export interface TargetOptions {
   quotaBytes?: number;
   /** How often an open change feed is checked and kept warm. */
   eventsHeartbeatMs?: number;
+  /** Content versions kept per file. */
+  maxVersions?: number;
   /** The backend binary; defaults to ENGRAM_CONFORMANCE_BIN. */
   bin?: string;
   /** How long a binary may take to announce its port. */
@@ -54,20 +58,26 @@ export async function startTarget(options: TargetOptions = {}): Promise<Target> 
   const dataDir = mkdtempSync(join(tmpdir(), "engram-conformance-"));
   const quotaBytes = options.quotaBytes ?? 512 * 1024;
   const heartbeatMs = options.eventsHeartbeatMs ?? 25_000;
+  const maxVersions = options.maxVersions ?? 10;
   const bin = options.bin ?? conformanceBin;
   try {
     if (bin) {
-      return await startLocal(bin, dataDir, quotaBytes, heartbeatMs, options.startTimeoutMs ?? 20_000);
+      return await startLocal(bin, dataDir, quotaBytes, heartbeatMs, maxVersions, options.startTimeoutMs ?? 20_000);
     }
-    return await startNode(dataDir, quotaBytes, heartbeatMs);
+    return await startNode(dataDir, quotaBytes, heartbeatMs, maxVersions);
   } catch (err) {
     rmSync(dataDir, { recursive: true, force: true });
     throw err;
   }
 }
 
-async function startNode(dataDir: string, quotaBytes: number, eventsHeartbeatMs: number): Promise<Target> {
-  const app = await buildApp({ dataDir, quotaBytes, eventsHeartbeatMs, webDistDir: null });
+async function startNode(
+  dataDir: string,
+  quotaBytes: number,
+  eventsHeartbeatMs: number,
+  maxVersions: number,
+): Promise<Target> {
+  const app = await buildApp({ dataDir, quotaBytes, eventsHeartbeatMs, maxVersions, webDistDir: null });
   try {
     await app.listen({ port: 0, host: "127.0.0.1" });
   } catch (err) {
@@ -83,6 +93,10 @@ async function startNode(dataDir: string, quotaBytes: number, eventsHeartbeatMs:
     dataDir,
     inject: (request) => send(baseUrl, request),
     close: async () => {
+      // Every request a suite made has been answered by now; the client's
+      // idle keep-alive connections would otherwise hold close() open for
+      // the server's keep-alive timeout.
+      app.server.closeAllConnections();
       await app.close();
       rmSync(dataDir, { recursive: true, force: true });
     },
@@ -94,6 +108,7 @@ async function startLocal(
   dataDir: string,
   quotaBytes: number,
   eventsHeartbeatMs: number,
+  maxVersions: number,
   startTimeoutMs: number,
 ): Promise<Target> {
   const child = spawn(
@@ -107,6 +122,8 @@ async function startLocal(
       String(quotaBytes),
       "--events-heartbeat-ms",
       String(eventsHeartbeatMs),
+      "--max-versions",
+      String(maxVersions),
     ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
@@ -183,11 +200,13 @@ async function send(baseUrl: string, request: InjectOptions): Promise<TargetResp
     }
   }
   const response = await fetch(baseUrl + request.url, { method: request.method, headers, body });
-  const text = Buffer.from(await response.arrayBuffer()).toString("utf8");
+  const rawPayload = Buffer.from(await response.arrayBuffer());
+  const text = rawPayload.toString("utf8");
   return {
     statusCode: response.status,
     headers: Object.fromEntries(response.headers.entries()),
     body: text,
+    rawPayload,
     json: () => JSON.parse(text),
   };
 }
