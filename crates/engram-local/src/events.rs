@@ -408,6 +408,8 @@ mod tests {
                 events_heartbeat_ms: 25_000,
                 max_versions: 10,
                 max_blob_bytes: 20 * 1024 * 1024 * 1024,
+                web_dist: None,
+                pack_read_timeout_ms: 60_000,
             })
             .unwrap(),
         );
@@ -443,6 +445,8 @@ mod tests {
                 events_heartbeat_ms: 25_000,
                 max_versions: 10,
                 max_blob_bytes: 20 * 1024 * 1024 * 1024,
+                web_dist: None,
+                pack_read_timeout_ms: 60_000,
             })
             .unwrap(),
         );

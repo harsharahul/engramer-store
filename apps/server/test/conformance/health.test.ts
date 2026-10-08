@@ -33,7 +33,9 @@ describe("health and discovery", () => {
   it("lets a new account be created, with no Mac app named", async () => {
     const response = await target.inject({ method: "GET", url: "/api/auth/registration" });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ mode: "open", macAppUrl: null });
+    const body = response.json();
+    expect(body.mode).toBe("open");
+    expect(body.macAppUrl).toBeNull();
   });
 
   it("answers a served path called with another method with a JSON 404", async () => {

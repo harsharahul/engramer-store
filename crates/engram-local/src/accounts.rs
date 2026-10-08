@@ -208,6 +208,13 @@ pub async fn user(
     auth: AuthUser,
 ) -> Result<Json<Value>, ApiError> {
     let default_quota = state.config.quota_bytes;
+    let local = json!({
+        "packs": state.packs.summary(),
+        "vault": {
+            "bytes": state.vault_bytes(),
+            "directory": state.config.data_dir.display().to_string(),
+        },
+    });
     let value = blocking(&state, move |store| {
         let conn = store.conn();
         let (email, created_at, display_name, totp, digests, quota) = conn.query_row(
@@ -243,6 +250,7 @@ pub async fn user(
             "recoveryCodesLeft": codes_left,
             "collab": { "relay": false },
             "events": true,
+            "local": local,
         }))
     })
     .await?;

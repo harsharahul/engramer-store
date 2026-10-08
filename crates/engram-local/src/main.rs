@@ -3,6 +3,7 @@
 //!
 //!   engram-local --data-dir <dir> [--port <n>] [--quota-bytes <n>]
 //!                [--events-heartbeat-ms <n>] [--max-versions <n>]
+//!                [--web-dist <dir>]
 //!
 //! Prints `listening on 127.0.0.1:<port>` once it accepts connections and
 //! runs until interrupted.
@@ -14,12 +15,14 @@ use std::sync::Arc;
 
 use engram_local::server::{bind, start, AppState, ServerConfig};
 
-const USAGE: &str = "usage: engram-local --data-dir <dir> [--port <n>] [--quota-bytes <n>] [--events-heartbeat-ms <n>] [--max-versions <n>]";
+const USAGE: &str = "usage: engram-local --data-dir <dir> [--port <n>] [--quota-bytes <n>] [--events-heartbeat-ms <n>] [--max-versions <n>] [--web-dist <dir>]";
 const DEFAULT_QUOTA_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 const DEFAULT_EVENTS_HEARTBEAT_MS: u64 = 25_000;
 /// The server's defaults: ten versions per file, blobs up to 20 GiB.
 const DEFAULT_MAX_VERSIONS: usize = 10;
 const MAX_BLOB_BYTES: u64 = 20 * 1024 * 1024 * 1024;
+/// A pack download that receives nothing for this long ends with a sentence.
+const PACK_READ_TIMEOUT_MS: u64 = 60_000;
 
 struct Args {
     data_dir: PathBuf,
@@ -27,6 +30,7 @@ struct Args {
     quota_bytes: u64,
     events_heartbeat_ms: u64,
     max_versions: usize,
+    web_dist: Option<PathBuf>,
 }
 
 fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -35,6 +39,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut quota_bytes = DEFAULT_QUOTA_BYTES;
     let mut events_heartbeat_ms = DEFAULT_EVENTS_HEARTBEAT_MS;
     let mut max_versions = DEFAULT_MAX_VERSIONS;
+    let mut web_dist = None;
     while let Some(flag) = args.next() {
         let value = args.next().ok_or_else(|| format!("{flag} needs a value"))?;
         match flag.as_str() {
@@ -53,6 +58,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
                     .parse()
                     .map_err(|_| format!("bad version count {value}"))?
             }
+            "--web-dist" => web_dist = Some(PathBuf::from(value)),
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -62,6 +68,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         quota_bytes,
         events_heartbeat_ms,
         max_versions,
+        web_dist,
     })
 }
 
@@ -80,6 +87,8 @@ async fn main() -> ExitCode {
         events_heartbeat_ms: args.events_heartbeat_ms,
         max_versions: args.max_versions,
         max_blob_bytes: MAX_BLOB_BYTES,
+        web_dist: args.web_dist,
+        pack_read_timeout_ms: PACK_READ_TIMEOUT_MS,
     }) {
         Ok(state) => Arc::new(state),
         Err(err) => {
@@ -128,6 +137,8 @@ mod tests {
             "200",
             "--max-versions",
             "3",
+            "--web-dist",
+            "/tmp/core",
         ])
         .unwrap();
         assert_eq!(parsed.data_dir, PathBuf::from("/tmp/v"));
@@ -135,6 +146,7 @@ mod tests {
         assert_eq!(parsed.quota_bytes, 524288);
         assert_eq!(parsed.events_heartbeat_ms, 200);
         assert_eq!(parsed.max_versions, 3);
+        assert_eq!(parsed.web_dist, Some(PathBuf::from("/tmp/core")));
     }
 
     #[test]
