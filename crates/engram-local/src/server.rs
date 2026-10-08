@@ -25,7 +25,7 @@ use crate::packs::{Packs, PACKS_DIR};
 use crate::store::{Store, DB_FILE};
 use crate::token::Tokens;
 use crate::web::WebDist;
-use crate::{accounts, content, events, headers, sessions, settings, storage, web};
+use crate::{accounts, content, events, headers, packs, sessions, settings, storage, web};
 
 /// Server defaults; the binary and the shell set them.
 pub struct ServerConfig {
@@ -191,6 +191,11 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         )
         .route("/api/sync", get(settings::sync))
         .route("/api/events", get(events::stream))
+        .route("/api/local/packs", get(packs::list))
+        .route(
+            "/api/local/packs/{name}",
+            post(packs::start_download).delete(packs::remove_pack),
+        )
         .route("/api/folders", post(storage::create_folder))
         .route(
             "/api/folders/{id}",
