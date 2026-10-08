@@ -1,10 +1,11 @@
-import { existsSync, readdirSync } from "node:fs";
+import Database from "better-sqlite3";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { decryptBytes, decryptFileMetadata, encryptBytes, ready, utf8Encode } from "@engramer/crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startTarget, type Target } from "../helpers/target.js";
 import { bearer, register } from "./accounts.js";
-import { getBlob, listVersions, metaFor, putBlob, restoreVersion, uploadFile, usedBytes, versionData } from "./content.js";
+import { getBlob, listVersions, metaFor, putBlob, restoreVersion, uploadFile, usedBytes, verify, versionData } from "./content.js";
 import { createFile, syncFor, type Account } from "./storage.js";
 
 /**
@@ -50,11 +51,11 @@ describe("version creation", () => {
     await save(file, "third");
     expect(await current(file)).toBe("third");
     const versions = await listVersions(target, alice.token, file.id);
-    expect(versions.map((v) => v.generation)).toEqual([1, 0]);
+    expect(versions.map((v) => v.generation)).toEqual([2, 1]);
     expect(versions[1]).toMatchObject({ size: file.ciphertext.length });
     expect(Object.keys(versions[0]!).sort()).toEqual(["createdAt", "encryptedMeta", "generation", "size"]);
     expect(decryptFileMetadata(versions[1]!.encryptedMeta, file.key).name).toBe("draft.txt");
-    const first = await versionData(target, alice.token, file.id, 0);
+    const first = await versionData(target, alice.token, file.id, 1);
     expect(first.statusCode).toBe(200);
     expect(first.headers["content-type"]).toBe("application/octet-stream");
     expect(first.headers["content-length"]).toBe(String(file.ciphertext.length));
@@ -72,13 +73,13 @@ describe("version creation", () => {
       await save(file, `v${i}`);
     }
     const versions = await listVersions(target, alice.token, file.id);
-    expect(versions.map((v) => v.generation)).toEqual([4, 3, 2]);
-    expect(existsSync(join(blobDir(), file.id))).toBe(false);
+    expect(versions.map((v) => v.generation)).toEqual([5, 4, 3]);
     expect(existsSync(join(blobDir(), `${file.id}.g1`))).toBe(false);
+    expect(existsSync(join(blobDir(), `${file.id}.g2`))).toBe(false);
     for (const version of versions) {
       expect(existsSync(join(blobDir(), `${file.id}.g${version.generation}`))).toBe(true);
     }
-    expect(existsSync(join(blobDir(), `${file.id}.g5`))).toBe(true);
+    expect(existsSync(join(blobDir(), `${file.id}.g6`))).toBe(true);
   });
 
   it("counts version bytes against the quota", async () => {
@@ -97,13 +98,13 @@ describe("restore", () => {
     const merged = metaFor(file.key, "renamed-later.txt", original!.size, "original words");
     const restored = await restoreVersion(target, alice.token, file.id, original!.generation, { encryptedMeta: merged });
     expect(restored.statusCode).toBe(200);
-    expect(restored.json()).toMatchObject({ id: file.id, generation: 0, size: original!.size, thumbSize: 0, uploaded: true });
+    expect(restored.json()).toMatchObject({ id: file.id, generation: 1, size: original!.size, thumbSize: 0, uploaded: true });
     expect(restored.json().encryptedMeta).toEqual(merged);
     expect(restored.json().hasCollaborators).toBeUndefined();
     expect(await current(file)).toBe("original words");
     const after = await listVersions(target, alice.token, file.id);
-    expect(after.map((v) => v.generation)).toEqual([1]);
-    const bad = await versionData(target, alice.token, file.id, 1);
+    expect(after.map((v) => v.generation)).toEqual([2]);
+    const bad = await versionData(target, alice.token, file.id, 2);
     expect(decryptBytes(new Uint8Array(bad.rawPayload), file.key)).toEqual(utf8Encode("overwritten badly"));
   });
 
@@ -121,7 +122,7 @@ describe("restore", () => {
     expect(decoded.name).toBe("kept-name.txt");
     expect(decoded.text).toBe("alpha");
     expect(row.size).toBe(version!.size);
-    expect(row.generation).toBe(0);
+    expect(row.generation).toBe(1);
   });
 
   it("restores a restore, so nothing is ever lost", async () => {
@@ -193,7 +194,20 @@ describe("restore", () => {
   });
 
   it("versions a generation-zero file under the server's blob names", async () => {
-    const file = await uploadFile(target, alice, "legacy.txt", utf8Encode("ancient bytes"));
+    // A row from before versioning shipped keeps its content at the bare
+    // key as generation 0; new content starts at generation 1, so that
+    // state is written directly into the vault.
+    const file = await createFile(target, alice, "legacy.txt");
+    const ancient = encryptBytes(utf8Encode("ancient bytes"), file.key);
+    writeFileSync(join(blobDir(), file.id), ancient);
+    const db = new Database(join(target.dataDir, "engramer.db"));
+    try {
+      db.pragma("busy_timeout = 5000");
+      db.prepare("UPDATE files SET uploaded = 1, size = ?, generation = 0 WHERE id = ?").run(ancient.length, file.id);
+    } finally {
+      db.close();
+    }
+    expect(await current(file)).toBe("ancient bytes");
     expect(existsSync(join(blobDir(), file.id))).toBe(true);
     await save(file, "modern bytes");
     expect(existsSync(join(blobDir(), `${file.id}.g1`))).toBe(true);
@@ -204,6 +218,37 @@ describe("restore", () => {
     expect(await current(file)).toBe("ancient bytes");
     expect(readdirSync(blobDir()).filter((name) => name.startsWith(file.id)).sort()).toEqual([file.id, `${file.id}.g1`]);
   });
+
+  it("a restored file verifies clean", async () => {
+    const file = await uploadFile(target, alice, "restore-check.txt", utf8Encode("one"));
+    await save(file, "two");
+    expect((await restoreVersion(target, alice.token, file.id, 1, { encryptedMeta: metaFor(file.key, "restore-check.txt", 1) })).statusCode).toBe(200);
+    const verdict = async () => {
+      const response = await verify(target, alice.token, [file.id]);
+      expect(response.statusCode).toBe(200);
+      return (response.json().results as Array<{ verdict: string }>)[0]!.verdict;
+    };
+    // The restored bytes carry no digest of their own yet; the check
+    // records one instead of comparing against the displaced content.
+    expect(await verdict()).toBe("recorded");
+    expect(await verdict()).toBe("intact");
+  });
+
+  it("a save after a restore keeps every version", async () => {
+    const file = await uploadFile(target, alice, "history.txt", utf8Encode("v1"));
+    await save(file, "v2");
+    await save(file, "v3");
+    expect((await restoreVersion(target, alice.token, file.id, 1, { encryptedMeta: metaFor(file.key, "history.txt", 1) })).statusCode).toBe(200);
+    const saved = await putBlob(target, alice.token, file.id, "data", encryptBytes(utf8Encode("v4"), file.key));
+    expect(saved.json().generation).toBe(4);
+    for (const [generation, text] of [[1, "v1"], [2, "v2"], [3, "v3"]] as const) {
+      const response = await versionData(target, alice.token, file.id, generation);
+      expect(response.statusCode, `generation ${generation}`).toBe(200);
+      expect(decryptBytes(new Uint8Array(response.rawPayload), file.key)).toEqual(utf8Encode(text));
+    }
+    expect((await listVersions(target, alice.token, file.id)).map((v) => v.generation).sort()).toEqual([1, 2, 3]);
+    expect(await current(file)).toBe("v4");
+  });
 });
 
 describe("with history off", () => {
@@ -213,10 +258,10 @@ describe("with history off", () => {
       const account = await register(bare, "bare@example.com");
       const file = await uploadFile(bare, account, "nohistory.txt", utf8Encode("one"));
       const replaced = await putBlob(bare, account.token, file.id, "data", encryptBytes(utf8Encode("two"), file.key));
-      expect(replaced.json().generation).toBe(1);
+      expect(replaced.json().generation).toBe(2);
       expect(await listVersions(bare, account.token, file.id)).toEqual([]);
       const names = readdirSync(join(bare.dataDir, "blobs")).filter((name) => name.startsWith(file.id));
-      expect(names).toEqual([`${file.id}.g1`]);
+      expect(names).toEqual([`${file.id}.g2`]);
     } finally {
       await bare.close();
     }

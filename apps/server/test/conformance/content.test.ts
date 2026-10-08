@@ -1,4 +1,6 @@
+import Database from "better-sqlite3";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { connect } from "node:net";
 import { join } from "node:path";
 import { decryptBytes, encryptBytes, ready, utf8Encode } from "@engramer/crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -41,18 +43,18 @@ describe("content", () => {
     const ciphertext = encryptBytes(plain, file.key);
     const put = await putBlob(target, alice.token, file.id, "data", ciphertext);
     expect(put.statusCode).toBe(200);
-    expect(put.json()).toEqual({ size: ciphertext.length, generation: 0 });
+    expect(put.json()).toEqual({ size: ciphertext.length, generation: 1 });
 
     const got = await getBlob(target, alice.token, file.id, "data");
     expect(got.statusCode).toBe(200);
     expect(got.headers["content-type"]).toBe("application/octet-stream");
     expect(got.headers["content-length"]).toBe(String(ciphertext.length));
-    expect(got.headers["x-generation"]).toBe("0");
+    expect(got.headers["x-generation"]).toBe("1");
     expect(got.headers["accept-ranges"]).toBe("bytes");
     expect(sameBytes(decryptBytes(new Uint8Array(got.rawPayload), file.key), plain)).toBe(true);
 
     const row = (await syncFor(target, alice)).files.find((f) => f.id === file.id)!;
-    expect(row).toMatchObject({ uploaded: true, size: ciphertext.length, generation: 0 });
+    expect(row).toMatchObject({ uploaded: true, size: ciphertext.length, generation: 1 });
     expect(row.updateSeq).toBeGreaterThan(file.row.updateSeq);
   });
 
@@ -61,20 +63,20 @@ describe("content", () => {
     const revised = encryptBytes(utf8Encode("second draft, revised in the editor"), file.key);
     const replaced = await putBlob(target, alice.token, file.id, "data", revised);
     expect(replaced.statusCode).toBe(200);
-    expect(replaced.json()).toEqual({ size: revised.length, generation: 1 });
+    expect(replaced.json()).toEqual({ size: revised.length, generation: 2 });
     const got = await getBlob(target, alice.token, file.id, "data");
-    expect(got.headers["x-generation"]).toBe("1");
+    expect(got.headers["x-generation"]).toBe("2");
     expect(decryptBytes(new Uint8Array(got.rawPayload), file.key)).toEqual(utf8Encode("second draft, revised in the editor"));
   });
 
   it("stores only ciphertext, under the server's blob names", async () => {
     const marker = "MARKER-plaintext-should-never-appear";
     const file = await uploadFile(target, alice, "secret.txt", utf8Encode(`${marker} content`));
-    const stored = readFileSync(blobPath(file.id));
+    const stored = readFileSync(blobPath(`${file.id}.g1`));
     expect(stored.includes(Buffer.from(marker))).toBe(false);
     expect(sameBytes(new Uint8Array(stored), file.ciphertext)).toBe(true);
     await putBlob(target, alice.token, file.id, "data", encryptBytes(utf8Encode("again"), file.key));
-    expect(existsSync(blobPath(`${file.id}.g1`))).toBe(true);
+    expect(existsSync(blobPath(`${file.id}.g2`))).toBe(true);
   });
 
   it("commits metadata riding the save in the same transaction", async () => {
@@ -87,8 +89,8 @@ describe("content", () => {
     expect(saved.statusCode).toBe(200);
     const body = saved.json();
     expect(body.size).toBe(bytes.length);
-    expect(body.generation).toBe(1);
-    expect(body.file).toMatchObject({ id: file.id, generation: 1, size: bytes.length, uploaded: true, hasCollaborators: false });
+    expect(body.generation).toBe(2);
+    expect(body.file).toMatchObject({ id: file.id, generation: 2, size: bytes.length, uploaded: true, hasCollaborators: false });
     expect(body.file.encryptedMeta).toEqual(nextMeta);
     const row = (await syncFor(target, alice)).files.find((f) => f.id === file.id)!;
     expect(row.encryptedMeta).toEqual(nextMeta);
@@ -103,7 +105,7 @@ describe("content", () => {
       expect(saved.statusCode, header).toBe(400);
       expect(saved.json()).toEqual({ error: "invalid request" });
     }
-    expect((await syncFor(target, alice)).files.find((f) => f.id === file.id)!.generation).toBe(0);
+    expect((await syncFor(target, alice)).files.find((f) => f.id === file.id)!.generation).toBe(1);
   });
 
   it("answers 404 for a file with no content, a stranger's file, and a missing file", async () => {
@@ -235,7 +237,7 @@ describe("ranges", () => {
     expect(response.headers["content-range"]).toBe(`bytes 100-299/${ciphertext.length}`);
     expect(response.headers["content-length"]).toBe("200");
     expect(response.headers["accept-ranges"]).toBe("bytes");
-    expect(response.headers["x-generation"]).toBe("0");
+    expect(response.headers["x-generation"]).toBe("1");
     expect(sameBytes(new Uint8Array(response.rawPayload), ciphertext.subarray(100, 300))).toBe(true);
   });
 
@@ -275,13 +277,59 @@ describe("deleting for good", () => {
     await putBlob(target, alice.token, file.id, "data", encryptBytes(utf8Encode("gen two"), file.key));
     await putBlob(target, alice.token, file.id, "thumbnail", encryptBytes(utf8Encode("t"), file.key));
     await putBlob(target, alice.token, file.id, "index", encryptBytes(utf8Encode("i"), file.key));
-    expect(blobsOf(file.id).sort()).toEqual([file.id, `${file.id}.g1`, `${file.id}.g2`, `${file.id}.idx`, `${file.id}.thumb`].sort());
+    expect(blobsOf(file.id).sort()).toEqual([`${file.id}.g1`, `${file.id}.g2`, `${file.id}.g3`, `${file.id}.idx`, `${file.id}.thumb`].sort());
     const trashed = await target.inject({ method: "DELETE", url: `/api/files/${file.id}`, headers: bearer(alice.token) });
     expect(trashed.statusCode).toBe(204);
     const purged = await target.inject({ method: "DELETE", url: `/api/trash/${file.id}`, headers: bearer(alice.token) });
     expect(purged.statusCode).toBe(204);
     expect(blobsOf(file.id)).toEqual([]);
     expect((await getBlob(target, alice.token, file.id, "data")).statusCode).toBe(404);
+  });
+});
+
+describe("overlapping saves", () => {
+  it("keep the winner's bytes and leave one blob", async () => {
+    const file = await createFile(target, alice, "overlap.bin");
+    const slow = encryptBytes(utf8Encode("slow writer"), file.key);
+    const port = Number(new URL(target.baseUrl).port);
+    // Writer A opens a save and sends half of its bytes.
+    const socket = connect(port, "127.0.0.1");
+    await new Promise<void>((resolve) => socket.once("connect", resolve));
+    const head =
+      `PUT /api/files/${file.id}/data HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nAuthorization: Bearer ${alice.token}\r\n` +
+      `Content-Type: application/octet-stream\r\nContent-Length: ${slow.length}\r\nConnection: close\r\n\r\n`;
+    const half = Math.floor(slow.length / 2);
+    socket.write(Buffer.concat([Buffer.from(head), Buffer.from(slow.subarray(0, half))]));
+    // A is admitted once it has either taken a generation or begun staging.
+    const admitted = () => {
+      const db = new Database(join(target.dataDir, "engramer.db"), { readonly: true });
+      try {
+        const row = db.prepare("SELECT minted_generation FROM files WHERE id = ?").get(file.id) as { minted_generation: number };
+        return row.minted_generation >= 1 || blobsOf(file.id).some((name) => name.includes(".upload-"));
+      } finally {
+        db.close();
+      }
+    };
+    const deadline = Date.now() + 5000;
+    while (!admitted()) {
+      expect(Date.now()).toBeLessThan(deadline);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    // Writer B saves whole and wins.
+    const won = await putBlob(target, alice.token, file.id, "data", encryptBytes(utf8Encode("fast writer"), file.key));
+    expect(won.statusCode).toBe(200);
+    // A finishes and loses without touching B's bytes.
+    const answer = new Promise<string>((resolve) => {
+      const chunks: Buffer[] = [];
+      socket.on("data", (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)));
+      socket.on("close", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    });
+    socket.write(Buffer.from(slow.subarray(half)));
+    expect((await answer).startsWith("HTTP/1.1 409")).toBe(true);
+    const got = await getBlob(target, alice.token, file.id, "data");
+    expect(got.statusCode).toBe(200);
+    expect(decryptBytes(new Uint8Array(got.rawPayload), file.key)).toEqual(utf8Encode("fast writer"));
+    expect(blobsOf(file.id)).toHaveLength(1);
   });
 });
 

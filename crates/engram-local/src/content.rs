@@ -91,19 +91,19 @@ fn quota_room(
     Ok(quota - (storage_used(conn, uid)? - reclaimable))
 }
 
-/// The generation new content lands in: one past the newest the file has
-/// ever had, so a save after a restore never re-mints a number whose
-/// history blob still exists. A first upload keeps generation 0.
+/// The generation new content lands in: one past the highest the file has
+/// ever had, whether current, kept as a version, or handed to a writer on
+/// a server, so a save after a restore never reuses a kept version's blob
+/// name. The first content is generation 1; generation 0 is a file with
+/// no content yet, or a row from before versioning shipped.
 fn next_generation(conn: &Connection, id: &str, file: &ContentFile) -> rusqlite::Result<i64> {
-    if !file.uploaded {
-        return Ok(file.generation);
-    }
-    let newest: Option<i64> = conn.query_row(
-        "SELECT MAX(generation) FROM file_versions WHERE file_id = ?1",
+    let (minted, newest): (i64, Option<i64>) = conn.query_row(
+        "SELECT minted_generation, (SELECT MAX(generation) FROM file_versions WHERE file_id = files.id)
+         FROM files WHERE id = ?1",
         params![id],
-        |r| r.get(0),
+        |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
-    Ok(file.generation.max(newest.unwrap_or(file.generation)) + 1)
+    Ok(file.generation.max(minted).max(newest.unwrap_or(0)) + 1)
 }
 
 /// `Content-Length`, or 0 when absent or unreadable, as the server reads it.
@@ -372,9 +372,10 @@ async fn commit_data(
                 }
             }
             let seq = next_seq(tx, auth.uid)?;
+            // The row records the generation it handed out, as a server does.
             tx.execute(
-                "UPDATE files SET size = ?1, generation = ?2, uploaded = 1, content_hash = ?3,
-                   thumb_size = ?4, encrypted_meta = COALESCE(?5, encrypted_meta),
+                "UPDATE files SET size = ?1, generation = ?2, minted_generation = ?2, uploaded = 1,
+                   content_hash = ?3, thumb_size = ?4, encrypted_meta = COALESCE(?5, encrypted_meta),
                    update_seq = ?6, updated_at = ?7
                  WHERE id = ?8",
                 params![
@@ -1249,7 +1250,7 @@ mod tests {
         assert_eq!(body, "BBBBBBBB");
         assert_eq!(
             vault.blob_names(&id),
-            vec![id.clone()],
+            vec![format!("{id}.g1")],
             "no staged file remains"
         );
     }
@@ -1260,7 +1261,7 @@ mod tests {
         let id = vault.create_file();
         assert_eq!(vault.save(&id, "one"), 200);
         assert_eq!(vault.save(&id, "two"), 200);
-        assert_eq!(vault.restore(&id, 0), 200);
+        assert_eq!(vault.restore(&id, 1), 200);
         let verdict = || {
             let body = format!(r#"{{"ids":["{id}"]}}"#);
             let (status, _, answer) = vault.call("POST", "/api/files/verify", Some(&body));
@@ -1278,13 +1279,13 @@ mod tests {
     fn a_save_after_a_restore_keeps_every_version() {
         let vault = Vault::new("history@example.com");
         let id = vault.create_file();
-        for text in ["v0", "v1", "v2"] {
+        for text in ["v1", "v2", "v3"] {
             assert_eq!(vault.save(&id, text), 200);
         }
-        assert_eq!(vault.restore(&id, 0), 200);
-        assert_eq!(vault.save(&id, "v3"), 200);
+        assert_eq!(vault.restore(&id, 1), 200);
+        assert_eq!(vault.save(&id, "v4"), 200);
         // Every kept version still serves its own bytes.
-        for (generation, text) in [(0, "v0"), (1, "v1"), (2, "v2")] {
+        for (generation, text) in [(1, "v1"), (2, "v2"), (3, "v3")] {
             let (status, _, body) = vault.call(
                 "GET",
                 &format!("/api/files/{id}/versions/{generation}/data"),
@@ -1302,7 +1303,28 @@ mod tests {
             .map(|v| v["generation"].as_i64().unwrap())
             .collect();
         generations.sort();
-        assert_eq!(generations, vec![0, 1, 2]);
-        assert_eq!(vault.content(&id), (200, "v3".to_string()));
+        assert_eq!(generations, vec![1, 2, 3]);
+        assert_eq!(vault.content(&id), (200, "v4".to_string()));
+        assert!(vault.blob_names(&id).contains(&format!("{id}.g4")));
+    }
+
+    #[test]
+    fn the_first_content_is_generation_one_under_its_own_name() {
+        let vault = Vault::new("first@example.com");
+        let id = vault.create_file();
+        let (status, _, body) = vault.call("PUT", &format!("/api/files/{id}/data"), Some("one"));
+        assert_eq!(status, 200);
+        let value: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(value["generation"], 1);
+        assert_eq!(vault.blob_names(&id), vec![format!("{id}.g1")]);
+        let minted: i64 = rusqlite::Connection::open(vault.server.dir.join(crate::store::DB_FILE))
+            .unwrap()
+            .query_row(
+                "SELECT minted_generation FROM files WHERE id = ?1",
+                rusqlite::params![id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(minted, 1, "the row records the generation it handed out");
     }
 }
