@@ -74,14 +74,50 @@ pub struct BlobStore {
 
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// The sentence for a write the disk refused for lack of room; `None` for
+/// any other failure.
+pub fn storage_sentence(err: &io::Error) -> Option<&'static str> {
+    matches!(
+        err.kind(),
+        io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded
+    )
+    .then_some("not enough space on this device")
+}
+
+/// Removes every `*.upload-*` staging file under `dir`; returns how many.
+fn sweep_staging(dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut swept = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name.to_string_lossy().contains(".upload-") && std::fs::remove_file(entry.path()).is_ok()
+        {
+            swept += 1;
+        }
+    }
+    swept
+}
+
 pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 impl BlobStore {
-    /// Opens the store at `dir`, creating it.
+    /// Opens the store at `dir`, creating it, and removes the staging
+    /// files a crash mid-write left behind: nothing under a blob's own
+    /// name is touched, and parts of an unfinished parts upload are kept
+    /// for the session that owns them.
     pub fn open(dir: PathBuf) -> io::Result<BlobStore> {
         std::fs::create_dir_all(&dir)?;
+        let swept = sweep_staging(&dir);
+        if swept > 0 {
+            eprintln!(
+                "engram-local: removed {swept} unfinished upload(s) from {}",
+                dir.display()
+            );
+        }
         Ok(BlobStore { dir })
     }
 
@@ -526,5 +562,46 @@ mod tests {
             vec!["k".to_string(), format!("k.parts-{b}.1")]
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn open_sweeps_unfinished_uploads_and_keeps_everything_else() {
+        let dir = crate::server::tests::temp_dir("sweep");
+        std::fs::write(dir.join("k.g1"), "blob").unwrap();
+        std::fs::write(dir.join("k.g1.upload-123-4"), "half").unwrap();
+        std::fs::write(dir.join("k.thumb.upload-9-0"), "half").unwrap();
+        std::fs::write(dir.join("k.parts-abcd.1"), "part").unwrap();
+        let store = BlobStore::open(dir.clone()).unwrap();
+        let mut names: Vec<String> = std::fs::read_dir(store.dir())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["k.g1".to_string(), "k.parts-abcd.1".to_string()]
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_full_disk_has_a_sentence() {
+        assert_eq!(
+            storage_sentence(&io::Error::from(io::ErrorKind::StorageFull)),
+            Some("not enough space on this device")
+        );
+        assert_eq!(
+            storage_sentence(&io::Error::from(io::ErrorKind::QuotaExceeded)),
+            Some("not enough space on this device")
+        );
+        assert_eq!(
+            storage_sentence(&io::Error::from(io::ErrorKind::PermissionDenied)),
+            None
+        );
     }
 }

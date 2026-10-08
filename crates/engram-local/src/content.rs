@@ -14,7 +14,7 @@ use axum::Json;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::{json, Value};
 
-use crate::blobs::{blob_key, sha256_file, BlobKind, BlobStore, PutError};
+use crate::blobs::{blob_key, sha256_file, storage_sentence, BlobKind, BlobStore, PutError};
 use crate::dto::FileDto;
 use crate::error::ApiError;
 use crate::extract::{blocking, AuthUser, JsonBody};
@@ -134,6 +134,9 @@ fn put_error(err: PutError) -> ApiError {
         PutError::TooLarge => quota_exceeded(),
         PutError::Body => ApiError::invalid_request(),
         PutError::Io(err) => {
+            if let Some(sentence) = storage_sentence(&err) {
+                return ApiError::new(StatusCode::INSUFFICIENT_STORAGE, sentence);
+            }
             eprintln!("engram-local: cannot store a blob: {err}");
             ApiError::internal()
         }
@@ -1099,6 +1102,19 @@ pub async fn verify(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_full_disk_answers_507_with_a_sentence() {
+        let err = put_error(PutError::Io(std::io::Error::from(
+            std::io::ErrorKind::StorageFull,
+        )));
+        assert_eq!(err.status, StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(err.message, "not enough space on this device");
+        let other = put_error(PutError::Io(std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied,
+        )));
+        assert_eq!(other.status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
 
     #[test]
     fn ranges_read_like_the_server() {
