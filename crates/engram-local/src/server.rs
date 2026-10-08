@@ -39,6 +39,9 @@ pub struct ServerConfig {
     pub max_blob_bytes: u64,
     /// The web client's core bundle to serve; `None` serves the API only.
     pub web_dist: Option<PathBuf>,
+    /// How long a pack download waits for its next bytes before it ends
+    /// with a sentence and keeps what it has for the next request.
+    pub pack_read_timeout_ms: u64,
 }
 
 /// Everything a request handler can reach.
@@ -72,6 +75,7 @@ impl AppState {
         let packs = Packs::open(
             config.data_dir.join(PACKS_DIR),
             web.as_ref().and_then(|w| w.manifest.clone()),
+            std::time::Duration::from_millis(config.pack_read_timeout_ms),
         )?;
         Ok(AppState {
             store,
@@ -353,6 +357,7 @@ pub(crate) mod tests {
                 max_versions: 10,
                 max_blob_bytes: 20 * 1024 * 1024 * 1024,
                 web_dist: None,
+                pack_read_timeout_ms: 60_000,
             };
             adjust(&mut config);
             let state = Arc::new(AppState::open(config).unwrap());

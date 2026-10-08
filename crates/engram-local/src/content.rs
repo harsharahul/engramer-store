@@ -144,6 +144,9 @@ fn put_error(err: PutError) -> ApiError {
 }
 
 fn io_error(err: std::io::Error) -> ApiError {
+    if let Some(sentence) = storage_sentence(&err) {
+        return ApiError::new(StatusCode::INSUFFICIENT_STORAGE, sentence);
+    }
     eprintln!("engram-local: cannot read a blob: {err}");
     ApiError::internal()
 }
@@ -1114,6 +1117,13 @@ mod tests {
             std::io::ErrorKind::PermissionDenied,
         )));
         assert_eq!(other.status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn a_full_disk_on_a_join_or_read_answers_507() {
+        let err = io_error(std::io::Error::from(std::io::ErrorKind::StorageFull));
+        assert_eq!(err.status, StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(err.message, "not enough space on this device");
     }
 
     #[test]

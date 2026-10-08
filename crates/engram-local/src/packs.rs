@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::extract::{Path as PathParam, State};
 use axum::http::{header, StatusCode};
@@ -27,7 +28,13 @@ use crate::server::AppState;
 pub const PACKS_DIR: &str = "packs";
 /// The manifest the web build writes next to the core bundle.
 pub const MANIFEST_FILE: &str = "packs.json";
+/// Written last into an installed pack's folder: the sha256 of the archive
+/// it came from, so a folder another build installed is not mistaken for
+/// this build's pack.
+pub const MARKER_FILE: &str = ".installed";
 const DOWNLOAD_DIR: &str = ".download";
+/// How long a connection attempt to the release host may take.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// `packs.json`, schema 1: every pack's archive and files.
 #[derive(Debug, Clone, Deserialize)]
@@ -85,7 +92,9 @@ impl Manifest {
                 return Err(format!("packs.json: pack {name} has an unsafe name"));
             }
             for file in &pack.files {
-                if clean_relative(Path::new(&file.path)).as_deref() != Some(file.path.as_str()) {
+                if clean_relative(Path::new(&file.path)).as_deref() != Some(file.path.as_str())
+                    || file.path == MARKER_FILE
+                {
                     return Err(format!("packs.json: unsafe path {}", file.path));
                 }
                 if owner_of.insert(file.path.clone(), name.clone()).is_some() {
@@ -174,8 +183,14 @@ pub struct Packs {
 impl Packs {
     /// Opens `dir`, creating it and removing the leftovers of an
     /// installation a crash cut short (a partial archive is kept: the next
-    /// request resumes it).
-    pub fn open(dir: PathBuf, manifest: Option<Manifest>) -> Result<Packs, String> {
+    /// request resumes it). `read_timeout` bounds the wait for the next
+    /// bytes of a download, so a host that answers and then stops sending
+    /// ends the attempt instead of holding the pack downloading for good.
+    pub fn open(
+        dir: PathBuf,
+        manifest: Option<Manifest>,
+        read_timeout: Duration,
+    ) -> Result<Packs, String> {
         std::fs::create_dir_all(&dir)
             .map_err(|err| format!("cannot create {}: {err}", dir.display()))?;
         if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -187,6 +202,8 @@ impl Packs {
             }
         }
         let client = reqwest::Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .read_timeout(read_timeout)
             .build()
             .map_err(|err| format!("cannot create the download client: {err}"))?;
         Ok(Packs {
@@ -216,8 +233,31 @@ impl Packs {
             .join(format!("{}.part", pack.archive))
     }
 
+    /// Whether the pack's folder holds this build's archive: the folder
+    /// exists and its marker names the manifest's archive. A folder another
+    /// build installed, or one without a marker, is not an installation.
     pub fn installed(&self, name: &str) -> bool {
-        self.install_dir(name).is_dir()
+        let Some(spec) = self.manifest.as_ref().and_then(|m| m.packs.get(name)) else {
+            return false;
+        };
+        std::fs::read_to_string(self.install_dir(name).join(MARKER_FILE))
+            .map(|marker| marker.trim() == spec.archive_sha256)
+            .unwrap_or(false)
+    }
+
+    /// Marks a pack as downloading unless it is installed or already
+    /// downloading, under one lock acquisition, so two requests at once
+    /// cannot both start a download of the same pack.
+    fn try_begin(&self, name: &str) -> bool {
+        let mut all = self.progress.lock().unwrap();
+        let progress = all.entry(name.to_string()).or_default();
+        if progress.downloading || self.installed(name) {
+            return false;
+        }
+        progress.downloading = true;
+        progress.downloaded = 0;
+        progress.error = None;
+        true
     }
 
     fn progress_of(&self, name: &str) -> Progress {
@@ -286,20 +326,22 @@ impl Packs {
     /// Starts (or resumes) a pack's download unless it is installed or
     /// already downloading. Returns whether a download was started.
     pub fn start(state: &Arc<AppState>, name: &str) -> Result<bool, ApiError> {
-        let packs = &state.packs;
-        packs.spec(name)?;
-        if packs.state(name) != PackState::Missing {
+        state.packs.spec(name)?;
+        if !state.packs.try_begin(name) {
             return Ok(false);
         }
-        packs.update(name, |p| {
-            p.downloading = true;
-            p.downloaded = 0;
-            p.error = None;
-        });
         let state = Arc::clone(state);
         let name = name.to_string();
         tokio::spawn(async move {
-            let outcome = state.packs.install(&name).await;
+            // The install runs as its own task so that even a panic in it
+            // settles the pack's state instead of leaving it downloading.
+            let worker = Arc::clone(&state);
+            let pack = name.clone();
+            let outcome = match tokio::spawn(async move { worker.packs.install(&pack).await }).await
+            {
+                Ok(outcome) => outcome,
+                Err(_) => Err("the pack could not be installed".to_string()),
+            };
             state.packs.update(&name, |p| {
                 p.downloading = false;
                 if let Err(message) = &outcome {
@@ -327,26 +369,35 @@ impl Packs {
         }
         let staging = self.staging_dir(name);
         let install = self.install_dir(name);
+        let displaced = self.dir.join(format!(".removing-{name}"));
         let spec = spec.clone();
         let archive = part.clone();
         let extracted = tokio::task::spawn_blocking(move || {
-            let result = extract(&archive, &spec, &staging);
+            let result = extract(&archive, &spec, &staging).and_then(|()| {
+                // The marker goes in last, so a folder is an installation
+                // only once every file in it has been checked.
+                std::fs::write(staging.join(MARKER_FILE), &spec.archive_sha256)
+                    .map_err(|err| io_sentence(&err))
+            });
             if result.is_err() {
                 let _ = std::fs::remove_dir_all(&staging);
                 return result;
             }
-            match std::fs::rename(&staging, &install) {
-                Ok(()) => Ok(()),
-                // Installed by someone else meanwhile: ours is a duplicate.
-                Err(_) if install.is_dir() => {
+            // A folder an earlier build installed moves aside first, so the
+            // new one takes its place in one rename.
+            let _ = std::fs::remove_dir_all(&displaced);
+            if install.is_dir() {
+                if let Err(err) = std::fs::rename(&install, &displaced) {
                     let _ = std::fs::remove_dir_all(&staging);
-                    Ok(())
-                }
-                Err(err) => {
-                    let _ = std::fs::remove_dir_all(&staging);
-                    Err(io_sentence(&err))
+                    return Err(io_sentence(&err));
                 }
             }
+            let renamed = std::fs::rename(&staging, &install).map_err(|err| io_sentence(&err));
+            let _ = std::fs::remove_dir_all(&displaced);
+            if renamed.is_err() {
+                let _ = std::fs::remove_dir_all(&staging);
+            }
+            renamed
         })
         .await
         .map_err(|_| "the pack could not be installed".to_string())?;
@@ -600,12 +651,14 @@ mod tests {
     use std::time::{Duration, Instant};
 
     /// A release host for one archive, with the faults a real download
-    /// meets: a connection cut after some bytes, a slow link, and a record
-    /// of every Range header it was asked for.
+    /// meets: a connection cut after some bytes, a slow link, a host that
+    /// answers and then stops sending, and a record of every Range header
+    /// it was asked for.
     struct Host {
         bytes: Mutex<Vec<u8>>,
         cut_after: Mutex<Option<usize>>,
         slow: AtomicBool,
+        stall: AtomicBool,
         ranges: Mutex<Vec<String>>,
     }
 
@@ -629,6 +682,7 @@ mod tests {
         }
         let cut = *host.cut_after.lock().unwrap();
         let slow = host.slow.load(Ordering::Relaxed);
+        let stall = host.stall.load(Ordering::Relaxed);
         let total = bytes.len();
         let slice = bytes[start..].to_vec();
         let mut chunks: Vec<Result<Bytes, io::Error>> = Vec::new();
@@ -643,8 +697,11 @@ mod tests {
             sent += chunk.len();
             chunks.push(Ok(Bytes::copy_from_slice(chunk)));
         }
-        let body = Body::from_stream(futures_util::stream::iter(chunks).then(
-            move |chunk| async move {
+        let body = Body::from_stream(futures_util::stream::iter(chunks).enumerate().then(
+            move |(index, chunk)| async move {
+                if stall && index == 0 {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
                 if slow {
                     tokio::time::sleep(Duration::from_millis(30)).await;
                 }
@@ -671,6 +728,7 @@ mod tests {
             bytes: Mutex::new(bytes),
             cut_after: Mutex::new(None),
             slow: AtomicBool::new(false),
+            stall: AtomicBool::new(false),
             ranges: Mutex::new(Vec::new()),
         });
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -696,9 +754,17 @@ mod tests {
 
     /// A serving vault whose office pack is hosted as `office` describes it.
     fn rig(office: &PackFixture) -> Rig {
+        rig_with(office, 60_000)
+    }
+
+    /// The same, with the download's read timeout set.
+    fn rig_with(office: &PackFixture, read_timeout_ms: u64) -> Rig {
         let (host, base_url, host_rt) = release_host(office.archive.clone());
         let dist = core_bundle(&base_url, office, &intelligence_fixture());
-        let server = Running::with(move |config| config.web_dist = Some(dist));
+        let server = Running::with(move |config| {
+            config.web_dist = Some(dist);
+            config.pack_read_timeout_ms = read_timeout_ms;
+        });
         let token = signed_in(server.port, "packs@example.com");
         Rig {
             server,
@@ -1011,6 +1077,7 @@ mod tests {
                 bytes: Mutex::new(Vec::new()),
                 cut_after: Mutex::new(None),
                 slow: AtomicBool::new(false),
+                stall: AtomicBool::new(false),
                 ranges: Mutex::new(Vec::new()),
             }),
             token,
@@ -1081,6 +1148,102 @@ mod tests {
     }
 
     #[test]
+    fn only_one_download_begins_per_pack() {
+        let office = office_fixture();
+        let dist = core_bundle("http://127.0.0.1:1/", &office, &intelligence_fixture());
+        let manifest = Manifest::read(&dist.join(MANIFEST_FILE)).unwrap();
+        let dir = crate::server::tests::temp_dir("begin");
+        let packs = Packs::open(dir.clone(), Some(manifest), Duration::from_secs(60)).unwrap();
+        assert!(packs.try_begin("office"));
+        assert!(
+            !packs.try_begin("office"),
+            "a second start while the first is downloading"
+        );
+        packs.update("office", |p| p.downloading = false);
+        assert!(packs.try_begin("office"), "a start after the first settled");
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dist);
+    }
+
+    #[test]
+    fn two_requests_at_once_start_one_download() {
+        let big = engram_core::backend::random_bytes(30_000);
+        let office = PackFixture::of(&[("office/big.bin", &big[..])]);
+        let rig = rig(&office);
+        rig.host.slow.store(true, Ordering::Relaxed);
+        let statuses: Vec<u16> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..2)
+                .map(|_| scope.spawn(|| rig.call("POST", "/api/local/packs/office").0))
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        let mut sorted = statuses.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, vec![200, 202], "{statuses:?}");
+        let settled = rig.settled();
+        assert_eq!(settled["state"], "installed", "{settled}");
+        assert_eq!(
+            std::fs::read(rig.install_dir().join("office/big.bin")).unwrap(),
+            big
+        );
+    }
+
+    #[test]
+    fn a_pack_from_another_build_is_missing_until_downloaded_again() {
+        let office = office_fixture();
+        let rig = rig(&office);
+        // An installation an earlier build left: the folder exists, its
+        // marker names another archive, and it holds a file this build does
+        // not ship.
+        let old = rig.install_dir();
+        std::fs::create_dir_all(old.join("office")).unwrap();
+        std::fs::write(old.join("office").join("old.js"), "old build").unwrap();
+        std::fs::write(old.join(MARKER_FILE), "0000").unwrap();
+        assert_eq!(rig.office()["state"], "missing");
+        let (status, head) = rig.page("/office/a.js");
+        assert_eq!(status, 404);
+        assert!(head.contains("x-engram-pack: office"));
+        let (status, _) = rig.call("POST", "/api/local/packs/office");
+        assert_eq!(status, 202);
+        let settled = rig.settled();
+        assert_eq!(settled["state"], "installed", "{settled}");
+        assert!(
+            !old.join("office").join("old.js").exists(),
+            "the earlier build's files are gone"
+        );
+        assert_eq!(
+            std::fs::read_to_string(old.join(MARKER_FILE))
+                .unwrap()
+                .trim(),
+            sha(&office.archive)
+        );
+        assert_eq!(rig.page("/office/a.js").0, 200);
+        assert!(!rig
+            .server
+            .dir
+            .join(PACKS_DIR)
+            .join(".removing-office")
+            .exists());
+    }
+
+    #[test]
+    fn a_stalled_host_ends_the_download_with_a_sentence() {
+        let office = office_fixture();
+        let rig = rig_with(&office, 200);
+        rig.host.stall.store(true, Ordering::Relaxed);
+        let started = Instant::now();
+        rig.call("POST", "/api/local/packs/office");
+        let settled = rig.settled();
+        assert_eq!(settled["state"], "missing");
+        assert_eq!(settled["error"], "the download was interrupted; try again");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
     fn leftover_staging_folders_are_removed_at_open() {
         let dir = crate::server::tests::temp_dir("packs");
         std::fs::create_dir_all(dir.join(".staging-office").join("office")).unwrap();
@@ -1088,14 +1251,17 @@ mod tests {
         std::fs::create_dir_all(dir.join(DOWNLOAD_DIR)).unwrap();
         std::fs::write(dir.join(DOWNLOAD_DIR).join("a.part"), "half").unwrap();
         std::fs::create_dir_all(dir.join("intelligence")).unwrap();
-        let packs = Packs::open(dir.clone(), None).unwrap();
+        let packs = Packs::open(dir.clone(), None, Duration::from_secs(60)).unwrap();
         assert!(!dir.join(".staging-office").exists());
         assert!(!dir.join(".removing-office").exists());
         assert!(
             dir.join(DOWNLOAD_DIR).join("a.part").exists(),
             "a partial download is kept for resuming"
         );
-        assert!(packs.installed("intelligence"));
+        assert!(
+            !packs.installed("intelligence"),
+            "a folder without a matching marker is not an installation"
+        );
         assert_eq!(packs.summary(), json!({}));
         let _ = std::fs::remove_dir_all(dir);
     }

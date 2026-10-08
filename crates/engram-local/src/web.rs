@@ -184,6 +184,14 @@ pub async fn serve(State(state): State<Arc<AppState>>, req: Request) -> Response
         }
         Resolved::NotFound => return plain_not_found(),
     };
+    // A path that must always revalidate is answered in full, never 304: a
+    // build older than the one a WebView cached would otherwise keep the
+    // newer page and fetch assets this build does not ship.
+    let mut req = req;
+    if cache_control(&cache_key) == "no-cache" {
+        req.headers_mut().remove(header::IF_MODIFIED_SINCE);
+        req.headers_mut().remove(header::IF_NONE_MATCH);
+    }
     let served = match ServeFile::new(&file).precompressed_br().oneshot(req).await {
         Ok(response) => response,
         Err(err) => {
@@ -206,10 +214,10 @@ pub(crate) mod tests {
     use crate::server::tests::{raw_with, signed_in, temp_dir, Running};
     use serde_json::{json, Value};
 
-    /// The inline script of the fixture page; its hash was computed with
-    /// Node (`createHash("sha256").update(body, "utf8").digest("base64")`).
-    const THEME_SCRIPT: &str = "\n  console.log(\"spike\");\n";
-    pub(crate) const THEME_HASH: &str = "sha256-X/EMeFCuUbkCqn3aYYNphvU6LjLsSo2ImHvIPwULSto=";
+    /// The inline script of the fixture page; its hash was computed the way
+    /// the server does (`createHash("sha256").update(body, "utf8").digest("base64")`).
+    const THEME_SCRIPT: &str = "\n  console.log(\"theme\");\n";
+    pub(crate) const THEME_HASH: &str = "sha256-HZN1WZSWdWSGWIrfrbroM59jODgpNeL8bvW/RyiWIXM=";
 
     pub(crate) fn sha(bytes: &[u8]) -> String {
         hex(&Sha256::digest(bytes))
@@ -339,7 +347,8 @@ pub(crate) mod tests {
             .map(str::trim)
     }
 
-    /// Puts a pack's files on disk as an installation, without a download.
+    /// Puts a pack's files on disk as an installation of the manifest's
+    /// archive, without a download.
     pub(crate) fn install_by_hand(server: &Running, name: &str, pack: &PackFixture) {
         let dir = server.dir.join(crate::packs::PACKS_DIR).join(name);
         for (path, bytes) in &pack.files {
@@ -347,6 +356,7 @@ pub(crate) mod tests {
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
             std::fs::write(file, bytes).unwrap();
         }
+        std::fs::write(dir.join(crate::packs::MARKER_FILE), sha(&pack.archive)).unwrap();
     }
 
     #[test]
@@ -539,6 +549,21 @@ pub(crate) mod tests {
             assert!(status == 404 || status == 200, "{path}: {status}");
             assert!(!body.contains("vault secret"), "{path} left the bundle");
         }
+    }
+
+    #[test]
+    fn the_page_is_never_answered_from_a_conditional_request() {
+        // A build older than the one a WebView cached must still replace
+        // the page, so the page and the worker never answer 304 by date.
+        let server = serving();
+        let stale = [("If-Modified-Since", "Thu, 01 Jan 2099 00:00:00 GMT")];
+        for path in ["/", "/files/some-folder", "/sw.js", "/version.json"] {
+            let (status, _, body) = get(&server, path, &stale);
+            assert_eq!(status, 200, "{path}");
+            assert!(!body.is_empty(), "{path}");
+        }
+        let (status, _, _) = get(&server, "/assets/app-abc.js", &stale);
+        assert_eq!(status, 304, "an immutable asset still revalidates by date");
     }
 
     #[test]
