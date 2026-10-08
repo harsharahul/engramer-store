@@ -829,6 +829,8 @@ mod tests {
         let (status, value) = rig.call("POST", "/api/local/packs/office");
         assert_eq!(status, 200, "an installed pack is not downloaded again");
         assert_eq!(value["packs"]["office"]["state"], "installed");
+        let (_, user) = rig.call("GET", "/api/user");
+        assert_eq!(user["local"]["packs"]["office"], "installed");
     }
 
     #[test]

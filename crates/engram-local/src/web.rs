@@ -203,7 +203,7 @@ pub async fn serve(State(state): State<Arc<AppState>>, req: Request) -> Response
 pub(crate) mod tests {
     use super::*;
     use crate::blobs::hex;
-    use crate::server::tests::{raw_with, temp_dir, Running};
+    use crate::server::tests::{raw_with, signed_in, temp_dir, Running};
     use serde_json::{json, Value};
 
     /// The inline script of the fixture page; its hash was computed with
@@ -579,5 +579,37 @@ pub(crate) mod tests {
         let err = WebDist::open(dir.clone()).err().unwrap();
         assert!(err.contains("no index.html"), "{err}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_user_record_reports_pack_states_and_the_vault_size() {
+        let server = serving();
+        install_by_hand(&server, "intelligence", &intelligence_fixture());
+        let token = signed_in(server.port, "local@example.com");
+        let (status, _, body) = get(
+            &server,
+            "/api/user",
+            &[("Authorization", &format!("Bearer {token}"))],
+        );
+        assert_eq!(status, 200);
+        let value: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            value["local"]["packs"],
+            json!({ "office": "missing", "intelligence": "installed" })
+        );
+        assert!(value["local"]["vault"]["bytes"].as_u64().unwrap() > 0);
+        assert_eq!(
+            value["local"]["vault"]["directory"],
+            json!(server.dir.display().to_string())
+        );
+        let plain = Running::new();
+        let token = signed_in(plain.port, "plain@example.com");
+        let (_, _, body) = get(
+            &plain,
+            "/api/user",
+            &[("Authorization", &format!("Bearer {token}"))],
+        );
+        let value: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(value["local"]["packs"], json!({}));
     }
 }
