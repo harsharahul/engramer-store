@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import { restoreDeviceSession } from "../session";
 import { loadUnlockRecord } from "../unlock";
 import { nativeShell } from "../native";
+import { LOCAL_ACCOUNT, defaultDeviceLabel } from "../local";
 import { BrandMark, Wordmark } from "./FileArt";
 import { KeyGlyph } from "./Icon";
 import { Button } from "./ui/button";
@@ -22,6 +23,10 @@ export function UnlockGate(props: { onUsePassword: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const email = loadUnlockRecord()?.email;
+  // A vault on this device has one hidden account: the screen names the
+  // device and its passphrase instead.
+  const local = email === LOCAL_ACCOUNT;
+  const secret = local ? "passphrase" : "password";
   const attempted = useRef(false);
 
   const unlock = async (auto = false) => {
@@ -32,13 +37,13 @@ export function UnlockGate(props: { onUsePassword: () => void }) {
       if (session) {
         await startSession(session);
       } else if (!auto) {
-        setError("Unlock did not complete. Try again, or use your password.");
+        setError(`Unlock did not complete. Try again, or use your ${secret}.`);
       }
     } catch {
       // A cancelled automatic prompt is not an error; the person simply
       // wants the button or the password, both of which are right here.
       if (!auto) {
-        setError("Could not unlock on this device. Use your password.");
+        setError(`Could not unlock on this device. Use your ${secret}.`);
       }
     } finally {
       setBusy(false);
@@ -64,7 +69,7 @@ export function UnlockGate(props: { onUsePassword: () => void }) {
           <p className="tagline">
             Private <b>·</b> Encrypted <b>·</b> Yours
           </p>
-          {email && <p>{email}</p>}
+          {email && <p>{local ? defaultDeviceLabel() : email}</p>}
         </div>
         <div className="auth-form">
           {error && <div className="error-text">{error}</div>}
@@ -73,7 +78,7 @@ export function UnlockGate(props: { onUsePassword: () => void }) {
             {busy ? "Unlocking" : "Unlock this vault"}
           </Button>
           <Button variant="ghost" onClick={props.onUsePassword} disabled={busy}>
-            Use password instead
+            {local ? "Use passphrase instead" : "Use password instead"}
           </Button>
         </div>
       </div>

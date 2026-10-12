@@ -679,12 +679,16 @@ export function ProfileView(props: {
     }
   };
 
+  // On this device the header shows the saved label, not the draft being
+  // typed below it; the store refreshes the label after a save.
+  const shownName = local ? store.displayName?.trim() || defaultDeviceLabel() : email;
+
   return (
     <div className="profile">
       <section className="profile-card profile-head">
-        <div className="profile-avatar">{(email[0] ?? "?").toUpperCase()}</div>
+        <div className="profile-avatar">{(shownName[0] ?? "?").toUpperCase()}</div>
         <div className="profile-id">
-          <h2>{local ? nameDraft.trim() || defaultDeviceLabel() : email}</h2>
+          <h2>{shownName}</h2>
           <div className="profile-sub">
             {store.isAdmin ? "Administrator · " : ""}
             {local ? `Vault on this device · ${formatBytes(local.vault.bytes)}` : "End-to-end encrypted vault"}
@@ -747,7 +751,11 @@ export function ProfileView(props: {
               setSavingName(true);
               void api
                 .setDisplayName(nameDraft.trim() || null)
-                .then(() => props.onToast("Saved. This is what collaborators will see."))
+                .then(() => {
+                  props.onToast(local ? "Saved. This is the name this device shows." : "Saved. This is what collaborators will see.");
+                  // The header and the sidebar read the store's copy.
+                  return store.refreshUsage();
+                })
                 .catch(() => props.onToast("Could not save that name."))
                 .finally(() => setSavingName(false));
             }}
