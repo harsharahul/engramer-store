@@ -55,6 +55,12 @@
   }
   button:active { background: var(--accent-press); }
   button[disabled] { opacity: 0.6; cursor: default; }
+  .or { display: flex; align-items: center; gap: 12px; margin: 18px 0 4px; color: var(--muted);
+    font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+  .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--edge); }
+  button.local { background: var(--field); color: var(--fg); border: 1px solid var(--edge); }
+  button.local:active { background: var(--edge); }
+  p.local-hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
   .error { color: var(--error); font-size: 14px; margin: 12px 0 0; min-height: 1em; }
   .connecting { display: none; padding: 10px 0; }
   .connecting .spin {
@@ -81,6 +87,9 @@
                spellcheck="false" placeholder="https://vault.example.com" autofocus />
         <button id="connect">Connect</button>
         <p class="error" id="error"></p>
+        <div class="or">or</div>
+        <button class="local" id="local">Keep it on this device</button>
+        <p class="local-hint">No server, no account: the vault stays on this device. You can connect a server later.</p>
       </section>
 
       <section class="connecting" id="connecting">
@@ -99,6 +108,7 @@
   const connectingTo = document.getElementById("connecting-to");
   const input = document.getElementById("server");
   const button = document.getElementById("connect");
+  const localButton = document.getElementById("local");
   const errorEl = document.getElementById("error");
 
   function showForm(prefill, error) {
@@ -107,6 +117,7 @@
     if (prefill) input.value = prefill;
     errorEl.textContent = error || "";
     button.disabled = false;
+    localButton.disabled = false;
     input.focus();
   }
   function showConnecting(origin) {
@@ -129,7 +140,23 @@
     }
   }
 
+  async function keepLocal() {
+    if (!invoke) { errorEl.textContent = "This page needs the Engram Store app."; return; }
+    button.disabled = true;
+    localButton.disabled = true;
+    errorEl.textContent = "";
+    showConnecting("this device");
+    try {
+      // On success the shell navigates this window to the vault on this
+      // device; only a failure returns.
+      await invoke("local_mode_enable");
+    } catch (e) {
+      showForm(input.value, String(e));
+    }
+  }
+
   button.addEventListener("click", connect);
+  localButton.addEventListener("click", keepLocal);
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") connect(); });
 
   (async () => {

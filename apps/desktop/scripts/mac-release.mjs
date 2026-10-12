@@ -69,6 +69,19 @@ if (generic) {
   if (appUrl) {
     fail("--generic bakes no server; unset ENGRAM_APP_URL (a build serves one deployment or any, never both)");
   }
+  // The generic app carries the web client's core bundle for local mode;
+  // it must be the build of this very version, or the app would serve
+  // another release's client from its loopback origin.
+  const coreDir = expand((process.env.ENGRAM_LOCAL_CORE ?? "").trim()) || join(here, "..", "..", "web", "dist-local", "core");
+  const coreVersionFile = join(coreDir, "version.json");
+  if (!existsSync(coreVersionFile)) {
+    fail(`no web client core bundle at ${coreDir}; run pnpm --filter @engramer/web build && pnpm --filter @engramer/web local:packs`);
+  }
+  const coreVersion = JSON.parse(readFileSync(coreVersionFile, "utf8")).version;
+  const appVersion = JSON.parse(readFileSync(join(tauriDir, "tauri.conf.json"), "utf8")).version;
+  if (coreVersion !== appVersion) {
+    fail(`the web client core bundle is ${coreVersion}, the app is ${appVersion}; rebuild the web client first`);
+  }
 } else if (!appUrl.startsWith("https://")) {
   fail("set ENGRAM_APP_URL=https://your-vault (or pass --generic); a localhost bake is a blank screen");
 }

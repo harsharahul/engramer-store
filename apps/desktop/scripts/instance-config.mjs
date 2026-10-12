@@ -20,8 +20,8 @@
  * origin call the shell's unlock commands, which is what makes Touch ID
  * work.
  */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -59,8 +59,22 @@ if (raw) {
     process.exit(1);
   }
 }
+// A generic build also carries the web client's core bundle, so the picker's
+// "Keep it on this device" has a client to serve from the loopback origin.
+// The bundle is the output of `pnpm --filter @engramer/web local:packs`; its
+// location can be overridden for a build made elsewhere.
+const coreDir = (process.env.ENGRAM_LOCAL_CORE ?? "").trim() || join(here, "..", "..", "web", "dist-local", "core");
 if (generic) {
+  if (!existsSync(join(coreDir, "index.html")) || !existsSync(join(coreDir, "packs.json"))) {
+    console.error(
+      `instance: a generic build needs the web client's core bundle at ${coreDir} ` +
+        "(pnpm --filter @engramer/web build && pnpm --filter @engramer/web local:packs), or ENGRAM_LOCAL_CORE=<dir>",
+    );
+    process.exit(1);
+  }
   config.build.frontendDist = "../picker";
+  // The dev server would otherwise replace the bundled picker in `tauri dev`.
+  config.build.devUrl = null;
   for (const window of config.app.windows ?? []) {
     window.url = "index.html";
   }
@@ -71,6 +85,10 @@ if (generic) {
   }
 }
 const instance = { build: config.build, app: { windows: config.app.windows } };
+if (generic) {
+  // Relative to src-tauri, as every path in tauri.conf.json is.
+  instance.bundle = { resources: { [relative(tauriDir, coreDir).split(sep).join("/")]: "webdist" } };
+}
 const team = (process.env.APPLE_DEVELOPMENT_TEAM ?? "").trim();
 // A re-upload of the same version needs a higher build number, and the
 // app's CFBundleVersion is Tauri's to write; the extensions get the
@@ -78,7 +96,7 @@ const team = (process.env.APPLE_DEVELOPMENT_TEAM ?? "").trim();
 // requires the two to agree.
 const buildNumber = (process.env.ENGRAM_BUILD_NUMBER ?? "").trim();
 if (team || buildNumber) {
-  instance.bundle = { iOS: {} };
+  instance.bundle = { ...(instance.bundle ?? {}), iOS: {} };
   if (team) {
     instance.bundle.iOS.developmentTeam = team;
   }
