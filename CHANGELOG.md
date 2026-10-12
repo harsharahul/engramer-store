@@ -59,8 +59,21 @@ All notable changes to Engram Store are documented here, following
   the vault is on the device, with each pack's state and the vault's size.
   Unfinished uploads left by a crash are removed at start, and a write the
   disk refuses for lack of room answers 507 with a sentence.
+- **The Mac and iOS app can keep the vault on the device.** The server
+  picker offers "Keep it on this device": the app runs its on-device
+  backend on a loopback address chosen once and reused, serves the bundled
+  web client from it, and remembers the choice. The listener stops when
+  the app quits, is checked and restarted when a phone brings the app back
+  to the foreground, and the vault can be removed again. The web client's
+  core bundle ships inside generic builds, which refuse to build without
+  it or with a core of another version. The Files provider says to open
+  the app when a vault on the device is not being served.
 
 ### Fixed
+- **Offline file records are never read half-written.** The record kept
+  beside each offline file is now written whole and swapped into place, so
+  a read that overlaps a write sees the previous record instead of an
+  empty one that would have hidden a pin or the downloaded segments.
 - **Two saves of one file at the same time could lose its content.** A
   retry racing its first attempt, or two devices saving at once, wrote
   under one blob name, and the losing save's cleanup removed the winning
