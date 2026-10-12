@@ -19,6 +19,7 @@ import {
 } from "../backup";
 import { resetBackupLedger } from "../backupledger";
 import { assistantState, describeAssistantState, type AssistantState } from "../intel/assistant";
+import { NEEDS_SERVER, PACK_TITLES, defaultDeviceLabel, downloadPack, packDisplayName, packReadySentence } from "../local";
 import { notificationsEnabled, setNotificationsEnabled } from "../notifications";
 import { settingsEvents, SETTINGS_APPLIED_EVENT } from "../settingsync";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
@@ -46,7 +47,7 @@ import { SCENES_VERSION } from "../intel/scenes";
 import { describeProcessing } from "../activity";
 import { SweepMemory, type SweepKind } from "../sweepmemory";
 import { publicKeyFingerprint } from "@engramer/crypto";
-import { api } from "../api";
+import { api, type PackName, type PackStatus } from "../api";
 import { changePassword } from "../changepassword";
 import { IDLE_LOCK_CHOICES, idleLockMinutes, setIdleLockMinutes } from "../idlelock";
 import { revealRecoveryKey, rotateRecoveryKey } from "../recoverykey";
@@ -119,6 +120,8 @@ export function ProfileView(props: {
   onToast: (message: string) => void;
 }) {
   const store = useStore();
+  // The vault lives on this device: the backend's word on its packs and size.
+  const local = store.local;
   const [unlockState, setUnlockState] = useState<UnlockState>("checking");
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
@@ -272,6 +275,53 @@ export function ProfileView(props: {
       .then((account) => setNameDraft(account.displayName ?? ""))
       .catch(() => {});
   }, []);
+  // The feature packs of a vault on this device, as the backend reports
+  // them; refreshed after every download or removal.
+  const [packs, setPacks] = useState<Record<string, PackStatus> | null>(null);
+  const [packBusy, setPackBusy] = useState<PackName | null>(null);
+  const refreshPacks = () => {
+    void api
+      .localPacks()
+      .then((answer) => setPacks(answer.packs))
+      .catch(() => {});
+  };
+  useEffect(() => {
+    if (local) {
+      refreshPacks();
+    }
+  }, [local]);
+  const packHooks = {
+    begin: (job: Parameters<typeof store.beginActivity>[0]) => store.beginActivity(job),
+    update: (patch: Parameters<typeof store.updateActivity>[0]) => store.updateActivity(patch),
+    end: (entry: { kind: "downloading"; title: string; detail?: string }) =>
+      store.finishActivity(entry.kind, entry.title, entry.detail),
+  };
+  const installPack = async (name: PackName) => {
+    setPackBusy(name);
+    try {
+      await downloadPack(name, packHooks);
+      props.onToast(packReadySentence(name));
+    } catch (err) {
+      props.onToast(err instanceof Error ? err.message : "The download did not finish.");
+    } finally {
+      setPackBusy(null);
+      refreshPacks();
+      void store.refreshUsage();
+    }
+  };
+  const removePack = async (name: PackName) => {
+    setPackBusy(name);
+    try {
+      await api.localPackRemove(name);
+      props.onToast(`Removed ${PACK_TITLES[name]} from this device.`);
+    } catch (err) {
+      props.onToast(err instanceof Error ? err.message : "Could not remove the pack.");
+    } finally {
+      setPackBusy(null);
+      refreshPacks();
+      void store.refreshUsage();
+    }
+  };
   const [watched, setWatched] = useState<string[]>([]);
   const [modes, setModes] = useState<Record<string, WatchMode>>({});
   const [verifying, setVerifying] = useState(false);
@@ -634,12 +684,15 @@ export function ProfileView(props: {
       <section className="profile-card profile-head">
         <div className="profile-avatar">{(email[0] ?? "?").toUpperCase()}</div>
         <div className="profile-id">
-          <h2>{email}</h2>
+          <h2>{local ? nameDraft.trim() || defaultDeviceLabel() : email}</h2>
           <div className="profile-sub">
             {store.isAdmin ? "Administrator · " : ""}
-            End-to-end encrypted vault
+            {local ? `Vault on this device · ${formatBytes(local.vault.bytes)}` : "End-to-end encrypted vault"}
           </div>
-          {shell && (
+          {local && !phoneShell && (
+            <div className="profile-sub">{local.vault.directory.replace(/^\/Users\/[^/]+\//, "~/")}</div>
+          )}
+          {shell && !local && (
             <div className="profile-sub">
               Server: <b>{location.host}</b> · sign out to switch
             </div>
@@ -673,9 +726,9 @@ export function ProfileView(props: {
       <section className="profile-card">
         <h3>Your name</h3>
         <p className="profile-note">
-          Shown to people you share a document with while you edit it together.
-          Leave it empty and they see your email address instead. Only people
-          invited to a document you are both in can see this.
+          {local
+            ? "The name this device shows for its vault. It becomes the name people you share documents with see once the vault is connected to a server."
+            : "Shown to people you share a document with while you edit it together. Leave it empty and they see your email address instead. Only people invited to a document you are both in can see this."}
         </p>
         <div className="profile-row">
           <input
@@ -708,14 +761,18 @@ export function ProfileView(props: {
           <div className="profile-row">
             <div className="profile-row-main">
               <b>
-                {formatBytes(usage.usedBytes)} of {formatBytes(usage.quotaBytes)}
+                {local
+                  ? `Used on this device: ${formatBytes(usage.usedBytes)}`
+                  : `${formatBytes(usage.usedBytes)} of ${formatBytes(usage.quotaBytes)}`}
               </b>
               <div className="profile-row-sub">Everything is encrypted before it leaves a device.</div>
             </div>
           </div>
-          <div className="meter profile-meter">
-            <div style={{ width: `${usagePercent}%` }} />
-          </div>
+          {!local && (
+            <div className="meter profile-meter">
+              <div style={{ width: `${usagePercent}%` }} />
+            </div>
+          )}
           {shell && (
             <div className="profile-row">
               <div className="profile-row-main">
@@ -747,6 +804,7 @@ export function ProfileView(props: {
 
       <section className="profile-card">
         <h3>Security</h3>
+        {!local && (
         <div className="profile-row">
           <div className="profile-row-main">
             <b>Password</b>
@@ -759,23 +817,27 @@ export function ProfileView(props: {
             <KeyGlyph size={13} /> Change
           </Button>
         </div>
+        )}
         <div className="profile-row">
           <div className="profile-row-main">
             <b>Two-factor authentication</b>
             <div className="profile-row-sub">
-              Time-based codes protect sign-in; your vault keys never depend on them.
+              {local
+                ? `Time-based codes protect sign-in on a server; here the passphrase alone opens the vault (${NEEDS_SERVER}).`
+                : "Time-based codes protect sign-in; your vault keys never depend on them."}
             </div>
           </div>
-          <Button variant="secondary" onClick={props.onOpenTwoFactor}>
+          <Button variant="secondary" disabled={local !== null} onClick={props.onOpenTwoFactor}>
             <KeyGlyph size={13} /> Manage
           </Button>
         </div>
         <div className="profile-row">
           <div className="profile-row-main">
-            <b>Delete account</b>
+            <b>{local ? "Delete this vault" : "Delete account"}</b>
             <div className="profile-row-sub">
-              Removes your account and every file in it from the server, for good. Download
-              anything you want to keep first.
+              {local
+                ? "Removes the vault from this device, for good: the database, every file and the keys. Download anything you want to keep first."
+                : "Removes your account and every file in it from the server, for good. Download anything you want to keep first."}
             </div>
           </div>
           <Button variant="destructive" onClick={() => setDeletingAccount(true)}>
@@ -854,8 +916,9 @@ export function ProfileView(props: {
           <div className="profile-row-main">
             <b>Recovery key</b>
             <div className="profile-row-sub">
-              The way back into this account if the password is lost. Show it again after a password
-              check, or rotate it: rotating invalidates the old key at once.
+              {local
+                ? `Kept with this vault for the day it is connected to a server; on this device the passphrase is the only way in. Show it again after a passphrase check (rotating ${NEEDS_SERVER}).`
+                : "The way back into this account if the password is lost. Show it again after a password check, or rotate it: rotating invalidates the old key at once."}
             </div>
           </div>
           <div className="profile-row-actions">
@@ -871,6 +934,7 @@ export function ProfileView(props: {
             </Button>
             <Button
               variant="secondary"
+              disabled={local !== null}
               onClick={() => {
                 setRkError(null);
                 setRkPassword("");
@@ -974,8 +1038,11 @@ export function ProfileView(props: {
             <div className="profile-row-sub">
               Lets a small on-device model find the names and places your documents mention, so
               files that share no printed reference can still be offered together, a booking and
-              its hotel as one trip. Runs only when you ask, downloads about 180MB from this
-              server the first time, and nothing it finds is stored or sent anywhere.
+              its hotel as one trip. Runs only when you ask,{" "}
+              {local
+                ? "uses the on-device intelligence pack,"
+                : "downloads about 180MB from this server the first time,"}{" "}
+              and nothing it finds is stored or sent anywhere.
             </div>
           </div>
           <button
@@ -1076,7 +1143,64 @@ export function ProfileView(props: {
 
       <section className="profile-card">
         <h3>This device</h3>
-        {shell && (
+        {local &&
+          (["office", "intelligence"] as PackName[]).map((name) => {
+            const status = packs?.[name];
+            const title = packDisplayName(name);
+            const busy = packBusy === name || status?.state === "downloading";
+            return (
+              <div className="profile-row" key={name}>
+                <div className="profile-row-main">
+                  <b>{title}</b>
+                  <div className="profile-row-sub">
+                    {!status
+                      ? "Checking…"
+                      : status.state === "installed"
+                        ? `Installed: ${formatBytes(status.installedBytes)} on this device.`
+                        : status.state === "downloading"
+                          ? `Downloading: ${formatBytes(status.downloadedBytes)} of ${formatBytes(status.archiveBytes)}. The bell shows its progress.`
+                          : `${formatBytes(status.archiveBytes)} to download, ${formatBytes(status.installedBytes)} once installed. One download from the release host; nothing about your vault leaves this device.${status.error ? ` Last attempt: ${status.error}.` : ""}`}
+                  </div>
+                </div>
+                {status && (
+                  <Button
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => void (status.state === "installed" ? removePack(name) : installPack(name))}
+                  >
+                    {status.state === "installed" ? "Remove" : busy ? "Downloading…" : "Download"}
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        {local && packs && Object.values(packs).some((status) => status.state === "missing") && (
+          <div className="profile-row">
+            <div className="profile-row-main">
+              <b>Download everything now</b>
+              <div className="profile-row-sub">
+                Every pack this device is missing, one after the other, so it is complete before you
+                go offline.
+              </div>
+            </div>
+            <Button
+              variant="secondary"
+              disabled={packBusy !== null}
+              onClick={() =>
+                void (async () => {
+                  for (const name of ["office", "intelligence"] as PackName[]) {
+                    if (packs[name]?.state === "missing") {
+                      await installPack(name);
+                    }
+                  }
+                })()
+              }
+            >
+              Download all
+            </Button>
+          </div>
+        )}
+        {shell && !local && (
           <div className="profile-row">
             <div className="profile-row-main">
               <b>Server</b>
@@ -1129,8 +1253,9 @@ export function ProfileView(props: {
           <div className="profile-row-main">
             <b>Resync library</b>
             <div className="profile-row-sub">
-              Rebuilds this device's encrypted cache from the server; fixes a listing that looks
-              stale.
+              {local
+                ? "Rebuilds the listing from the vault on this device; fixes a listing that looks stale."
+                : "Rebuilds this device's encrypted cache from the server; fixes a listing that looks stale."}
             </div>
           </div>
           <Button
@@ -1166,6 +1291,7 @@ export function ProfileView(props: {
             <div className="profile-row-main">
               <b>Extensions on this device</b>
               <div className="profile-row-sub">
+                {local ? "The drive works while Engram Store is open. " : ""}
                 {driveWord === "finder"
                   ? "Shows your vault as a drive in Finder's sidebar, with files fetched as " +
                     "you open them. "
@@ -1252,9 +1378,11 @@ export function ProfileView(props: {
               <b>Live updates</b>
               <div className="profile-row-sub">
                 {store.liveFeed === "live"
-                  ? "Connected. Changes from your other devices reach the drive within " +
-                    "seconds, even while this window is closed. Turning Extensions off " +
-                    "ends it."
+                  ? local
+                    ? "Connected. The drive learns about changes within seconds while the app is open."
+                    : "Connected. Changes from your other devices reach the drive within " +
+                      "seconds, even while this window is closed. Turning Extensions off " +
+                      "ends it."
                   : store.liveFeed === "connecting"
                     ? "Reaching the server's change feed. Until it connects, the drive " +
                       "refreshes on the regular sync cycle."
@@ -1401,9 +1529,9 @@ export function ProfileView(props: {
           <div className="profile-row-main">
             <b>Check stored files</b>
             <div className="profile-row-sub">
-              Asks the server whether what it holds is still what it was given. Nothing is
-              downloaded, so a vault of any size is checked in seconds. This catches what
-              happens to data at rest: a truncated write, a replaced object, bit rot.
+              {local
+                ? "Checks that the vault on this device still holds what it was given. Nothing is copied, so a vault of any size is checked in seconds. This catches what happens to data at rest: a truncated write, a replaced file, bit rot."
+                : "Asks the server whether what it holds is still what it was given. Nothing is downloaded, so a vault of any size is checked in seconds. This catches what happens to data at rest: a truncated write, a replaced object, bit rot."}
             </div>
             {verifying && (
               <div className="profile-row-sub">
@@ -1698,7 +1826,59 @@ export function ProfileView(props: {
         </section>
       )}
 
-      {deletingAccount && (
+      {deletingAccount && local && (
+        <div
+          className="overlay"
+          onClick={() => {
+            if (!delBusy) {
+              setDeletingAccount(false);
+            }
+          }}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Delete this vault</h2>
+            <p className="modal-sub">
+              The database, every file and the keys on this device go, for good. Nothing can be
+              recovered afterwards, not with the recovery key either. Download anything you want to
+              keep first.
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                setDelBusy(true);
+                setDelError(null);
+                void store
+                  .localVaultDelete(delPassword)
+                  .catch((err: unknown) => {
+                    setDelError(err instanceof Error ? err.message : "Could not remove the vault.");
+                    setDelBusy(false);
+                  });
+              }}
+            >
+              <label className="field">
+                <span>Your passphrase</span>
+                <input
+                  type="password"
+                  value={delPassword}
+                  onChange={(e) => setDelPassword(e.target.value)}
+                  autoComplete="current-password"
+                  autoFocus
+                />
+              </label>
+              {delError && <div className="error-text">{delError}</div>}
+              <div className="modal-actions">
+                <Button type="button" variant="ghost" disabled={delBusy} onClick={() => setDeletingAccount(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="destructive" disabled={delBusy || !delPassword}>
+                  {delBusy ? "Removing…" : "Delete this vault"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {deletingAccount && !local && (
         <div
           className="overlay"
           onClick={() => {
