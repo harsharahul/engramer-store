@@ -930,6 +930,10 @@ export const useStore = create<StoreState>((set, get) => {
 
   /** The last sync sequence applied in this tab; 0 forces a full sync. */
   let syncCursor = 0;
+  /** Set while the vault on this device is being removed: no sync may
+   * refill the cache that was just emptied, or a later visit would trust
+   * a cache that claims a cursor and holds no rows. */
+  let removingVault = false;
   /** Every move of the cursor is mirrored into state as `syncSeq`, so
    * autosync can tell a pull that reached an announced change from one
    * that ran before it committed. */
@@ -1401,23 +1405,35 @@ export const useStore = create<StoreState>((set, get) => {
       // This browser's copies of the library go before the vault does: the
       // cache, the decisions mirror and the shell's offline store belong to
       // an origin the next vault will not use, so nothing would clear them
-      // later. The session stays until the shell has removed the vault, so
-      // a failure leaves the person signed in with the vault intact.
+      // later. No sync runs meanwhile. The session stays until the shell
+      // has removed the vault, so a failure leaves the person signed in
+      // with the vault intact.
       const account = session.email;
-      await clearCache(account).catch(() => {});
-      clearDecisions(account);
-      await nativeOfflineClear().catch(() => {});
+      removingVault = true;
       try {
+        await clearCache(account).catch(() => {});
+        clearDecisions(account);
+        await nativeOfflineClear().catch(() => {});
         // The shell removes the vault, the keys and the extension records,
         // and returns to its first page.
         await nativeLocalVaultDelete(account);
       } catch (err) {
+        // The vault is still here and this browser's cache is gone: the
+        // next sync starts from zero and refills it, so a later visit does
+        // not trust an empty cache.
+        removingVault = false;
+        moveCursor(0);
+        set({ synced: false });
+        void get()
+          .refresh()
+          .catch(() => {});
         // The shell's sentence arrives as a plain string, not an Error.
         throw new Error(
           typeof err === "string" ? err : err instanceof Error ? err.message : "Could not remove the vault.",
         );
       }
       get().logout();
+      removingVault = false;
     },
 
     adoptToken: (token) => {
@@ -1492,6 +1508,9 @@ export const useStore = create<StoreState>((set, get) => {
       const account = get().session?.email;
       if (!account) {
         throw new Error("not signed in");
+      }
+      if (removingVault) {
+        return;
       }
       // Warm boot: the rows cached on this device (ciphertext, exactly as the
       // server sent them) put the library on screen before the network answers.
