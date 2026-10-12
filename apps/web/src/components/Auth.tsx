@@ -540,9 +540,15 @@ export function Auth() {
           </div>
         )}
         <p className="auth-note">
-          Files, names, and folders are encrypted on your device before upload.
-          <br />
-          The server stores ciphertext it cannot read.
+          {local ? (
+            "Files, names, and folders are encrypted before they are stored on this device."
+          ) : (
+            <>
+              Files, names, and folders are encrypted on your device before upload.
+              <br />
+              The server stores ciphertext it cannot read.
+            </>
+          )}
         </p>
       </div>
 

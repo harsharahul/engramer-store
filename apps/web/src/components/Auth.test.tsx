@@ -64,6 +64,8 @@ describe("the sign-in screen for a vault on this device", () => {
     expect(container.textContent).not.toContain("Forgot your password?");
     expect(container.textContent).toContain("This device");
     expect(container.textContent).not.toContain("Server:");
+    expect(container.textContent).toContain("stored on this device");
+    expect(container.textContent).not.toContain("The server stores ciphertext");
   });
 
   it("offers to unlock an existing vault", async () => {
@@ -82,6 +84,7 @@ describe("the sign-in screen for a vault on this device", () => {
     expect(container.querySelector("#email")).not.toBeNull();
     expect(container.textContent).toContain("Forgot your password?");
     expect(container.textContent).toContain("Server:");
+    expect(container.textContent).toContain("The server stores ciphertext it cannot read.");
     expect(container.textContent).not.toContain("Unlock your vault");
   });
 });

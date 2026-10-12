@@ -711,15 +711,17 @@ export function ProfileView(props: {
           >
             Sign out
           </Button>
-          <Button
-            variant="secondary"
-            title="Every other device and browser is signed out now; this one stays in"
-            disabled={signingOutEverywhere}
-            onClick={() => void signOutEverywhere()}
-          >
-            {signingOutEverywhere ? <span className="spinner" /> : null}
-            Sign out everywhere
-          </Button>
+          {!local && (
+            <Button
+              variant="secondary"
+              title="Every other device and browser is signed out now; this one stays in"
+              disabled={signingOutEverywhere}
+              onClick={() => void signOutEverywhere()}
+            >
+              {signingOutEverywhere ? <span className="spinner" /> : null}
+              Sign out everywhere
+            </Button>
+          )}
         </div>
       </section>
 
@@ -765,7 +767,11 @@ export function ProfileView(props: {
                   ? `Used on this device: ${formatBytes(usage.usedBytes)}`
                   : `${formatBytes(usage.usedBytes)} of ${formatBytes(usage.quotaBytes)}`}
               </b>
-              <div className="profile-row-sub">Everything is encrypted before it leaves a device.</div>
+              <div className="profile-row-sub">
+                {local
+                  ? "Everything is encrypted before it is written to this device."
+                  : "Everything is encrypted before it leaves a device."}
+              </div>
             </div>
           </div>
           {!local && (
