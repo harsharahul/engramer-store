@@ -57,9 +57,18 @@ export interface AppSidebarProps {
   collapsed: boolean;
   places: SidebarPlace[];
   groups: SidebarGroupData[];
-  usage?: { label: string; percent: number };
+  /** The storage line; without `percent` there is no meter (a vault on this
+   * device has no quota). */
+  usage?: { label: string; percent?: number };
   version: string;
-  account: { email: string; onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void };
+  /** The account button: the address, or a label and a line under it when the
+   * vault lives on this device and the address is not meant to be seen. */
+  account: {
+    email: string;
+    label?: string;
+    sub?: string;
+    onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  };
 }
 
 /**
@@ -71,7 +80,8 @@ export interface AppSidebarProps {
  */
 export function AppSidebar(props: AppSidebarProps) {
   const { collapsed } = props;
-  const name = props.account.email.split("@")[0] ?? props.account.email;
+  const name = props.account.label ?? props.account.email.split("@")[0] ?? props.account.email;
+  const sub = props.account.sub ?? props.account.email;
 
   return (
     <SidebarProvider
@@ -190,18 +200,22 @@ export function AppSidebar(props: AppSidebarProps) {
             <div className="tw:flex tw:flex-col tw:gap-1.5 tw:px-2 tw:py-2 tw:group-data-[collapsible=icon]:hidden">
               <div className="tw:flex tw:items-baseline tw:justify-between tw:text-[12.5px] tw:text-foreground">
                 <span>{props.usage.label}</span>
-                <span className="tw:text-[11px] tw:text-muted-foreground">{props.usage.percent}%</span>
+                {props.usage.percent !== undefined && (
+                  <span className="tw:text-[11px] tw:text-muted-foreground">{props.usage.percent}%</span>
+                )}
               </div>
-              <div
-                className="tw:h-1 tw:overflow-hidden tw:rounded-full tw:bg-muted"
-                role="meter"
-                aria-label="Storage used"
-                aria-valuenow={props.usage.percent}
-                aria-valuemin={0}
-                aria-valuemax={100}
-              >
-                <div className="tw:h-full tw:rounded-full tw:bg-primary" style={{ width: `${props.usage.percent}%` }} />
-              </div>
+              {props.usage.percent !== undefined && (
+                <div
+                  className="tw:h-1 tw:overflow-hidden tw:rounded-full tw:bg-muted"
+                  role="meter"
+                  aria-label="Storage used"
+                  aria-valuenow={props.usage.percent}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div className="tw:h-full tw:rounded-full tw:bg-primary" style={{ width: `${props.usage.percent}%` }} />
+                </div>
+              )}
               <div className="tw:text-[11px] tw:text-muted-foreground" title="The version running in this page">
                 Encrypted at rest · v{props.version}
               </div>
@@ -211,9 +225,9 @@ export function AppSidebar(props: AppSidebarProps) {
             <SidebarMenuItem>
               <SidebarMenuButton
                 size="lg"
-                tooltip={props.account.email}
+                tooltip={name}
                 aria-haspopup="menu"
-                aria-label={`Account: ${props.account.email}`}
+                aria-label={`Account: ${name}`}
                 onClick={props.account.onOpen}
                 className="account-button tw:gap-2.5"
               >
@@ -230,8 +244,8 @@ export function AppSidebar(props: AppSidebarProps) {
                     <span className="tw:truncate tw:text-[13px] tw:font-semibold tw:text-foreground">{name}</span>
                     <ChevronsUpDown className="tw:ml-auto tw:size-3.5 tw:shrink-0 tw:text-muted-foreground" aria-hidden="true" />
                   </span>
-                  <span className="account-link tw:truncate tw:text-[11px] tw:text-muted-foreground" title={props.account.email}>
-                    {props.account.email}
+                  <span className="account-link tw:truncate tw:text-[11px] tw:text-muted-foreground" title={sub}>
+                    {sub}
                   </span>
                 </span>
               </SidebarMenuButton>

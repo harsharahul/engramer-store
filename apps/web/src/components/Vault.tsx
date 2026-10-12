@@ -15,7 +15,7 @@ import { stepThrough } from "../neighbors";
 import { clipComparable, useStore, type FileEntry, type FolderEntry } from "../store";
 import { scheduleBackfill } from "../backfill";
 import { installAutoBackup } from "../backup";
-import { api } from "../api";
+import { api, type PackName } from "../api";
 import {
   applyAccent,
   applyTheme,
@@ -101,6 +101,16 @@ import {
 } from "../intel/semantic";
 import { factsEnabled, setFactsEnabled } from "../intel/scan";
 import { entitiesEnabled, setEntitiesEnabled } from "../intel/entities";
+import {
+  NEEDS_SERVER,
+  PACK_TITLES,
+  defaultDeviceLabel,
+  downloadPack,
+  packGate,
+  packPromptBody,
+  packPromptTitle,
+  packReadySentence,
+} from "../local";
 import {
   assistantEnabled,
   assistantState,
@@ -279,6 +289,9 @@ const OPERATOR_HINTS = ["tag:", "type:", "in:", "before:", "after:", "is:favorit
 
 export function Vault() {
   const store = useStore();
+  // The vault lives on this device: server features are greyed, and the
+  // entry points that need a feature pack ask for its download first.
+  const localMode = store.local !== null;
   const [view, setView] = useState<View>({ kind: "folder", id: null });
   const [query, setQuery] = useState("");
   const [layout, setLayout] = useState<"grid" | "list">(() => loadPref("engramer-layout", "grid"));
@@ -339,6 +352,9 @@ export function Vault() {
   const [dragging, setDragging] = useState(false);
   // A toast that created or moved something carries the way there.
   const [toast, setToast] = useState<{ text: string; action?: () => void } | null>(null);
+  // A pack an entry point needs and does not have yet: the question, and
+  // what to do once it is installed.
+  const [packPrompt, setPackPrompt] = useState<{ name: PackName; bytes: number; after: () => void } | null>(null);
   const [updateReady, setUpdateReady] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => currentTheme());
   const [accent, setAccent] = useState<string>(() => currentAccent());
@@ -524,6 +540,40 @@ export function Vault() {
     // One with somewhere to go stays a little longer.
     toastTimer.current = setTimeout(() => setToast(null), action ? 5000 : 3200);
   }, []);
+
+  // An entry point that needs a feature pack asks for the download first,
+  // with the manifest's size, and runs once the pack is installed. The
+  // store is read fresh so a menu built earlier still sees today's state.
+  const withPack = useCallback(
+    (name: PackName, after: () => void) => {
+      const gate = packGate(useStore.getState().local, name);
+      if (gate === "run") {
+        after();
+        return;
+      }
+      if (gate === "wait") {
+        showToast(`${PACK_TITLES[name].charAt(0).toUpperCase()}${PACK_TITLES[name].slice(1)} is still downloading; the bell shows its progress.`);
+        return;
+      }
+      void api
+        .localPacks()
+        .then((answer) => setPackPrompt({ name, bytes: answer.packs[name]?.archiveBytes ?? 0, after }))
+        .catch(() => after());
+    },
+    [showToast],
+  );
+  // Office documents open in the editor pack; notes and sheets of text do not.
+  const openEditor = useCallback(
+    (id: string) => {
+      const file = useStore.getState().files.get(id);
+      if (file && officeKind(file)) {
+        withPack("office", () => setEditorId(id));
+      } else {
+        setEditorId(id);
+      }
+    },
+    [withPack],
+  );
 
   const currentFolderId = view.kind === "folder" ? view.id : null;
   const searching = query.trim().length > 0;
@@ -1067,7 +1117,7 @@ export function Vault() {
       run: () => enterSelect(file.id),
     },
     ...(["text", "doc", "sheet"].includes(fileKind(file.mime, file.name))
-      ? [{ id: "edit", label: "Edit", icon: <PencilGlyph size={13} />, run: () => setEditorId(file.id) }]
+      ? [{ id: "edit", label: "Edit", icon: <PencilGlyph size={13} />, run: () => openEditor(file.id) }]
       : []),
     ...((file.mime.startsWith("image/") || file.mime === "application/pdf") && !file.hasText
       ? [
@@ -1149,7 +1199,15 @@ export function Vault() {
     // entry offers Leave instead, and only an editor may touch metadata.
     ...(file.shared
       ? []
-      : [{ id: "share", label: "Share", icon: <ShareGlyph size={13} />, run: () => setShareId(file.id) }]),
+      : [
+          {
+            id: "share",
+            label: localMode ? `Share · ${NEEDS_SERVER}` : "Share",
+            icon: <ShareGlyph size={13} />,
+            disabled: localMode,
+            run: () => setShareId(file.id),
+          },
+        ]),
     { id: "d1", label: "", divider: true, run: () => {} },
     ...(!file.shared || file.role === "editor"
       ? [
@@ -1280,8 +1338,9 @@ export function Vault() {
         { id: "rename", label: "Rename", icon: <PencilGlyph size={13} />, run: () => setRenameFolderId(folderId) },
         {
           id: "request",
-          label: "Request files here…",
+          label: localMode ? `Request files here · ${NEEDS_SERVER}` : "Request files here…",
           icon: <InboxGlyph size={13} />,
+          disabled: localMode,
           run: () => setRequestFolder({ folderId }),
         },
         { id: "d", label: "", divider: true, run: () => {} },
@@ -1694,24 +1753,38 @@ export function Vault() {
   // surfaces can never disagree about a setting.
   const toggleOcr = () => {
     const next = !ocrOn;
-    setOcrEnabled(next);
-    setOcrOn(next);
-    showToast(
+    const apply = () => {
+      setOcrEnabled(next);
+      setOcrOn(next);
+      showToast(
       next
         ? "New images will be read on this device. Cmd+K, then “Make images searchable” for existing ones."
         : "Image reading is off.",
-    );
+      );
+    };
+    if (next) {
+      withPack("intelligence", apply);
+    } else {
+      apply();
+    }
   };
 
   const toggleSemantic = () => {
     const next = !semanticOn;
-    setSemanticEnabled(next);
-    setSemanticOn(next);
-    showToast(
+    const apply = () => {
+      setSemanticEnabled(next);
+      setSemanticOn(next);
+      showToast(
       next
         ? "Photos and videos will be indexed by meaning on this device (a 65 MB model downloads once). Cmd+K, then “Index photos and videos by meaning” for existing ones."
         : "Meaning search is off.",
-    );
+      );
+    };
+    if (next) {
+      withPack("intelligence", apply);
+    } else {
+      apply();
+    }
   };
 
   const toggleTheme = () => {
@@ -1887,13 +1960,13 @@ export function Vault() {
       id: "new-document",
       label: "Word document",
       icon: <DocGlyph size={15} />,
-      run: () => setNewOfficeKind("docx"),
+      run: () => withPack("office", () => setNewOfficeKind("docx")),
     },
     {
       id: "new-spreadsheet",
       label: "Spreadsheet",
       icon: <GridGlyph size={15} />,
-      run: () => setNewOfficeKind("xlsx"),
+      run: () => withPack("office", () => setNewOfficeKind("xlsx")),
     },
     { id: "new-d", label: "", divider: true, run: () => {} },
     {
@@ -1944,13 +2017,13 @@ export function Vault() {
           id: "new-document",
           label: "New document",
           icon: <DocGlyph size={15} />,
-          run: () => setNewOfficeKind("docx"),
+          run: () => withPack("office", () => setNewOfficeKind("docx")),
         },
         {
           id: "new-spreadsheet",
           label: "New spreadsheet",
           icon: <GridGlyph size={15} />,
-          run: () => setNewOfficeKind("xlsx"),
+          run: () => withPack("office", () => setNewOfficeKind("xlsx")),
         },
       ],
     });
@@ -2003,13 +2076,13 @@ export function Vault() {
         id: "new-document",
         label: "New document",
         hint: "Word, encrypted",
-        run: () => setNewOfficeKind("docx"),
+        run: () => withPack("office", () => setNewOfficeKind("docx")),
       },
       {
         id: "new-spreadsheet",
         label: "New spreadsheet",
         hint: "Excel, encrypted",
-        run: () => setNewOfficeKind("xlsx"),
+        run: () => withPack("office", () => setNewOfficeKind("xlsx")),
       },
       { id: "new-folder", label: "New folder", run: () => setNewFolderOpen(true) },
       { id: "toggle-layout", label: "Toggle grid and list", run: () => toggleLayout() },
@@ -2019,31 +2092,39 @@ export function Vault() {
         id: "request-files",
         label: "Request files…",
         hint: "receive, encrypted to you",
-        run: () => setRequestFolder({ folderId: null }),
+        run: () => {
+          if (useStore.getState().local) {
+            showToast(`Requesting files ${NEEDS_SERVER}.`);
+            return;
+          }
+          setRequestFolder({ folderId: null });
+        },
       },
       {
         id: "ocr-all",
         label: "Make images and scans searchable",
         hint: "on-device OCR, PDFs included",
-        run: () => {
-          if (!ocrEnabled()) {
-            setOcrEnabled(true);
-            setOcrOn(true);
-          }
-          void store.processLibrary().then((counts) => showToast(describeProcessing(counts).title));
-        },
+        run: () =>
+          withPack("intelligence", () => {
+            if (!ocrEnabled()) {
+              setOcrEnabled(true);
+              setOcrOn(true);
+            }
+            void store.processLibrary().then((counts) => showToast(describeProcessing(counts).title));
+          }),
       },
       {
         id: "clip-all",
         label: "Index photos and videos by meaning",
         hint: "on-device; find media by what is in it, and label it",
-        run: () => {
-          if (!semanticEnabled()) {
-            setSemanticEnabled(true);
-            setSemanticOn(true);
-          }
-          void store.processLibrary().then((counts) => showToast(describeProcessing(counts).title));
-        },
+        run: () =>
+          withPack("intelligence", () => {
+            if (!semanticEnabled()) {
+              setSemanticEnabled(true);
+              setSemanticOn(true);
+            }
+            void store.processLibrary().then((counts) => showToast(describeProcessing(counts).title));
+          }),
       },
       {
         id: "fill-in",
@@ -2416,7 +2497,9 @@ export function Vault() {
     ...(calendarWorthy
       ? [place("calendar", view.kind === "calendar", () => setView({ kind: "calendar" }), <CalendarGlyph />, "Calendar")]
       : []),
-    place("shared", view.kind === "shared", () => setView({ kind: "shared" }), <LinkGlyph />, "Shared"),
+    ...(localMode
+      ? []
+      : [place("shared", view.kind === "shared", () => setView({ kind: "shared" }), <LinkGlyph />, "Shared")]),
     ...(sharedWithMeCount > 0
       ? [
           place(
@@ -2560,14 +2643,22 @@ export function Vault() {
           groups={sidebarGroups}
           usage={
             store.usage
-              ? {
-                  label: `${formatBytes(store.usage.usedBytes)} of ${formatBytes(store.usage.quotaBytes)}`,
-                  percent: usagePercent,
-                }
+              ? localMode
+                ? { label: `Used on this device: ${formatBytes(store.usage.usedBytes)}` }
+                : {
+                    label: `${formatBytes(store.usage.usedBytes)} of ${formatBytes(store.usage.quotaBytes)}`,
+                    percent: usagePercent,
+                  }
               : undefined
           }
           version={APP_VERSION}
-          account={{ email: store.session?.email ?? "", onOpen: openAccountMenu }}
+          account={{
+            email: store.session?.email ?? "",
+            ...(localMode
+              ? { label: store.displayName?.trim() || defaultDeviceLabel(), sub: "Vault on this device" }
+              : {}),
+            onOpen: openAccountMenu,
+          }}
         />
       </aside>
 
@@ -2945,7 +3036,7 @@ export function Vault() {
             <AskCard
               question={query.trim()}
               status={ask && ask.question === query.trim() ? ask.status : { kind: "offer" }}
-              onAsk={() => void runAsk(query.trim())}
+              onAsk={() => withPack("intelligence", () => void runAsk(query.trim()))}
               onStop={stopAsk}
               onOpen={openFile}
             />
@@ -3002,8 +3093,15 @@ export function Vault() {
               entitiesOn={entitiesOn}
               onToggleEntities={() => {
                 const next = !entitiesOn;
-                setEntitiesEnabled(next);
-                setEntitiesOn(next);
+                const apply = () => {
+                  setEntitiesEnabled(next);
+                  setEntitiesOn(next);
+                };
+                if (next) {
+                  withPack("intelligence", apply);
+                } else {
+                  apply();
+                }
               }}
               assistantOn={assistantOn}
               onToggleAssistant={() => {
@@ -3130,9 +3228,10 @@ export function Vault() {
             selectionCount={selection.size}
             selectionBytes={[...selection].reduce((sum, id) => sum + (store.files.get(id)?.size ?? 0), 0)}
             onOpen={openFile}
-            onEdit={(id) => setEditorId(id)}
+            onEdit={openEditor}
             onDownload={download}
             onShare={(id) => setShareId(id)}
+            localMode={localMode}
             onRename={(id) => setRenameFileId(id)}
             onTrash={(id) => {
               const name = store.files.get(id)?.name;
@@ -3392,6 +3491,7 @@ export function Vault() {
             setShareId(previewFile.id);
             setPreviewId(null);
           }}
+          localMode={localMode}
           onStep={(direction) => {
             const to = stepThrough(
               visibleFiles.map((f) => f.id),
@@ -3413,7 +3513,7 @@ export function Vault() {
             ["text", "doc", "sheet", "image"].includes(fileKind(previewFile.mime, previewFile.name)) &&
             !previewFile.shared
               ? () => {
-                  setEditorId(previewFile.id);
+                  openEditor(previewFile.id);
                   setPreviewId(null);
                 }
               : undefined
@@ -3529,6 +3629,30 @@ export function Vault() {
             setEditorId(id);
           }}
           onClose={() => setNewNoteOpen(false)}
+        />
+      )}
+      {packPrompt && (
+        <Confirm
+          title={packPromptTitle(packPrompt.name, packPrompt.bytes)}
+          sub={packPromptBody(packPrompt.name)}
+          confirmLabel="Download"
+          onConfirm={() => {
+            // The download runs in the background, narrated by the bell;
+            // the entry point's action follows once the pack is installed.
+            const { name, after } = packPrompt;
+            void downloadPack(name, {
+              begin: (job) => store.beginActivity(job),
+              update: (patch) => store.updateActivity(patch),
+              end: (entry) => store.finishActivity(entry.kind, entry.title, entry.detail),
+            })
+              .then(async () => {
+                await store.refreshUsage();
+                showToast(packReadySentence(name));
+                after();
+              })
+              .catch((err: unknown) => showToast(err instanceof Error ? err.message : "The download did not finish."));
+          }}
+          onClose={() => setPackPrompt(null)}
         />
       )}
       {newOfficeKind && (
