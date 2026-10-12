@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment-options { "url": "http://127.0.0.1:1/" }
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -66,6 +67,33 @@ describe("the sign-in screen for a vault on this device", () => {
     expect(container.textContent).not.toContain("Server:");
     expect(container.textContent).toContain("stored on this device");
     expect(container.textContent).not.toContain("The server stores ciphertext");
+    expect(container.textContent?.toLowerCase()).not.toContain("password");
+  });
+
+  it("waits for the vault's answer before it shows a form", async () => {
+    registration.mockReturnValue(new Promise(() => {}));
+    await render();
+    expect(container.textContent).toContain("Reaching the vault on this device");
+    expect(container.querySelector("#password")).toBeNull();
+    expect(container.querySelector("#email")).toBeNull();
+  });
+
+  it("offers to try again when the vault does not answer", async () => {
+    registration.mockRejectedValueOnce(new Error("Failed to fetch"));
+    await render();
+    expect(container.textContent).toContain("Could not reach the vault on this device.");
+    expect(container.querySelector("#password")).toBeNull();
+    expect(container.querySelector("#email")).toBeNull();
+    registration.mockResolvedValueOnce({ mode: "open", macAppUrl: null, local: true, vault: "empty" });
+    const retry = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("Try again"));
+    expect(retry).toBeDefined();
+    await act(async () => {
+      retry!.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("Create your vault");
   });
 
   it("offers to unlock an existing vault", async () => {

@@ -39,11 +39,15 @@ export function Auth() {
   const [serverDraft, setServerDraft] = useState("");
   const [serverError, setServerError] = useState("");
 
-  useEffect(() => {
-    const arrived = invite.length > 0;
-    if (arrived) {
-      history.replaceState(null, "", location.pathname);
-    }
+  // On a loopback origin the backend is the vault on this device and the
+  // form depends on its answer (create or unlock): until the answer is in,
+  // nothing is offered, so a typed address can never register a second
+  // account on the vault. A server's page keeps its form on screen while
+  // the answer is on its way, as it always has.
+  const loopback = location.hostname === "127.0.0.1";
+  const [probe, setProbe] = useState<"pending" | "ready" | "failed">("pending");
+  const probeVault = () => {
+    setProbe("pending");
     api
       .registration()
       .then((info) => {
@@ -54,11 +58,19 @@ export function Auth() {
           setMode(vault === "created" ? "signin" : "signup");
         }
         // Arriving with an invite link goes straight to the sign-up form.
-        if (info.mode === "invite" && arrived) {
+        if (info.mode === "invite" && invite.length > 0) {
           setMode("signup");
         }
+        setProbe("ready");
       })
-      .catch(() => {});
+      .catch(() => setProbe("failed"));
+  };
+
+  useEffect(() => {
+    if (invite.length > 0) {
+      history.replaceState(null, "", location.pathname);
+    }
+    probeVault();
     // Runs once on mount; `invite` is the value read from the URL there.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -124,14 +136,14 @@ export function Auth() {
       }
       if (mode === "signup") {
         if (password.length < 10) {
-          setError("Use at least 10 characters; this password protects your keys.");
+          setError(`Use at least 10 characters; this ${local ? "passphrase" : "password"} protects your keys.`);
           return;
         }
         if (password !== confirm) {
-          setError("Passwords do not match.");
+          setError(local ? "The passphrases do not match." : "Passwords do not match.");
           return;
         }
-        setBusy("Strengthening your password into encryption keys; slow on purpose.");
+        setBusy(`Strengthening your ${local ? "passphrase" : "password"} into encryption keys; slow on purpose.`);
         const result = await registerAccount(local ? LOCAL_ACCOUNT : email, password, invite.trim() || undefined);
         if (local) {
           // The vault's one account shows the device's name, never an address.
@@ -139,7 +151,7 @@ export function Auth() {
         }
         setPendingRecovery(result);
       } else {
-        setBusy("Strengthening your password into encryption keys; slow on purpose.");
+        setBusy(`Strengthening your ${local ? "passphrase" : "password"} into encryption keys; slow on purpose.`);
         const result = await login(local ? LOCAL_ACCOUNT : email, password);
         if (result.kind === "two-factor") {
           setTwoFactor(result);
@@ -352,6 +364,34 @@ export function Auth() {
     await startSession(pendingRecovery.session);
   };
 
+  if (loopback && probe !== "ready") {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card">
+          <div className="auth-brand">
+            <BrandMark size={64} />
+            <h1>
+              <Wordmark />
+            </h1>
+            <p className="tagline">
+              Private <b>·</b> Encrypted <b>·</b> Yours
+            </p>
+          </div>
+          <div className="auth-form">
+            {probe === "pending" ? (
+              <div className="auth-note">Reaching the vault on this device…</div>
+            ) : (
+              <>
+                <div className="error-text">Could not reach the vault on this device.</div>
+                <Button onClick={probeVault}>Try again</Button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="auth-shell">
       <div className="auth-card">
@@ -557,10 +597,9 @@ export function Auth() {
           recoveryKeyHex={pendingRecovery.recoveryKeyHex}
           title="Your recovery key"
           sub={
-            "This is the only way back into your vault if you forget your password. Store it somewhere safe and offline. It will not be shown again." +
-            (local
-              ? " On this device the passphrase is the only way in; the recovery key becomes useful once this vault is connected to a server."
-              : "")
+            local
+              ? "Store it somewhere safe and offline; it will not be shown again. On this device the passphrase is the only way in; the recovery key becomes useful once this vault is connected to a server."
+              : "This is the only way back into your vault if you forget your password. Store it somewhere safe and offline. It will not be shown again."
           }
           confirmLabel="I saved it, open my vault"
           busy={busy !== null}
