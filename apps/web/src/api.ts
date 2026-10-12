@@ -217,9 +217,14 @@ export const api = {
     }),
 
   registration: () =>
-    request<{ mode: "open" | "invite" | "closed"; macAppUrl?: string | null }>(
-      "/api/auth/registration",
-    ),
+    request<{
+      mode: "open" | "invite" | "closed";
+      macAppUrl?: string | null;
+      /** Set by the on-device backend: the vault lives on this device. */
+      local?: boolean;
+      /** On the device: whether the vault already has its account. */
+      vault?: "empty" | "created";
+    }>("/api/auth/registration"),
 
   // Account settings: one client-sealed blob; the server stores and
   // stamps it, and can read nothing.
@@ -357,7 +362,19 @@ export const api = {
       totpEnabled: boolean;
       recoveryCodesLeft: number;
       isAdmin: boolean;
+      /** Present only when the vault lives on this device. */
+      local?: LocalCapability;
     }>("/api/user"),
+
+  // Feature packs of a vault on this device: the office editor and the
+  // on-device intelligence models, downloaded on request.
+  localPacks: () => request<{ packs: Record<string, PackStatus> }>("/api/local/packs"),
+
+  localPackStart: (name: PackName) =>
+    request<{ packs: Record<string, PackStatus> }>(`/api/local/packs/${name}`, { method: "POST" }),
+
+  localPackRemove: (name: PackName) =>
+    request<{ packs: Record<string, PackStatus> }>(`/api/local/packs/${name}`, { method: "DELETE" }),
 
   /** The name collaborators see instead of this account's address. */
   setDisplayName: (displayName: string | null) =>
@@ -942,4 +959,25 @@ export function uploadBlob(
     onBody: opts?.onBody,
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   });
+}
+
+/** The two optional feature packs of a vault kept on this device. */
+export type PackName = "office" | "intelligence";
+
+export type PackState = "installed" | "missing" | "downloading";
+
+/** One pack as the on-device backend reports it. */
+export interface PackStatus {
+  state: PackState;
+  archiveBytes: number;
+  installedBytes: number;
+  downloadedBytes: number;
+  /** Why the last attempt did not install the pack, until the next one. */
+  error: string | null;
+}
+
+/** What the user record carries when the vault lives on this device. */
+export interface LocalCapability {
+  packs: Partial<Record<PackName, PackState>>;
+  vault: { bytes: number; directory: string };
 }

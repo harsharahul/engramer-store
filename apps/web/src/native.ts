@@ -276,6 +276,18 @@ export async function nativeServerUrlClear(): Promise<void> {
   await invoke("server_url_clear").catch(() => {});
 }
 
+// ----- the vault on this device -----
+
+/** Removes the vault kept on this device, with the keys and extension
+ * records for `email`; the shell then returns to its first page. */
+export async function nativeLocalVaultDelete(email: string): Promise<void> {
+  const invoke = tauriInvoke();
+  if (!invoke) {
+    throw new Error("no native shell");
+  }
+  await invoke("local_vault_delete", { email });
+}
+
 // ----- photo library (iOS; automatic backup) -----
 
 export interface NativePhotoAsset {

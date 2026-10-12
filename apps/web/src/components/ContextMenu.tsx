@@ -11,6 +11,8 @@ export interface MenuItem {
   divider?: boolean;
   /** A choice among siblings (sort order, say): set on each, true on the current one. */
   checked?: boolean;
+  /** Shown but not runnable, with the label saying why. */
+  disabled?: boolean;
   run: () => void;
 }
 
@@ -83,7 +85,12 @@ export function ContextMenu(props: {
             role={item.checked === undefined ? "menuitem" : "menuitemradio"}
             aria-checked={item.checked}
             className={`ctx-item${item.danger ? " danger" : ""}`}
+            disabled={item.disabled}
+            aria-disabled={item.disabled || undefined}
             onClick={() => {
+              if (item.disabled) {
+                return;
+              }
               props.onClose();
               item.run();
             }}

@@ -277,6 +277,11 @@ a {
   padding: 24px;
 }
 
+.auth-local-title {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
 .auth-note {
   color: var(--paper-dim);
   font-size: 12.5px;
@@ -3484,6 +3489,10 @@ button.tag:hover {
   color: var(--paper);
 }
 
+.ctx-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 .ctx-item:hover {
   background: var(--ink-3);
 }
