@@ -1329,10 +1329,16 @@ export const useStore = create<StoreState>((set, get) => {
       try {
         // The user record first: it says whether the vault lives on this
         // device, which the sync's follow-up calls read before they ask a
-        // server for what only a server has.
-        await get().refreshUsage().catch(() => {});
+        // server for what only a server has. One fetch, as before; a
+        // second only when the first did not land.
+        let userKnown = true;
+        await get().refreshUsage().catch(() => {
+          userKnown = false;
+        });
         await get().refresh();
-        await get().refreshUsage();
+        if (!userKnown) {
+          await get().refreshUsage();
+        }
       } catch {
         // refresh() already recorded syncError; nothing else to do here.
       }

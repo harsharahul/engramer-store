@@ -225,9 +225,9 @@ export function AppSidebar(props: AppSidebarProps) {
             <SidebarMenuItem>
               <SidebarMenuButton
                 size="lg"
-                tooltip={name}
+                tooltip={props.account.label ?? props.account.email}
                 aria-haspopup="menu"
-                aria-label={`Account: ${name}`}
+                aria-label={`Account: ${props.account.label ?? props.account.email}`}
                 onClick={props.account.onOpen}
                 className="account-button tw:gap-2.5"
               >
