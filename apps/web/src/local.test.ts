@@ -17,6 +17,7 @@ const {
   packGate,
   packPromptTitle,
   packPromptBody,
+  packDownloading,
   LOCAL_ACCOUNT,
   NEEDS_SERVER,
 } = await import("./local");
@@ -90,6 +91,34 @@ describe("local mode", () => {
     expect(h.end).toHaveBeenCalledWith(
       expect.objectContaining({ detail: "Not installed: the download did not match its checksum; it was discarded." }),
     );
+  });
+
+  it("ends the job when the download cannot be followed", async () => {
+    start.mockResolvedValueOnce({ packs: { office: status("downloading", 0) } });
+    packs.mockRejectedValueOnce(new Error("Failed to fetch"));
+    const h = hooks();
+    await expect(downloadPack("office", h, { sleep: async () => {} })).rejects.toThrow("Failed to fetch");
+    expect(h.end).toHaveBeenCalledTimes(1);
+    expect(h.end).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: "Lost track of the download: Failed to fetch. The Profile row shows where it stands.",
+      }),
+    );
+  });
+
+  it("joins a download that is already running instead of starting a second", async () => {
+    start.mockResolvedValueOnce({ packs: { office: status("downloading", 0) } });
+    packs.mockResolvedValueOnce({ packs: { office: status("installed", 94_429_296) } });
+    const h = hooks();
+    expect(packDownloading("office")).toBe(false);
+    const first = downloadPack("office", h, { sleep: async () => {} });
+    const second = downloadPack("office", hooks(), { sleep: async () => {} });
+    expect(packDownloading("office")).toBe(true);
+    await Promise.all([first, second]);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(h.begin).toHaveBeenCalledTimes(1);
+    expect(h.end).toHaveBeenCalledTimes(1);
+    expect(packDownloading("office")).toBe(false);
   });
 
   it("does nothing more for a pack that is already installed", async () => {

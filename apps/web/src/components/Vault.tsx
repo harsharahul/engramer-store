@@ -103,6 +103,7 @@ import { factsEnabled, setFactsEnabled } from "../intel/scan";
 import { entitiesEnabled, setEntitiesEnabled } from "../intel/entities";
 import {
   NEEDS_SERVER,
+  packDownloading,
   PACK_TITLES,
   defaultDeviceLabel,
   downloadPack,
@@ -293,6 +294,13 @@ export function Vault() {
   // entry points that need a feature pack ask for its download first.
   const localMode = store.local !== null;
   const [view, setView] = useState<View>({ kind: "folder", id: null });
+  // A vault on this device has no Shared view: a stale or restored view of
+  // that kind falls back to All files.
+  useEffect(() => {
+    if (localMode && view.kind === "shared") {
+      setView({ kind: "folder", id: null });
+    }
+  }, [localMode, view.kind]);
   const [query, setQuery] = useState("");
   const [layout, setLayout] = useState<"grid" | "list">(() => loadPref("engramer-layout", "grid"));
   const [sort, setSort] = useState<SortState>(() => loadPref("engramer-sort", { key: "name", dir: 1 }));
@@ -546,7 +554,9 @@ export function Vault() {
   // store is read fresh so a menu built earlier still sees today's state.
   const withPack = useCallback(
     (name: PackName, after: () => void) => {
-      const gate = packGate(useStore.getState().local, name);
+      // A download this page is following counts as running even before
+      // the store has seen the backend say so.
+      const gate = packDownloading(name) ? "wait" : packGate(useStore.getState().local, name);
       if (gate === "run") {
         after();
         return;
@@ -557,8 +567,17 @@ export function Vault() {
       }
       void api
         .localPacks()
-        .then((answer) => setPackPrompt({ name, bytes: answer.packs[name]?.archiveBytes ?? 0, after }))
-        .catch(() => after());
+        .then((answer) => {
+          const status = answer.packs[name];
+          // A pack the manifest does not name, or one installed since the
+          // store last looked, needs no question.
+          if (!status || status.state === "installed") {
+            after();
+            return;
+          }
+          setPackPrompt({ name, bytes: status.archiveBytes, after });
+        })
+        .catch(() => showToast("Could not read the packs on this device. Try again."));
     },
     [showToast],
   );
@@ -2090,7 +2109,7 @@ export function Vault() {
       { id: "toggle-details", label: "Show or hide details", hint: "⌘⌥I", run: toggleDetails },
       {
         id: "request-files",
-        label: "Request files…",
+        label: localMode ? `Request files · ${NEEDS_SERVER}` : "Request files…",
         hint: "receive, encrypted to you",
         run: () => {
           if (useStore.getState().local) {
@@ -2185,7 +2204,8 @@ export function Vault() {
       },
       { id: "go-recent", label: "Go to Recent", run: () => setView({ kind: "recent" }) },
       { id: "go-favorites", label: "Go to Favorites", run: () => setView({ kind: "favorites" }) },
-      { id: "go-shared", label: "Go to Shared", run: () => setView({ kind: "shared" }) },
+      // A vault on this device has nothing to share and no Shared view.
+      ...(localMode ? [] : [{ id: "go-shared", label: "Go to Shared", run: () => setView({ kind: "shared" }) }]),
       { id: "go-trash", label: "Go to Trash", run: () => setView({ kind: "trash" }) },
       {
         id: "unlock-enable",
@@ -2211,8 +2231,11 @@ export function Vault() {
       { id: "lock", label: "Lock vault", hint: "Touch ID or passkey reopens it", run: lock },
       { id: "signout", label: "Sign out", hint: "full sign-out; password required next time", run: signOut },
     ],
+    // Built once per vault; the one input that changes after the first
+    // paint is whether the vault lives on this device, which the user
+    // record settles moments after sign-in.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [localMode],
   );
 
   const toggleLayout = () => {
@@ -2727,7 +2750,7 @@ export function Vault() {
                 } else if (e.key === "Enter" && askable && shownHits.length === 0) {
                   // Nothing to open, and the query is a question: ask it.
                   e.preventDefault();
-                  void runAsk(query.trim());
+                  withPack("intelligence", () => void runAsk(query.trim()));
                 } else if (e.key === "Escape") {
                   setQuery("");
                   (e.target as HTMLInputElement).blur();
@@ -3478,7 +3501,7 @@ export function Vault() {
                   // The palette mirrors; the search field is the home.
                   setQuery(question);
                   searchInput.current?.focus();
-                  void runAsk(question);
+                  withPack("intelligence", () => void runAsk(question));
                 }
               : undefined
           }
@@ -3643,10 +3666,30 @@ export function Vault() {
             // The download runs in the background, narrated by the bell;
             // the entry point's action follows once the pack is installed.
             const { name, after } = packPrompt;
+            // The bell has one job slot. A running upload or processing
+            // pass keeps it, and the download is narrated by toasts instead.
+            let slot = false;
             void downloadPack(name, {
-              begin: (job) => store.beginActivity(job),
-              update: (patch) => store.updateActivity(patch),
-              end: (entry) => store.finishActivity(entry.kind, entry.title, entry.detail),
+              begin: (job) => {
+                slot = useStore.getState().activity.job === null;
+                if (slot) {
+                  store.beginActivity(job);
+                } else {
+                  showToast(`${job.title}; the Profile row shows its progress.`);
+                }
+              },
+              update: (patch) => {
+                if (slot) {
+                  store.updateActivity(patch);
+                }
+              },
+              end: (entry) => {
+                if (slot) {
+                  store.finishActivity(entry.kind, entry.title, entry.detail);
+                } else if (entry.detail) {
+                  showToast(entry.detail);
+                }
+              },
             })
               .then(async () => {
                 await store.refreshUsage();

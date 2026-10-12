@@ -94,17 +94,34 @@ function progressLine(status: PackStatus): string {
   return `${formatBytes(status.downloadedBytes)} of ${formatBytes(status.archiveBytes)}`;
 }
 
+type FollowOptions = { pollMs?: number; sleep?: (ms: number) => Promise<void> };
+
+/** The downloads this page is following right now: a second entry point
+ * joins the first instead of starting another job for the same pack. */
+const inFlight = new Map<PackName, Promise<void>>();
+
+export function packDownloading(name: PackName): boolean {
+  return inFlight.has(name);
+}
+
 /**
  * Starts (or resumes) a pack's download and follows it in Activity until
  * the backend reports it installed. Resolves then; rejects with the
  * backend's own sentence when the attempt did not install the pack, so
- * the entry point can say why.
+ * the entry point can say why. A download already being followed is
+ * returned as is; the later caller's hooks are not used.
  */
-export async function downloadPack(
-  name: PackName,
-  hooks: PackJobHooks,
-  options: { pollMs?: number; sleep?: (ms: number) => Promise<void> } = {},
-): Promise<void> {
+export function downloadPack(name: PackName, hooks: PackJobHooks, options: FollowOptions = {}): Promise<void> {
+  const running = inFlight.get(name);
+  if (running) {
+    return running;
+  }
+  const run = followPack(name, hooks, options).finally(() => inFlight.delete(name));
+  inFlight.set(name, run);
+  return run;
+}
+
+async function followPack(name: PackName, hooks: PackJobHooks, options: FollowOptions): Promise<void> {
   const pollMs = options.pollMs ?? 1000;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   let status: PackStatus | undefined = (await api.localPackStart(name)).packs[name];
@@ -123,14 +140,27 @@ export async function downloadPack(
     failed: 0,
     current: progressLine(status),
   });
-  while (status.state === "downloading") {
-    await sleep(pollMs);
-    status = (await api.localPacks()).packs[name] ?? status;
-    hooks.update({
-      done: megabytes(status.downloadedBytes),
-      total: megabytes(status.archiveBytes),
-      current: progressLine(status),
+  try {
+    // A stalled transfer ends on the backend's own read timeout, which
+    // reports it as a failed attempt, so this loop always sees an end.
+    while (status.state === "downloading") {
+      await sleep(pollMs);
+      status = (await api.localPacks()).packs[name] ?? status;
+      hooks.update({
+        done: megabytes(status.downloadedBytes),
+        total: megabytes(status.archiveBytes),
+        current: progressLine(status),
+      });
+    }
+  } catch (err) {
+    // The backend carries on by itself; only this page lost sight of it.
+    const reason = err instanceof Error ? err.message : String(err);
+    hooks.end({
+      kind: "downloading",
+      title,
+      detail: `Lost track of the download: ${reason}. The Profile row shows where it stands.`,
     });
+    throw err;
   }
   if (status.state === "installed") {
     hooks.end({
