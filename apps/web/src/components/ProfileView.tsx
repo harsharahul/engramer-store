@@ -710,7 +710,7 @@ export function ProfileView(props: {
           )}
           <Button
             variant="secondary"
-            title="Full sign-out: removes device unlock; password required next time"
+            title={`Full sign-out: removes device unlock; ${local ? "passphrase" : "password"} required next time`}
             onClick={props.onSignOut}
           >
             Sign out

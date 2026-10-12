@@ -2210,7 +2210,7 @@ export function Vault() {
       {
         id: "unlock-enable",
         label: "Enable device unlock",
-        hint: "Touch ID or passkey instead of the password",
+        hint: `Touch ID or passkey instead of the ${localMode ? "passphrase" : "password"}`,
         run: () => {
           if (hasDeviceUnlock()) {
             showToast("Device unlock is already on for this device.");
@@ -2222,14 +2222,19 @@ export function Vault() {
       {
         id: "unlock-disable",
         label: "Disable device unlock",
-        hint: "require the password on this device",
+        hint: `require the ${localMode ? "passphrase" : "password"} on this device`,
         run: () => {
           clearNativeUnlock();
-          showToast("Device unlock removed. Your password is required next time.");
+          showToast(`Device unlock removed. Your ${localMode ? "passphrase" : "password"} is required next time.`);
         },
       },
       { id: "lock", label: "Lock vault", hint: "Touch ID or passkey reopens it", run: lock },
-      { id: "signout", label: "Sign out", hint: "full sign-out; password required next time", run: signOut },
+      {
+        id: "signout",
+        label: "Sign out",
+        hint: `full sign-out; ${localMode ? "passphrase" : "password"} required next time`,
+        run: signOut,
+      },
     ],
     // Built once per vault; the one input that changes after the first
     // paint is whether the vault lives on this device, which the user
