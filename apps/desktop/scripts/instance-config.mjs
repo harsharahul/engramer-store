@@ -21,6 +21,7 @@
  * work.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -63,7 +64,9 @@ if (raw) {
 // "Keep it on this device" has a client to serve from the loopback origin.
 // The bundle is the output of `pnpm --filter @engramer/web local:packs`; its
 // location can be overridden for a build made elsewhere.
-const coreDir = (process.env.ENGRAM_LOCAL_CORE ?? "").trim() || join(here, "..", "..", "web", "dist-local", "core");
+const coreDir =
+  (process.env.ENGRAM_LOCAL_CORE ?? "").trim().replace(/^~(?=\/)/, homedir()) ||
+  join(here, "..", "..", "web", "dist-local", "core");
 if (generic) {
   if (!existsSync(join(coreDir, "index.html")) || !existsSync(join(coreDir, "packs.json"))) {
     console.error(
@@ -118,6 +121,10 @@ capability.description = "The deployment this build belongs to, named at build t
 // commands adds no trust it does not have. Plain http stays pinned to the
 // baked (dev) origin; a generic build has no baked origin to pin.
 capability.remote = { urls: generic ? ["https://**"] : [origin, "https://**"] };
+// The vault on this device is started, inspected and removed only from the
+// bundled picker and from the vault's own loopback page (granted at runtime);
+// no page a server serves gets those commands.
+capability.permissions = capability.permissions.filter((permission) => permission !== "local-commands");
 mkdirSync(join(outDir, "capabilities"), { recursive: true });
 writeFileSync(
   join(outDir, "capabilities", "instance.json"),

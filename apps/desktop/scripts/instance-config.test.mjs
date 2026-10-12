@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -79,6 +79,34 @@ test("a generic build without the core bundle is a refusal with the build hint",
     assert.match(r.stderr, /local:packs/);
   } finally {
     rmSync(empty, { recursive: true, force: true });
+  }
+});
+
+test("a core bundle named with a tilde is found under the home directory", () => {
+  const core = mkdtempSync(join(homedir(), ".instance-config-core-"));
+  writeFileSync(join(core, "index.html"), "<!doctype html>");
+  writeFileSync(join(core, "packs.json"), "{}");
+  try {
+    const r = run({ ENGRAM_GENERIC: "1", ENGRAM_LOCAL_CORE: `~/${core.slice(homedir().length + 1)}` });
+    assert.equal(r.ok, true, r.stderr);
+    const [source] = Object.keys(r.instance.bundle.resources);
+    assert.equal(resolve(join(here, "..", "src-tauri"), source), core);
+  } finally {
+    rmSync(core, { recursive: true, force: true });
+  }
+});
+
+test("the remote capability never grants the local vault's commands", () => {
+  const core = fakeCore();
+  try {
+    for (const env of [{ ENGRAM_GENERIC: "1", ENGRAM_LOCAL_CORE: core }, { ENGRAM_APP_URL: "https://vault.example.com" }]) {
+      const r = run(env);
+      assert.equal(r.ok, true, r.stderr);
+      assert.ok(r.capability.permissions.includes("shell-commands"));
+      assert.ok(!r.capability.permissions.includes("local-commands"), JSON.stringify(env));
+    }
+  } finally {
+    rmSync(core, { recursive: true, force: true });
   }
 });
 

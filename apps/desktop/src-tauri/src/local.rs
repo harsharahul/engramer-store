@@ -143,6 +143,7 @@ pub fn capability_json(port: u16) -> String {
             "core:window:allow-start-dragging",
             "dialog:allow-open",
             "shell-commands",
+            "local-commands",
             "notification:default"
         ]
     })
@@ -211,7 +212,12 @@ async fn serve(app: &AppHandle, state: Arc<AppState>) -> Result<Bound, String> {
         _ => {}
     }
     if remembered != Some(bound.port) {
-        write_port(app, bound.port)?;
+        // A port that cannot be remembered is not served: a running
+        // backend nobody can reach again would only hold the vault open.
+        if let Err(err) = write_port(app, bound.port) {
+            bound.stop().await;
+            return Err(format!("cannot remember the port: {err}"));
+        }
     }
     Ok(bound)
 }
@@ -337,6 +343,88 @@ pub async fn disable(app: &AppHandle) -> Result<(), String> {
     set_enabled(app, false)
 }
 
+/// Only the vault's own page, while the backend runs, may remove the vault:
+/// the shell's commands also reach the pages of servers this app signs in
+/// to, and a vault on this device may be the only copy.
+fn may_delete(running: Option<u16>, current_origin: &str) -> Result<(), String> {
+    let Some(port) = running else {
+        return Err("the vault on this device is not running".to_string());
+    };
+    if current_origin != origin(port) {
+        return Err("only the vault's own page can remove it".to_string());
+    }
+    Ok(())
+}
+
+/// The server whose presence must leave this device before the vault moves
+/// here: the extension record's origin and account, unless the record
+/// already belongs to a vault on this device.
+fn server_record_to_tear_down(record: &[u8]) -> Option<(String, String)> {
+    let value: serde_json::Value = serde_json::from_slice(record).ok()?;
+    let origin = value.get("origin")?.as_str()?.to_string();
+    let email = value.get("email")?.as_str()?.to_string();
+    (!origin.starts_with("http://127.0.0.1:")).then_some((origin, email))
+}
+
+/// Keeping the vault here removes real things for a server this device
+/// was signed in to, so it says which, and asks, before anything happens.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+async fn confirm_keep_local(app: &AppHandle, old_origin: &str) -> Result<(), String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+    let host = url::Url::parse(old_origin)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .unwrap_or_else(|| old_origin.to_string());
+    let message = format!(
+        "Keep the vault on this device?\n\nThe drive, extension access, and watched folders for {host} will be removed from this device. Files on that server are not affected."
+    );
+    let dialog = app
+        .dialog()
+        .message(message)
+        .title("Keep it on this device")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Keep it here".to_string(),
+            "Cancel".to_string(),
+        ));
+    let confirmed = tauri::async_runtime::spawn_blocking(move || dialog.blocking_show())
+        .await
+        .map_err(|err| err.to_string())?;
+    if confirmed {
+        Ok(())
+    } else {
+        Err("kept the current server".to_string())
+    }
+}
+
+/// A server this device was signed in to leaves it before the vault moves
+/// here, exactly as a server switch does: confirmed, then the extension
+/// record, the drive, offline files and watched folders go.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+async fn leave_server_for_local(app: &AppHandle) -> Result<(), String> {
+    let record =
+        tauri::async_runtime::spawn_blocking(|| crate::keychain::read_any(crate::handoff::SERVICE))
+            .await
+            .map_err(|err| err.to_string())?;
+    match record {
+        Ok(Some(bytes)) => {
+            if let Some((old_origin, old_email)) = server_record_to_tear_down(&bytes) {
+                confirm_keep_local(app, &old_origin).await?;
+                #[cfg(target_os = "macos")]
+                crate::pushsync::stop();
+                crate::serverurl::teardown_previous(app, old_email).await;
+            }
+        }
+        Ok(None) => {}
+        Err(err) => eprintln!("local mode: extension record unreadable ({err}); continuing"),
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+async fn leave_server_for_local(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalStatus {
@@ -370,6 +458,7 @@ pub async fn local_mode_enable(app: AppHandle) -> Result<String, String> {
         crate::serverurl::navigate_main(&app, url)?;
         return Ok(origin(port));
     }
+    leave_server_for_local(&app).await?;
     set_enabled(&app, true)?;
     match boot(&app).await {
         Ok(origin) => Ok(origin),
@@ -383,18 +472,21 @@ pub async fn local_mode_enable(app: AppHandle) -> Result<String, String> {
 /// Removes the vault from this device: stops the backend, deletes the
 /// database and the blobs, the extension record and the unlock secret for
 /// `email`, forgets the choice and the port, and returns to the picker.
+/// Only the vault's own page may call it, while the backend runs.
 #[tauri::command]
 pub async fn local_vault_delete(app: AppHandle, email: String) -> Result<(), String> {
+    may_delete(running_port(&app), &crate::serverurl::current_origin(&app))?;
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        // The unlock secret is scoped to the origin the window shows, which
+        // the check above made the vault's loopback origin.
+        let _ = crate::unlock::unlock_secret_delete(app.clone(), email.clone()).await;
+    }
     stop(&app).await;
     #[cfg(target_os = "macos")]
     crate::pushsync::stop();
     #[cfg(any(target_os = "macos", target_os = "ios"))]
-    {
-        crate::serverurl::teardown_previous(&app, email.clone()).await;
-        // The unlock secret is scoped to the origin the window shows, which
-        // is still the vault's loopback origin at this point.
-        let _ = crate::unlock::unlock_secret_delete(app.clone(), email.clone()).await;
-    }
+    crate::serverurl::teardown_previous(&app, email.clone()).await;
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     let _ = email;
     let vault = vault_dir(&app)?;
@@ -443,5 +535,45 @@ mod tests {
             "no wildcard origin: {text}"
         );
         assert!(text.contains("\"shell-commands\""));
+    }
+
+    #[test]
+    fn the_capability_grants_the_main_windows_permissions() {
+        // The loopback page gets exactly what the main window's static
+        // capability grants, local commands included; a permission added to
+        // one and not the other would leave the vault's page without it.
+        let main: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let local: serde_json::Value = serde_json::from_str(&capability_json(1)).unwrap();
+        assert_eq!(local["permissions"], main["permissions"]);
+        assert!(main["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p == "local-commands"));
+    }
+
+    #[test]
+    fn vault_removal_needs_the_vaults_own_page() {
+        assert!(may_delete(None, "http://127.0.0.1:38765").is_err());
+        assert!(may_delete(Some(38765), "https://vault.example.com").is_err());
+        assert!(may_delete(Some(38765), "http://127.0.0.1:38766").is_err());
+        assert!(may_delete(Some(38765), "http://127.0.0.1:38765").is_ok());
+    }
+
+    #[test]
+    fn a_server_record_means_a_switch_before_local_mode() {
+        let server =
+            br#"{"origin":"https://vault.example.com","email":"a@example.com","token":"t"}"#;
+        assert_eq!(
+            server_record_to_tear_down(server),
+            Some((
+                "https://vault.example.com".to_string(),
+                "a@example.com".to_string()
+            ))
+        );
+        let local = br#"{"origin":"http://127.0.0.1:38765","email":"a@example.com","token":"t"}"#;
+        assert_eq!(server_record_to_tear_down(local), None);
+        assert_eq!(server_record_to_tear_down(b"not json"), None);
     }
 }

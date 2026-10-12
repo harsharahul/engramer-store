@@ -247,12 +247,19 @@ pub fn run() {
             Ok(())
         })
         // One line per page load on the loopback origin: the proof, in the
-        // app's own log, that local mode served its client.
+        // app's own log, that local mode served its client. Origin and path
+        // only: a share link carries its file key in the fragment.
         .on_page_load(|webview, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Finished
                 && payload.url().host_str() == Some("127.0.0.1")
             {
-                eprintln!("local mode: page loaded {} in {}", payload.url(), webview.label());
+                let url = payload.url();
+                eprintln!(
+                    "local mode: page loaded {}{} in {}",
+                    url.origin().ascii_serialization(),
+                    url.path(),
+                    webview.label()
+                );
             }
         })
         // Closing the window parks the app in the tray; Quit lives there.

@@ -219,14 +219,20 @@ pub(crate) fn back_to_picker(app: &AppHandle, error: &str, origin: &str) {
 pub fn apply_stored(app: &AppHandle) {
     // A vault kept on this device comes before any server override: the
     // backend starts and the window goes to its loopback origin. When it
-    // cannot start, the picker says why instead of a blank window.
+    // cannot start, the picker says why instead of a blank window. Only a
+    // generic build carries the picker and the client; a baked build that
+    // finds the choice left by a generic build on the same identifier
+    // ignores it and opens its server.
     if crate::local::enabled(app) {
-        let handle = app.clone();
-        if let Err(message) = tauri::async_runtime::block_on(crate::local::boot(&handle)) {
-            eprintln!("local mode: {message}");
-            back_to_picker(app, &message, "this device");
+        if generic_build(app) {
+            let handle = app.clone();
+            if let Err(message) = tauri::async_runtime::block_on(crate::local::boot(&handle)) {
+                eprintln!("local mode: {message}");
+                back_to_picker(app, &message, "");
+            }
+            return;
         }
-        return;
+        eprintln!("local mode: this build carries no picker; opening the baked server instead");
     }
     let Ok(path) = store_path(app) else { return };
     let Ok(stored) = fs::read_to_string(&path) else {

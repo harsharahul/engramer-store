@@ -72,12 +72,6 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         refusedToken = record?.token
     }
 
-    /// The system's word for a failed call. A token the server no
-    /// longer honors is "not authenticated", which Files shows as a
-    /// sign-in prompt that opens the app; everything else is the
-    /// connection problem it always was. Before this distinction an
-    /// expired token read as "server unreachable", and there was nothing
-    /// for the person to reconnect.
     /// The system's word for a connection that failed. A vault kept on
     /// this device answers only while Engram Store runs, so that case
     /// says what to do instead of blaming a network.
@@ -91,6 +85,12 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         return NSFileProviderError(.serverUnreachable)
     }
 
+    /// The system's word for a failed call. A token the server no
+    /// longer honors is "not authenticated", which Files shows as a
+    /// sign-in prompt that opens the app; everything else is the
+    /// connection problem it always was. Before this distinction an
+    /// expired token read as "server unreachable", and there was nothing
+    /// for the person to reconnect.
     private func providerError(_ failure: EngramApiFailure) -> NSFileProviderError {
         switch failure {
         case .notAuthenticated:
@@ -156,7 +156,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             return progress
         }
         guard let url = URL(string: "\(record.origin)/api/files/\(entry.id)/data") else {
-            completionHandler(nil, nil, self.unreachable())
+            completionHandler(nil, nil, NSFileProviderError(.serverUnreachable))
             return progress
         }
         var download = URLRequest(url: url)
@@ -214,7 +214,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             do {
                 try FileManager.default.moveItem(at: downloaded, to: blob)
             } catch {
-                completionHandler(nil, nil, self.unreachable())
+                completionHandler(nil, nil, NSFileProviderError(.serverUnreachable))
                 return
             }
             defer { try? FileManager.default.removeItem(at: blob) }
@@ -288,7 +288,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
               let key = try? JSONSerialization.jsonObject(with: Data(envelope.encryptedKeyJson.utf8)),
               let meta = try? JSONSerialization.jsonObject(with: Data(envelope.encryptedMetaJson.utf8))
         else {
-            completionHandler(nil, [], false, self.unreachable())
+            completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
             return
         }
         let created: Data
@@ -306,7 +306,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         guard let dto = try? JSONSerialization.jsonObject(with: created) as? [String: Any],
               let folderId = dto["id"] as? String
         else {
-            completionHandler(nil, [], false, self.unreachable())
+            completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
             return
         }
         index.refresh()
@@ -345,7 +345,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             let key = try? JSONSerialization.jsonObject(with: Data(envelope.encryptedKeyJson.utf8)),
             let meta = try? JSONSerialization.jsonObject(with: Data(envelope.encryptedMetaJson.utf8))
         else {
-            completionHandler(nil, [], false, self.unreachable())
+            completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
             return
         }
         let created: Data
@@ -363,7 +363,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         guard let dto = try? JSONSerialization.jsonObject(with: created) as? [String: Any],
               let fileId = dto["id"] as? String
         else {
-            completionHandler(nil, [], false, self.unreachable())
+            completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
             return
         }
         let uploaded = EngramApi.uploadContent(record: record, fileId: fileId, blob: scratch)
@@ -455,7 +455,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 }
                 if changedFields.contains(.filename) {
                     guard let sealed = self.resealMetadata(entry: entry, newName: item.filename) else {
-                        completionHandler(nil, [], false, self.unreachable())
+                        completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
                         return
                     }
                     payload["encryptedMeta"] = sealed
@@ -497,7 +497,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             }
             if changedFields.contains(.filename) {
                 guard let sealed = resealMetadata(entry: entry, newName: item.filename) else {
-                    completionHandler(nil, [], false, self.unreachable())
+                    completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
                     return
                 }
                 payload["encryptedMeta"] = sealed
@@ -601,7 +601,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             // The copy could not be stored; refuse the save outright so
             // Files keeps the local bytes dirty and retries. Losing the
             // edit silently is the one outcome this path must never have.
-            completionHandler(nil, [], false, self.unreachable())
+            completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
             return
         }
         index.refresh()
@@ -731,7 +731,7 @@ final class RootItem: NSObject, NSFileProviderItem {
                 defer { progress.completedUnitCount = 1 }
                 let links = entries.compactMap { Self.shareLink(record: record, entry: $0) }
                 guard links.count == entries.count else {
-                    completionHandler(self.unreachable())
+                    completionHandler(NSFileProviderError(.serverUnreachable))
                     return
                 }
                 DispatchQueue.main.async {

@@ -125,6 +125,11 @@
     connecting.style.display = "block";
     connectingTo.textContent = "Connecting to " + origin + "…";
   }
+  function showOpeningLocal() {
+    form.style.display = "none";
+    connecting.style.display = "block";
+    connectingTo.textContent = "Opening the vault on this device…";
+  }
 
   async function connect() {
     const value = input.value.trim();
@@ -145,7 +150,7 @@
     button.disabled = true;
     localButton.disabled = true;
     errorEl.textContent = "";
-    showConnecting("this device");
+    showOpeningLocal();
     try {
       // On success the shell navigates this window to the vault on this
       // device; only a failure returns.
