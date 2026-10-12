@@ -7,7 +7,7 @@ use std::net::TcpListener as StdListener;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::extract::{DefaultBodyLimit, Request};
+use axum::extract::{DefaultBodyLimit, Request, State};
 use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -20,6 +20,7 @@ use tokio::task::JoinHandle;
 use crate::blobs::{BlobStore, BLOBS_DIR};
 use crate::error::ApiError;
 use crate::events::SeqEvents;
+use crate::extract::blocking;
 use crate::headers::OFFICE_PREFIX;
 use crate::packs::{Packs, PACKS_DIR};
 use crate::store::{Store, DB_FILE};
@@ -272,9 +273,23 @@ async fn ready() -> Json<Value> {
 }
 
 /// An on-device vault always lets its owner create the vault, and says
-/// it is one: the sign-in screen reads `local` before any account exists.
-async fn registration() -> Json<Value> {
-    Json(json!({ "mode": "open", "macAppUrl": null, "local": true }))
+/// it is one: the sign-in screen reads `local` before any account exists,
+/// and `vault` tells it whether to offer creating the vault or unlocking
+/// it.
+async fn registration(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ApiError> {
+    let created = blocking(&state, |store| {
+        let accounts: i64 = store
+            .conn()
+            .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))?;
+        Ok(accounts > 0)
+    })
+    .await?;
+    Ok(Json(json!({
+        "mode": "open",
+        "macAppUrl": null,
+        "local": true,
+        "vault": if created { "created" } else { "empty" },
+    })))
 }
 
 async fn needs_server() -> ApiError {
@@ -473,8 +488,12 @@ pub(crate) mod tests {
         let value: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(
             value,
-            json!({ "mode": "open", "macAppUrl": null, "local": true })
+            json!({ "mode": "open", "macAppUrl": null, "local": true, "vault": "empty" })
         );
+        signed_in(server.port, "first@example.com");
+        let (_, _, body) = server.request("GET", "/api/auth/registration", None);
+        let value: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(value["vault"], "created");
     }
 
     #[test]
