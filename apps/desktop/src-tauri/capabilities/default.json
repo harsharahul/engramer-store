@@ -16,6 +16,7 @@
     "core:window:allow-start-dragging",
     "dialog:allow-open",
     "shell-commands",
+    "local-commands",
     "notification:default"
   ]
 }

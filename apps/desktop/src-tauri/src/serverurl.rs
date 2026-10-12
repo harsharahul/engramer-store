@@ -79,7 +79,7 @@ fn host_of(origin: &str) -> String {
 /// Asks the address to prove it is an Engram Store server before the shell
 /// commits to it. Redirects are followed and the final origin is what gets
 /// adopted, so the stored server is where the vault actually answers.
-fn probe_health(origin: &str) -> Result<String, String> {
+pub(crate) fn probe_health(origin: &str) -> Result<String, String> {
     let host = host_of(origin);
     let client = reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(6))
@@ -159,7 +159,7 @@ async fn confirm_switch(app: &AppHandle, new_origin: &str, old_origin: &str) -> 
 /// than serving the old vault), then the drive itself, then the
 /// in-process registries and staged uploads.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-async fn teardown_previous(app: &AppHandle, email: String) {
+pub(crate) async fn teardown_previous(app: &AppHandle, email: String) {
     let record_email = email.clone();
     let _ = tauri::async_runtime::spawn_blocking(move || {
         crate::keychain::delete_shared(crate::handoff::SERVICE, &record_email)
@@ -176,7 +176,7 @@ async fn teardown_previous(app: &AppHandle, email: String) {
     crate::watched::clear_all(app);
 }
 
-fn navigate_main(app: &AppHandle, url: url::Url) -> Result<(), String> {
+pub(crate) fn navigate_main(app: &AppHandle, url: url::Url) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "no main window".to_string())?;
@@ -198,7 +198,7 @@ fn generic_build(app: &AppHandle) -> bool {
 /// Returns to the bundled picker page with the failure spelled out, so an
 /// unreachable server is an honest state instead of a blank window. Only
 /// meaningful while the window still shows the local page.
-fn back_to_picker(app: &AppHandle, error: &str, origin: &str) {
+pub(crate) fn back_to_picker(app: &AppHandle, error: &str, origin: &str) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
@@ -217,6 +217,23 @@ fn back_to_picker(app: &AppHandle, error: &str, origin: &str) {
 /// lands back on the picker with the reason when it will not: there is no
 /// baked page behind it to fall back to.
 pub fn apply_stored(app: &AppHandle) {
+    // A vault kept on this device comes before any server override: the
+    // backend starts and the window goes to its loopback origin. When it
+    // cannot start, the picker says why instead of a blank window. Only a
+    // generic build carries the picker and the client; a baked build that
+    // finds the choice left by a generic build on the same identifier
+    // ignores it and opens its server.
+    if crate::local::enabled(app) {
+        if generic_build(app) {
+            let handle = app.clone();
+            if let Err(message) = tauri::async_runtime::block_on(crate::local::boot(&handle)) {
+                eprintln!("local mode: {message}");
+                back_to_picker(app, &message, "");
+            }
+            return;
+        }
+        eprintln!("local mode: this build carries no picker; opening the baked server instead");
+    }
     let Ok(path) = store_path(app) else { return };
     let Ok(stored) = fs::read_to_string(&path) else {
         return;
@@ -293,6 +310,9 @@ pub async fn server_url_set(app: AppHandle, url: String) -> Result<(), String> {
     // server being left; it restarts on the new one's first signal.
     #[cfg(target_os = "macos")]
     crate::pushsync::stop();
+    // A vault kept on this device stays on disk; its backend stops and the
+    // choice is forgotten, so the next launch opens the server.
+    crate::local::disable(&app).await?;
     let path = store_path(&app)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
@@ -308,8 +328,13 @@ pub async fn server_url_set(app: AppHandle, url: String) -> Result<(), String> {
 pub fn server_url_clear(app: AppHandle) -> Result<(), String> {
     let path = store_path(&app)?;
     let _ = fs::remove_file(path);
+    go_home(&app)
+}
+
+/// Navigates to the build's own starting page.
+pub(crate) fn go_home(app: &AppHandle) -> Result<(), String> {
     if let Some(home) = app.try_state::<HomeUrl>().and_then(|state| state.0.clone()) {
-        return navigate_main(&app, home);
+        return navigate_main(app, home);
     }
     let default = app
         .config()
@@ -319,7 +344,7 @@ pub fn server_url_clear(app: AppHandle) -> Result<(), String> {
         .map(|window| window.url.to_string())
         .ok_or_else(|| "no configured window".to_string())?;
     let target = url::Url::parse(&default).map_err(|_| "no usable default page".to_string())?;
-    navigate_main(&app, target)
+    navigate_main(app, target)
 }
 
 #[cfg(test)]

@@ -72,6 +72,19 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         refusedToken = record?.token
     }
 
+    /// The system's word for a connection that failed. A vault kept on
+    /// this device answers only while Engram Store runs, so that case
+    /// says what to do instead of blaming a network.
+    private func unreachable() -> NSFileProviderError {
+        if let origin = record?.origin, origin.hasPrefix("http://127.0.0.1:") {
+            return NSFileProviderError(
+                .serverUnreachable,
+                userInfo: [NSLocalizedDescriptionKey: "Open Engram Store to browse this vault."]
+            )
+        }
+        return NSFileProviderError(.serverUnreachable)
+    }
+
     /// The system's word for a failed call. A token the server no
     /// longer honors is "not authenticated", which Files shows as a
     /// sign-in prompt that opens the app; everything else is the
@@ -84,7 +97,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             noteRefusedToken()
             return NSFileProviderError(.notAuthenticated)
         case .unreachable:
-            return NSFileProviderError(.serverUnreachable)
+            return self.unreachable()
         }
     }
 
@@ -93,7 +106,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             noteRefusedToken()
             return NSFileProviderError(.notAuthenticated)
         }
-        return NSFileProviderError(.serverUnreachable)
+        return self.unreachable()
     }
 
     // Deliberately NOT observing materializedItemsDidChange: reacting to
@@ -170,13 +183,13 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                                             completionHandler: completionHandler)
                 } else {
                     self.noteFailedFetch(entry)
-                    completionHandler(nil, nil, NSFileProviderError(.serverUnreachable))
+                    completionHandler(nil, nil, self.unreachable())
                 }
                 return
             }
             guard let http = response as? HTTPURLResponse else {
                 self.noteFailedFetch(entry)
-                completionHandler(nil, nil, NSFileProviderError(.serverUnreachable))
+                completionHandler(nil, nil, self.unreachable())
                 return
             }
             if http.statusCode == 401 {

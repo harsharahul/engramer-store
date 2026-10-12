@@ -12,6 +12,7 @@ mod filesprovider;
 mod handoff;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod keychain;
+mod local;
 mod media;
 mod network;
 mod offline;
@@ -166,6 +167,7 @@ pub fn run() {
         .manage::<watched::SharedWatchState>(Arc::new(Mutex::new(Default::default())))
         .manage(media::MediaState::default())
         .manage(intel::IntelState::default())
+        .manage(local::LocalMode::default())
         .register_asynchronous_uri_scheme_protocol("stream", media::handle)
         .register_asynchronous_uri_scheme_protocol("picked", pickedstream::handle)
         .invoke_handler(tauri::generate_handler![
@@ -220,6 +222,9 @@ pub fn run() {
             serverurl::server_url_get,
             serverurl::server_url_set,
             serverurl::server_url_clear,
+            local::local_mode_status,
+            local::local_mode_enable,
+            local::local_vault_delete,
             network::network_status,
             intel::intel_available,
             intel::intel_generate,
@@ -240,6 +245,22 @@ pub fn run() {
             #[cfg(desktop)]
             install_tray(app)?;
             Ok(())
+        })
+        // One line per page load on the loopback origin: the proof, in the
+        // app's own log, that local mode served its client. Origin and path
+        // only: a share link carries its file key in the fragment.
+        .on_page_load(|webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished
+                && payload.url().host_str() == Some("127.0.0.1")
+            {
+                let url = payload.url();
+                eprintln!(
+                    "local mode: page loaded {}{} in {}",
+                    url.origin().ascii_serialization(),
+                    url.path(),
+                    webview.label()
+                );
+            }
         })
         // Closing the window parks the app in the tray; Quit lives there.
         // iOS windows never close, they background, so only desktop hooks in.
@@ -268,12 +289,19 @@ pub fn run() {
             if let tauri::RunEvent::Reopen { .. } = event {
                 show_main(app);
             }
+            // The vault's listener stops with the process, after requests in
+            // flight; on a phone it is checked again when the app comes back.
+            if let tauri::RunEvent::Exit = event {
+                local::stop_blocking(app);
+            }
+            #[cfg(mobile)]
+            if let tauri::RunEvent::Resumed = event {
+                local::resumed(app);
+            }
             // iPad asked for another window of the app.
             #[cfg(target_os = "ios")]
             if let tauri::RunEvent::SceneRequested { .. } = event {
                 open_scene_window(app);
             }
-            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-            let _ = (app, event);
         });
 }

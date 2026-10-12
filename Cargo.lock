@@ -1160,6 +1160,7 @@ dependencies = [
  "crypto_secretbox",
  "engram-core",
  "engram-ffi",
+ "engram-local",
  "http",
  "notify",
  "objc2",

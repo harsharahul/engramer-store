@@ -37,6 +37,9 @@ pub fn clear_staging() {
 }
 
 #[cfg(target_os = "ios")]
+pub(crate) use apple::group_container_dir;
+
+#[cfg(target_os = "ios")]
 mod apple {
     use super::DrainReport;
     use objc2::msg_send;
@@ -52,7 +55,9 @@ mod apple {
         token: String,
     }
 
-    pub(super) fn group_outbox_dir() -> Option<PathBuf> {
+    /// The app group container shared with the extensions, if the
+    /// process has one.
+    pub(crate) fn group_container_dir() -> Option<PathBuf> {
         unsafe {
             let class = AnyClass::get(c"NSFileManager")?;
             let manager: *mut AnyObject = msg_send![class, defaultManager];
@@ -63,9 +68,12 @@ mod apple {
                 return None;
             }
             let path: *const NSString = msg_send![url, path];
-            path.as_ref()
-                .map(|p| PathBuf::from(p.to_string()).join("outbox"))
+            path.as_ref().map(|p| PathBuf::from(p.to_string()))
         }
+    }
+
+    pub(super) fn group_outbox_dir() -> Option<PathBuf> {
+        group_container_dir().map(|dir| dir.join("outbox"))
     }
 
     fn remove_job(dir: &Path, file_id: &str) {

@@ -75,3 +75,19 @@ commands.allow = [
     "intel_generate",
     "intel_cancel",
 ]
+
+# The vault on this device: its own page and the bundled picker may start,
+# inspect and remove it. A server's page never gets these, so no page a
+# server serves can start local mode or delete the vault; the generated
+# capability for https origins leaves this permission out.
+[[permission]]
+identifier = "local-commands"
+description = """
+Lets the bundled picker and the vault's own loopback page start local mode,
+read its state and remove the vault from this device.
+"""
+commands.allow = [
+    "local_mode_status",
+    "local_mode_enable",
+    "local_vault_delete",
+]
