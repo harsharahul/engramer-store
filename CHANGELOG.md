@@ -68,6 +68,18 @@ All notable changes to Engram Store are documented here, following
   core bundle ships inside generic builds, which refuse to build without
   it or with a core of another version. The Files provider says to open
   the app when a vault on the device is not being served.
+- **The app works without a server.** A vault kept on this device is created
+  and unlocked with the passphrase alone; the sign-in screen and Profile say
+  "This device" where the server used to be, Profile shows the vault's size
+  and its folder, and the vault can be removed from the device after a
+  passphrase check. Features that need a server (sharing, file requests,
+  two-factor sign-in, rotating the recovery key) stay visible and say so.
+  Opening or creating a document, turning on reading images, searching by
+  meaning or naming entities, and asking a question first offer to download
+  the pack they need, with its size from the release manifest and a one-line
+  privacy statement; the download shows in the Activity bell and the action
+  continues once the pack is installed. Profile lists each pack with Download
+  and Remove and offers to download everything now.
 
 ### Fixed
 - **Offline file records are never read half-written.** The record kept
