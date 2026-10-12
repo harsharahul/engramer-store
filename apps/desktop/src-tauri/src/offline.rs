@@ -81,12 +81,24 @@ impl OfflineStore {
             .unwrap_or_default()
     }
 
+    /// Written whole beside the meta and renamed into place: a reader that
+    /// looks while a write is in progress sees the old meta or the new one,
+    /// never a half-written file, which would parse as an empty meta with
+    /// no pin and no segment bits.
     fn write_meta(&self, file_id: &str, meta: &Meta) -> Result<(), String> {
+        let path = self.meta_path(file_id);
+        let staged = self
+            .root
+            .join(format!("{file_id}.json.{}.tmp", std::process::id()));
         std::fs::write(
-            self.meta_path(file_id),
+            &staged,
             serde_json::to_vec(meta).map_err(|err| err.to_string())?,
         )
-        .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?;
+        std::fs::rename(&staged, &path).map_err(|err| {
+            let _ = std::fs::remove_file(&staged);
+            err.to_string()
+        })
     }
 
     fn seg_present(meta: &Meta, index: usize) -> bool {
