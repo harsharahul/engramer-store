@@ -886,7 +886,8 @@ export function ProfileView(props: {
             <b>Lock after inactivity</b>
             <div className="profile-row-sub">
               A quiet spell locks the vault the way the Lock button does; device unlock or the
-              password reopens it. The choice follows your account to every device.
+              {local ? " passphrase" : " password"} reopens it.{" "}
+              {local ? "The choice is kept with this vault." : "The choice follows your account to every device."}
             </div>
           </div>
           <select
@@ -910,9 +911,9 @@ export function ProfileView(props: {
             <div className="profile-row-main">
               <b>Your key fingerprint</b>
               <div className="profile-row-sub">
-                When someone releases a document to you, this is shown beside your address. Read it
-                to them over a call or in person: if it matches what they see, the key the server
-                gave them is yours.
+                {local
+                  ? "Once this vault is connected to a server, this is shown beside your address when someone releases a document to you. Read it to them over a call or in person: if it matches what they see, the key they were given is yours."
+                  : "When someone releases a document to you, this is shown beside your address. Read it to them over a call or in person: if it matches what they see, the key the server gave them is yours."}
               </div>
               <div className="profile-row-sub mono">{publicKeyFingerprint(store.session.publicKey)}</div>
             </div>
@@ -1586,8 +1587,10 @@ export function ProfileView(props: {
             <div className="profile-row-sub">
               Reads every file back and compares it against the digest taken on your device
               before it was encrypted. It proves the contents, not just the storage, and it
-              is the only thing that can. It downloads everything: {formatBytes(totalToCheck)}
-              , so it is worth doing on a connection you do not pay by the megabyte.
+              is the only thing that can.{" "}
+              {local
+                ? `It reads everything back from the vault on this device: ${formatBytes(totalToCheck)}.`
+                : `It downloads everything: ${formatBytes(totalToCheck)}, so it is worth doing on a connection you do not pay by the megabyte.`}
             </div>
           </div>
           <Button
@@ -1627,9 +1630,9 @@ export function ProfileView(props: {
         <div className="profile-row">
           <div className="profile-row-main">
             <div className="profile-row-sub">
-              Thumbnails, search text, and meaning vectors are made on your devices, never on
-              the server. Anything a device could not produce at upload fills in automatically
-              while a vault is open somewhere; these numbers are what is left right now.
+              {local
+                ? "Thumbnails, search text, and meaning vectors are made on this device. Anything not produced at upload fills in automatically while the vault is open; these numbers are what is left right now."
+                : "Thumbnails, search text, and meaning vectors are made on your devices, never on the server. Anything a device could not produce at upload fills in automatically while a vault is open somewhere; these numbers are what is left right now."}
               {autoPending.thumbs === 0 &&
                 autoPending.text === 0 &&
                 autoPending.meaning === 0 &&
@@ -1651,9 +1654,9 @@ export function ProfileView(props: {
           <div className="profile-row-main">
             <b>Fill in automatically</b>
             <div className="profile-row-sub">
-              Filling in downloads a file's contents to this device to work on them. Turn
-              this off on a connection you pay by the megabyte; the buttons below always
-              work by hand.
+              {local
+                ? "Filling in reads a file's contents back from the vault to work on them; the buttons below always work by hand."
+                : "Filling in downloads a file's contents to this device to work on them. Turn this off on a connection you pay by the megabyte; the buttons below always work by hand."}
             </div>
           </div>
           <Button
@@ -1750,7 +1753,7 @@ export function ProfileView(props: {
                   ? "Every document has been summarized, or judged too short to need it."
                   : assistant?.state === "available"
                     ? `${pending.summaries} document${pending.summaries === 1 ? "" : "s"} not yet summarized, on this device.`
-                    : `${pending.summaries} document${pending.summaries === 1 ? "" : "s"} wait for a device that can summarize (a Mac or iPhone on macOS 26 or iOS 26).`}
+                    : `${pending.summaries} document${pending.summaries === 1 ? " waits" : "s wait"} for a device that can summarize (a Mac or iPhone on macOS 26 or iOS 26).`}
             </div>
           </div>
         </div>

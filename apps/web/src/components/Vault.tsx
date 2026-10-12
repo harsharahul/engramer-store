@@ -2325,8 +2325,9 @@ export function Vault() {
       },
       {
         id: "acct-2fa",
-        label: "Two-factor sign-in",
+        label: localMode ? `Two-factor sign-in · ${NEEDS_SERVER}` : "Two-factor sign-in",
         icon: <KeyGlyph size={15} />,
+        disabled: localMode,
         run: () => {
           setDrawerOpen(false);
           setSecurityOpen(true);
@@ -2348,8 +2349,10 @@ export function Vault() {
       { id: "acct-d", label: "", divider: true, run: () => {} },
       { id: "acct-lock", label: "Lock vault", icon: <LockGlyph />, run: lock },
     );
-    // Opens upward: the button sits at the bottom of the window.
-    setCtxMenu({ x: at.left, y: at.top - (items.length * 34 + 18), title: store.session?.email, items });
+    // Opens upward: the button sits at the bottom of the window. On this
+    // device the menu is titled with the device label, never the address.
+    const title = localMode ? store.displayName?.trim() || defaultDeviceLabel() : store.session?.email;
+    setCtxMenu({ x: at.left, y: at.top - (items.length * 34 + 18), title, items });
   };
 
   const usagePercent = store.usage
