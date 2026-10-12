@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError } from "../api";
+import { LOCAL_ACCOUNT, defaultDeviceLabel } from "../local";
 import { nativeServerUrlSet, nativeShell } from "../native";
 import { activateSession, login, registerAccount, type LoginResult, type Session } from "../session";
 import { beginRecovery, type RecoveryStep, type SetPasswordStep } from "../recovery";
@@ -24,6 +25,10 @@ export function Auth() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [registration, setRegistration] = useState<RegistrationMode>("open");
+  // Set when the backend serves a vault on this device: one account behind
+  // a device label, created or unlocked with the passphrase alone, and no
+  // recovery without a server.
+  const [local, setLocal] = useState<"empty" | "created" | null>(null);
   // Invite links carry the token in the URL fragment, which browsers never
   // put on the wire, and it is wiped from the address bar once read so it
   // does not linger in history. A token from the query string is still
@@ -34,21 +39,38 @@ export function Auth() {
   const [serverDraft, setServerDraft] = useState("");
   const [serverError, setServerError] = useState("");
 
-  useEffect(() => {
-    const arrived = invite.length > 0;
-    if (arrived) {
-      history.replaceState(null, "", location.pathname);
-    }
+  // On a loopback origin the backend is the vault on this device and the
+  // form depends on its answer (create or unlock): until the answer is in,
+  // nothing is offered, so a typed address can never register a second
+  // account on the vault. A server's page keeps its form on screen while
+  // the answer is on its way, as it always has.
+  const loopback = location.hostname === "127.0.0.1";
+  const [probe, setProbe] = useState<"pending" | "ready" | "failed">("pending");
+  const probeVault = () => {
+    setProbe("pending");
     api
       .registration()
-      .then(({ mode: serverMode }) => {
-        setRegistration(serverMode);
+      .then((info) => {
+        setRegistration(info.mode);
+        if (info.local) {
+          const vault = info.vault === "created" ? "created" : "empty";
+          setLocal(vault);
+          setMode(vault === "created" ? "signin" : "signup");
+        }
         // Arriving with an invite link goes straight to the sign-up form.
-        if (serverMode === "invite" && arrived) {
+        if (info.mode === "invite" && invite.length > 0) {
           setMode("signup");
         }
+        setProbe("ready");
       })
-      .catch(() => {});
+      .catch(() => setProbe("failed"));
+  };
+
+  useEffect(() => {
+    if (invite.length > 0) {
+      history.replaceState(null, "", location.pathname);
+    }
+    probeVault();
     // Runs once on mount; `invite` is the value read from the URL there.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -114,19 +136,23 @@ export function Auth() {
       }
       if (mode === "signup") {
         if (password.length < 10) {
-          setError("Use at least 10 characters; this password protects your keys.");
+          setError(`Use at least 10 characters; this ${local ? "passphrase" : "password"} protects your keys.`);
           return;
         }
         if (password !== confirm) {
-          setError("Passwords do not match.");
+          setError(local ? "The passphrases do not match." : "Passwords do not match.");
           return;
         }
-        setBusy("Strengthening your password into encryption keys; slow on purpose.");
-        const result = await registerAccount(email, password, invite.trim() || undefined);
+        setBusy(`Strengthening your ${local ? "passphrase" : "password"} into encryption keys; slow on purpose.`);
+        const result = await registerAccount(local ? LOCAL_ACCOUNT : email, password, invite.trim() || undefined);
+        if (local) {
+          // The vault's one account shows the device's name, never an address.
+          await api.setDisplayName(defaultDeviceLabel()).catch(() => {});
+        }
         setPendingRecovery(result);
       } else {
-        setBusy("Strengthening your password into encryption keys; slow on purpose.");
-        const result = await login(email, password);
+        setBusy(`Strengthening your ${local ? "passphrase" : "password"} into encryption keys; slow on purpose.`);
+        const result = await login(local ? LOCAL_ACCOUNT : email, password);
         if (result.kind === "two-factor") {
           setTwoFactor(result);
           return;
@@ -338,6 +364,34 @@ export function Auth() {
     await startSession(pendingRecovery.session);
   };
 
+  if (loopback && probe !== "ready") {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card">
+          <div className="auth-brand">
+            <BrandMark size={64} />
+            <h1>
+              <Wordmark />
+            </h1>
+            <p className="tagline">
+              Private <b>·</b> Encrypted <b>·</b> Yours
+            </p>
+          </div>
+          <div className="auth-form">
+            {probe === "pending" ? (
+              <div className="auth-note">Reaching the vault on this device…</div>
+            ) : (
+              <>
+                <div className="error-text">Could not reach the vault on this device.</div>
+                <Button onClick={probeVault}>Try again</Button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="auth-shell">
       <div className="auth-card">
@@ -353,19 +407,28 @@ export function Auth() {
         </div>
 
         <form className="auth-form" onSubmit={submit}>
-          <label htmlFor="email">Email</label>
-          <input
-            id="email"
-            type="email"
-            required
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-          />
+          {local && (
+            <div className="auth-local-title">
+              {local === "empty" ? "Create your vault" : "Unlock your vault"}
+            </div>
+          )}
+          {!local && (
+            <>
+              <label htmlFor="email">Email</label>
+              <input
+                id="email"
+                type="email"
+                required
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+              />
+            </>
+          )}
           {mode !== "forgot" && (
             <>
-              <label htmlFor="password">Password</label>
+              <label htmlFor="password">{local ? "Passphrase" : "Password"}</label>
               <input
                 id="password"
                 type="password"
@@ -398,7 +461,7 @@ export function Auth() {
           )}
           {mode === "signup" && (
             <>
-              <label htmlFor="confirm">Confirm password</label>
+              <label htmlFor="confirm">{local ? "Confirm passphrase" : "Confirm password"}</label>
               <input
                 id="confirm"
                 type="password"
@@ -418,9 +481,15 @@ export function Auth() {
                   />
                 </>
               )}
-              {registration === "closed" && (
+              {registration === "closed" && !local && (
                 <div className="auth-note">
                   Registration is disabled on this server. Contact the administrator.
+                </div>
+              )}
+              {local && (
+                <div className="auth-note">
+                  Your passphrase is the only way into this vault. Nothing about it leaves this
+                  device.
                 </div>
               )}
             </>
@@ -443,6 +512,7 @@ export function Auth() {
           {busy && <div className="auth-note">{busy}</div>}
         </form>
 
+        {!local && (
         <div className="auth-switch">
           {mode === "signin" ? (
             <>
@@ -471,7 +541,9 @@ export function Auth() {
             </>
           )}
         </div>
-        {nativeShell() && (
+        )}
+        {nativeShell() && local && <div className="auth-server">This device</div>}
+        {nativeShell() && !local && (
           <div className="auth-server">
             {serverEditing ? (
               <form
@@ -508,9 +580,15 @@ export function Auth() {
           </div>
         )}
         <p className="auth-note">
-          Files, names, and folders are encrypted on your device before upload.
-          <br />
-          The server stores ciphertext it cannot read.
+          {local ? (
+            "Files, names, and folders are encrypted before they are stored on this device."
+          ) : (
+            <>
+              Files, names, and folders are encrypted on your device before upload.
+              <br />
+              The server stores ciphertext it cannot read.
+            </>
+          )}
         </p>
       </div>
 
@@ -518,7 +596,11 @@ export function Auth() {
         <RecoveryKeyModal
           recoveryKeyHex={pendingRecovery.recoveryKeyHex}
           title="Your recovery key"
-          sub="This is the only way back into your vault if you forget your password. Store it somewhere safe and offline. It will not be shown again."
+          sub={
+            local
+              ? "Store it somewhere safe and offline; it will not be shown again. On this device the passphrase is the only way in; the recovery key becomes useful once this vault is connected to a server."
+              : "This is the only way back into your vault if you forget your password. Store it somewhere safe and offline. It will not be shown again."
+          }
           confirmLabel="I saved it, open my vault"
           busy={busy !== null}
           onClose={finishSignup}

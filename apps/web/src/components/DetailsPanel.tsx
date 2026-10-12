@@ -38,6 +38,8 @@ export function DetailsPanel(props: {
   onEdit: (id: string) => void;
   onDownload: (file: FileEntry) => void;
   onShare: (id: string) => void;
+  /** The vault lives on this device: sharing needs a server. */
+  localMode?: boolean;
   onRename: (id: string) => void;
   onTrash: (id: string) => void;
   onTagClick: (tag: string) => void;
@@ -209,7 +211,11 @@ export function DetailsPanel(props: {
           <DownloadGlyph />
         </IconButton>
         {!file.shared && (
-          <IconButton label="Share" onClick={() => props.onShare(file.id)}>
+          <IconButton
+            label={props.localMode ? "Share · needs a server" : "Share"}
+            disabled={props.localMode}
+            onClick={() => props.onShare(file.id)}
+          >
             <ShareGlyph />
           </IconButton>
         )}

@@ -92,5 +92,7 @@ describe("AppSidebar", () => {
     const account = container.querySelector(".account-button")!;
     expect(account.textContent).toContain("alexandra.rivera");
     expect(account.querySelector(".account-link")?.textContent).toBe("alexandra.rivera@example.com");
+    // The accessible name and the tooltip carry the whole address, as before.
+    expect(account.getAttribute("aria-label")).toBe("Account: alexandra.rivera@example.com");
   });
 });

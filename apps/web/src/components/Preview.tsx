@@ -234,6 +234,8 @@ export function Preview(props: {
    * no toast surface of its own. */
   onToast?: (message: string) => void;
   onShare: () => void;
+  /** The vault lives on this device: sharing needs a server. */
+  localMode?: boolean;
   onRename: () => void;
   onDetails: () => void;
   onEdit?: () => void;
@@ -540,7 +542,13 @@ export function Preview(props: {
           },
         ]
       : []),
-    { id: "share", label: "Share", icon: <ShareGlyph size={14} />, run: props.onShare },
+    {
+      id: "share",
+      label: props.localMode ? "Share · needs a server" : "Share",
+      icon: <ShareGlyph size={14} />,
+      disabled: props.localMode,
+      run: props.onShare,
+    },
     { id: "details", label: "Details and tags", icon: <InfoGlyph size={14} />, run: props.onDetails },
     { id: "rename", label: "Rename", icon: <PencilGlyph size={14} />, run: props.onRename },
     { id: "download", label: "Download", icon: <DownloadGlyph size={14} />, run: () => void download() },
@@ -617,7 +625,11 @@ export function Preview(props: {
                 <StarGlyph />
               </IconButton>
             )}
-            <IconButton label="Share" onClick={props.onShare}>
+            <IconButton
+              label={props.localMode ? "Share · needs a server" : "Share"}
+              disabled={props.localMode}
+              onClick={props.onShare}
+            >
               <ShareGlyph />
             </IconButton>
             <IconButton label="Details" onClick={props.onDetails}>

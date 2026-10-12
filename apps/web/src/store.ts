@@ -31,6 +31,7 @@ import {
   type FileDto,
   type FolderDto,
   type SharedFileDto,
+ type LocalCapability,
 } from "./api";
 import { albumTag, isReservedTag } from "./albums";
 import { openSharedFileKey, sealFileKeyFor } from "./collab";
@@ -69,6 +70,7 @@ import {
   nativeStagedSource,
   pickedSweep,
   type NativeOfflineEntry,
+  nativeLocalVaultDelete,
 } from "./native";
 import { invalidateStaleOffline, offlineStale, pinFileOffline } from "./offlinefiles";
 import {
@@ -324,6 +326,11 @@ interface StoreState {
   files: Map<string, FileEntry>;
   usage: Usage | null;
   isAdmin: boolean;
+  /** Present when the vault lives on this device: each feature pack's
+   * state and the vault's size, as the on-device backend reports them. */
+  local: LocalCapability | null;
+  /** The account's name, as the user record carries it. */
+  displayName: string | null;
   uploads: UploadItem[];
   /** Files being processed right now; their folders show as busy. */
   working: ReadonlySet<string>;
@@ -394,6 +401,8 @@ interface StoreState {
    * a second factor when one is on), then leaves this device signed out
    * with nothing of the account kept. */
   deleteAccount: (password: string, code?: string) => Promise<void>;
+  /** Removes the vault kept on this device once the passphrase checks out. */
+  localVaultDelete: (password: string) => Promise<void>;
   /** Installs a renewed token (after a password change) everywhere a
    * sign-in would, so this tab's reload record and unlock record follow. */
   adoptToken: (token: string) => void;
@@ -921,6 +930,10 @@ export const useStore = create<StoreState>((set, get) => {
 
   /** The last sync sequence applied in this tab; 0 forces a full sync. */
   let syncCursor = 0;
+  /** Set while the vault on this device is being removed: no sync may
+   * refill the cache that was just emptied, or a later visit would trust
+   * a cache that claims a cursor and holds no rows. */
+  let removingVault = false;
   /** Every move of the cursor is mirrored into state as `syncSeq`, so
    * autosync can tell a pull that reached an announced change from one
    * that ran before it committed. */
@@ -1228,6 +1241,8 @@ export const useStore = create<StoreState>((set, get) => {
     files: new Map(),
     usage: null,
     isAdmin: false,
+    local: null,
+    displayName: null,
     uploads: [],
     working: new Set(),
     workFailed: new Set(),
@@ -1316,8 +1331,18 @@ export const useStore = create<StoreState>((set, get) => {
         reveal: null,
       });
       try {
+        // The user record first: it says whether the vault lives on this
+        // device, which the sync's follow-up calls read before they ask a
+        // server for what only a server has. One fetch, as before; a
+        // second only when the first did not land.
+        let userKnown = true;
+        await get().refreshUsage().catch(() => {
+          userKnown = false;
+        });
         await get().refresh();
-        await get().refreshUsage();
+        if (!userKnown) {
+          await get().refreshUsage();
+        }
       } catch {
         // refresh() already recorded syncError; nothing else to do here.
       }
@@ -1364,6 +1389,53 @@ export const useStore = create<StoreState>((set, get) => {
       get().logout();
     },
 
+    localVaultDelete: async (password) => {
+      const session = get().session;
+      if (!session) {
+        throw new Error("not signed in");
+      }
+      const { keyAttributes } = await api.keyAttributes();
+      // The passphrase is checked on this device first; nothing below runs
+      // on a wrong one.
+      try {
+        deletionProof(password, keyAttributes);
+      } catch {
+        throw new Error("That is not your passphrase.");
+      }
+      // This browser's copies of the library go before the vault does: the
+      // cache, the decisions mirror and the shell's offline store belong to
+      // an origin the next vault will not use, so nothing would clear them
+      // later. No sync runs meanwhile. The session stays until the shell
+      // has removed the vault, so a failure leaves the person signed in
+      // with the vault intact.
+      const account = session.email;
+      removingVault = true;
+      try {
+        await clearCache(account).catch(() => {});
+        clearDecisions(account);
+        await nativeOfflineClear().catch(() => {});
+        // The shell removes the vault, the keys and the extension records,
+        // and returns to its first page.
+        await nativeLocalVaultDelete(account);
+      } catch (err) {
+        // The vault is still here and this browser's cache is gone: the
+        // next sync starts from zero and refills it, so a later visit does
+        // not trust an empty cache.
+        removingVault = false;
+        moveCursor(0);
+        set({ synced: false });
+        void get()
+          .refresh()
+          .catch(() => {});
+        // The shell's sentence arrives as a plain string, not an Error.
+        throw new Error(
+          typeof err === "string" ? err : err instanceof Error ? err.message : "Could not remove the vault.",
+        );
+      }
+      get().logout();
+      removingVault = false;
+    },
+
     adoptToken: (token) => {
       const session = get().session;
       if (!session) {
@@ -1399,6 +1471,8 @@ export const useStore = create<StoreState>((set, get) => {
         folders: new Map(),
         files: new Map(),
         usage: null,
+        local: null,
+        displayName: null,
         uploads: [],
         working: new Set(),
         workFailed: new Set(),
@@ -1420,6 +1494,8 @@ export const useStore = create<StoreState>((set, get) => {
         folders: new Map(),
         files: new Map(),
         usage: null,
+        local: null,
+        displayName: null,
         uploads: [],
         working: new Set(),
         workFailed: new Set(),
@@ -1432,6 +1508,9 @@ export const useStore = create<StoreState>((set, get) => {
       const account = get().session?.email;
       if (!account) {
         throw new Error("not signed in");
+      }
+      if (removingVault) {
+        return;
       }
       // Warm boot: the rows cached on this device (ciphertext, exactly as the
       // server sent them) put the library on screen before the network answers.
@@ -1576,6 +1655,8 @@ export const useStore = create<StoreState>((set, get) => {
       set({
         usage: { usedBytes: user.usedBytes, quotaBytes: user.quotaBytes },
         isAdmin: user.isAdmin === true,
+        local: user.local ?? null,
+        displayName: user.displayName ?? null,
       });
     },
 
@@ -2649,7 +2730,8 @@ export const useStore = create<StoreState>((set, get) => {
      */
     ingestRequestUploads: async () => {
       const session = get().session;
-      if (!session) {
+      // A vault on this device receives no file requests: nothing to ask.
+      if (!session || get().local) {
         return 0;
       }
       const { uploads } = await api.listRequestUploads();
@@ -2690,7 +2772,8 @@ export const useStore = create<StoreState>((set, get) => {
      * decides. Nothing is released by simply being asked.
      */
     refreshPendingClaims: async () => {
-      if (!get().session) {
+      // A vault on this device has no collaborators: nothing to ask.
+      if (!get().session || get().local) {
         return;
       }
       const { invites } = await api.listCollabInvites();
