@@ -1385,11 +1385,33 @@ export const useStore = create<StoreState>((set, get) => {
         throw new Error("not signed in");
       }
       const { keyAttributes } = await api.keyAttributes();
-      // The passphrase is checked on this device first; the shell then
-      // removes the vault, the keys and the extension records, and returns
-      // to its first page.
-      deletionProof(password, keyAttributes);
-      await nativeLocalVaultDelete(session.email);
+      // The passphrase is checked on this device first; nothing below runs
+      // on a wrong one.
+      try {
+        deletionProof(password, keyAttributes);
+      } catch {
+        throw new Error("That is not your passphrase.");
+      }
+      // This browser's copies of the library go before the vault does: the
+      // cache, the decisions mirror and the shell's offline store belong to
+      // an origin the next vault will not use, so nothing would clear them
+      // later. The session stays until the shell has removed the vault, so
+      // a failure leaves the person signed in with the vault intact.
+      const account = session.email;
+      await clearCache(account).catch(() => {});
+      clearDecisions(account);
+      await nativeOfflineClear().catch(() => {});
+      try {
+        // The shell removes the vault, the keys and the extension records,
+        // and returns to its first page.
+        await nativeLocalVaultDelete(account);
+      } catch (err) {
+        // The shell's sentence arrives as a plain string, not an Error.
+        throw new Error(
+          typeof err === "string" ? err : err instanceof Error ? err.message : "Could not remove the vault.",
+        );
+      }
+      get().logout();
     },
 
     adoptToken: (token) => {
