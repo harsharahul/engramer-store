@@ -16,6 +16,7 @@ overrides:
   # Fastify ships them directly.
   fast-uri@3: "^3.1.8" # GHSA-v2hh-gcrm-f6hx, GHSA-7p8r-x3mc-p8w7, the 2026-09 host-confusion/SSRF set, and the 2026-10 advisories
   fast-uri@4: "^4.1.5" # GHSA-7p8r-x3mc-p8w7, the 2026-09 host-confusion/SSRF set, and the 2026-10 advisories
+  "fast-jwt@<6.3.4": "^6.3.4" # GHSA-ww5h-9m49-7xx4, GHSA-8wpc-h4q6-8fxv, GHSA-5hjw-83fp-phq9, GHSA-g3jj-5cmm-3hxx, GHSA-687g-22h4-j4w4, GHSA-x937-hj6v-793p (the 2026-10 fast-jwt verifier set)
   # transformers.js Node-side deps, unused by the browser bundle but audited:
   "adm-zip@<0.6.1": "^0.6.1" # GHSA-xcpc-8h2w-3j85 (zip bomb allocation), GHSA-7q85-xj36-vmfc
   "sharp@<0.35.5": "^0.35.5" # GHSA-f88m-g3jw-g9cj, the 2026-09 libvips CVE and GHSA-wq5f-xc86-pv6w (the 2026-10 librsvg advisory)
