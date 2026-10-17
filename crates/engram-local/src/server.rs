@@ -18,6 +18,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use crate::blobs::{BlobStore, BLOBS_DIR};
+use crate::connect::Connect;
 use crate::error::ApiError;
 use crate::events::SeqEvents;
 use crate::extract::blocking;
@@ -26,7 +27,7 @@ use crate::packs::{Packs, PACKS_DIR};
 use crate::store::{Store, DB_FILE};
 use crate::token::Tokens;
 use crate::web::WebDist;
-use crate::{accounts, content, events, headers, packs, sessions, settings, storage, web};
+use crate::{accounts, connect, content, events, headers, packs, sessions, settings, storage, web};
 
 /// Server defaults; the binary and the shell set them.
 pub struct ServerConfig {
@@ -53,6 +54,8 @@ pub struct AppState {
     pub blobs: BlobStore,
     pub web: Option<WebDist>,
     pub packs: Packs,
+    /// The copy of this vault to a server, when one is running or done.
+    pub connect: Connect,
     pub config: ServerConfig,
 }
 
@@ -78,6 +81,7 @@ impl AppState {
             web.as_ref().and_then(|w| w.manifest.clone()),
             std::time::Duration::from_millis(config.pack_read_timeout_ms),
         )?;
+        let connect = Connect::open(&config.data_dir)?;
         Ok(AppState {
             store,
             tokens,
@@ -85,6 +89,7 @@ impl AppState {
             blobs,
             web,
             packs,
+            connect,
             config,
         })
     }
@@ -200,6 +205,12 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         .route(
             "/api/local/packs/{name}",
             post(packs::start_download).delete(packs::remove_pack),
+        )
+        .route(
+            "/api/local/connect",
+            get(connect::status)
+                .post(connect::start)
+                .delete(connect::cancel),
         )
         .route("/api/folders", post(storage::create_folder))
         .route(

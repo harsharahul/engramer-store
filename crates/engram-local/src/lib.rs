@@ -6,6 +6,7 @@
 
 pub mod accounts;
 pub mod blobs;
+pub mod connect;
 pub mod content;
 pub mod dto;
 pub mod error;
