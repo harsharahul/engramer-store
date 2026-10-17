@@ -19,7 +19,18 @@ import {
 } from "../backup";
 import { resetBackupLedger } from "../backupledger";
 import { assistantState, describeAssistantState, type AssistantState } from "../intel/assistant";
-import { NEEDS_SERVER, PACK_TITLES, defaultDeviceLabel, downloadPack, packDisplayName, packReadySentence } from "../local";
+import {
+  NEEDS_SERVER,
+  PACK_TITLES,
+  connectSentence,
+  defaultDeviceLabel,
+  downloadPack,
+  followConnect,
+  loginKeyFor,
+  packDisplayName,
+  packReadySentence,
+  type ConnectJobHooks,
+} from "../local";
 import { notificationsEnabled, setNotificationsEnabled } from "../notifications";
 import { settingsEvents, SETTINGS_APPLIED_EVENT } from "../settingsync";
 import { IntegrityError, downloadAndDecrypt } from "../transfer";
@@ -47,7 +58,7 @@ import { SCENES_VERSION } from "../intel/scenes";
 import { describeProcessing } from "../activity";
 import { SweepMemory, type SweepKind } from "../sweepmemory";
 import { publicKeyFingerprint } from "@engramer/crypto";
-import { api, type PackName, type PackStatus } from "../api";
+import { api, type ConnectStatus, type PackName, type PackStatus } from "../api";
 import { changePassword } from "../changepassword";
 import { IDLE_LOCK_CHOICES, idleLockMinutes, setIdleLockMinutes } from "../idlelock";
 import { revealRecoveryKey, rotateRecoveryKey } from "../recoverykey";
@@ -65,6 +76,7 @@ import {
   nativeShell,
   nativeFilesProviderAvailable,
   nativeNotificationPermission,
+  nativeServerUrlSet,
   nativeUnlockAvailable,
   pickFolder,
   watchedAdd,
@@ -320,6 +332,93 @@ export function ProfileView(props: {
       setPackBusy(null);
       refreshPacks();
       void store.refreshUsage();
+    }
+  };
+  // Connecting this vault to a server: the backend copies it there and
+  // reports each step; the card follows and offers the switch once the
+  // copy is verified. The passphrase is checked here and turned into the
+  // login key a sign-in there would send; it never leaves this device.
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [connectStatus, setConnectStatus] = useState<ConnectStatus | null>(null);
+  const [connectBusy, setConnectBusy] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [connectForm, setConnectForm] = useState({
+    server: "",
+    email: "",
+    passphrase: "",
+    create: true,
+    invite: "",
+  });
+  const refreshConnect = () => {
+    void api
+      .localConnect()
+      .then(setConnectStatus)
+      .catch(() => {});
+  };
+  useEffect(() => {
+    if (local) {
+      refreshConnect();
+    }
+  }, [local]);
+  const connectHooks: ConnectJobHooks = {
+    begin: (job) => store.beginActivity(job),
+    update: (patch) => store.updateActivity(patch),
+    end: (entry) => store.finishActivity(entry.kind, entry.title, entry.detail),
+  };
+  const startConnect = async () => {
+    setConnectError(null);
+    setConnectBusy(true);
+    let loginKey: string;
+    try {
+      const { keyAttributes } = await api.keyAttributes();
+      loginKey = loginKeyFor(connectForm.passphrase, keyAttributes);
+    } catch (err) {
+      setConnectError(err instanceof Error ? err.message : "Could not check the passphrase.");
+      setConnectBusy(false);
+      return;
+    }
+    setConnectOpen(false);
+    // The passphrase served its one purpose; the field does not keep it.
+    setConnectForm((form) => ({ ...form, passphrase: "" }));
+    const invite = connectForm.invite.trim();
+    try {
+      const status = await followConnect(
+        {
+          server: connectForm.server.trim(),
+          email: connectForm.email.trim(),
+          loginKey,
+          create: connectForm.create,
+          ...(connectForm.create && invite ? { inviteToken: invite } : {}),
+        },
+        connectHooks,
+      );
+      setConnectStatus(status);
+      props.onToast(`Verified on ${status.host ?? "the server"}. Switch when you are ready.`);
+    } catch (err) {
+      props.onToast(err instanceof Error ? err.message : "The copy did not finish.");
+      refreshConnect();
+    } finally {
+      setConnectBusy(false);
+    }
+  };
+  const stopConnect = async () => {
+    try {
+      setConnectStatus(await api.localConnectCancel());
+    } catch {
+      props.onToast("Could not stop the copy.");
+    }
+  };
+  const switchToServer = async () => {
+    const server = connectStatus?.server;
+    if (!server) {
+      return;
+    }
+    try {
+      // The shell confirms, turns off the drive for this vault and opens
+      // the server; the vault stays on disk until it is removed.
+      await nativeServerUrlSet(server);
+    } catch (err) {
+      props.onToast(err instanceof Error ? err.message : "Could not switch to the server.");
     }
   };
   const [watched, setWatched] = useState<string[]>([]);
@@ -1215,6 +1314,29 @@ export function ProfileView(props: {
             </Button>
           </div>
         )}
+        {local && (
+          <div className="profile-row">
+            <div className="profile-row-main">
+              <b>Connect a server</b>
+              <div className="profile-row-sub">
+                {connectStatus?.step
+                  ? connectSentence(connectStatus)
+                  : "Copies this vault to a server as it is stored here: encrypted, with its keys wrapped. The server never sees your passphrase. Once the server has read every file back, one button switches this app to it; the vault stays on this device until you remove it."}
+              </div>
+            </div>
+            {connectStatus?.running ? (
+              <Button variant="secondary" onClick={() => void stopConnect()}>
+                Stop
+              </Button>
+            ) : connectStatus?.step === "done" ? (
+              <Button onClick={() => void switchToServer()}>Switch to {connectStatus.host ?? "the server"}</Button>
+            ) : (
+              <Button variant="secondary" disabled={connectBusy} onClick={() => setConnectOpen(true)}>
+                {connectBusy ? "Checking…" : connectStatus?.step === "failed" ? "Connect again…" : "Connect…"}
+              </Button>
+            )}
+          </div>
+        )}
         {shell && !local && (
           <div className="profile-row">
             <div className="profile-row-main">
@@ -1889,6 +2011,104 @@ export function ProfileView(props: {
                 </Button>
                 <Button type="submit" variant="destructive" disabled={delBusy || !delPassword}>
                   {delBusy ? "Removing…" : "Delete this vault"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {connectOpen && local && (
+        <div
+          className="overlay"
+          onClick={() => {
+            if (!connectBusy) {
+              setConnectOpen(false);
+            }
+          }}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Connect a server</h2>
+            <p className="modal-sub">
+              Your folders and files go to the server as they are stored here: encrypted. The
+              account there opens with this vault's passphrase; the server never sees it. Nothing
+              changes on this device until the copy has been read back and checked.
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void startConnect();
+              }}
+            >
+              <label className="field">
+                <span>Server</span>
+                <input
+                  type="text"
+                  value={connectForm.server}
+                  onChange={(e) => setConnectForm({ ...connectForm, server: e.target.value })}
+                  placeholder="vault.example.com"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  autoFocus
+                />
+              </label>
+              <label className="field">
+                <span>Account on the server</span>
+                <select
+                  value={connectForm.create ? "create" : "signin"}
+                  onChange={(e) => setConnectForm({ ...connectForm, create: e.target.value === "create" })}
+                >
+                  <option value="create">Create a new account there</option>
+                  <option value="signin">Sign in to the account this vault made there earlier</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Email for the account</span>
+                <input
+                  type="email"
+                  value={connectForm.email}
+                  onChange={(e) => setConnectForm({ ...connectForm, email: e.target.value })}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                />
+              </label>
+              {connectForm.create && (
+                <label className="field">
+                  <span>Invite code, if the server asks for one</span>
+                  <input
+                    type="text"
+                    value={connectForm.invite}
+                    onChange={(e) => setConnectForm({ ...connectForm, invite: e.target.value })}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                </label>
+              )}
+              <label className="field">
+                <span>Your passphrase</span>
+                <input
+                  type="password"
+                  value={connectForm.passphrase}
+                  onChange={(e) => setConnectForm({ ...connectForm, passphrase: e.target.value })}
+                  autoComplete="current-password"
+                />
+              </label>
+              {connectError && <div className="error-text">{connectError}</div>}
+              <div className="modal-actions">
+                <Button type="button" variant="ghost" disabled={connectBusy} onClick={() => setConnectOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={
+                    connectBusy ||
+                    !connectForm.server.trim() ||
+                    !connectForm.email.trim() ||
+                    !connectForm.passphrase
+                  }
+                >
+                  {connectBusy ? "Checking the passphrase…" : "Copy and check"}
                 </Button>
               </div>
             </form>
