@@ -160,8 +160,9 @@ fn grant_ipc(app: &AppHandle, port: u16) -> Result<(), String> {
         .map_err(|err| format!("cannot grant the loopback origin its commands: {err}"))
 }
 
-/// A vault directory is never part of a device backup: this device is the
-/// vault, and a restore elsewhere is "connect a server" or a later sync.
+/// Downloaded packs are never part of a device backup: they come again from
+/// the release host. The vault itself is backed up with the device: it is
+/// the only copy, and it is ciphertext.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 fn exclude_from_backup(dir: &std::path::Path) {
     use objc2_foundation::{NSNumber, NSString, NSURLIsExcludedFromBackupKey, NSURL};
@@ -186,7 +187,7 @@ fn exclude_from_backup(_dir: &std::path::Path) {}
 fn open_state(app: &AppHandle) -> Result<Arc<AppState>, String> {
     let dist = web_dist(app)?;
     let vault = vault_dir(app)?;
-    exclude_from_backup(&vault);
+    exclude_from_backup(&vault.join(engram_local::packs::PACKS_DIR));
     let state = AppState::open(ServerConfig {
         data_dir: vault,
         quota_bytes: QUOTA_BYTES,
