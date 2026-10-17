@@ -376,6 +376,16 @@ export const api = {
   localPackRemove: (name: PackName) =>
     request<{ packs: Record<string, PackStatus> }>(`/api/local/packs/${name}`, { method: "DELETE" }),
 
+  // Connecting a vault on this device to a server: the backend copies the
+  // vault there and reports each step; the client follows and switches.
+  localConnect: () => request<ConnectStatus>("/api/local/connect"),
+
+  localConnectStart: (body: ConnectRequest) =>
+    request<ConnectStatus>("/api/local/connect", { method: "POST", body: JSON.stringify(body) }),
+
+  /** Stops a running copy (it resumes on the next start) or forgets a finished one. */
+  localConnectCancel: () => request<ConnectStatus>("/api/local/connect", { method: "DELETE" }),
+
   /** The name collaborators see instead of this account's address. */
   setDisplayName: (displayName: string | null) =>
     request<{ displayName: string | null }>("/api/user", {
@@ -980,4 +990,51 @@ export interface PackStatus {
 export interface LocalCapability {
   packs: Partial<Record<PackName, PackState>>;
   vault: { bytes: number; directory: string };
+}
+
+/** What the client asks the on-device backend to copy the vault with. */
+export interface ConnectRequest {
+  /** The server as typed: a host, or an origin with its port. */
+  server: string;
+  /** The address of the account on the server. */
+  email: string;
+  /** Derived from the vault's passphrase; what a sign-in there would send. */
+  loginKey: string;
+  /** Create the account there, or sign in to an empty one. */
+  create: boolean;
+  inviteToken?: string;
+}
+
+export type ConnectStep =
+  | "reaching"
+  | "account"
+  | "folders"
+  | "files"
+  | "settings"
+  | "verifying"
+  | "done"
+  | "failed";
+
+/** Where the copy of this vault to a server stands. */
+export interface ConnectStatus {
+  running: boolean;
+  server: string | null;
+  host: string | null;
+  email: string | null;
+  step: ConnectStep | null;
+  foldersDone: number;
+  foldersTotal: number;
+  filesDone: number;
+  filesTotal: number;
+  bytesDone: number;
+  bytesTotal: number;
+  verified: {
+    folders: number;
+    files: number;
+    bytes: number;
+    /** Files the server read back and found intact. */
+    checked: number;
+    problems: string[];
+  } | null;
+  error: string | null;
 }
