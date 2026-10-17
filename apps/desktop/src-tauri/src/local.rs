@@ -49,6 +49,11 @@ pub fn origin(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
+/// Whether an origin is the vault on this device, on any port.
+pub(crate) fn is_loopback_origin(origin: &str) -> bool {
+    origin.starts_with("http://127.0.0.1:")
+}
+
 fn config_path(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
     app.path()
         .app_config_dir()
