@@ -326,9 +326,10 @@ final class ScreenWalk: XCTestCase {
   /// Opens the More drawer and waits until its footer can take a tap. A
   /// sheet left open over the tab bar takes the first tap itself, and the
   /// drawer's controls keep their frames while it is off screen, so only
-  /// a hittable footer proves the drawer is open.
+  /// a hittable footer proves the drawer is open. The version line is the
+  /// footer text both a vault on this device and a server account show.
   private func openDrawer() {
-    let footer = web.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Used on this device")).firstMatch
+    let footer = web.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Encrypted at rest")).firstMatch
     for _ in 0..<3 {
       if footer.exists && footer.isHittable {
         return
