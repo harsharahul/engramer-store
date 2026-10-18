@@ -8,7 +8,14 @@
  * finished while they were gone.
  */
 
-export type ActivityKind = "processing" | "moving" | "trashing" | "backup" | "uploading" | "downloading";
+export type ActivityKind =
+  | "processing"
+  | "moving"
+  | "trashing"
+  | "backup"
+  | "uploading"
+  | "downloading"
+  | "connecting";
 
 export interface ActivityJob {
   kind: ActivityKind;

@@ -80,6 +80,17 @@ All notable changes to Engram Store are documented here, following
   privacy statement; the download shows in the Activity bell and the action
   continues once the pack is installed. Profile lists each pack with Download
   and Remove and offers to download everything now.
+- **A vault kept on this device can be connected to a server.** Profile offers
+  "Connect a server": the app's own backend copies the vault there as it is
+  stored (folders, files with their wrapped keys, previews, search indexes,
+  the settings and the account's name), creating the account with the
+  vault's own keys or signing in to an empty one, then has the server read
+  every file back and compares the listing before anything changes. The copy
+  shows in the Activity bell, resumes where it stopped, and refuses an
+  account that already holds files, one with keys of its own, or one with
+  two-factor sign-in on, each with the reason. Once verified, one button
+  switches the app to the server; the vault stays on this device until you
+  remove it.
 
 ### Fixed
 - **Offline file records are never read half-written.** The record kept

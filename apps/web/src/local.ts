@@ -8,7 +8,17 @@
  * and the download of a feature pack followed in Activity.
  */
 
-import { api, type LocalCapability, type PackName, type PackStatus } from "./api";
+import {
+  api,
+  ApiError,
+  type ConnectRequest,
+  type ConnectStatus,
+  type LocalCapability,
+  type PackName,
+  type PackStatus,
+} from "./api";
+import type { KeyAttributes } from "@engramer/crypto";
+import { deletionProof } from "./accountdeletion";
 import { isHandheld } from "./analysisslot";
 import { formatBytes } from "./format";
 
@@ -173,4 +183,141 @@ async function followPack(name: PackName, hooks: PackJobHooks, options: FollowOp
   const reason = status.error ?? "the download did not finish";
   hooks.end({ kind: "downloading", title, detail: `Not installed: ${reason}.` });
   throw new Error(reason);
+}
+
+// ----- connecting the vault to a server -----
+
+/**
+ * The login key a sign-in at the server would send, derived from the
+ * vault's passphrase with the vault's own key attributes. A wrong
+ * passphrase is refused here, before anything leaves this device.
+ */
+export function loginKeyFor(passphrase: string, keyAttributes: KeyAttributes): string {
+  try {
+    return deletionProof(passphrase, keyAttributes);
+  } catch {
+    throw new Error("That is not your passphrase.");
+  }
+}
+
+function count(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+/** One line for the Profile card and the bell, from where the copy stands. */
+export function connectSentence(status: ConnectStatus): string {
+  const host = status.host ?? "the server";
+  switch (status.step) {
+    case null:
+      return "";
+    case "reaching":
+      return `Reaching ${host}…`;
+    case "account":
+      return `Signing in at ${host}…`;
+    case "folders":
+      return `Folders: ${status.foldersDone} of ${status.foldersTotal}.`;
+    case "files":
+      return `Files: ${status.filesDone} of ${status.filesTotal} · ${formatBytes(status.bytesDone)} of ${formatBytes(status.bytesTotal)}.`;
+    case "settings":
+      return "Settings and the account's name…";
+    case "verifying":
+      return `${host} is reading its copy back…`;
+    case "done": {
+      if (status.stale) {
+        return `The vault changed since the copy on ${host} was checked. Connect again to copy the changes.`;
+      }
+      const v = status.verified;
+      return v
+        ? `Verified: ${count(v.folders, "folder")}, ${count(v.files, "file")}, ${formatBytes(v.bytes)} on ${host}; the server read every file back.`
+        : `Done on ${host}.`;
+    }
+    case "failed":
+      return status.error === "stopped"
+        ? "Stopped. Connect again to continue where it left off."
+        : `Not connected: ${status.error ?? "the copy did not finish"}.`;
+  }
+}
+
+/** What Activity shows while the vault is copied. */
+export interface ConnectJob {
+  kind: "connecting";
+  title: string;
+  done: number;
+  total: number;
+  failed: number;
+  current?: string;
+}
+
+export interface ConnectJobHooks {
+  begin(job: ConnectJob): void;
+  update(patch: Partial<ConnectJob>): void;
+  end(entry: { kind: "connecting"; title: string; detail?: string }): void;
+  /** Every answer from the backend, so a row can show the live step. */
+  status?(status: ConnectStatus): void;
+}
+
+/**
+ * Starts (or resumes) the copy of this vault to a server and follows it
+ * in Activity until the backend reports it verified. Resolves with the
+ * final status; rejects with the backend's own sentence when the copy
+ * did not verify, so the card can say why. A copy already running is
+ * followed instead of started twice.
+ */
+export async function followConnect(
+  request: ConnectRequest,
+  hooks: ConnectJobHooks,
+  options: FollowOptions = {},
+): Promise<ConnectStatus> {
+  const pollMs = options.pollMs ?? 1000;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  let status: ConnectStatus;
+  try {
+    status = await api.localConnectStart(request);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) {
+      // A copy is already running: follow it only if it is the one asked
+      // for, never a copy to some other server.
+      status = await api.localConnect();
+      const asked = request.server
+        .trim()
+        .replace(/^[a-z]+:\/\//i, "")
+        .replace(/\/+$/, "");
+      if (status.host && asked !== status.host && request.server.trim() !== status.server) {
+        throw new Error(`a copy to ${status.host} is already running; stop it first`);
+      }
+    } else {
+      throw err;
+    }
+  }
+  const title = `Connecting to ${status.host ?? request.server}`;
+  hooks.status?.(status);
+  hooks.begin({
+    kind: "connecting",
+    title,
+    done: status.filesDone,
+    total: status.filesTotal,
+    failed: 0,
+    current: connectSentence(status),
+  });
+  try {
+    while (status.running) {
+      await sleep(pollMs);
+      status = await api.localConnect();
+      hooks.status?.(status);
+      hooks.update({ done: status.filesDone, total: status.filesTotal, current: connectSentence(status) });
+    }
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    hooks.end({
+      kind: "connecting",
+      title,
+      detail: `Lost track of the copy: ${reason}. Profile shows where it stands.`,
+    });
+    throw err;
+  }
+  hooks.end({ kind: "connecting", title, detail: connectSentence(status) });
+  if (status.step !== "done") {
+    throw new Error(status.error ?? "the copy did not finish");
+  }
+  return status;
 }

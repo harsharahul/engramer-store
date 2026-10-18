@@ -126,16 +126,31 @@ fn switch_teardown_needed(record: &[u8], new_origin: &str) -> Option<(String, St
     (origin != new_origin).then_some((origin, email))
 }
 
+/// What the switch says. A server being left loses its drive, extension
+/// access and watched folders on this device; a vault kept on this device
+/// stays on disk, and only those go.
+pub(crate) fn switch_message(new_origin: &str, old_origin: &str) -> String {
+    if crate::local::is_loopback_origin(old_origin) {
+        format!(
+            "Switch this app to {}?\n\nThe vault kept on this device stays on disk until you remove it; its drive, extension access, and watched folders are turned off. Files already copied to {} are not affected.",
+            host_of(new_origin),
+            host_of(new_origin)
+        )
+    } else {
+        format!(
+            "Switch this app to {}?\n\nThe drive, extension access, and watched folders for {} will be removed from this device. Files on that server are not affected.",
+            host_of(new_origin),
+            host_of(old_origin)
+        )
+    }
+}
+
 /// A switch removes real things from this device, so it says which, and
 /// asks, before anything happens.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 async fn confirm_switch(app: &AppHandle, new_origin: &str, old_origin: &str) -> Result<(), String> {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
-    let message = format!(
-        "Switch this app to {}?\n\nThe drive, extension access, and watched folders for {} will be removed from this device. Files on that server are not affected.",
-        host_of(new_origin),
-        host_of(old_origin)
-    );
+    let message = switch_message(new_origin, old_origin);
     let dialog = app
         .dialog()
         .message(message)
@@ -358,6 +373,18 @@ mod tests {
     fn a_bare_hostname_is_assumed_https() {
         let parsed = parse_input("vault.example.com").unwrap();
         assert_eq!(parsed.origin().ascii_serialization(), "https://vault.example.com");
+    }
+
+    #[test]
+    fn the_switch_says_what_leaves_this_device() {
+        let from_server = switch_message("https://new.example.com", "https://old.example.com");
+        assert!(from_server.starts_with("Switch this app to new.example.com?"));
+        assert!(from_server.contains("watched folders for old.example.com will be removed"));
+        let from_this_device = switch_message("https://new.example.com", "http://127.0.0.1:60944");
+        assert!(from_this_device.starts_with("Switch this app to new.example.com?"));
+        assert!(from_this_device.contains("The vault kept on this device stays on disk until you remove it"));
+        assert!(from_this_device.contains("Files already copied to new.example.com are not affected"));
+        assert!(!from_this_device.contains("127.0.0.1"));
     }
 
     #[test]

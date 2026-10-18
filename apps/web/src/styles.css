@@ -113,6 +113,31 @@ input::placeholder {
   color: var(--paper-faint);
 }
 
+/* A select inside a form field sits under its label like an input does. */
+.field select {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: var(--paper);
+  background: var(--ink-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  outline: none;
+}
+
+.field select:focus {
+  border-color: var(--accent);
+}
+
+/* Two actions on one Profile row sit side by side. */
+.profile-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 a {
   color: var(--accent);
   text-decoration: none;
