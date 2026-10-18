@@ -91,8 +91,20 @@ All notable changes to Engram Store are documented here, following
   two-factor sign-in on, each with the reason. Once verified, one button
   switches the app to the server; the vault stays on this device until you
   remove it.
+- **Releases carry the feature packs, and the store build asks on first
+  launch.** Each release publishes the office editor and on-device
+  intelligence archives next to the app downloads, and a release check
+  re-downloads both and compares them with the bundled manifest before the
+  release counts as done. The iOS build for the App Store now starts on the
+  server picker like the Mac build: "Keep it on this device" or a server. A
+  Mac smoke script and the iOS screen walk exercise the on-device path.
 
 ### Fixed
+- **A document's first save no longer reports a false conflict.** The
+  editor's pre-save check compared the file's modification time, which also
+  moves when a preview or a search index is written, so a save could report
+  that someone else had saved first. The check now compares the file's
+  content generation.
 - **Offline file records are never read half-written.** The record kept
   beside each offline file is now written whole and swapped into place, so
   a read that overlaps a write sees the previous record instead of an
