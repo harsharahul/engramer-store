@@ -24,7 +24,7 @@ use reqwest::Method;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::io::ReaderStream;
 
 use crate::blobs::{blob_key, BlobKind};
@@ -33,9 +33,10 @@ use crate::error::ApiError;
 use crate::extract::{blocking, AuthUser, JsonBody};
 use crate::server::AppState;
 
-/// The copy's bookkeeping between runs, so a stopped copy resumes where it
-/// was instead of creating a second of everything.
-pub const PLAN_FILE: &str = "connect.json";
+/// The copy's journal between runs: one JSON line per thing created on the
+/// server, so a stopped copy resumes where it was instead of creating a
+/// second of everything, and a large vault never rewrites its bookkeeping.
+pub const JOURNAL_FILE: &str = "connect.log";
 
 /// Content above this goes up in parts, as the web client sends it; one
 /// request per part keeps every request short.
@@ -88,42 +89,135 @@ pub struct Progress {
     pub error: Option<String>,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default)]
 struct FilePlan {
     /// The server's id for the file.
     id: String,
-    #[serde(default)]
     data: bool,
-    #[serde(default)]
     thumb: bool,
-    #[serde(default)]
     index: bool,
-    #[serde(default)]
     trashed: bool,
 }
 
-/// The ids the server gave to what was copied so far, keyed by the ids on
-/// this device; written after every step that created something there.
-#[derive(Clone, Default, Serialize, Deserialize)]
+/// What an earlier run against the same server and address already
+/// created there, keyed by the ids on this device; rebuilt from the
+/// journal when a run starts.
+#[derive(Clone, Default)]
 struct Plan {
-    server: String,
-    email: String,
-    #[serde(default)]
+    /// A journal for this server and address exists: the account was
+    /// reached before, so what it lists is adopted instead of refused.
+    known: bool,
+    /// When the server account was created, so an account deleted and
+    /// made again starts the copy afresh.
+    account: Option<i64>,
     folders: HashMap<String, String>,
-    #[serde(default)]
     files: HashMap<String, FilePlan>,
-    #[serde(default)]
     settings: bool,
 }
 
 impl Plan {
-    fn is_empty(&self) -> bool {
-        self.folders.is_empty() && self.files.is_empty() && !self.settings
+    /// Rebuilds the plan from a journal whose header names this server
+    /// and address; any other journal, or none, is a fresh plan.
+    fn from_journal(text: &str, origin: &str, email: &str) -> Plan {
+        let mut lines = text.lines();
+        let Some(header) = lines
+            .next()
+            .and_then(|line| serde_json::from_str::<Value>(line).ok())
+        else {
+            return Plan::default();
+        };
+        if header["server"].as_str() != Some(origin) || header["email"].as_str() != Some(email) {
+            return Plan::default();
+        }
+        let mut plan = Plan {
+            known: true,
+            account: header["account"].as_i64(),
+            ..Plan::default()
+        };
+        for line in lines {
+            if let Ok(event) = serde_json::from_str::<Value>(line) {
+                plan.apply(&event);
+            }
+        }
+        plan
+    }
+
+    /// Replays one journal line.
+    fn apply(&mut self, event: &Value) {
+        if let (Some(local), Some(id)) = (event["folder"].as_str(), event["id"].as_str()) {
+            self.folders.insert(local.to_string(), id.to_string());
+        } else if let (Some(local), Some(id)) = (event["file"].as_str(), event["id"].as_str()) {
+            self.files.insert(
+                local.to_string(),
+                FilePlan {
+                    id: id.to_string(),
+                    ..FilePlan::default()
+                },
+            );
+        } else if event["settings"].as_bool() == Some(true) {
+            self.settings = true;
+        } else {
+            for (field, flag) in [("data", 0), ("thumb", 1), ("index", 2), ("trashed", 3)] {
+                if let Some(entry) = event[field]
+                    .as_str()
+                    .and_then(|local| self.files.get_mut(local))
+                {
+                    match flag {
+                        0 => entry.data = true,
+                        1 => entry.thumb = true,
+                        2 => entry.index = true,
+                        _ => entry.trashed = true,
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The journal a run appends to: the header names the server, the address
+/// and the account; every later line is one thing created there.
+struct Journal {
+    file: tokio::fs::File,
+}
+
+impl Journal {
+    /// Starts a fresh journal for the account, or continues the known one.
+    async fn open(
+        path: &Path,
+        origin: &str,
+        email: &str,
+        account: i64,
+        fresh: bool,
+    ) -> Result<Journal, String> {
+        let io = |err: std::io::Error| format!("cannot keep the copy's bookkeeping: {err}");
+        let mut file = if fresh {
+            let mut file = tokio::fs::File::create(path).await.map_err(io)?;
+            let header = json!({ "server": origin, "email": email, "account": account });
+            file.write_all(format!("{header}\n").as_bytes())
+                .await
+                .map_err(io)?;
+            file
+        } else {
+            tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(path)
+                .await
+                .map_err(io)?
+        };
+        file.flush().await.map_err(io)?;
+        Ok(Journal { file })
+    }
+
+    async fn record(&mut self, event: Value) -> Result<(), String> {
+        self.file
+            .write_all(format!("{event}\n").as_bytes())
+            .await
+            .map_err(|err| format!("cannot keep the copy's bookkeeping: {err}"))
     }
 }
 
 pub struct Connect {
-    plan_path: PathBuf,
+    journal_path: PathBuf,
     progress: Mutex<Progress>,
     cancel: AtomicBool,
     client: reqwest::Client,
@@ -137,7 +231,7 @@ impl Connect {
             .build()
             .map_err(|err| format!("cannot build the HTTP client: {err}"))?;
         Ok(Connect {
-            plan_path: data_dir.join(PLAN_FILE),
+            journal_path: data_dir.join(JOURNAL_FILE),
             progress: Mutex::new(Progress::default()),
             cancel: AtomicBool::new(false),
             client,
@@ -180,36 +274,29 @@ impl Connect {
     }
 
     /// The bookkeeping of an earlier run against the same server and
-    /// address; anything else starts fresh.
-    fn load_plan(&self, origin: &str, email: &str) -> Plan {
-        let stored = std::fs::read(&self.plan_path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<Plan>(&bytes).ok());
-        match stored {
-            Some(plan) if plan.server == origin && plan.email == email => plan,
-            _ => Plan {
-                server: origin.to_string(),
-                email: email.to_string(),
-                ..Plan::default()
-            },
+    /// address; anything else is a fresh plan.
+    async fn load_plan(&self, origin: &str, email: &str) -> Plan {
+        match tokio::fs::read_to_string(&self.journal_path).await {
+            Ok(text) => Plan::from_journal(&text, origin, email),
+            Err(_) => Plan::default(),
         }
     }
 
-    fn save_plan(&self, plan: &Plan) -> Result<(), String> {
-        let bytes = serde_json::to_vec(plan).map_err(|err| err.to_string())?;
-        let part = self.plan_path.with_extension("json.part");
-        std::fs::write(&part, bytes)
-            .and_then(|()| std::fs::rename(&part, &self.plan_path))
-            .map_err(|err| format!("cannot keep the copy's bookkeeping: {err}"))
-    }
-
-    pub fn forget_plan(&self) {
-        let _ = std::fs::remove_file(&self.plan_path);
+    pub async fn forget_plan(&self) {
+        let _ = tokio::fs::remove_file(&self.journal_path).await;
     }
 }
 
+/// The only hosts a server may be reached on over plain http: a server on
+/// this machine, the one place the shell's own picker allows it too.
+fn is_loopback_host(host: &str) -> bool {
+    matches!(host, "127.0.0.1" | "localhost" | "[::1]")
+}
+
 /// The server as the person typed it, as an origin: a bare host gets
-/// https, a port is kept, and nothing else may ride on it.
+/// https (a bare loopback address gets http, as in the shell's picker), a
+/// port is kept, nothing else may ride on it, and plain http is refused
+/// for any host but this machine's own.
 pub fn server_origin(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -218,13 +305,25 @@ pub fn server_origin(raw: &str) -> Result<String, String> {
     let with_scheme = if trimmed.contains("://") {
         trimmed.to_string()
     } else {
-        format!("https://{trimmed}")
+        let bare_host = trimmed
+            .split('/')
+            .next()
+            .unwrap_or(trimmed)
+            .trim_end_matches(|c: char| c.is_ascii_digit())
+            .trim_end_matches(':');
+        if is_loopback_host(bare_host) {
+            format!("http://{trimmed}")
+        } else {
+            format!("https://{trimmed}")
+        }
     };
     let wrong = || format!("{trimmed} is not a server address");
     let url = reqwest::Url::parse(&with_scheme).map_err(|_| wrong())?;
     let plain_path = url.path().is_empty() || url.path() == "/";
+    let Some(host) = url.host_str() else {
+        return Err(wrong());
+    };
     if !matches!(url.scheme(), "http" | "https")
-        || url.host_str().is_none()
         || !url.username().is_empty()
         || url.password().is_some()
         || url.query().is_some()
@@ -232,6 +331,11 @@ pub fn server_origin(raw: &str) -> Result<String, String> {
         || !plain_path
     {
         return Err(wrong());
+    }
+    if url.scheme() == "http" && !is_loopback_host(host) {
+        return Err(format!(
+            "{trimmed}: plain http is only supported for a server on this machine; use https"
+        ));
     }
     Ok(url.origin().ascii_serialization())
 }
@@ -414,12 +518,16 @@ impl Remote<'_> {
     }
 
     /// Everything the account holds: live folders and uploaded files,
-    /// paged the way every client reads the change feed.
+    /// paged the way every client reads the change feed, with each row's
+    /// server id reachable by its sealed key (unique per item, identical
+    /// on both sides because the copy carries it verbatim).
     async fn library(&self) -> Result<Library, String> {
         let mut folders: HashMap<String, Value> = HashMap::new();
         let mut files: HashMap<String, Value> = HashMap::new();
         let mut cursor = 0i64;
-        loop {
+        // A listing is at most as long as the account's change count; the
+        // bound keeps a server whose cursor misbehaves from looping forever.
+        for _ in 0..100_000 {
             let page = self
                 .expect(
                     Method::GET,
@@ -447,10 +555,10 @@ impl Remote<'_> {
             }
             cursor = seq;
         }
-        let live_folders = folders
+        let live_folders: Vec<&Value> = folders
             .values()
             .filter(|row| row["deleted"].as_bool() != Some(true))
-            .count() as u64;
+            .collect();
         let live_files: Vec<&Value> = files
             .values()
             .filter(|row| {
@@ -465,10 +573,20 @@ impl Remote<'_> {
                     + row["indexSize"].as_u64().unwrap_or(0)
             })
             .sum();
+        let by_key = |rows: &[&Value]| -> HashMap<String, String> {
+            rows.iter()
+                .filter_map(|row| {
+                    let id = row["id"].as_str()?;
+                    Some((row["encryptedKey"].to_string(), id.to_string()))
+                })
+                .collect()
+        };
         Ok(Library {
-            folders: live_folders,
+            folders: live_folders.len() as u64,
             files: live_files.len() as u64,
             bytes,
+            folder_by_key: by_key(&live_folders),
+            file_by_key: by_key(&live_files),
         })
     }
 }
@@ -477,6 +595,8 @@ struct Library {
     folders: u64,
     files: u64,
     bytes: u64,
+    folder_by_key: HashMap<String, String>,
+    file_by_key: HashMap<String, String>,
 }
 
 struct LocalFolder {
@@ -549,14 +669,26 @@ pub async fn status(State(state): State<Arc<AppState>>, _auth: AuthUser) -> Json
 }
 
 /// `POST /api/local/connect`: starts or resumes the copy. 202 with the
-/// status; 409 while one runs; 400 for an address that is not a server's.
+/// status; 409 while one runs; 400 for an address that is not a server's,
+/// or that is this device's own vault.
 pub async fn start(
     State(state): State<Arc<AppState>>,
     auth: AuthUser,
+    headers: axum::http::HeaderMap,
     JsonBody(body): JsonBody<StartBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let origin = server_origin(&body.server)
         .map_err(|message| ApiError::new(StatusCode::BAD_REQUEST, message))?;
+    let own = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(|host| format!("http://{host}"));
+    if own.as_deref() == Some(origin.as_str()) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "that address is this device's own vault",
+        ));
+    }
     let email = crate::validate::email(&body.email)?;
     crate::validate::login_key(&body.login_key)?;
     if !state.connect.try_begin(&origin, &email) {
@@ -591,19 +723,34 @@ pub async fn start(
     Ok((StatusCode::ACCEPTED, Json(state.connect.status())))
 }
 
-/// `DELETE /api/local/connect`: stops a running copy (its bookkeeping
-/// stays, so the next start resumes), or forgets a finished one.
+/// `DELETE /api/local/connect`: stops a running copy; its journal stays,
+/// so the next start resumes. Nothing happens when none runs.
 pub async fn cancel(State(state): State<Arc<AppState>>, _auth: AuthUser) -> Json<Value> {
     let running = state.connect.progress.lock().unwrap().running;
     if running {
         state.connect.cancel.store(true, Ordering::SeqCst);
-    } else {
-        state.connect.forget_plan();
-        state
-            .connect
-            .update(|progress| *progress = Progress::default());
     }
     Json(state.connect.status())
+}
+
+/// `DELETE /api/local/connect/plan`: forgets a finished or stopped copy,
+/// so the next start begins afresh; 409 while one runs.
+pub async fn forget(
+    State(state): State<Arc<AppState>>,
+    _auth: AuthUser,
+) -> Result<Json<Value>, ApiError> {
+    let running = state.connect.progress.lock().unwrap().running;
+    if running {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "a copy is running; stop it first",
+        ));
+    }
+    state.connect.forget_plan().await;
+    state
+        .connect
+        .update(|progress| *progress = Progress::default());
+    Ok(Json(state.connect.status()))
 }
 
 async fn run(
@@ -649,16 +796,40 @@ async fn run(
     })
     .await
     .map_err(|err| err.message)?;
-    sign_in(&mut remote, &body, &account.attributes).await?;
-    let mut plan = connect.load_plan(&origin, &body.email);
-    if plan.is_empty() {
-        let theirs = remote.library().await?;
-        if theirs.folders + theirs.files > 0 {
-            return Err(format!(
-                "the account {} at {host} already holds {} folders and {} files; connect an empty account",
-                body.email, theirs.folders, theirs.files
-            ));
-        }
+    let created_now = sign_in(&mut remote, &body, &account.attributes).await?;
+    let me = remote
+        .expect(Method::GET, "/api/user", None, "read the account")
+        .await?;
+    let account_since = me["createdAt"].as_i64().unwrap_or(0);
+    // The journal of an earlier run is only trusted for the same account:
+    // one created just now, or one made again after a deletion, holds
+    // nothing of ours, however the journal reads.
+    let mut plan = connect.load_plan(&origin, &body.email).await;
+    let fresh = created_now || !plan.known || plan.account != Some(account_since);
+    if fresh {
+        plan = Plan {
+            known: true,
+            account: Some(account_since),
+            ..Plan::default()
+        };
+    }
+    let mut journal = Journal::open(
+        &connect.journal_path,
+        &origin,
+        &body.email,
+        account_since,
+        fresh,
+    )
+    .await?;
+    // What the account holds. A fresh copy needs it empty; a resumed one
+    // adopts whatever an earlier run created there, whether or not the
+    // reply made it into the journal.
+    let theirs = remote.library().await?;
+    if fresh && theirs.folders + theirs.files > 0 {
+        return Err(format!(
+            "the account {} at {host} already holds {} folders and {} files; connect an empty account",
+            body.email, theirs.folders, theirs.files
+        ));
     }
 
     // 3. Folders, parents first.
@@ -686,29 +857,37 @@ async fn run(
     for folder in &folders {
         connect.check_cancel()?;
         if !plan.folders.contains_key(&folder.id) {
-            let parent = folder
-                .parent
-                .as_ref()
-                .and_then(|p| plan.folders.get(p))
-                .cloned();
-            let created = remote
-                .expect(
-                    Method::POST,
-                    "/api/folders",
-                    Some(json!({
-                        "parentId": parent,
-                        "encryptedKey": folder.key,
-                        "encryptedMeta": folder.meta,
-                    })),
-                    "create a folder",
-                )
+            let id = match theirs.folder_by_key.get(&folder.key.to_string()) {
+                Some(id) => id.clone(),
+                None => {
+                    let parent = folder
+                        .parent
+                        .as_ref()
+                        .and_then(|p| plan.folders.get(p))
+                        .cloned();
+                    let created = remote
+                        .expect(
+                            Method::POST,
+                            "/api/folders",
+                            Some(json!({
+                                "parentId": parent,
+                                "encryptedKey": folder.key,
+                                "encryptedMeta": folder.meta,
+                            })),
+                            "create a folder",
+                        )
+                        .await?;
+                    created
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| format!("{host} created a folder without an id"))?
+                        .to_string()
+                }
+            };
+            plan.folders.insert(folder.id.clone(), id.clone());
+            journal
+                .record(json!({ "folder": folder.id, "id": id }))
                 .await?;
-            let id = created
-                .get("id")
-                .and_then(Value::as_str)
-                .ok_or_else(|| format!("{host} created a folder without an id"))?;
-            plan.folders.insert(folder.id.clone(), id.to_string());
-            connect.save_plan(&plan)?;
         }
         connect.update(|p| p.folders_done += 1);
     }
@@ -751,58 +930,55 @@ async fn run(
     });
     for file in &files {
         connect.check_cancel()?;
-        let entry = match plan.files.get(&file.id) {
+        let mut entry = match plan.files.get(&file.id) {
             Some(entry) => entry.clone(),
             None => {
-                let folder = file
-                    .folder
-                    .as_ref()
-                    .and_then(|f| plan.folders.get(f))
-                    .cloned();
-                let created = remote
-                    .expect(
-                        Method::POST,
-                        "/api/files",
-                        Some(json!({
-                            "folderId": folder,
-                            "encryptedKey": file.key,
-                            "encryptedMeta": file.meta,
-                            "seekable": file.seekable,
-                        })),
-                        "create a file",
-                    )
-                    .await?;
-                let id = created
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| format!("{host} created a file without an id"))?;
+                let id = match theirs.file_by_key.get(&file.key.to_string()) {
+                    Some(id) => id.clone(),
+                    None => {
+                        let folder = file
+                            .folder
+                            .as_ref()
+                            .and_then(|f| plan.folders.get(f))
+                            .cloned();
+                        let created = remote
+                            .expect(
+                                Method::POST,
+                                "/api/files",
+                                Some(json!({
+                                    "folderId": folder,
+                                    "encryptedKey": file.key,
+                                    "encryptedMeta": file.meta,
+                                    "seekable": file.seekable,
+                                })),
+                                "create a file",
+                            )
+                            .await?;
+                        created
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| format!("{host} created a file without an id"))?
+                            .to_string()
+                    }
+                };
                 let entry = FilePlan {
-                    id: id.to_string(),
+                    id,
                     ..FilePlan::default()
                 };
                 plan.files.insert(file.id.clone(), entry.clone());
-                connect.save_plan(&plan)?;
+                journal
+                    .record(json!({ "file": file.id, "id": entry.id }))
+                    .await?;
                 entry
             }
         };
-        let mut entry = entry;
         let sid = entry.id.clone();
         let mut done_bytes = 0u64;
         if !entry.data {
             let path = state
                 .blobs
                 .path(&blob_key(&file.id, BlobKind::Data, file.generation));
-            let size = file.size.max(0) as u64;
-            let on_disk = tokio::fs::metadata(&path)
-                .await
-                .map(|m| m.len())
-                .unwrap_or(0);
-            if on_disk != size {
-                return Err(format!(
-                    "a file on this device does not match its record ({} bytes stored, {size} expected); run Check stored files first",
-                    on_disk
-                ));
-            }
+            let size = stored_size(&path, file.size, "a file").await?;
             if size > PART_THRESHOLD {
                 remote.put_parts(&sid, &path, size).await?;
             } else {
@@ -811,38 +987,37 @@ async fn run(
                     .await?;
             }
             entry.data = true;
-            plan.files.insert(file.id.clone(), entry.clone());
-            connect.save_plan(&plan)?;
+            journal.record(json!({ "data": file.id })).await?;
         }
         done_bytes += file.size.max(0) as u64;
         if file.thumb > 0 && !entry.thumb {
             let path = state.blobs.path(&blob_key(&file.id, BlobKind::Thumb, 0));
+            let size = stored_size(&path, file.thumb, "a preview").await?;
             remote
                 .put_blob(
                     &format!("/api/files/{sid}/thumbnail"),
                     &path,
-                    file.thumb as u64,
+                    size,
                     "a preview",
                 )
                 .await?;
             entry.thumb = true;
-            plan.files.insert(file.id.clone(), entry.clone());
-            connect.save_plan(&plan)?;
+            journal.record(json!({ "thumb": file.id })).await?;
         }
         done_bytes += file.thumb.max(0) as u64;
         if file.index > 0 && !entry.index {
             let path = state.blobs.path(&blob_key(&file.id, BlobKind::Index, 0));
+            let size = stored_size(&path, file.index, "a search index").await?;
             remote
                 .put_blob(
                     &format!("/api/files/{sid}/index"),
                     &path,
-                    file.index as u64,
+                    size,
                     "a search index",
                 )
                 .await?;
             entry.index = true;
-            plan.files.insert(file.id.clone(), entry.clone());
-            connect.save_plan(&plan)?;
+            journal.record(json!({ "index": file.id })).await?;
         }
         done_bytes += file.index.max(0) as u64;
         if file.trashed && !entry.trashed {
@@ -855,9 +1030,9 @@ async fn run(
                 )
                 .await?;
             entry.trashed = true;
-            plan.files.insert(file.id.clone(), entry.clone());
-            connect.save_plan(&plan)?;
+            journal.record(json!({ "trashed": file.id })).await?;
         }
+        plan.files.insert(file.id.clone(), entry);
         connect.update(|p| {
             p.files_done += 1;
             p.bytes_done += done_bytes;
@@ -888,7 +1063,7 @@ async fn run(
                 .await?;
         }
         plan.settings = true;
-        connect.save_plan(&plan)?;
+        journal.record(json!({ "settings": true })).await?;
     }
 
     // 6. The server reads its copy of every file back, and its listing
@@ -957,11 +1132,30 @@ async fn run(
     }
 }
 
+/// A blob's size on disk, which must be what its record says: the server
+/// is told the length up front, and a mismatch means this device's copy
+/// needs checking before it travels.
+async fn stored_size(path: &Path, recorded: i64, what: &str) -> Result<u64, String> {
+    let expected = recorded.max(0) as u64;
+    let on_disk = tokio::fs::metadata(path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
+    if on_disk != expected {
+        return Err(format!(
+            "{what} on this device does not match its record ({on_disk} bytes stored, {expected} expected); run Check stored files first"
+        ));
+    }
+    Ok(expected)
+}
+
+/// Creates the account with this vault's keys, or signs in to one that
+/// holds the same keys; `true` when the account was created just now.
 async fn sign_in(
     remote: &mut Remote<'_>,
     body: &StartBody,
     attributes: &Value,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let host = remote.host.clone();
     let token = if body.create {
         let mut payload = json!({
@@ -1034,7 +1228,7 @@ async fn sign_in(
     match token {
         Some(token) => {
             remote.token = Some(token);
-            Ok(())
+            Ok(body.create)
         }
         None => Err(format!("{host} answered without a session")),
     }
@@ -1183,10 +1377,26 @@ mod tests {
             server_origin("http://127.0.0.1:8080/").unwrap(),
             "http://127.0.0.1:8080"
         );
+        // A bare loopback address means plain http, as in the shell's picker.
+        assert_eq!(
+            server_origin("127.0.0.1:8080").unwrap(),
+            "http://127.0.0.1:8080"
+        );
+        assert_eq!(
+            server_origin("localhost:3080").unwrap(),
+            "http://localhost:3080"
+        );
+        assert_eq!(
+            server_origin("https://localhost:3080").unwrap(),
+            "https://localhost:3080"
+        );
         assert_eq!(
             host_of("https://vault.example.com:8443"),
             "vault.example.com:8443"
         );
+        // Plain http anywhere else would carry the login key and the vault in the clear.
+        let plain = server_origin("http://vault.example.com").unwrap_err();
+        assert!(plain.contains("plain http is only supported"), "{plain}");
         for wrong in [
             "",
             "ftp://x",
@@ -1194,9 +1404,103 @@ mod tests {
             "https://host/path",
             "https://host/?q",
             "host#f",
+            "file:///etc/passwd",
         ] {
             assert!(server_origin(wrong).is_err(), "{wrong}");
         }
+    }
+
+    #[test]
+    fn the_journal_replays_only_for_its_own_account() {
+        let text = concat!(
+            "{\"server\":\"https://s.example.com\",\"email\":\"a@example.com\",\"account\":42}\n",
+            "{\"folder\":\"f1\",\"id\":\"sf1\"}\n",
+            "{\"file\":\"d1\",\"id\":\"sd1\"}\n",
+            "{\"data\":\"d1\"}\n",
+            "{\"thumb\":\"d1\"}\n",
+            "not json\n",
+            "{\"settings\":true}\n",
+        );
+        let plan = Plan::from_journal(text, "https://s.example.com", "a@example.com");
+        assert!(plan.known);
+        assert_eq!(plan.account, Some(42));
+        assert_eq!(plan.folders.get("f1").map(String::as_str), Some("sf1"));
+        let entry = plan.files.get("d1").unwrap();
+        assert_eq!(entry.id, "sd1");
+        assert!(entry.data && entry.thumb && !entry.index && !entry.trashed);
+        assert!(plan.settings);
+        let other = Plan::from_journal(text, "https://s.example.com", "b@example.com");
+        assert!(!other.known && other.folders.is_empty());
+        let empty = Plan::from_journal("", "https://s.example.com", "a@example.com");
+        assert!(!empty.known);
+    }
+
+    #[test]
+    fn a_resumed_copy_adopts_what_its_journal_lost() {
+        let vault = Running::new();
+        let server = Running::new();
+        let token = signed_in(vault.port, "vault@this.device");
+        let top = folder(&vault, &token, None, "top");
+        file(&vault, &token, Some(&top), "doc", "hello");
+        file(&vault, &token, None, "note", "world");
+        assert_eq!(connect(&vault, &token, &server, true)["step"], "done");
+        // The journal keeps only its header: every reply after it is lost,
+        // as after a crash before the lines were written.
+        let journal = vault.dir.join(JOURNAL_FILE);
+        let text = std::fs::read_to_string(&journal).unwrap();
+        let header = text.lines().next().unwrap().to_string();
+        std::fs::write(&journal, format!("{header}\n")).unwrap();
+        let again = connect(&vault, &token, &server, false);
+        assert_eq!(again["step"], "done", "{again}");
+        assert_eq!(again["foldersDone"], 1);
+        assert_eq!(again["filesDone"], 2);
+        let theirs = their_session(&server);
+        let listing = library(&server, &theirs);
+        assert_eq!(listing["folders"].as_array().unwrap().len(), 1);
+        assert_eq!(listing["files"].as_array().unwrap().len(), 2);
+        // The replayed journal now names everything again.
+        let text = std::fs::read_to_string(&journal).unwrap();
+        assert_eq!(text.lines().count(), 1 + 1 + 2 + 2 + 1, "{text}");
+    }
+
+    #[test]
+    fn stop_keeps_the_journal_and_forget_clears_it() {
+        let vault = Running::new();
+        let server = Running::new();
+        let token = signed_in(vault.port, "vault@this.device");
+        file(&vault, &token, None, "doc", "hello");
+        assert_eq!(connect(&vault, &token, &server, true)["step"], "done");
+        // Stop on a finished copy changes nothing.
+        let (status, _, answer) = call(&vault, "DELETE", "/api/local/connect", &token, None);
+        assert_eq!(status, 200);
+        let kept: Value = serde_json::from_str(&answer).unwrap();
+        assert_eq!(kept["step"], "done", "{kept}");
+        assert!(vault.dir.join(JOURNAL_FILE).is_file());
+        // Forgetting starts over: the account now counts as history.
+        let (status, _, answer) = call(&vault, "DELETE", "/api/local/connect/plan", &token, None);
+        assert_eq!(status, 200, "{answer}");
+        let cleared: Value = serde_json::from_str(&answer).unwrap();
+        assert_eq!(cleared["step"], Value::Null);
+        assert!(!vault.dir.join(JOURNAL_FILE).exists());
+        let refused = connect(&vault, &token, &server, false);
+        assert_eq!(refused["step"], "failed", "{refused}");
+        assert!(refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("already holds 0 folders and 1 files"));
+    }
+
+    #[test]
+    fn this_devices_own_vault_is_not_a_server() {
+        let vault = Running::new();
+        let token = signed_in(vault.port, "vault@this.device");
+        let body = format!(
+            r#"{{"server":"http://127.0.0.1:{}","email":"alice@example.com","loginKey":"{LOGIN_KEY}","create":true}}"#,
+            vault.port
+        );
+        let (status, _, answer) = call(&vault, "POST", "/api/local/connect", &token, Some(&body));
+        assert_eq!(status, 400, "{answer}");
+        assert!(answer.contains("this device's own vault"), "{answer}");
     }
 
     #[test]
@@ -1437,7 +1741,7 @@ mod tests {
         assert_eq!(status["step"], "failed", "{status}");
         assert_eq!(status["error"], format!("could not reach 127.0.0.1:{port}"));
         // Forgetting a finished copy clears the status.
-        let (_, _, cleared) = call(&vault, "DELETE", "/api/local/connect", &token, None);
+        let (_, _, cleared) = call(&vault, "DELETE", "/api/local/connect/plan", &token, None);
         let cleared: Value = serde_json::from_str(&cleared).unwrap();
         assert_eq!(cleared["step"], Value::Null);
     }

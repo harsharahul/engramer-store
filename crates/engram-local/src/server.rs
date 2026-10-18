@@ -212,6 +212,10 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
                 .post(connect::start)
                 .delete(connect::cancel),
         )
+        .route(
+            "/api/local/connect/plan",
+            axum::routing::delete(connect::forget),
+        )
         .route("/api/folders", post(storage::create_folder))
         .route(
             "/api/folders/{id}",
