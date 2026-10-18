@@ -595,7 +595,10 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array, prior?: FileEntry): Fi
     createdAt: dto.createdAt,
     updatedAt: dto.updatedAt,
     keyEpoch: dto.keyEpoch ?? 0,
-    generation: dto.generation ?? 0,
+    // Unknown, not zero, for a row cached before backends named it: the
+    // editor's pre-save check then falls back to the modification time
+    // instead of reading a real generation as somebody else's save.
+    generation: dto.generation,
     // Sticky across replies that did not compute it (cached rows, older
     // servers): known-collaborative must not flicker back to private.
     hasCollaborators: dto.hasCollaborators ?? prior?.hasCollaborators ?? false,
@@ -695,7 +698,7 @@ export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEnt
     role: dto.role,
     ownerEmail: dto.ownerEmail,
     keyEpoch: dto.keyEpoch,
-    generation: dto.generation ?? 0,
+    generation: dto.generation,
   };
 }
 

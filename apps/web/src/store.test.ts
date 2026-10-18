@@ -59,6 +59,9 @@ vi.mock("./api", async (importOriginal) => {
         updateSeq: 1,
         createdAt: 1,
         updatedAt: 1,
+        // Both backends name the row's generation in the create answer:
+        // 0, no content yet.
+        generation: 0,
       }),
       batchFiles: async (body: unknown) => {
         if (!rig.batch) {

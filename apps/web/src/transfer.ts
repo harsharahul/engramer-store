@@ -1208,6 +1208,13 @@ export async function uploadFirstContent(fileId: string, ciphertext: Uint8Array)
     },
   });
   if (written !== null && written !== ciphertext.length) {
+    // Truncated content must not linger behind a row that looks complete;
+    // best-effort removal, as encryptAndUpload does, with the error still
+    // surfacing to the caller.
+    void api
+      .trashFile(fileId)
+      .then(() => api.deleteForever(fileId))
+      .catch(() => {});
     throw new Error(`upload stored ${written} bytes of ${ciphertext.length}; the file was not saved`);
   }
   return generation;

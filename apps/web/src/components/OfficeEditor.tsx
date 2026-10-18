@@ -931,6 +931,13 @@ export function OfficeEditor(props: {
         // ago still carries its create answer until the next sync).
         if (doc.generation !== null) {
           openedGenerationRef.current = doc.generation;
+          // Bytes newer than the row mean another device saved and its
+          // sync row has not landed here yet; pull the library once so the
+          // pre-save check compares against the row these bytes belong to.
+          const row = useStore.getState().files.get(fileId);
+          if (row?.generation !== undefined && row.generation !== doc.generation) {
+            void refreshLibraryOnce();
+          }
         }
         session.deliver(doc.imported.bin, doc.imported.media);
         setStage("loading");

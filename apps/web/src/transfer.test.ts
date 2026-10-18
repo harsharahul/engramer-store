@@ -44,6 +44,12 @@ vi.mock("./api", async (importOriginal) => {
         await relay.gate;
         return dto({ id, encryptedMeta: patch.encryptedMeta, updatedAt: 2 });
       },
+      trashFile: async () => {
+        relay.started.push("trash");
+      },
+      deleteForever: async () => {
+        relay.started.push("delete");
+      },
     },
     uploadBlob: async (
       _id: string,
@@ -164,13 +170,6 @@ describe("encryptAndUpload", () => {
   });
 });
 
-/**
- * The upload path was designed to never hold a large file: 4 MiB slices,
- * bounded part bodies. That property was silently defeated once, by a
- * picker that handed it memory-backed Files, and the whole app died on a
- * 30-second video. This suite guards the property itself, so the next
- * change that re-materializes a source fails here instead of on a phone.
- */
 describe("uploadFirstContent", () => {
   it("returns the generation the backend committed", async () => {
     relay.generation = 1;
@@ -182,16 +181,26 @@ describe("uploadFirstContent", () => {
     await expect(uploadFirstContent("f1", new Uint8Array(3))).resolves.toBeUndefined();
   });
 
-  it("refuses a write of the wrong size", async () => {
+  it("refuses a write of the wrong size and removes the row it would leave behind", async () => {
     relay.shortWrite = true;
+    relay.started.length = 0;
     try {
       await expect(uploadFirstContent("f1", new Uint8Array(3))).rejects.toThrow("stored 2 bytes of 3");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(relay.started).toEqual(["data", "trash", "delete"]);
     } finally {
       relay.shortWrite = false;
     }
   });
 });
 
+/**
+ * The upload path was designed to never hold a large file: 4 MiB slices,
+ * bounded part bodies. That property was silently defeated once, by a
+ * picker that handed it memory-backed Files, and the whole app died on a
+ * 30-second video. This suite guards the property itself, so the next
+ * change that re-materializes a source fails here instead of on a phone.
+ */
 describe("the upload path never materializes a large source", () => {
   beforeAll(async () => {
     await ready();
