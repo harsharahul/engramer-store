@@ -160,34 +160,37 @@ fn grant_ipc(app: &AppHandle, port: u16) -> Result<(), String> {
         .map_err(|err| format!("cannot grant the loopback origin its commands: {err}"))
 }
 
-/// Downloaded packs are never part of a device backup: they come again from
-/// the release host. The vault itself is backed up with the device: it is
-/// the only copy, and it is ciphertext.
+/// Marks a directory in or out of the device's backups. The vault itself
+/// is backed up with the device: it is the only copy, and it is ciphertext
+/// (an earlier build excluded it, so the flag is cleared explicitly).
+/// Downloaded packs stay out: they come again from the release host.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-fn exclude_from_backup(dir: &std::path::Path) {
+fn mark_backup_exclusion(dir: &std::path::Path, excluded: bool) {
     use objc2_foundation::{NSNumber, NSString, NSURLIsExcludedFromBackupKey, NSURL};
     let _ = std::fs::create_dir_all(dir);
     let url = NSURL::fileURLWithPath(&NSString::from_str(&dir.to_string_lossy()));
-    let yes = NSNumber::new_bool(true);
+    let value = NSNumber::new_bool(excluded);
     // SAFETY: a file URL for an existing directory, a boolean resource value
     // and the framework's own key; the call only reads them.
     let outcome =
-        unsafe { url.setResourceValue_forKey_error(Some(&yes), NSURLIsExcludedFromBackupKey) };
+        unsafe { url.setResourceValue_forKey_error(Some(&value), NSURLIsExcludedFromBackupKey) };
     if outcome.is_err() {
         eprintln!(
-            "local mode: could not exclude {} from backups",
-            dir.display()
+            "local mode: could not mark {} as {} the device's backups",
+            dir.display(),
+            if excluded { "out of" } else { "part of" }
         );
     }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-fn exclude_from_backup(_dir: &std::path::Path) {}
+fn mark_backup_exclusion(_dir: &std::path::Path, _excluded: bool) {}
 
 fn open_state(app: &AppHandle) -> Result<Arc<AppState>, String> {
     let dist = web_dist(app)?;
     let vault = vault_dir(app)?;
-    exclude_from_backup(&vault.join(engram_local::packs::PACKS_DIR));
+    mark_backup_exclusion(&vault, false);
+    mark_backup_exclusion(&vault.join(engram_local::packs::PACKS_DIR), true);
     let state = AppState::open(ServerConfig {
         data_dir: vault,
         quota_bytes: QUOTA_BYTES,
