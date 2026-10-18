@@ -36,3 +36,18 @@ keyboard, safe areas) show here.
 
 Screenshots land in `WALK_OUT` in walk order, with `steps.txt` listing
 every step and any control the walk could not reach.
+
+## A vault on this device
+
+The generic build asks on first launch. Built with `ENGRAM_GENERIC=1`
+in place of `ENGRAM_APP_URL` (after `pnpm --filter @engramer/web build`
+and `pnpm --filter @engramer/web local:packs`, which produce the core
+bundle it carries), the walk chooses "Keep it on this device", creates
+the vault with `WALK_PASSPHRASE` (default `walk-pass-2026`), declines
+the biometric offer and then walks the same screens. `WALK_EMAIL` is
+not needed. Reinstall the app before each run so the picker shows:
+
+```sh
+xcrun simctl uninstall <udid> com.harsharahul.engramstore
+xcrun simctl install <udid> "src-tauri/gen/apple/build/arm64-sim/Engram Store.app"
+```
