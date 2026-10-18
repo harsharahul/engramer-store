@@ -210,6 +210,18 @@ describe("local mode", () => {
     );
     expect(h.update).toHaveBeenLastCalledWith(expect.objectContaining({ done: 90, total: 90 }));
     expect(h.update.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ done: 38, current: "38.1 MB of 90.1 MB" }));
+  });
+
+  it("says the download is being checked and unpacked once every byte is in", async () => {
+    start.mockResolvedValueOnce({ packs: { office: status("downloading", 0) } });
+    packs
+      .mockResolvedValueOnce({ packs: { office: status("downloading", 94_429_296) } })
+      .mockResolvedValueOnce({ packs: { office: status("installed", 94_429_296) } });
+    const h = hooks();
+    await downloadPack("office", h, { sleep: async () => {} });
+    expect(h.update.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ done: 90, total: 90, current: "Checking and unpacking the download…" }),
+    );
     expect(h.end).toHaveBeenCalledWith(
       expect.objectContaining({ detail: "The office editor is ready. 236 MB on this device." }),
     );

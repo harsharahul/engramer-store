@@ -3782,7 +3782,7 @@ export function Vault() {
       {unlockPromptOpen && (
         <Confirm
           title="Unlock with Touch ID next time?"
-          sub="Skip the password on this device: your vault key stays wrapped under a key only this device's screen-lock passkey can release. Signing out removes it, and you can disable it anytime from the command palette."
+          sub={`Skip the ${localMode ? "passphrase" : "password"} on this device: your vault key stays wrapped under a key only this device's screen-lock passkey can release. Signing out removes it, and you can disable it anytime from the command palette.`}
           confirmLabel="Enable"
           onConfirm={enrollUnlock}
           onClose={() => {

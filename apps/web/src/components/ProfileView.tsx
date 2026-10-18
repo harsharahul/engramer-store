@@ -819,7 +819,7 @@ export function ProfileView(props: {
           <h2>{shownName}</h2>
           <div className="profile-sub">
             {store.isAdmin ? "Administrator · " : ""}
-            {local ? `Vault on this device · ${formatBytes(local.vault.bytes)}` : "End-to-end encrypted vault"}
+            {local ? `Vault on this device · ${formatBytes(local.vault.bytes)} on disk` : "End-to-end encrypted vault"}
           </div>
           {local && !phoneShell && (
             <div className="profile-sub">{local.vault.directory.replace(/^\/Users\/[^/]+\//, "~/")}</div>
@@ -1776,7 +1776,7 @@ export function ProfileView(props: {
             <div className="profile-row-main">
               <b>Record missing checksums</b>
               <div className="profile-row-sub">
-                {digestless.count} file{digestless.count === 1 ? "" : "s"} carry no checksum:
+                {digestless.count} file{digestless.count === 1 ? " carries" : "s carry"} no checksum:
                 stored before checksums existed, or renamed while an old bug dropped them.
                 This reads each one back ({formatBytes(digestless.bytes)}) and records a
                 checksum for what it holds today, so every later check has something to
