@@ -116,6 +116,7 @@ To use it as an app: on iPhone, open the site in Safari, tap Share, then "Add to
 - **Find** things from the search box or `Cmd+K`: names, tags, folder names, and text inside documents, PDFs and (with OCR on) images. Filters like `tag:receipts`, `type:photo`, `in:Work` and `before:2026` narrow it down.
 - **Watch a folder** in the desktop app, under your account menu, then Watch folders. Choose per folder whether arrivals are sorted by kind and tagged with the folder's name, or kept together in a folder of the same name.
 - **Share** a file with a link that carries its key in the URL fragment, which browsers never send to a server. Add a password, an expiry, or a download limit; revoke it at any time from **Shared**.
+- **Keep it on this device.** The Mac and iPhone apps work without a server: the first launch offers to keep the vault on the device, where the app's own backend serves the same client from a loopback address. Everything is stored encrypted; the vault travels with the device's backups. The office editor and the on-device intelligence models are optional downloads from the release page, offered the first time a feature needs them. Profile > "Connect a server" copies the vault to a server later, checks the copy, and switches the app to it.
 
 Configuration via environment variables:
 

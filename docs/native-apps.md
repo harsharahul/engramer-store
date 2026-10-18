@@ -60,6 +60,44 @@ ENGRAM_MAC_APP_PROFILE=~/secrets/engram-mac/engram-mac-app.provisionprofile \
 pnpm --filter @engramer/desktop mac:release -- --generic
 ```
 
+## A vault on this device
+
+The generic Mac and iPhone apps also work without any server. The first
+launch offers "Keep it on this device": the app starts its own backend on
+a loopback address chosen once and remembered, serves the bundled web
+client from it, and the vault lives in the app's data directory as the
+same SQLite database and encrypted blob files a server would hold. The
+client does not change: every cryptographic step stays in the web client,
+and the on-device backend sees ciphertext and locked keys only, exactly
+as a server does. The passphrase is the only way in; the recovery key is
+shown at creation and becomes useful once the vault is connected to a
+server.
+
+The vault is part of the device's backups (Time Machine, iCloud Backup):
+it is the only copy, and it is ciphertext. Two feature packs are optional
+downloads from the release page, offered the first time a feature needs
+them and listed in Profile under "This device": the office editor (about
+90 MB) and the on-device intelligence models (about 206 MB). Downloaded
+packs are excluded from backups because they can be fetched again. Each
+archive is checked against the hash the app ships with before a single
+file of it is served.
+
+Features that need a server stay visible and say so: sharing, file
+requests, two-factor sign-in and rotating the recovery key. The Finder
+drive and the Files provider work while the app is open.
+
+Profile > "Connect a server" moves the vault to a server later. The app's
+backend copies the vault there through the server's public API, as it is
+stored: folders, files with their locked keys, previews and search
+indexes, the settings and the account's name. The account on the server is
+created with the vault's own keys, so the same passphrase opens it and
+every copied file still opens. Before anything changes, the server reads
+every copied file back and its listing is compared with the device's;
+then one button switches the app to the server, and the person signs in
+there with the same passphrase. The vault stays on the device until it is
+removed from Profile. A server account that already holds files is
+refused with the reason; the first version connects empty accounts only.
+
 ## The iPhone app
 
 With extensions turned on, the vault appears as a drive in the Files app and
