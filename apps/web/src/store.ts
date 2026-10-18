@@ -57,6 +57,7 @@ import {
   downloadThumbnail,
   encryptAndUpload,
   makeThumbnail,
+  uploadFirstContent,
   withDeadlineOrThrow,
   type UploadSource,
 } from "./transfer";
@@ -594,7 +595,10 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array, prior?: FileEntry): Fi
     createdAt: dto.createdAt,
     updatedAt: dto.updatedAt,
     keyEpoch: dto.keyEpoch ?? 0,
-    generation: dto.generation ?? 0,
+    // Unknown, not zero, for a row cached before backends named it: the
+    // editor's pre-save check then falls back to the modification time
+    // instead of reading a real generation as somebody else's save.
+    generation: dto.generation,
     // Sticky across replies that did not compute it (cached rows, older
     // servers): known-collaborative must not flicker back to private.
     hasCollaborators: dto.hasCollaborators ?? prior?.hasCollaborators ?? false,
@@ -694,7 +698,7 @@ export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEnt
     role: dto.role,
     ownerEmail: dto.ownerEmail,
     keyEpoch: dto.keyEpoch,
-    generation: dto.generation ?? 0,
+    generation: dto.generation,
   };
 }
 
@@ -2078,8 +2082,8 @@ export const useStore = create<StoreState>((set, get) => {
         secretBoxSeal(fileKey, masterKey()),
         encryptFileMetadata(meta, fileKey),
       );
-      await uploadBlob(dto.id, "data", encryptBytes(new Uint8Array(0), fileKey));
-      applyFile({ ...dto, uploaded: true });
+      const generation = await uploadFirstContent(dto.id, encryptBytes(new Uint8Array(0), fileKey));
+      applyFile({ ...dto, uploaded: true, ...(generation !== undefined ? { generation } : {}) });
       return dto.id;
     },
 
@@ -2102,8 +2106,13 @@ export const useStore = create<StoreState>((set, get) => {
         secretBoxSeal(fileKey, masterKey()),
         encryptFileMetadata(meta, fileKey),
       );
-      await uploadBlob(dto.id, "data", encryptBytes(bytes, fileKey));
-      applyFile({ ...dto, uploaded: true, size: bytes.length });
+      const generation = await uploadFirstContent(dto.id, encryptBytes(bytes, fileKey));
+      applyFile({
+        ...dto,
+        uploaded: true,
+        size: bytes.length,
+        ...(generation !== undefined ? { generation } : {}),
+      });
       return dto.id;
     },
 
@@ -2199,7 +2208,7 @@ export const useStore = create<StoreState>((set, get) => {
         secretBoxSeal(fileKey, masterKey()),
         encryptFileMetadata(meta, fileKey),
       );
-      await uploadBlob(dto.id, "data", encryptBytes(bytes, fileKey));
+      const generation = await uploadFirstContent(dto.id, encryptBytes(bytes, fileKey));
       if (searchText !== undefined) {
         await uploadBlob(
           dto.id,
@@ -2207,7 +2216,12 @@ export const useStore = create<StoreState>((set, get) => {
           encryptBytes(encodeIndexPayload({ text: searchText.slice(0, 100_000) }), fileKey),
         );
       }
-      applyFile({ ...dto, uploaded: true, size: bytes.length });
+      applyFile({
+        ...dto,
+        uploaded: true,
+        size: bytes.length,
+        ...(generation !== undefined ? { generation } : {}),
+      });
       return dto.id;
     },
 

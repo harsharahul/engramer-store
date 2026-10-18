@@ -1190,6 +1190,37 @@ export async function encryptAndUpload(
 }
 
 /**
+ * Uploads the first content of a file created a moment ago and returns the
+ * content generation the backend committed for it, so the library row can
+ * carry the truth at once. The create answer says generation 0 (no content
+ * yet); the next sync would correct it, and an editor that opened the file
+ * in between would read that correction as somebody else's save. Undefined
+ * when the backend named no generation (an older server).
+ */
+export async function uploadFirstContent(fileId: string, ciphertext: Uint8Array): Promise<number | undefined> {
+  let generation: number | undefined;
+  const written = await uploadBlob(fileId, "data", ciphertext, undefined, undefined, {
+    onBody: (body) => {
+      const named = (body as { generation?: unknown } | null)?.generation;
+      if (typeof named === "number") {
+        generation = named;
+      }
+    },
+  });
+  if (written !== null && written !== ciphertext.length) {
+    // Truncated content must not linger behind a row that looks complete;
+    // best-effort removal, as encryptAndUpload does, with the error still
+    // surfacing to the caller.
+    void api
+      .trashFile(fileId)
+      .then(() => api.deleteForever(fileId))
+      .catch(() => {});
+    throw new Error(`upload stored ${written} bytes of ${ciphertext.length}; the file was not saved`);
+  }
+  return generation;
+}
+
+/**
  * A file's contents, checked against the digest taken when it was uploaded.
  *
  * A mismatch is reported rather than thrown: the bytes are handed back so a

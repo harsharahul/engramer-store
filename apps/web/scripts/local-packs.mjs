@@ -15,7 +15,7 @@
  * (default: this version's GitHub release).
  */
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as tar from "tar";
@@ -120,7 +120,15 @@ export async function buildLocal({ dist, out, version, env = process.env }) {
   return { groups, manifest };
 }
 
-const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+// Resolved through symlinks (macOS keeps /tmp as one), so the build runs
+// from any path Node was handed.
+const isMain = (() => {
+  try {
+    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+})();
 if (isMain) {
   const arg = (flag, fallback) => {
     const at = process.argv.indexOf(flag);

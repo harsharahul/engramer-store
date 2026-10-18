@@ -100,7 +100,12 @@ function megabytes(bytes: number): number {
   return Math.round(bytes / MB);
 }
 
+/** The bell's line while a pack arrives: bytes while they come, then the
+ * check and the unpacking, which take their own time after the last byte. */
 function progressLine(status: PackStatus): string {
+  if (status.state === "downloading" && status.downloadedBytes >= status.archiveBytes && status.archiveBytes > 0) {
+    return "Checking and unpacking the download…";
+  }
   return `${formatBytes(status.downloadedBytes)} of ${formatBytes(status.archiveBytes)}`;
 }
 

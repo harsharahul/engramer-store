@@ -16,18 +16,53 @@ const rig = vi.hoisted(() => ({
   /** The batch route's stand-in; null plays an older server (404), so
    * bulk actions fall back to the single routes the tests stub. */
   batch: null as null | ((body: unknown) => Promise<unknown>),
+  /** The content generation the stand-in backend names in its upload
+   * reply; unset, the reply names none, as the older tests expect. */
+  generation: undefined as number | undefined,
 }));
 
 vi.mock("./api", async (importOriginal) => {
   const original = await importOriginal<typeof import("./api")>();
   return {
     ...original,
-    uploadBlob: async (id: string, kind: string, bytes: Uint8Array) => {
+    uploadBlob: async (
+      id: string,
+      kind: string,
+      bytes: Uint8Array,
+      _onProgress?: unknown,
+      _signal?: unknown,
+      opts?: { onBody?: (body: unknown) => void },
+    ) => {
       rig.blobPuts.push(`${kind}:${id}`);
+      if (rig.generation !== undefined) {
+        opts?.onBody?.({ size: bytes.length, generation: rig.generation });
+      }
       return bytes.length;
     },
     api: {
       ...original.api,
+      createFile: async (
+        folderId: string | null,
+        encryptedKey: FileDto["encryptedKey"],
+        encryptedMeta: FileDto["encryptedMeta"],
+      ): Promise<FileDto> => ({
+        id: `new-${rig.blobPuts.length}`,
+        folderId,
+        encryptedKey,
+        encryptedMeta,
+        size: 0,
+        thumbSize: 0,
+        indexSize: 0,
+        uploaded: false,
+        trashed: false,
+        deleted: false,
+        updateSeq: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        // Both backends name the row's generation in the create answer:
+        // 0, no content yet.
+        generation: 0,
+      }),
       batchFiles: async (body: unknown) => {
         if (!rig.batch) {
           throw new original.ApiError(404, "not found");
@@ -1203,5 +1238,44 @@ describe("moveFiles against a server with the batch route", () => {
       spy.mockRestore();
       rig.batch = null;
     }
+  });
+});
+
+describe("a file created with its first content", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  /**
+   * The create answer says generation 0, the upload of the first bytes
+   * makes it 1. The library row must say 1 at once: an editor that opened
+   * the file before the next sync would otherwise read the correction as
+   * somebody else's save and refuse to save over it.
+   */
+  it("carries the generation the backend committed", async () => {
+    useStore.setState({
+      session: {
+        email: "t@example.com",
+        token: "t",
+        masterKey: generateKey(),
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      refreshUsage: async () => {},
+    });
+    rig.generation = 1;
+    try {
+      const document = await useStore.getState().createOfficeDocument("Plan", "docx", null);
+      expect(useStore.getState().files.get(document)?.generation).toBe(1);
+      const note = await useStore.getState().createNote("Ideas", null);
+      expect(useStore.getState().files.get(note)?.generation).toBe(1);
+    } finally {
+      rig.generation = undefined;
+    }
+  });
+
+  it("keeps the create answer's generation when the backend names none", async () => {
+    const document = await useStore.getState().createOfficeDocument("Older", "docx", null);
+    expect(useStore.getState().files.get(document)?.generation).toBe(0);
   });
 });

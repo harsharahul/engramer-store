@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { SaveConflictError, copyName, describeConflict, satisfiedByPeer } from "./conflict";
+import { SaveConflictError, contentMoved, copyName, describeConflict, satisfiedByPeer } from "./conflict";
+
+describe("contentMoved", () => {
+  it("is quiet while the content generation is the one the editor opened", () => {
+    expect(contentMoved(3, 3)).toBe(false);
+  });
+
+  it("moves when another save or a restore changed the generation", () => {
+    expect(contentMoved(3, 4)).toBe(true);
+    expect(contentMoved(3, 2)).toBe(true);
+  });
+
+  it("decides nothing without generations on both sides", () => {
+    // A preview or an index written after the editor opened moves the
+    // entry's stamp, never its generation; without the generation the
+    // stamp is the only signal left, and that is the caller's call.
+    expect(contentMoved(undefined, 4)).toBe(false);
+    expect(contentMoved(3, undefined)).toBe(false);
+  });
+});
 
 describe("describeConflict", () => {
   it("is clean while the entry has not moved since open", () => {

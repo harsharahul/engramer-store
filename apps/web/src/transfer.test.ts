@@ -6,6 +6,10 @@ const relay = vi.hoisted(() => ({
   started: [] as string[],
   gate: Promise.resolve(),
   open: () => {},
+  /** The generation the stand-in backend names in its upload reply. */
+  generation: undefined as number | undefined,
+  /** Report one byte fewer than sent, as a truncated store would. */
+  shortWrite: false,
 }));
 
 vi.mock("./api", async (importOriginal) => {
@@ -40,13 +44,31 @@ vi.mock("./api", async (importOriginal) => {
         await relay.gate;
         return dto({ id, encryptedMeta: patch.encryptedMeta, updatedAt: 2 });
       },
+      trashFile: async () => {
+        relay.started.push("trash");
+      },
+      deleteForever: async () => {
+        relay.started.push("delete");
+      },
     },
-    uploadBlob: async (_id: string, kind: string, bytes: Uint8Array) => {
+    uploadBlob: async (
+      _id: string,
+      kind: string,
+      bytes: Uint8Array,
+      _onProgress?: unknown,
+      _signal?: unknown,
+      opts?: { onBody?: (body: unknown) => void },
+    ) => {
       relay.started.push(kind);
       if (kind !== "data") {
         await relay.gate;
       }
-      return bytes.length;
+      const written = relay.shortWrite ? bytes.length - 1 : bytes.length;
+      opts?.onBody?.({
+        size: written,
+        ...(relay.generation !== undefined ? { generation: relay.generation } : {}),
+      });
+      return written;
     },
     beginPartUpload: async () => ({ session: "s1" }),
     uploadPart: async (_id: string, _s: string, _no: number, body: Uint8Array) => body.length,
@@ -81,6 +103,7 @@ import {
   contentCiphertextSize,
   encryptAndUpload,
   makeThumbnail,
+  uploadFirstContent,
   withDeadline,
   type PreparedFile,
   type UploadSource,
@@ -144,6 +167,30 @@ describe("encryptAndUpload", () => {
     const result = await done;
     expect(result.dto.uploaded).toBe(true);
     expect(result.meta.digest).toBeDefined();
+  });
+});
+
+describe("uploadFirstContent", () => {
+  it("returns the generation the backend committed", async () => {
+    relay.generation = 1;
+    await expect(uploadFirstContent("f1", new Uint8Array([1, 2, 3, 4]))).resolves.toBe(1);
+    relay.generation = undefined;
+  });
+
+  it("answers undefined when the backend names no generation", async () => {
+    await expect(uploadFirstContent("f1", new Uint8Array(3))).resolves.toBeUndefined();
+  });
+
+  it("refuses a write of the wrong size and removes the row it would leave behind", async () => {
+    relay.shortWrite = true;
+    relay.started.length = 0;
+    try {
+      await expect(uploadFirstContent("f1", new Uint8Array(3))).rejects.toThrow("stored 2 bytes of 3");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(relay.started).toEqual(["data", "trash", "delete"]);
+    } finally {
+      relay.shortWrite = false;
+    }
   });
 });
 
