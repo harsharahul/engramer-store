@@ -10,34 +10,63 @@
  *
  *   node scripts/release-packs-check.mjs [--manifest <packs.json>] [--base-url <url>]
  *
- * The manifest defaults to apps/web/dist-local/core/packs.json. A local
- * host (http://127.0.0.1:<port>/) stands in for the release page in tests.
+ * The manifest defaults to the bundled core's packs.json: the directory
+ * ENGRAM_LOCAL_CORE names, else apps/web/dist-local/core, the same choice
+ * the app builds make. A local host (http://127.0.0.1:<port>/) stands in
+ * for the release page in tests.
  */
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+/** The core bundle the app carries, as the build scripts resolve it. */
+function bundledCore() {
+  const named = (process.env.ENGRAM_LOCAL_CORE ?? "").trim().replace(/^~(?=\/)/, homedir());
+  return named || join(here, "..", "..", "web", "dist-local", "core");
+}
+
+/** Whether this file is the script Node was asked to run, through any path. */
+function invokedAs(argv1) {
+  if (!argv1) {
+    return false;
+  }
+  try {
+    return realpathSync(argv1) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+}
 
 function arg(name, fallback) {
   const index = process.argv.indexOf(name);
   return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
 }
 
-/** Downloads one archive and reports what arrived. */
+/** Downloads one archive and reports what arrived; a failed connection or
+ * a stream that breaks off is a result, not a crash, so the packs after it
+ * are still checked. */
 export async function fetchDigest(url, fetchImpl = fetch) {
-  const response = await fetchImpl(url);
-  if (!response.ok || !response.body) {
-    return { ok: false, status: response.status, bytes: 0, sha256: null };
+  try {
+    const response = await fetchImpl(url);
+    if (!response.ok || !response.body) {
+      return { ok: false, status: response.status, bytes: 0, sha256: null, error: null };
+    }
+    const hash = createHash("sha256");
+    let bytes = 0;
+    for await (const chunk of response.body) {
+      hash.update(chunk);
+      bytes += chunk.length;
+    }
+    return { ok: true, status: response.status, bytes, sha256: hash.digest("hex"), error: null };
+  } catch (err) {
+    const cause = err instanceof Error && err.cause instanceof Error ? `: ${err.cause.message}` : "";
+    const message = err instanceof Error ? `${err.message}${cause}` : String(err);
+    return { ok: false, status: 0, bytes: 0, sha256: null, error: message };
   }
-  const hash = createHash("sha256");
-  let bytes = 0;
-  for await (const chunk of response.body) {
-    hash.update(chunk);
-    bytes += chunk.length;
-  }
-  return { ok: true, status: response.status, bytes, sha256: hash.digest("hex") };
 }
 
 /** Checks every pack of a manifest against the host; one line per pack. */
@@ -49,7 +78,9 @@ export async function checkPacks(manifest, { baseUrl = manifest.baseUrl, fetchIm
     const got = await fetchDigest(url, fetchImpl);
     const match = got.ok && got.bytes === pack.archiveBytes && got.sha256 === pack.archiveSha256;
     const reason = !got.ok
-      ? `HTTP ${got.status}`
+      ? got.error !== null
+        ? `network error: ${got.error}`
+        : `HTTP ${got.status}`
       : got.bytes !== pack.archiveBytes
         ? `${got.bytes} bytes, the manifest says ${pack.archiveBytes}`
         : got.sha256 !== pack.archiveSha256
@@ -60,9 +91,8 @@ export async function checkPacks(manifest, { baseUrl = manifest.baseUrl, fetchIm
   return results;
 }
 
-const invokedDirectly = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (invokedDirectly) {
-  const manifestPath = arg("--manifest", join(here, "..", "..", "web", "dist-local", "core", "packs.json"));
+if (invokedAs(process.argv[1])) {
+  const manifestPath = arg("--manifest", join(bundledCore(), "packs.json"));
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   const results = await checkPacks(manifest, { baseUrl: arg("--base-url", manifest.baseUrl) });
   let failed = false;

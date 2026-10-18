@@ -77,3 +77,28 @@ test("a missing archive, a short one and a changed one are each a mismatch with 
     await release.close();
   }
 });
+
+test("a host that cannot be reached is a mismatch with the reason, and the packs after it are still checked", async () => {
+  const office = Buffer.from("office-archive-bytes");
+  const intelligence = Buffer.from("intelligence-archive-bytes");
+  const manifest = manifestFor({ office, intelligence });
+  const release = await host({ "/v0.1.0/engram-pack-intelligence-0.1.0.tar.gz": intelligence });
+  // The first download fails the way undici reports a refused connection;
+  // the second reaches the host.
+  const fetchImpl = (url) =>
+    url.includes("office")
+      ? Promise.reject(new TypeError("fetch failed", { cause: new Error("connect ECONNREFUSED") }))
+      : fetch(url);
+  try {
+    const results = await checkPacks(manifest, { baseUrl: release.baseUrl, fetchImpl });
+    assert.deepEqual(
+      results.map((r) => [r.name, r.match, r.reason]),
+      [
+        ["office", false, "network error: fetch failed: connect ECONNREFUSED"],
+        ["intelligence", true, ""],
+      ],
+    );
+  } finally {
+    await release.close();
+  }
+});
