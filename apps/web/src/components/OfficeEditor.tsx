@@ -13,7 +13,7 @@ class OpenStalledError extends Error {
 import { openSharedContent, refreshLibraryOnce } from "../openshared";
 import { barrierDelayMs, barrierVerdict } from "../office/barrier";
 import { reconcile, type ContentMarker } from "../office/content";
-import { SaveConflictError, describeConflict, satisfiedByPeer } from "../conflict";
+import { SaveConflictError, contentMoved, describeConflict, satisfiedByPeer } from "../conflict";
 import { Converter } from "../office/x2t";
 import { EditorSession, editorFrameUrl } from "../office/session";
 import { CollabBridge, type OutFrame } from "../office/collab";
@@ -121,9 +121,12 @@ export function OfficeEditor(props: {
   // Someone else's save landed first; the exported bytes wait here for the
   // choice between reloading theirs and keeping these as a copy.
   const [conflict, setConflict] = useState<{ bytes: Uint8Array | null } | null>(null);
-  // The entry's stamp when this editor opened it; a strictly newer stamp on
-  // the store's entry means somebody saved meanwhile.
+  // The entry's content generation and stamp when this editor opened it. A
+  // changed generation means somebody saved content meanwhile; the stamp
+  // alone also moves for previews, indexes and renames, so it only decides
+  // when a generation is unknown.
   const openedAtRef = useRef(file.updatedAt);
+  const openedGenerationRef = useRef(file.generation);
   // Forces the open effect to run again for "Reload theirs".
   const [reloadNonce, setReloadNonce] = useState(0);
   // A content blocker refused the editor frame's assets; failure is
@@ -187,6 +190,7 @@ export function OfficeEditor(props: {
 
     const opened = fileRef.current;
     openedAtRef.current = opened.updatedAt;
+    openedGenerationRef.current = opened.generation;
     // The idle clock starts NOW, not at the epoch: a zero start made the
     // first elected tick read decades of quiet and save immediately.
     lastFrameAtRef.current = Date.now();
@@ -562,10 +566,14 @@ export function OfficeEditor(props: {
         // move its digest exactly as they move a recipient's, and every
         // stale-entry healing keyed on entry.shared silently skipped the
         // one member every room has.
+        // A vault on this device has no collaborators and no relay; the
+        // question is not asked of a backend that cannot answer it.
         const collaborativePromise: Promise<boolean> =
           opened.shared === true
             ? Promise.resolve(true)
-            : Promise.race([
+            : useStore.getState().local !== null
+              ? Promise.resolve(false)
+              : Promise.race([
                 api
                   .listCollaborators(opened.id)
                   .then((r) => r.collaborators.length > 0)
@@ -1129,7 +1137,12 @@ export function OfficeEditor(props: {
     // frames, so a save from here is cooperative, not a conflict.
     const live = collabRef.current === "live";
     const current = useStore.getState().files.get(fileId);
-    if (!live && current && describeConflict(openedAtRef.current, current.updatedAt) === "stale") {
+    const moved =
+      current !== undefined &&
+      (current.generation !== undefined && openedGenerationRef.current !== undefined
+        ? contentMoved(openedGenerationRef.current, current.generation)
+        : describeConflict(openedAtRef.current, current.updatedAt) === "stale");
+    if (!live && moved) {
       setConflict({ bytes: null });
       return;
     }
@@ -1175,7 +1188,11 @@ export function OfficeEditor(props: {
       setDirty(false);
       dirtyRef.current = false;
       setSavedAt(Date.now());
-      openedAtRef.current = useStore.getState().files.get(fileId)?.updatedAt ?? Date.now();
+      // The save landed the row the backend returned in the store, so the
+      // generation and the stamp read here are this save's own.
+      const saved = useStore.getState().files.get(fileId);
+      openedAtRef.current = saved?.updatedAt ?? Date.now();
+      openedGenerationRef.current = saved?.generation;
       if (live) {
         lastSaveRef.current = { upTo, at: Date.now() };
         if (checkpoint) {

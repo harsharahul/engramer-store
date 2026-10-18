@@ -27,6 +27,24 @@ export function describeConflict(
 }
 
 /**
+ * Whether the document's content moved since the editor opened it. The
+ * content generation changes only when bytes are saved or a version is
+ * restored; a preview, a search index, a rename or a tag moves the
+ * entry's stamp but not its generation, and none of them is somebody
+ * else's save. Unknown generations (an older server) decide nothing.
+ */
+export function contentMoved(
+  openedGeneration: number | undefined,
+  currentGeneration: number | undefined,
+): boolean {
+  return (
+    openedGeneration !== undefined &&
+    currentGeneration !== undefined &&
+    currentGeneration !== openedGeneration
+  );
+}
+
+/**
  * Whether losing a save race actually lost anything. In a LIVE room with
  * every posted frame acknowledged, this client's content sits in the log
  * and inside the winner's engine, so the winner's committed bytes and the
