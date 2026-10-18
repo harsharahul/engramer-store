@@ -57,6 +57,7 @@ import {
   downloadThumbnail,
   encryptAndUpload,
   makeThumbnail,
+  uploadFirstContent,
   withDeadlineOrThrow,
   type UploadSource,
 } from "./transfer";
@@ -2078,8 +2079,8 @@ export const useStore = create<StoreState>((set, get) => {
         secretBoxSeal(fileKey, masterKey()),
         encryptFileMetadata(meta, fileKey),
       );
-      await uploadBlob(dto.id, "data", encryptBytes(new Uint8Array(0), fileKey));
-      applyFile({ ...dto, uploaded: true });
+      const generation = await uploadFirstContent(dto.id, encryptBytes(new Uint8Array(0), fileKey));
+      applyFile({ ...dto, uploaded: true, ...(generation !== undefined ? { generation } : {}) });
       return dto.id;
     },
 
@@ -2102,8 +2103,13 @@ export const useStore = create<StoreState>((set, get) => {
         secretBoxSeal(fileKey, masterKey()),
         encryptFileMetadata(meta, fileKey),
       );
-      await uploadBlob(dto.id, "data", encryptBytes(bytes, fileKey));
-      applyFile({ ...dto, uploaded: true, size: bytes.length });
+      const generation = await uploadFirstContent(dto.id, encryptBytes(bytes, fileKey));
+      applyFile({
+        ...dto,
+        uploaded: true,
+        size: bytes.length,
+        ...(generation !== undefined ? { generation } : {}),
+      });
       return dto.id;
     },
 
@@ -2199,7 +2205,7 @@ export const useStore = create<StoreState>((set, get) => {
         secretBoxSeal(fileKey, masterKey()),
         encryptFileMetadata(meta, fileKey),
       );
-      await uploadBlob(dto.id, "data", encryptBytes(bytes, fileKey));
+      const generation = await uploadFirstContent(dto.id, encryptBytes(bytes, fileKey));
       if (searchText !== undefined) {
         await uploadBlob(
           dto.id,
@@ -2207,7 +2213,12 @@ export const useStore = create<StoreState>((set, get) => {
           encryptBytes(encodeIndexPayload({ text: searchText.slice(0, 100_000) }), fileKey),
         );
       }
-      applyFile({ ...dto, uploaded: true, size: bytes.length });
+      applyFile({
+        ...dto,
+        uploaded: true,
+        size: bytes.length,
+        ...(generation !== undefined ? { generation } : {}),
+      });
       return dto.id;
     },
 

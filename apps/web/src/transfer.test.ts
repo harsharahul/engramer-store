@@ -6,6 +6,10 @@ const relay = vi.hoisted(() => ({
   started: [] as string[],
   gate: Promise.resolve(),
   open: () => {},
+  /** The generation the stand-in backend names in its upload reply. */
+  generation: undefined as number | undefined,
+  /** Report one byte fewer than sent, as a truncated store would. */
+  shortWrite: false,
 }));
 
 vi.mock("./api", async (importOriginal) => {
@@ -41,12 +45,24 @@ vi.mock("./api", async (importOriginal) => {
         return dto({ id, encryptedMeta: patch.encryptedMeta, updatedAt: 2 });
       },
     },
-    uploadBlob: async (_id: string, kind: string, bytes: Uint8Array) => {
+    uploadBlob: async (
+      _id: string,
+      kind: string,
+      bytes: Uint8Array,
+      _onProgress?: unknown,
+      _signal?: unknown,
+      opts?: { onBody?: (body: unknown) => void },
+    ) => {
       relay.started.push(kind);
       if (kind !== "data") {
         await relay.gate;
       }
-      return bytes.length;
+      const written = relay.shortWrite ? bytes.length - 1 : bytes.length;
+      opts?.onBody?.({
+        size: written,
+        ...(relay.generation !== undefined ? { generation: relay.generation } : {}),
+      });
+      return written;
     },
     beginPartUpload: async () => ({ session: "s1" }),
     uploadPart: async (_id: string, _s: string, _no: number, body: Uint8Array) => body.length,
@@ -81,6 +97,7 @@ import {
   contentCiphertextSize,
   encryptAndUpload,
   makeThumbnail,
+  uploadFirstContent,
   withDeadline,
   type PreparedFile,
   type UploadSource,
@@ -154,6 +171,27 @@ describe("encryptAndUpload", () => {
  * 30-second video. This suite guards the property itself, so the next
  * change that re-materializes a source fails here instead of on a phone.
  */
+describe("uploadFirstContent", () => {
+  it("returns the generation the backend committed", async () => {
+    relay.generation = 1;
+    await expect(uploadFirstContent("f1", new Uint8Array([1, 2, 3, 4]))).resolves.toBe(1);
+    relay.generation = undefined;
+  });
+
+  it("answers undefined when the backend names no generation", async () => {
+    await expect(uploadFirstContent("f1", new Uint8Array(3))).resolves.toBeUndefined();
+  });
+
+  it("refuses a write of the wrong size", async () => {
+    relay.shortWrite = true;
+    try {
+      await expect(uploadFirstContent("f1", new Uint8Array(3))).rejects.toThrow("stored 2 bytes of 3");
+    } finally {
+      relay.shortWrite = false;
+    }
+  });
+});
+
 describe("the upload path never materializes a large source", () => {
   beforeAll(async () => {
     await ready();

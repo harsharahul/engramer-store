@@ -925,6 +925,13 @@ export function OfficeEditor(props: {
             diag("collab", `bytes contain the log through ${feedFloor}; replay starts after it`);
           }
         }
+        // The gate before a save compares against the generation of the
+        // bytes this editor holds, which the backend named as it served
+        // them; the library row can lag behind (a file created a moment
+        // ago still carries its create answer until the next sync).
+        if (doc.generation !== null) {
+          openedGenerationRef.current = doc.generation;
+        }
         session.deliver(doc.imported.bin, doc.imported.media);
         setStage("loading");
       } catch (err) {
