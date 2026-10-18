@@ -117,10 +117,12 @@ describe("connecting the vault to a server", () => {
       .mockResolvedValueOnce(
         connecting("done", { filesDone: 2, filesTotal: 2, verified: { folders: 1, files: 2, bytes: 20, checked: 2, problems: [] } }),
       );
-    const h = hooks();
+    const h = { ...hooks(), status: vi.fn() };
     const status = await followConnect(request, h, { sleep: async () => {} });
     expect(connectStart).toHaveBeenCalledWith(request);
     expect(status.step).toBe("done");
+    // Every answer from the backend reaches the row, not only the last one.
+    expect(h.status.mock.calls.map((call) => call[0].step)).toEqual(["reaching", "files", "done"]);
     expect(h.begin).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "connecting", title: "Connecting to vault.example.com", current: "Reaching vault.example.com…" }),
     );
@@ -143,6 +145,18 @@ describe("connecting the vault to a server", () => {
     expect(h.end).toHaveBeenCalledWith(
       expect.objectContaining({ detail: expect.stringContaining("Not connected: the account alice@example.com") }),
     );
+  });
+
+  it("does not follow a running copy to another server as its own", async () => {
+    const request = { server: "other.example.com", email: "alice@example.com", loginKey: "LOGIN-KEY", create: true };
+    const { ApiError } = await import("./api");
+    connectStart.mockRejectedValueOnce(new ApiError(409, "a copy is already running"));
+    connect.mockResolvedValueOnce(connecting("files"));
+    const h = hooks();
+    await expect(followConnect(request, h, { sleep: async () => {} })).rejects.toThrow(
+      "a copy to vault.example.com is already running; stop it first",
+    );
+    expect(h.begin).not.toHaveBeenCalled();
   });
 });
 

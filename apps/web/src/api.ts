@@ -383,8 +383,11 @@ export const api = {
   localConnectStart: (body: ConnectRequest) =>
     request<ConnectStatus>("/api/local/connect", { method: "POST", body: JSON.stringify(body) }),
 
-  /** Stops a running copy (it resumes on the next start) or forgets a finished one. */
+  /** Stops a running copy; it resumes on the next start. */
   localConnectCancel: () => request<ConnectStatus>("/api/local/connect", { method: "DELETE" }),
+
+  /** Forgets a finished or stopped copy's bookkeeping, so the next start begins afresh. */
+  localConnectForget: () => request<ConnectStatus>("/api/local/connect/plan", { method: "DELETE" }),
 
   /** The name collaborators see instead of this account's address. */
   setDisplayName: (displayName: string | null) =>

@@ -130,6 +130,14 @@ input::placeholder {
   border-color: var(--accent);
 }
 
+/* Two actions on one Profile row sit side by side. */
+.profile-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 a {
   color: var(--accent);
   text-decoration: none;

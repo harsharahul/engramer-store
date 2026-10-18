@@ -360,10 +360,29 @@ export function ProfileView(props: {
       refreshConnect();
     }
   }, [local]);
+  // A copy started elsewhere (another tab, an earlier visit to Profile)
+  // is followed from here too, so Stop and the sentence stay live.
+  useEffect(() => {
+    if (!connectStatus?.running) {
+      return;
+    }
+    const timer = setInterval(refreshConnect, 1500);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectStatus?.running]);
   const connectHooks: ConnectJobHooks = {
     begin: (job) => store.beginActivity(job),
     update: (patch) => store.updateActivity(patch),
     end: (entry) => store.finishActivity(entry.kind, entry.title, entry.detail),
+    status: setConnectStatus,
+  };
+  const forgetConnect = async () => {
+    try {
+      setConnectStatus(await api.localConnectForget());
+      setConnectOpen(true);
+    } catch {
+      props.onToast("Could not forget the copy.");
+    }
   };
   const startConnect = async () => {
     setConnectError(null);
@@ -1331,9 +1350,16 @@ export function ProfileView(props: {
             ) : connectStatus?.step === "done" ? (
               <Button onClick={() => void switchToServer()}>Switch to {connectStatus.host ?? "the server"}</Button>
             ) : (
-              <Button variant="secondary" disabled={connectBusy} onClick={() => setConnectOpen(true)}>
-                {connectBusy ? "Checking…" : connectStatus?.step === "failed" ? "Connect again…" : "Connect…"}
-              </Button>
+              <div className="profile-row-actions">
+                {connectStatus?.step === "failed" && (
+                  <Button variant="ghost" disabled={connectBusy} onClick={() => void forgetConnect()}>
+                    Start over
+                  </Button>
+                )}
+                <Button variant="secondary" disabled={connectBusy} onClick={() => setConnectOpen(true)}>
+                  {connectBusy ? "Checking…" : connectStatus?.step === "failed" ? "Connect again…" : "Connect…"}
+                </Button>
+              </div>
             )}
           </div>
         )}

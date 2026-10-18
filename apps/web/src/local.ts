@@ -249,6 +249,8 @@ export interface ConnectJobHooks {
   begin(job: ConnectJob): void;
   update(patch: Partial<ConnectJob>): void;
   end(entry: { kind: "connecting"; title: string; detail?: string }): void;
+  /** Every answer from the backend, so a row can show the live step. */
+  status?(status: ConnectStatus): void;
 }
 
 /**
@@ -270,12 +272,22 @@ export async function followConnect(
     status = await api.localConnectStart(request);
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
+      // A copy is already running: follow it only if it is the one asked
+      // for, never a copy to some other server.
       status = await api.localConnect();
+      const asked = request.server
+        .trim()
+        .replace(/^[a-z]+:\/\//i, "")
+        .replace(/\/+$/, "");
+      if (status.host && asked !== status.host && request.server.trim() !== status.server) {
+        throw new Error(`a copy to ${status.host} is already running; stop it first`);
+      }
     } else {
       throw err;
     }
   }
   const title = `Connecting to ${status.host ?? request.server}`;
+  hooks.status?.(status);
   hooks.begin({
     kind: "connecting",
     title,
@@ -288,6 +300,7 @@ export async function followConnect(
     while (status.running) {
       await sleep(pollMs);
       status = await api.localConnect();
+      hooks.status?.(status);
       hooks.update({ done: status.filesDone, total: status.filesTotal, current: connectSentence(status) });
     }
   } catch (err) {
