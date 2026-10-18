@@ -60,6 +60,7 @@ function connecting(step: ConnectStatus["step"], patch: Partial<ConnectStatus> =
     bytesTotal: 0,
     verified: null,
     error: null,
+    stale: false,
     ...patch,
   };
 }
@@ -101,6 +102,11 @@ describe("connecting the vault to a server", () => {
     expect(
       connectSentence(connecting("done", { verified: { folders: 1, files: 1, bytes: 176, checked: 1, problems: [] } })),
     ).toBe("Verified: 1 folder, 1 file, 176 B on vault.example.com; the server read every file back.");
+    expect(
+      connectSentence(
+        connecting("done", { stale: true, verified: { folders: 1, files: 1, bytes: 176, checked: 1, problems: [] } }),
+      ),
+    ).toBe("The vault changed since the copy on vault.example.com was checked. Connect again to copy the changes.");
     expect(connectSentence(connecting("failed", { error: "could not reach vault.example.com" }))).toBe(
       "Not connected: could not reach vault.example.com.",
     );

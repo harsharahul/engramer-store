@@ -223,6 +223,9 @@ export function connectSentence(status: ConnectStatus): string {
     case "verifying":
       return `${host} is reading its copy back…`;
     case "done": {
+      if (status.stale) {
+        return `The vault changed since the copy on ${host} was checked. Connect again to copy the changes.`;
+      }
       const v = status.verified;
       return v
         ? `Verified: ${count(v.folders, "folder")}, ${count(v.files, "file")}, ${formatBytes(v.bytes)} on ${host}; the server read every file back.`

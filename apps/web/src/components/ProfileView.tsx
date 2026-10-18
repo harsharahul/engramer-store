@@ -1347,7 +1347,7 @@ export function ProfileView(props: {
               <Button variant="secondary" onClick={() => void stopConnect()}>
                 Stop
               </Button>
-            ) : connectStatus?.step === "done" ? (
+            ) : connectStatus?.step === "done" && !connectStatus.stale ? (
               <Button onClick={() => void switchToServer()}>Switch to {connectStatus.host ?? "the server"}</Button>
             ) : (
               <div className="profile-row-actions">
@@ -1357,7 +1357,11 @@ export function ProfileView(props: {
                   </Button>
                 )}
                 <Button variant="secondary" disabled={connectBusy} onClick={() => setConnectOpen(true)}>
-                  {connectBusy ? "Checking…" : connectStatus?.step === "failed" ? "Connect again…" : "Connect…"}
+                  {connectBusy
+                    ? "Checking…"
+                    : connectStatus?.step === "failed" || connectStatus?.step === "done"
+                      ? "Connect again…"
+                      : "Connect…"}
                 </Button>
               </div>
             )}

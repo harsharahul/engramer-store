@@ -1040,4 +1040,7 @@ export interface ConnectStatus {
     problems: string[];
   } | null;
   error: string | null;
+  /** The vault changed since the checked copy was taken: the server does
+   * not hold the changes until the copy runs again. */
+  stale: boolean;
 }
