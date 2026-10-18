@@ -384,6 +384,16 @@ export function ProfileView(props: {
       props.onToast("Could not forget the copy.");
     }
   };
+  // The dialog opens with the server and address of the copy it would
+  // continue, so a return visit to Profile does not start from blank fields.
+  const openConnect = () => {
+    setConnectForm((form) => ({
+      ...form,
+      server: form.server || connectStatus?.server || "",
+      email: form.email || connectStatus?.email || "",
+    }));
+    setConnectOpen(true);
+  };
   const startConnect = async () => {
     setConnectError(null);
     setConnectBusy(true);
@@ -1356,7 +1366,7 @@ export function ProfileView(props: {
                     Start over
                   </Button>
                 )}
-                <Button variant="secondary" disabled={connectBusy} onClick={() => setConnectOpen(true)}>
+                <Button variant="secondary" disabled={connectBusy} onClick={openConnect}>
                   {connectBusy
                     ? "Checking…"
                     : connectStatus?.step === "failed" || connectStatus?.step === "done"
