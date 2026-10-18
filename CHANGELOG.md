@@ -5,6 +5,8 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-10-18
+
 ### Added
 - **Web build partition for on-device installs.** The web build now sorts
   every output file into the core bundle or one of two download packs
