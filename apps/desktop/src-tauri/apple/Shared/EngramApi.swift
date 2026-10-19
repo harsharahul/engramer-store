@@ -78,29 +78,10 @@ enum EngramApi {
 // wait here wedges fileproviderd's whole domain; this project has
 // already paid once for undeadlined network calls on automatic paths.
 
-/// What a content upload came back as; the provider maps refusals to
-/// conflict copies rather than data loss.
-enum EngramUploadOutcome {
-    case ok
-    /// The server refused: a generation race or a live co-editing session.
-    case conflict
-    /// The token the record carries no longer stands (401): the answer
-    /// is "open the app", never a retry with the same token.
-    case notAuthenticated
-    case failed(String)
-}
-
-/// Why a blocking JSON call came back empty, where the difference
-/// decides what the provider tells the system. Every other refusal
-/// used to read as "server unreachable", so a token past its end
-/// showed in Files as a connection problem with nothing to reconnect.
-enum EngramApiFailure: Error {
-    /// 401: the stored token is expired, revoked, or from before a
-    /// password change. Only the app can replace it.
-    case notAuthenticated
-    /// No answer, no HTTP response, or any other status.
-    case unreachable
-}
+// Every call below answers a refusal as an EngramWriteVerdict, the one
+// reading of an HTTP status the provider turns into the system's words.
+// A call that could not be prepared or sent at all is "unreachable",
+// the verdict the system retries later.
 
 extension EngramApi {
     /// The threshold above which content travels as numbered parts, so a
@@ -186,13 +167,13 @@ extension EngramApi {
         method: String,
         path: String,
         payload: [String: Any]
-    ) -> Result<Data, EngramApiFailure> {
+    ) -> Result<Data, EngramWriteVerdict> {
         guard let body = try? JSONSerialization.data(withJSONObject: payload),
               let request = request(record, method, path, body: body, contentType: "application/json"),
               let (status, data) = send(request)
         else { return .failure(.unreachable) }
-        if (200..<300).contains(status) { return .success(data) }
-        return .failure(status == 401 ? .notAuthenticated : .unreachable)
+        if let refusal = EngramWriteVerdict.refusal(status: status) { return .failure(refusal) }
+        return .success(data)
     }
 
     /// JSON POST/PATCH returning the decoded body on 2xx, for callers
@@ -207,39 +188,39 @@ extension EngramApi {
     }
 
     /// Uploads a staged ciphertext blob as the file's content: one PUT
-    /// below the threshold, the parts flow above it.
-    static func uploadContent(record: HandoffRecord, fileId: String, blob: URL) -> EngramUploadOutcome {
+    /// below the threshold, the parts flow above it. A refusal comes
+    /// back as its verdict; a blob this process cannot read, or a call
+    /// that never answered, is "unreachable" so the system tries later.
+    static func uploadContent(record: HandoffRecord, fileId: String, blob: URL) -> Result<Void, EngramWriteVerdict> {
         guard let size = (try? FileManager.default.attributesOfItem(atPath: blob.path)[.size] as? NSNumber)?
             .uint64Value
-        else { return .failed("staged blob unreadable") }
+        else { return .failure(.unreachable) }
         if size < partsThreshold {
             guard let put = request(record, "PUT", "/api/files/\(fileId)/data", contentType: "application/octet-stream"),
                   let (status, _) = sendFile(put, from: blob)
-            else { return .failed("upload did not complete") }
-            if (200..<300).contains(status) { return .ok }
-            if status == 401 { return .notAuthenticated }
-            return status == 409 ? .conflict : .failed("upload refused (\(status))")
+            else { return .failure(.unreachable) }
+            if let refusal = EngramWriteVerdict.refusal(status: status) { return .failure(refusal) }
+            return .success(())
         }
         return uploadParts(record: record, fileId: fileId, blob: blob, size: size)
     }
 
     private static func uploadParts(
         record: HandoffRecord, fileId: String, blob: URL, size: UInt64
-    ) -> EngramUploadOutcome {
+    ) -> Result<Void, EngramWriteVerdict> {
         struct Begun: Decodable { let session: String }
         let beginData: Data
         switch call(record: record, method: "POST", path: "/api/files/\(fileId)/data/parts",
                     payload: ["size": size]) {
         case .success(let data): beginData = data
-        case .failure(.notAuthenticated): return .notAuthenticated
-        case .failure(.unreachable): return .failed("could not begin a parts upload")
+        case .failure(let why): return .failure(why)
         }
         guard let begun = try? JSONDecoder().decode(Begun.self, from: beginData) else {
-            return .failed("could not begin a parts upload")
+            return .failure(.unreachable)
         }
 
         guard let handle = try? FileHandle(forReadingFrom: blob) else {
-            return .failed("staged blob unreadable")
+            return .failure(.unreachable)
         }
         defer { try? handle.close() }
         var part = 1
@@ -249,23 +230,21 @@ extension EngramApi {
             guard var putReq = request(
                 record, "PUT", "/api/files/\(fileId)/data/parts/\(begun.session)/\(part)",
                 contentType: "application/octet-stream"
-            ) else { return .failed("bad part request") }
+            ) else { return .failure(.unreachable) }
             putReq.httpBody = chunk
-            let partStatus = send(putReq)?.0
-            guard let partStatus, (200..<300).contains(partStatus) else {
+            if let refusal = EngramWriteVerdict.refusal(status: send(putReq)?.0) {
                 _ = json(record: record, method: "DELETE",
                          path: "/api/files/\(fileId)/data/parts/\(begun.session)", payload: [:])
-                return partStatus == 401 ? .notAuthenticated : .failed("part \(part) refused")
+                return .failure(refusal)
             }
             part += 1
         }
         guard let completeReq = request(
             record, "POST", "/api/files/\(fileId)/data/parts/\(begun.session)/complete",
             body: Data("{}".utf8), contentType: "application/json"
-        ), let (status, _) = send(completeReq) else { return .failed("completion did not answer") }
-        if (200..<300).contains(status) { return .ok }
-        if status == 401 { return .notAuthenticated }
-        return status == 409 ? .conflict : .failed("completion refused (\(status))")
+        ), let (status, _) = send(completeReq) else { return .failure(.unreachable) }
+        if let refusal = EngramWriteVerdict.refusal(status: status) { return .failure(refusal) }
+        return .success(())
     }
 }
 

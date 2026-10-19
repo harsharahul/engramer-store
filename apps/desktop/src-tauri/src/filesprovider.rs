@@ -107,7 +107,7 @@ mod apple {
     use block2::RcBlock;
     use objc2::rc::Retained;
     use objc2::runtime::{AnyClass, AnyObject, NSObject};
-    use objc2::msg_send;
+    use objc2::{msg_send, sel};
     use objc2_foundation::NSString;
     use std::sync::mpsc;
 
@@ -122,7 +122,19 @@ mod apple {
             initWithIdentifier: &*id_str,
             displayName: &*name_str,
         ];
-        Retained::from_raw(domain)
+        let domain = Retained::from_raw(domain)?;
+        // The drive keeps no trash of its own: a delete goes to the
+        // vault's trash, restorable from the app, and no item carries
+        // the trashing capability. Saying so (macOS 13, iOS 18) keeps
+        // the system from parenting trashed items under its Trash
+        // container, a location the server has no folder for; the
+        // provider still answers such a request safely either way.
+        let setter = sel!(setSupportsSyncingTrash:);
+        let responds: bool = msg_send![&*domain, respondsToSelector: setter];
+        if responds {
+            let _: () = msg_send![&*domain, setSupportsSyncingTrash: false];
+        }
+        Some(domain)
     }
 
     /// The NSFileProviderManager add/remove calls share this completion
