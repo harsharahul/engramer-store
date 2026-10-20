@@ -5,6 +5,30 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+- **A file trashed before it finished uploading no longer stalls the
+  drive.** The Finder and Files app providers keep such a file on the
+  device alone, excluded from sync, instead of asking the server to
+  create it inside the Trash. The server's refusal of that request had
+  been reported as an unreachable server, and the drive then held every
+  change from other devices behind retries of that one create until the
+  extension was turned off and on. The drive also tells the system it
+  keeps no trash of its own; a delete goes to the vault's trash as before.
+- **Each refusal from the server now carries its own meaning to the
+  drive.** A missing file or folder is reported as such (the system
+  removes it or re-creates the parent), a rejected request stops being
+  retried and is shown on the item, a full account is shown as the quota
+  it is, and only a server that does not answer, or fails, backs the
+  drive off. A folder deletion from the drive is rejected outright and
+  the folder comes back, where before it was retried without end, and a
+  deletion of a file the vault no longer has counts as done.
+
+### Changed
+- **Profile says where the office editor and intelligence come from on a
+  server vault.** The "This device" card now explains that both run on
+  the device and are fetched from the server the first time they are
+  used, where a vault kept on the device shows its download rows instead.
+
 ## [0.59.0] - 2026-10-18
 
 ### Added

@@ -1286,6 +1286,17 @@ export function ProfileView(props: {
 
       <section className="profile-card">
         <h3>This device</h3>
+        {!local && (
+          <div className="profile-row">
+            <div className="profile-row-main">
+              <b>Office editor and intelligence</b>
+              <div className="profile-row-sub">
+                The office editor and on-device intelligence run on this device. The app fetches
+                them from your server the first time you use them and keeps a copy here.
+              </div>
+            </div>
+          </div>
+        )}
         {local &&
           (["office", "intelligence"] as PackName[]).map((name) => {
             const status = packs?.[name];

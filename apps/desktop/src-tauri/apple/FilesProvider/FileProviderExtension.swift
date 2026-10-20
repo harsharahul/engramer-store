@@ -85,28 +85,36 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         return NSFileProviderError(.serverUnreachable)
     }
 
-    /// The system's word for a failed call. A token the server no
-    /// longer honors is "not authenticated", which Files shows as a
-    /// sign-in prompt that opens the app; everything else is the
-    /// connection problem it always was. Before this distinction an
-    /// expired token read as "server unreachable", and there was nothing
-    /// for the person to reconnect.
-    private func providerError(_ failure: EngramApiFailure) -> NSFileProviderError {
-        switch failure {
+    /// The system's word for a refused or failed write, from the verdict
+    /// the shared API layer reached. Each word has its own consequence
+    /// in the system's contract, and only "server unreachable" backs the
+    /// whole domain off until the next signal. That word used to cover
+    /// every refusal but 401, so a create the server answered with 404
+    /// was retried as a connection problem for two weeks, and every
+    /// remote change waited behind it while the domain was throttled.
+    private func providerError(_ verdict: EngramWriteVerdict) -> NSFileProviderError {
+        switch verdict {
         case .notAuthenticated:
+            // Files shows a sign-in prompt that opens the app; a retry
+            // with the same token could never succeed.
             noteRefusedToken()
             return NSFileProviderError(.notAuthenticated)
+        case .gone:
+            // The item or its parent no longer exists: the system drops
+            // the item from disk, or re-creates the missing parent and
+            // asks again.
+            return NSFileProviderError(.noSuchItem)
+        case .overQuota:
+            return NSFileProviderError(.insufficientQuota)
+        case .conflict, .rejected:
+            // Definitive for these bytes: the item shows as unable to
+            // sync and is tried again once it changes on disk. The
+            // content paths turn a conflict into a conflict copy before
+            // they reach here.
+            return NSFileProviderError(.cannotSynchronize)
         case .unreachable:
             return self.unreachable()
         }
-    }
-
-    private func providerError(_ outcome: EngramUploadOutcome) -> NSFileProviderError {
-        if case .notAuthenticated = outcome {
-            noteRefusedToken()
-            return NSFileProviderError(.notAuthenticated)
-        }
-        return self.unreachable()
     }
 
     // Deliberately NOT observing materializedItemsDidChange: reacting to
@@ -261,6 +269,18 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     ) -> Progress {
         reconnectIfNeeded()
         let progress = Progress(totalUnitCount: 1)
+        if itemTemplate.parentItemIdentifier == .trashContainer {
+            // A file trashed before it ever uploaded. The vault has no
+            // row to trash and the person has let go of the bytes, so
+            // the item stays on this device alone, in its Trash,
+            // excluded from sync; the system follows up with a
+            // deleteItem for an id the index never knew, answered there
+            // as already gone. Posting it instead named the Trash as a
+            // folder, the server said 404, and that one refusal, read
+            // as "unreachable", throttled the drive for two weeks.
+            completionHandler(nil, [], false, NSFileProviderError(.excludedFromSync))
+            return progress
+        }
         guard let record, let index, let master = record.masterKeyBytes else {
             completionHandler(nil, [], false, NSFileProviderError(.notAuthenticated))
             return progress
@@ -366,14 +386,10 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             completionHandler(nil, [], false, NSFileProviderError(.serverUnreachable))
             return
         }
-        let uploaded = EngramApi.uploadContent(record: record, fileId: fileId, blob: scratch)
-        switch uploaded {
-        case .ok:
-            break
-        case .conflict, .failed, .notAuthenticated:
+        if case .failure(let why) = EngramApi.uploadContent(record: record, fileId: fileId, blob: scratch) {
             // The record exists without content; the index skips
             // not-uploaded rows, and a later save retries cleanly.
-            completionHandler(nil, [], false, providerError(uploaded))
+            completionHandler(nil, [], false, providerError(why))
             return
         }
         index.refresh()
@@ -395,6 +411,16 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     ) -> Progress {
         reconnectIfNeeded()
         let progress = Progress(totalUnitCount: 1)
+        if changedFields.contains(.parentItemIdentifier), item.parentItemIdentifier == .trashContainer {
+            // Moved into the Trash. The drive keeps no trash of its own
+            // (no item carries the trashing capability; a delete goes to
+            // the vault's trash, restorable from the app), so the item
+            // is excluded from sync here and the system's follow-up
+            // deleteItem moves it to the vault's trash. Posting the move
+            // would name the Trash as a folder.
+            completionHandler(nil, [], false, NSFileProviderError(.excludedFromSync))
+            return progress
+        }
         guard let record, let index, let master = record.masterKeyBytes else {
             completionHandler(nil, [], false, NSFileProviderError(.notAuthenticated))
             return progress
@@ -426,18 +452,17 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                                              completionHandler: completionHandler)
                     return
                 }
-                let replaced = self.uploadReplacement(entry: entry, contents: newContents,
-                                                      record: record, master: master)
-                switch replaced {
-                case .ok:
+                switch self.uploadReplacement(entry: entry, contents: newContents,
+                                              record: record, master: master) {
+                case .success:
                     break
-                case .conflict:
+                case .failure(.conflict):
                     self.surfaceConflictCopy(of: entry, contents: newContents, record: record,
                                              master: master, index: index,
                                              completionHandler: completionHandler)
                     return
-                case .failed, .notAuthenticated:
-                    completionHandler(nil, [], false, self.providerError(replaced))
+                case .failure(let why):
+                    completionHandler(nil, [], false, self.providerError(why))
                     return
                 }
                 index.refresh()
@@ -526,17 +551,19 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
     /// generation serving and the metadata untouched.
     private func uploadReplacement(
         entry: IndexEntry, contents: URL, record: HandoffRecord, master: Data
-    ) -> EngramUploadOutcome {
+    ) -> Result<Void, EngramWriteVerdict> {
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: scratch) }
         // Reuse the existing file key by sealing manually: metadata JSON is
         // decrypted, updated, resealed; content streams through the
         // format file to file under the same key, so a multi-gigabyte
         // save from another app costs one chunk of memory, not the file.
+        // A metadata or encryption failure here is local and answered
+        // as "unreachable": the system tries the save again later.
         guard let metaJson = try? decryptMetadataJson(
             encryptedMetaJson: entry.encryptedMetaJson, objectKey: entry.key
         ), var meta = (try? JSONSerialization.jsonObject(with: Data(metaJson.utf8))) as? [String: Any]
-        else { return .failed("metadata unreadable") }
+        else { return .failure(.unreachable) }
 
         let envelope: ReplacementEnvelope
         do {
@@ -544,11 +571,11 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                 inputPath: contents.path, outputPath: scratch.path, fileKey: entry.key
             )
         } catch {
-            return .failed("encryption failed")
+            return .failure(.unreachable)
         }
 
         let outcome = EngramApi.uploadContent(record: record, fileId: entry.id, blob: scratch)
-        guard case .ok = outcome else { return outcome }
+        guard case .success = outcome else { return outcome }
 
         meta["digest"] = envelope.digest
         meta["size"] = envelope.plainSize
@@ -561,7 +588,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
                                path: "/api/files/\(entry.id)",
                                payload: ["encryptedMeta": sealedObject])
         }
-        return .ok
+        return .success(())
     }
 
     /// The no-edit-is-ever-lost path: the local bytes become a sibling
@@ -596,7 +623,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
             ]),
             let dto = try? JSONSerialization.jsonObject(with: created) as? [String: Any],
             let copyId = dto["id"] as? String,
-            case .ok = EngramApi.uploadContent(record: record, fileId: copyId, blob: scratch)
+            case .success = EngramApi.uploadContent(record: record, fileId: copyId, blob: scratch)
         else {
             // The copy could not be stored; refuse the save outright so
             // Files keeps the local bytes dirty and retries. Losing the
@@ -647,17 +674,34 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         }
         DispatchQueue.global(qos: .userInitiated).async {
             defer { progress.completedUnitCount = 1 }
-            guard let entry = index.entry(identifier.rawValue), !entry.isFolder else {
-                // Folder deletion cascades server-side trash over contents;
-                // deferred until that UX is thought through. Files only.
-                completionHandler(CocoaError(.featureUnsupported))
+            guard let entry = index.entry(identifier.rawValue) else {
+                // Unknown here: already deleted from another device, or
+                // an item the system excluded from sync (a create inside
+                // the Trash). The contract's answer for both is success;
+                // any other answer is retried for as long as the item
+                // exists on disk.
+                completionHandler(nil)
+                return
+            }
+            if entry.isFolder {
+                // Folder deletion would tombstone the whole subtree
+                // server-side, which a slip in Files must not be able to
+                // do. Rejecting the deletion is the contract's word for
+                // it: the folder comes back on disk. The earlier
+                // "unsupported" answer counted as transient and was
+                // retried without end.
+                completionHandler(NSFileProviderError(.deletionRejected))
                 return
             }
             // Server-side trash: restorable from the web app's Trash, so a
-            // slip in Files is never a permanent loss.
-            if case .failure(let why) = EngramApi.call(
+            // slip in Files is never a permanent loss. A file the vault no
+            // longer has is as deleted as it gets.
+            switch EngramApi.call(
                 record: record, method: "DELETE", path: "/api/files/\(entry.id)", payload: [:]
             ) {
+            case .success, .failure(.gone):
+                break
+            case .failure(let why):
                 completionHandler(self.providerError(why))
                 return
             }
@@ -672,6 +716,12 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension {
         request: NSFileProviderRequest
     ) throws -> NSFileProviderEnumerator {
         reconnectIfNeeded()
+        if containerItemIdentifier == .trashContainer {
+            // The contract's answer for a provider without a trash of its
+            // own; a listing under the Trash's identifier would otherwise
+            // read as an empty folder the server knows nothing about.
+            throw CocoaError(.featureUnsupported)
+        }
         guard let index else {
             throw NSFileProviderError(.notAuthenticated)
         }
