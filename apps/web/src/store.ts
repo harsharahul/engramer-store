@@ -173,6 +173,8 @@ export interface FileEntry {
   updatedAt: number;
   /** Shared into this vault by another account. */
   shared?: boolean;
+  /** SPIKE (spike/mail-scale only): the mail-index shard file holding this file's text. */
+  shard?: string;
   /** This account's rights on a shared file. */
   role?: "viewer" | "editor";
   /** Who shared it; shown wherever the file appears. */
@@ -565,6 +567,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array, prior?: FileEntry): Fi
   const meta = decryptFileMetadata(dto.encryptedMeta, key);
   return {
     id: dto.id,
+    ...((meta as { shard?: string }).shard ? { shard: (meta as { shard?: string }).shard } : {}),
     folderId: dto.folderId,
     name: meta.name,
     mime: meta.mime,
@@ -3471,6 +3474,35 @@ export const useStore = create<StoreState>((set, get) => {
       if (get().indexWarm) {
         return;
       }
+      // SPIKE (spike/mail-scale only): files whose text lives in a shared
+      // shard blob are filled from one fetch per shard.
+      const byShard = new Map<string, FileEntry[]>();
+      for (const f of get().files.values()) {
+        if (!f.trashed && f.shard && f.text === undefined) {
+          byShard.set(f.shard, [...(byShard.get(f.shard) ?? []), f]);
+        }
+      }
+      if (byShard.size > 0) {
+        await boundedRun([...byShard.keys()], 3, async (shardId) => {
+          const shardFile = get().files.get(shardId);
+          if (!shardFile) {
+            return;
+          }
+          try {
+            const bytes = await api.downloadBlob(shardId, "index");
+            const body = new TextDecoder().decode(decryptBytes(bytes, shardFile.key));
+            const texts = (JSON.parse(body.slice("EIDX1:".length)) as { texts: Record<string, string> }).texts;
+            for (const member of byShard.get(shardId) ?? []) {
+              const text = texts[member.id];
+              if (text !== undefined) {
+                setEntryText(member.id, text);
+              }
+            }
+          } catch {
+            // A missing shard leaves its members unsearchable by content.
+          }
+        });
+      }
       const candidates = [...get().files.values()].filter(
         (f) =>
           !f.trashed &&
@@ -3500,6 +3532,10 @@ export const useStore = create<StoreState>((set, get) => {
         set({ indexWarm: null });
       }
 
+      // SPIKE (spike/mail-scale only): mode C is measured without uploads.
+      if (typeof location !== "undefined" && location.search.includes("spike=1")) {
+        return;
+      }
       // Legacy migration trickle, bounded per session.
       const legacy = [...get().files.values()]
         .filter((f) => !f.trashed && f.inlineText && f.text !== undefined)

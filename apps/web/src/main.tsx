@@ -8,6 +8,8 @@ import { App } from "./App";
 import { ocrEnabled } from "./intel/ocr";
 import { semanticEnabled } from "./intel/semantic";
 import { warmList } from "./runtimeassets";
+import { searchFiles } from "./search";
+import { useStore } from "./store";
 import { APP_VERSION } from "./version";
 import { trackViewportHeight } from "./viewport";
 
@@ -15,6 +17,11 @@ import { trackViewportHeight } from "./viewport";
 // which build produced it, and this app can be running an older one than the
 // server has, through the service worker or the desktop shell.
 console.log(`Engram Store ${APP_VERSION}`);
+
+// SPIKE (spike/mail-scale only): the measurement script reads the store here.
+if (location.search.includes("spike=1")) {
+  (window as unknown as { __engramSpike: unknown }).__engramSpike = { store: useStore, searchFiles };
+}
 
 // Before first paint, so the layout is sized from a measured height rather
 // than whatever the browser reported while it was still settling.
