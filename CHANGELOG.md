@@ -5,6 +5,12 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Security
+- **Dependency advisories patched.** `dompurify` 3.4.17 (sanitizer
+  bypasses in the HTML sanitizer the web client applies to rendered
+  text) and `zod` 4.6.7 (memory exhaustion while validating oversized
+  collections in the server's request validation).
+
 ### Fixed
 - **A file trashed before it finished uploading no longer stalls the
   drive.** The Finder and Files app providers keep such a file on the
