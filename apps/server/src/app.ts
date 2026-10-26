@@ -81,6 +81,8 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   // A hop count is spelled out as the function it stands for: trust the
   // first N addresses behind the socket (Fastify types the count no more).
   const trusted = config.trustedProxies;
+  const requestLog: ConfigOverrides["requestLog"] | null =
+    overrides.requestLog ?? (process.env.ENGRAMER_LOG_REQUESTS === "true" ? {} : null);
   const app = Fastify({
     bodyLimit: 16 * 1024 * 1024,
     trustProxy: typeof trusted === "number" ? (_address: string, hop: number) => hop < trusted : trusted,
@@ -91,11 +93,10 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
     // Structured request logs to stdout for whatever ships container logs
     // off the node. Off by default; even when on, entries carry only what
     // the server already sees: method, path (opaque ids), status, timing.
-    logger:
-      process.env.ENGRAMER_LOG_REQUESTS === "true"
-        ? { level: "info" }
-        : false,
-    disableRequestLogging: process.env.ENGRAMER_LOG_REQUESTS !== "true",
+    logger: requestLog
+      ? { level: "info", ...(requestLog.stream ? { stream: requestLog.stream } : {}) }
+      : false,
+    disableRequestLogging: !requestLog,
   });
 
   // The bus to the other instances: PostgreSQL LISTEN/NOTIFY on a shared
@@ -451,12 +452,15 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   // Liveness: the process answers. Never tied to the database, so a
   // database blip does not restart pods; the server picker in the native
   // apps and the container HEALTHCHECK read this exact body.
-  app.get("/api/health", async () => ({ status: "ok" }));
+  // Both probes arrive twice every few seconds per instance; logged, they
+  // would be most of the request log and push the lines that matter out
+  // of the container's retention within hours.
+  app.get("/api/health", { logLevel: "silent" }, async () => ({ status: "ok" }));
   // Readiness: this instance may receive new work. 503 only while draining
   // (a pod leaving the set), by design not on database health: that would
   // take every replica out of service at once for a blip the requests
   // themselves already report.
-  app.get("/api/ready", async (_request, reply) => {
+  app.get("/api/ready", { logLevel: "silent" }, async (_request, reply) => {
     if (app.draining) {
       return reply.code(503).send({ status: "draining" });
     }

@@ -139,6 +139,32 @@ describe("PgBus", () => {
     await bus.close();
   });
 
+  it("logs one line when the listener is back, with the failed attempts before it", async () => {
+    const lines: string[] = [];
+    const bus = makeBus({ log: (message) => lines.push(message) });
+    bus.subscribe("engram_seq", () => {});
+    bus.start();
+    expect(await bus.ready(500)).toBe(true);
+    // A clean first connection is the quiet case: nothing to report.
+    expect(lines).toEqual([]);
+
+    // The database goes away; the next two attempts are refused, the
+    // third is taken. The line names the two that failed.
+    FakeClient.failNextConnect = 2;
+    FakeClient.created[0]!.emit("error", new Error("terminating connection due to administrator command"));
+    await tick(150);
+    expect(bus.connected).toBe(true);
+    expect(lines.filter((line) => /^listener reconnected after 2 failed attempts$/.test(line))).toHaveLength(1);
+    expect(lines.filter((line) => /reconnecting in/.test(line))).toHaveLength(3);
+
+    // A drop followed by an immediate reconnect still reports the recovery.
+    FakeClient.created.at(-1)!.emit("end");
+    await tick(60);
+    expect(bus.connected).toBe(true);
+    expect(lines.filter((line) => /^listener reconnected after 0 failed attempts$/.test(line))).toHaveLength(1);
+    await bus.close();
+  });
+
   it("treats a heartbeat that does not answer as a dead session", async () => {
     const bus = makeBus({ heartbeatMs: 30, heartbeatTimeoutMs: 30 });
     bus.subscribe("engram_seq", () => {});
