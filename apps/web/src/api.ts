@@ -528,6 +528,31 @@ export const api = {
    * until the tab closed. Interactive downloads pass nothing and wait as
    * long as the person is willing to.
    */
+  /** SPIKE (spike/mail-scale only): index blobs for many files in one request. */
+  downloadIndexBatch: async (ids: string[]): Promise<Map<string, Uint8Array>> => {
+    const response = await fetch("/api/files/index/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${authToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (!response.ok) {
+      throw new ApiError(response.status, `index batch failed (${response.status})`);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const out = new Map<string, Uint8Array>();
+    let at = 0;
+    while (at < bytes.length) {
+      const idLength = view.getUint32(at);
+      const id = new TextDecoder().decode(bytes.subarray(at + 4, at + 4 + idLength));
+      at += 4 + idLength;
+      const size = view.getUint32(at);
+      out.set(id, bytes.subarray(at + 4, at + 4 + size));
+      at += 4 + size;
+    }
+    return out;
+  },
+
   downloadBlobDetailed: async (
     id: string,
     kind: "data" | "thumbnail" | "index",

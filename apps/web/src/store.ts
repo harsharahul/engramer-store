@@ -1141,6 +1141,29 @@ export const useStore = create<StoreState>((set, get) => {
     set({ files });
   };
 
+  /** SPIKE (spike/mail-scale only): many index readings applied with one
+   * map copy and one store update, instead of one of each per file. */
+  const setEntryIndexBatch = (
+    updates: { id: string; text?: string; clip?: Float32Array; clips?: Float32Array[] }[],
+  ) => {
+    if (updates.length === 0) {
+      return;
+    }
+    const files = new Map(get().files);
+    for (const update of updates) {
+      const entry = files.get(update.id);
+      if (!entry) {
+        continue;
+      }
+      files.set(update.id, {
+        ...entry,
+        ...(update.text !== undefined ? { text: update.text, hasText: true } : {}),
+        ...(update.clip ? { clip: update.clip, hasClip: true, ...(update.clips ? { clips: update.clips } : {}) } : {}),
+      });
+    }
+    set({ files });
+  };
+
   const setEntryText = (id: string, text: string | undefined, inlineText?: boolean) => {
     const files = new Map(get().files);
     const entry = files.get(id);
@@ -3492,12 +3515,11 @@ export const useStore = create<StoreState>((set, get) => {
             const bytes = await api.downloadBlob(shardId, "index");
             const body = new TextDecoder().decode(decryptBytes(bytes, shardFile.key));
             const texts = (JSON.parse(body.slice("EIDX1:".length)) as { texts: Record<string, string> }).texts;
-            for (const member of byShard.get(shardId) ?? []) {
-              const text = texts[member.id];
-              if (text !== undefined) {
-                setEntryText(member.id, text);
-              }
-            }
+            setEntryIndexBatch(
+              (byShard.get(shardId) ?? [])
+                .filter((member) => texts[member.id] !== undefined)
+                .map((member) => ({ id: member.id, text: texts[member.id] })),
+            );
           } catch {
             // A missing shard leaves its members unsearchable by content.
           }
@@ -3509,26 +3531,59 @@ export const useStore = create<StoreState>((set, get) => {
           ((f.hasText && !f.inlineText && f.text === undefined) ||
             (f.hasClip && f.clip === undefined)),
       );
-      if (candidates.length > 0) {
+      // SPIKE (spike/mail-scale only): mode D fetches index blobs 200 at a time.
+      if (candidates.length > 0 && typeof location !== "undefined" && location.search.includes("batch=1")) {
         set({ indexWarm: { done: 0, total: candidates.length } });
+        const chunks: FileEntry[][] = [];
+        for (let i = 0; i < candidates.length; i += 200) {
+          chunks.push(candidates.slice(i, i + 200));
+        }
+        await boundedRun(chunks, 3, async (chunk) => {
+          try {
+            const blobs = await api.downloadIndexBatch(chunk.map((f) => f.id));
+            const updates: { id: string; text?: string; clip?: Float32Array; clips?: Float32Array[] }[] = [];
+            for (const file of chunk) {
+              const bytes = blobs.get(file.id);
+              if (!bytes) {
+                continue;
+              }
+              const payload = decodeIndexPayload(decryptBytes(bytes, file.key));
+              updates.push({ id: file.id, text: payload.text, clip: payload.clip, clips: payload.clips });
+            }
+            setEntryIndexBatch(updates);
+          } catch {
+            // A failed batch leaves its files unsearchable by content.
+          }
+          const warm = get().indexWarm;
+          if (warm) {
+            set({ indexWarm: { ...warm, done: warm.done + chunk.length } });
+          }
+        });
+        set({ indexWarm: null });
+      } else if (candidates.length > 0) {
+        set({ indexWarm: { done: 0, total: candidates.length } });
+        // SPIKE (spike/mail-scale only): readings are applied 200 at a time.
+        let pending: { id: string; text?: string; clip?: Float32Array; clips?: Float32Array[] }[] = [];
+        let finished = 0;
+        const flush = () => {
+          setEntryIndexBatch(pending);
+          pending = [];
+          set({ indexWarm: { done: finished, total: candidates.length } });
+        };
         await boundedRun(candidates, 3, async (file) => {
           try {
             const bytes = await api.downloadBlob(file.id, "index");
             const payload = decodeIndexPayload(decryptBytes(bytes, file.key));
-            if (payload.text !== undefined) {
-              setEntryText(file.id, payload.text);
-            }
-            if (payload.clip) {
-              setEntryClip(file.id, payload.clip, payload.clips);
-            }
+            pending.push({ id: file.id, text: payload.text, clip: payload.clip, clips: payload.clips });
           } catch {
             // A missing index never blocks the rest; search simply skips it.
           }
-          const warm = get().indexWarm;
-          if (warm) {
-            set({ indexWarm: { ...warm, done: warm.done + 1 } });
+          finished++;
+          if (pending.length >= 200) {
+            flush();
           }
         });
+        flush();
         set({ indexWarm: null });
       }
 

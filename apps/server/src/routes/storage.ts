@@ -1135,6 +1135,33 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   app.get("/api/files/:id/thumbnail", auth, (request, reply) => downloadBlob(request, reply, "thumb"));
   app.get("/api/files/:id/index", auth, (request, reply) => downloadBlob(request, reply, "index"));
 
+  // SPIKE (spike/mail-scale only): many index blobs in one response. Each
+  // frame is [u32 id length][id][u32 blob length][blob], big-endian; files
+  // the caller cannot read or that have no index are left out.
+  app.post("/api/files/index/batch", auth, async (request, reply) => {
+    const { ids } = z.object({ ids: z.array(z.string().uuid()).max(500) }).parse(request.body);
+    const frames: Buffer[] = [];
+    for (const id of ids) {
+      const file = (await getAccessibleFile(id, request.user.uid))?.file;
+      if (!file || !file.index_size) {
+        continue;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of await app.blobs.get(blobKey(id, "index", 0))) {
+        chunks.push(chunk as Buffer);
+      }
+      const blob = Buffer.concat(chunks);
+      const idBytes = Buffer.from(id, "utf8");
+      const head = Buffer.alloc(4);
+      head.writeUInt32BE(idBytes.length);
+      const size = Buffer.alloc(4);
+      size.writeUInt32BE(blob.length);
+      frames.push(head, idBytes, size, blob);
+    }
+    reply.header("content-type", "application/octet-stream");
+    return reply.send(Buffer.concat(frames));
+  });
+
   app.patch("/api/files/:id", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
     const uid = request.user.uid;

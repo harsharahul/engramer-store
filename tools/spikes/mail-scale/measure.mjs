@@ -28,6 +28,8 @@ const BASE = arg("base", "http://127.0.0.1:3182");
 const ENGINE = arg("engine", "chromium");
 const LABEL = arg("label", "unlabelled");
 const NEEDLE_EXPECT = Number(arg("needle-expect", "3"));
+/** Extra page query, e.g. "batch=1" for mode D. */
+const QUERY = arg("query", "");
 const EMAIL = "spike-mail@example.com";
 const PASSWORD = "spike lantern velvet harbor";
 
@@ -81,7 +83,7 @@ async function main() {
   const built = readFileSync(path.join(repo, "apps/web/dist/index.html"), "utf8");
   const bundleOk = scriptName(served) !== null && scriptName(served) === scriptName(built);
 
-  await page.goto(`${BASE}/?spike=1`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/?spike=1${QUERY ? `&${QUERY}` : ""}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector('input[type="email"]', { timeout: 60_000 });
   await page.fill('input[type="email"]', EMAIL);
   await page.fill('input[type="password"]', PASSWORD);
