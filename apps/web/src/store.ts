@@ -757,6 +757,17 @@ export interface BulkResult {
 /** Requests a bulk action keeps in flight at once. */
 const BULK_LANES = 4;
 
+/** One file's decoded index blob, waiting to be applied to the library. */
+interface IndexReading {
+  id: string;
+  text?: string;
+  clip?: Float32Array;
+  clips?: Float32Array[];
+}
+
+/** Index readings applied per library update while the search index warms. */
+const INDEX_APPLY_BATCH = 200;
+
 /** Whether the thumbnail sweep still owes this file a preview. */
 export function needsThumb(file: FileEntry): boolean {
   return (
@@ -1150,6 +1161,33 @@ export const useStore = create<StoreState>((set, get) => {
       });
       set({ files });
     }
+  };
+
+  /**
+   * Applies many index readings with one copy of the library and one store
+   * update, together with the warm-up's progress. Applying them one at a
+   * time copied the whole library once per file, so warming the index grew
+   * with the square of the library's size.
+   */
+  const applyIndexReadings = (
+    readings: readonly IndexReading[],
+    indexWarm: { done: number; total: number } | null,
+  ) => {
+    const files = new Map(get().files);
+    for (const reading of readings) {
+      const entry = files.get(reading.id);
+      if (!entry) {
+        continue;
+      }
+      files.set(reading.id, {
+        ...entry,
+        ...(reading.text !== undefined ? { text: reading.text, hasText: true } : {}),
+        ...(reading.clip
+          ? { clip: reading.clip, ...(reading.clips ? { clips: reading.clips } : {}), hasClip: true }
+          : {}),
+      });
+    }
+    set({ files, indexWarm });
   };
 
   const normalizeTags = (tags: readonly string[]): string[] => [
@@ -3478,26 +3516,30 @@ export const useStore = create<StoreState>((set, get) => {
             (f.hasClip && f.clip === undefined)),
       );
       if (candidates.length > 0) {
-        set({ indexWarm: { done: 0, total: candidates.length } });
+        const total = candidates.length;
+        set({ indexWarm: { done: 0, total } });
+        let pending: IndexReading[] = [];
+        let done = 0;
         await boundedRun(candidates, 3, async (file) => {
           try {
             const bytes = await api.downloadBlob(file.id, "index");
             const payload = decodeIndexPayload(decryptBytes(bytes, file.key));
-            if (payload.text !== undefined) {
-              setEntryText(file.id, payload.text);
-            }
-            if (payload.clip) {
-              setEntryClip(file.id, payload.clip, payload.clips);
-            }
+            pending.push({ id: file.id, text: payload.text, clip: payload.clip, clips: payload.clips });
           } catch {
             // A missing index never blocks the rest; search simply skips it.
           }
-          const warm = get().indexWarm;
-          if (warm) {
-            set({ indexWarm: { ...warm, done: warm.done + 1 } });
+          done++;
+          if (pending.length >= INDEX_APPLY_BATCH) {
+            const batch = pending;
+            pending = [];
+            applyIndexReadings(batch, { done, total });
           }
         });
-        set({ indexWarm: null });
+        if (pending.length > 0) {
+          applyIndexReadings(pending, null);
+        } else {
+          set({ indexWarm: null });
+        }
       }
 
       // Legacy migration trickle, bounded per session.

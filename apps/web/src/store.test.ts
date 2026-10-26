@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { encryptFileMetadata, generateKey, ready, secretBoxSeal } from "@engramer/crypto";
+import { encryptBytes, encryptFileMetadata, generateKey, ready, secretBoxSeal } from "@engramer/crypto";
 import type { PreparedFile } from "./transfer";
 import type { FileDto } from "./api";
 
@@ -162,6 +162,7 @@ vi.mock("./intel/ocr", async (importOriginal) => ({
 }));
 
 import { api } from "./api";
+import { encodeIndexPayload } from "./indexblob";
 import {
   clipComparable,
   metadataOf,
@@ -1277,5 +1278,58 @@ describe("a file created with its first content", () => {
   it("keeps the create answer's generation when the backend names none", async () => {
     const document = await useStore.getState().createOfficeDocument("Older", "docx", null);
     expect(useStore.getState().files.get(document)?.generation).toBe(0);
+  });
+});
+
+/**
+ * Warming the search index reads every file's encrypted index blob. Applying
+ * each reading with its own store update copied the whole library once per
+ * file, so the work grew with the square of the library: a fresh device with
+ * 10,000 indexed files waited about 75 seconds instead of about 4. The
+ * property pinned here is the bound on store updates, whatever the size.
+ */
+describe("search index warm-up", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  const library = (count: number) =>
+    Array.from({ length: count }, (_, i) =>
+      entry({ id: `w${i}`, name: `note-${i}.txt`, mime: "text/plain", hasText: true, key: generateKey() }),
+    );
+
+  const serve = (files: FileEntry[], unreadable?: string) => {
+    const byId = new Map(files.map((f) => [f.id, f]));
+    (api as unknown as Record<string, unknown>).downloadBlob = async (id: string) => {
+      if (id === unreadable) {
+        throw new Error("index blob missing");
+      }
+      return encryptBytes(encodeIndexPayload({ text: `words of ${id}` }), byId.get(id)!.key);
+    };
+  };
+
+  it("applies readings in batches, never one store update per file", async () => {
+    const files = library(1_000);
+    useStore.setState({ files: new Map(files.map((f) => [f.id, f])), indexWarm: null });
+    serve(files);
+    let updates = 0;
+    const stop = useStore.subscribe(() => {
+      updates++;
+    });
+    await useStore.getState().warmSearchIndex();
+    stop();
+    expect(updates).toBeLessThanOrEqual(Math.ceil(1_000 / 200) + 2);
+    expect([...useStore.getState().files.values()].every((f) => f.text === `words of ${f.id}`)).toBe(true);
+    expect(useStore.getState().indexWarm).toBeNull();
+  });
+
+  it("leaves the rest searchable when one file's index cannot be read", async () => {
+    const files = library(5);
+    useStore.setState({ files: new Map(files.map((f) => [f.id, f])), indexWarm: null });
+    serve(files, "w2");
+    await useStore.getState().warmSearchIndex();
+    const after = useStore.getState().files;
+    expect(after.get("w2")?.text).toBeUndefined();
+    expect(["w0", "w1", "w3", "w4"].every((id) => after.get(id)?.text === `words of ${id}`)).toBe(true);
   });
 });

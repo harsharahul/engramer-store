@@ -12,6 +12,12 @@ All notable changes to Engram Store are documented here, following
   collections in the server's request validation).
 
 ### Fixed
+- **Search is ready far sooner on a large library.** Loading the search
+  index on a new device or a new session applied each file's text with
+  its own update of the whole library, so the wait grew with the square
+  of the library's size. Readings are now applied 200 at a time: a
+  library of 10,000 indexed files becomes searchable in seconds instead
+  of more than a minute.
 - **A file trashed before it finished uploading no longer stalls the
   drive.** The Finder and Files app providers keep such a file on the
   device alone, excluded from sync, instead of asking the server to
