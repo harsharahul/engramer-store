@@ -5,6 +5,12 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Security
+- **Dependency advisories patched.** `dompurify` 3.4.17 (sanitizer
+  bypasses in the HTML sanitizer the web client applies to rendered
+  text) and `zod` 4.6.7 (memory exhaustion while validating oversized
+  collections in the server's request validation).
+
 ### Fixed
 - **A file trashed before it finished uploading no longer stalls the
   drive.** The Finder and Files app providers keep such a file on the
@@ -28,6 +34,15 @@ All notable changes to Engram Store are documented here, following
   server vault.** The "This device" card now explains that both run on
   the device and are fetched from the server the first time they are
   used, where a vault kept on the device shows its download rows instead.
+- **Health and readiness probes stay out of the request log.** With
+  request logging on, the two probe routes no longer write a line per
+  call. They arrive twice every few seconds per instance and were most of
+  the log, pushing real entries out of the container's retention within
+  hours.
+- **The server logs when its change-feed listener is back.** After a
+  database switchover or a dropped connection, one line reports the
+  recovery and the number of failed attempts before it, next to the
+  existing line for each failure.
 
 ## [0.59.0] - 2026-10-18
 

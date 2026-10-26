@@ -252,8 +252,17 @@ export class PgBus implements Bus {
     }
     this.listener = client;
     this.connected = true;
-    this.failures = 0;
     const first = this.connects === 0;
+    // Every failure on the way down is logged; one line on the way back
+    // up lets a later read of the log confirm the recovery. A first
+    // connection that needed no retry stays quiet.
+    const failed = first ? this.failures : Math.max(0, this.failures - 1);
+    if (!first) {
+      this.log(`listener reconnected after ${failed} failed attempts`);
+    } else if (failed > 0) {
+      this.log(`listener connected after ${failed} failed attempts`);
+    }
+    this.failures = 0;
     this.connects++;
     this.armHeartbeat(generation);
     this.readyWaiters.splice(0).forEach((wake) => wake(true));

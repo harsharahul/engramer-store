@@ -146,6 +146,9 @@ export interface ConfigOverrides {
   /** The session signing key, for tests that run several instances against
    * one PostgreSQL database; deployments set ENGRAMER_JWT_SECRET. */
   jwtSecret?: string;
+  /** Turns request logging on and, when a stream is given, writes it
+   * there; tests read their own log. Deployments set ENGRAMER_LOG_REQUESTS. */
+  requestLog?: { stream?: { write(message: string): void } };
 }
 
 export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
