@@ -158,7 +158,9 @@ export function describeImport(
       ? `Imported ${plural(report.imported, "email")}${
           report.attachments > 0 ? ` and ${plural(report.attachments, "attachment")}` : ""
         }`
-      : "No new emails";
+      : report.attachments > 0
+        ? `Stored ${plural(report.attachments, "missing attachment")}`
+        : "No new emails";
   const parts = [did];
   if (report.alreadyPresent > 0) {
     parts.push(`${report.alreadyPresent} already present`);

@@ -35,8 +35,8 @@ export interface ImportReport {
 
 /** What the importer needs from the store. */
 export interface ImportTarget {
-  /** Every file the library holds, trashed ones included. */
-  files(): Iterable<{ id: string; digest?: string; mail?: MailMeta; trashed?: boolean }>;
+  /** Every file the library holds, trashed and shared-in ones included. */
+  files(): Iterable<{ id: string; digest?: string; mail?: MailMeta; trashed?: boolean; shared?: boolean }>;
   ensureFolderPath(path: string[]): Promise<string>;
   /** Uploads one source into a folder through the normal upload path. */
   store(file: UploadSource, folderId: string): Promise<{ id: string; digest?: string }>;
@@ -89,13 +89,20 @@ export async function importMail(sources: UploadSource[], target: ImportTarget):
   const parse = target.parse ?? parseMessage;
   const report: ImportReport = { imported: 0, alreadyPresent: 0, skipped: [], attachments: 0 };
 
-  // What the vault already holds. Emails count even in the Trash: a
-  // deleted email is not brought back by importing the same file again.
+  // What this account already holds. Files other accounts share in do not
+  // count: a share can be revoked, so imported mail keeps its own copies.
+  // Emails count even in the Trash: a deleted email is not brought back by
+  // importing the same file again.
   const keys = new Set<string>();
+  const present = new Map<string, { id: string; mail: MailMeta }>();
   const byDigest = new Map<string, Promise<string>>();
   for (const file of target.files()) {
+    if (file.shared) {
+      continue;
+    }
     if (file.mail?.messageId) {
       keys.add(file.mail.messageId);
+      present.set(file.mail.messageId, { id: file.id, mail: file.mail });
     }
     if (file.digest && !file.trashed) {
       byDigest.set(file.digest, Promise.resolve(file.id));
@@ -134,49 +141,13 @@ export async function importMail(sources: UploadSource[], target: ImportTarget):
       ...(current ? { current } : {}),
     });
 
-  const handle = async (raw: Uint8Array, sourceName: string, fallbackName: string) => {
-    const label = subjectOf(raw) || fallbackName;
-    if (raw.length > MESSAGE_MAX) {
-      report.skipped.push({ name: label, reason: "larger than 50 MB" });
-      return;
-    }
-    let parsed: ParsedMessage;
-    try {
-      parsed = await parse(raw);
-    } catch (error) {
-      report.skipped.push({ name: label, reason: `could not be read: ${shortReason(error)}` });
-      return;
-    }
-    if (!readable(parsed)) {
-      report.skipped.push({ name: label, reason: "not an email" });
-      return;
-    }
-    const built = buildEmail(parsed, raw, { label: sourceName });
-    if (keys.has(built.dedupeKey)) {
-      report.alreadyPresent++;
-      return;
-    }
-    // Claimed before any await, so the same message twice in flight is
-    // stored once.
-    keys.add(built.dedupeKey);
+  /** Stores an email's attachments, or links the ones already here; answers their ids in order. */
+  const storeAttachments = async (
+    recordId: string,
+    built: ReturnType<typeof buildEmail>,
+    label: string,
+  ): Promise<string[]> => {
     const date = built.meta.date;
-    let recordId: string;
-    try {
-      const record = sourceWith(
-        [JSON.stringify(built.record)],
-        built.name,
-        EMAIL_MIME,
-        date || Date.now(),
-        { mail: built.meta },
-      );
-      recordId = (await target.store(record, await folder(RECORDS_FOLDER))).id;
-    } catch (error) {
-      keys.delete(built.dedupeKey);
-      report.skipped.push({ name: label, reason: `could not be stored: ${shortReason(error)}` });
-      return;
-    }
-    report.imported++;
-
     const year = date ? String(new Date(date).getFullYear()) : "Undated";
     const ids: string[] = [];
     for (const attachment of built.attachments) {
@@ -214,6 +185,68 @@ export async function importMail(sources: UploadSource[], target: ImportTarget):
         });
       }
     }
+    return ids;
+  };
+
+  const handle = async (raw: Uint8Array, sourceName: string, fallbackName: string) => {
+    const label = subjectOf(raw) || fallbackName;
+    if (raw.length > MESSAGE_MAX) {
+      report.skipped.push({ name: label, reason: "larger than 50 MB" });
+      return;
+    }
+    let parsed: ParsedMessage;
+    try {
+      parsed = await parse(raw);
+    } catch (error) {
+      report.skipped.push({ name: label, reason: `could not be read: ${shortReason(error)}` });
+      return;
+    }
+    if (!readable(parsed)) {
+      report.skipped.push({ name: label, reason: "not an email" });
+      return;
+    }
+    const built = buildEmail(parsed, raw, { label: sourceName });
+    if (keys.has(built.dedupeKey)) {
+      report.alreadyPresent++;
+      // An earlier import that stored the email but not all of its files
+      // (a dropped connection, a closed tab) is finished now. A complete
+      // email is left alone: its list never shrinks, so an attachment the
+      // owner deleted since is not stored again.
+      const existing = present.get(built.dedupeKey);
+      if (existing && existing.mail.attachmentIds.length < built.attachments.length) {
+        // Once per run, even when the export holds the message twice.
+        present.delete(built.dedupeKey);
+        const ids = await storeAttachments(existing.id, built, label);
+        const before = existing.mail.attachmentIds;
+        if (ids.length !== before.length || ids.some((id, i) => id !== before[i])) {
+          await target.setMail(existing.id, { ...existing.mail, attachmentIds: ids });
+        }
+      }
+      progress();
+      return;
+    }
+    // Claimed before any await, so the same message twice in flight is
+    // stored once.
+    keys.add(built.dedupeKey);
+    const date = built.meta.date;
+    let recordId: string;
+    try {
+      const record = sourceWith(
+        [JSON.stringify(built.record)],
+        built.name,
+        EMAIL_MIME,
+        date || Date.now(),
+        { mail: built.meta },
+      );
+      recordId = (await target.store(record, await folder(RECORDS_FOLDER))).id;
+    } catch (error) {
+      keys.delete(built.dedupeKey);
+      report.skipped.push({ name: label, reason: `could not be stored: ${shortReason(error)}` });
+      return;
+    }
+    report.imported++;
+
+    const ids = await storeAttachments(recordId, built, label);
     if (ids.length > 0) {
       await target.setMail(recordId, { ...built.meta, attachmentIds: ids });
     }

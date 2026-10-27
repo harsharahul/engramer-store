@@ -17,11 +17,19 @@ interface Stored {
   mail?: MailMeta;
   mailParent?: string;
   trashed?: boolean;
+  shared?: boolean;
 }
 
 /** The store as the importer sees it: files, folders by path, uploads. */
-function fakeTarget(opts: { onStore?: (file: Stored, job: ActivityJob | null) => void } = {}) {
-  const files = new Map<string, Stored>();
+function fakeTarget(
+  opts: {
+    onStore?: (file: Stored, job: ActivityJob | null) => void;
+    /** Names whose next upload fails once, as a dropped connection would. */
+    failOnce?: Set<string>;
+    existing?: Stored[];
+  } = {},
+) {
+  const files = new Map<string, Stored>((opts.existing ?? []).map((f) => [f.id, f]));
   let job: ActivityJob | null = null;
   let inFlight = 0;
   const seen = { peakInFlight: 0, setMailCalls: 0, finished: [] as string[][] };
@@ -30,6 +38,9 @@ function fakeTarget(opts: { onStore?: (file: Stored, job: ActivityJob | null) =>
     files: () => files.values(),
     ensureFolderPath: async (path) => `folder:${path.join("/")}`,
     store: async (file, folderId) => {
+      if (opts.failOnce?.delete(file.name)) {
+        throw new Error("the connection dropped");
+      }
       inFlight++;
       seen.peakInFlight = Math.max(seen.peakInFlight, inFlight);
       const bytes = new Uint8Array(await file.arrayBuffer());
@@ -269,5 +280,92 @@ describe("importMail", () => {
     expect(rig.records()).toHaveLength(8);
     expect(rig.seen.peakInFlight).toBeLessThanOrEqual(2);
     expect(rig.seen.peakInFlight).toBeGreaterThan(1);
+  });
+
+  it("files shared by other accounts are never counted as present or linked", async () => {
+    const lease = pdf("lease");
+    const rig = fakeTarget({
+      existing: [
+        {
+          id: "theirs-email",
+          name: "Lease.email",
+          type: EMAIL_MIME,
+          folderId: "elsewhere",
+          bytes: new Uint8Array(0),
+          digest: "x",
+          shared: true,
+          mail: {
+            messageId: "<Lease@example.com>",
+            from: "",
+            fromAddress: "",
+            to: [],
+            date: 0,
+            subject: "Lease",
+            attachmentIds: [],
+          },
+        },
+        { id: "theirs-pdf", name: "lease.pdf", type: "application/pdf", folderId: "elsewhere", bytes: lease, digest: contentDigest(lease), shared: true },
+      ],
+    });
+    const report = await importMail([source(mbox(message("Lease", { parts: [{ name: "lease.pdf", bytes: lease }] })))], rig.target);
+    // A share can be revoked: this account keeps its own copy of both.
+    expect(report).toEqual({ imported: 1, alreadyPresent: 0, skipped: [], attachments: 1 });
+    const mine = rig.records().find((r) => !r.shared)!;
+    expect(mine.mail!.attachmentIds).not.toContain("theirs-pdf");
+  });
+
+  it("a later import stores the attachments an earlier one could not", async () => {
+    const rig = fakeTarget({ failOnce: new Set(["a.pdf"]) });
+    const text = mbox(message("One", { parts: [{ name: "a.pdf", bytes: pdf("a") }] }));
+    const first = await importMail([source(text)], rig.target);
+    expect(first.imported).toBe(1);
+    expect(first.skipped).toEqual([{ name: "a.pdf (with One)", reason: expect.stringMatching(/could not be stored/) }]);
+    expect(rig.record("One.email").mail!.attachmentIds).toEqual([]);
+
+    const second = await importMail([source(text)], rig.target);
+    expect(second).toEqual({ imported: 0, alreadyPresent: 1, skipped: [], attachments: 1 });
+    const attachment = rig.attachments()[0]!;
+    expect(attachment.mailParent).toBe(rig.record("One.email").id);
+    expect(rig.record("One.email").mail!.attachmentIds).toEqual([attachment.id]);
+    expect(rig.seen.finished.at(-1)![0]).toBe("Stored 1 missing attachment; 1 already present");
+
+    // Complete now: a third import reads and writes nothing.
+    const writes = rig.seen.setMailCalls;
+    const size = rig.files.size;
+    const third = await importMail([source(text)], rig.target);
+    expect(third).toEqual({ imported: 0, alreadyPresent: 1, skipped: [], attachments: 0 });
+    expect(rig.seen.setMailCalls).toBe(writes);
+    expect(rig.files.size).toBe(size);
+  });
+
+  it("an import cut off before linking its attachments links them next time", async () => {
+    const bytes = pdf("cut");
+    const rig = fakeTarget({
+      existing: [
+        {
+          id: "rec",
+          name: "Cut.email",
+          type: EMAIL_MIME,
+          folderId: "folder:Mail/Imported",
+          bytes: new Uint8Array(0),
+          digest: "r",
+          mail: {
+            messageId: "<Cut@example.com>",
+            from: "Example Sender",
+            fromAddress: "sender@example.com",
+            to: ["owner@example.com"],
+            date: 0,
+            subject: "Cut",
+            attachmentIds: [],
+          },
+        },
+        { id: "att", name: "cut.pdf", type: "application/pdf", folderId: "x", bytes, digest: contentDigest(bytes), mailParent: "rec" },
+      ],
+    });
+    const report = await importMail([source(mbox(message("Cut", { parts: [{ name: "cut.pdf", bytes }] })))], rig.target);
+    expect(report).toEqual({ imported: 0, alreadyPresent: 1, skipped: [], attachments: 0 });
+    expect(rig.files.size).toBe(2);
+    expect(rig.files.get("rec")!.mail!.attachmentIds).toEqual(["att"]);
+    expect(rig.seen.setMailCalls).toBe(1);
   });
 });
