@@ -42,6 +42,12 @@ export interface ParsedQuery {
   favorite: boolean;
   before: number | null;
   after: number | null;
+  /** `from:` words, each matched against an email's sender name or address. */
+  from: string[];
+  /** `to:` words, each matched against an email's recipients. */
+  to: string[];
+  /** `has:attachment`: only emails that came with files. */
+  hasAttachment: boolean;
 }
 
 const KIND_SYNONYMS: Record<string, string> = {
@@ -68,13 +74,25 @@ const KIND_SYNONYMS: Record<string, string> = {
   deck: "slides",
   zip: "archive",
   archives: "archive",
+  email: "mail",
+  emails: "mail",
+  message: "mail",
+  messages: "mail",
 };
 
 /** Every word `type:` understands, canonical kinds and their synonyms; the
  * vocabulary handed to anything that writes a query on the user's behalf. */
 export const TYPE_WORDS: readonly string[] = [
-  ...new Set(["image", "video", "doc", "audio", "text", ...Object.keys(KIND_SYNONYMS)]),
+  ...new Set(["image", "video", "doc", "audio", "text", "mail", ...Object.keys(KIND_SYNONYMS)]),
 ];
+
+const OPERATOR_KEYS = "tag|type|in|is|before|after|from|to|has";
+const OPERATOR = new RegExp(`^(${OPERATOR_KEYS}):(.*)$`, "i");
+
+/** Whether a query uses any operator; such a query is taken literally. */
+export function hasOperator(query: string): boolean {
+  return new RegExp(`(^|\\s)(${OPERATOR_KEYS}):`, "i").test(query);
+}
 
 /**
  * Query grammar: free text plus `tag:receipts`, `type:image`, `in:folder`,
@@ -90,9 +108,12 @@ export function parseQuery(query: string): ParsedQuery {
     favorite: false,
     before: null,
     after: null,
+    from: [],
+    to: [],
+    hasAttachment: false,
   };
   for (const token of query.trim().split(/\s+/)) {
-    const match = /^(tag|type|in|is|before|after):(.*)$/i.exec(token);
+    const match = OPERATOR.exec(token);
     if (!match || !match[2]) {
       if (token) {
         parsed.terms.push(token.toLowerCase());
@@ -120,6 +141,17 @@ export function parseQuery(query: string): ParsedQuery {
         break;
       case "after":
         parsed.after = parseDate(value, false);
+        break;
+      case "from":
+        parsed.from.push(value);
+        break;
+      case "to":
+        parsed.to.push(value);
+        break;
+      case "has":
+        if (value.startsWith("attachment")) {
+          parsed.hasAttachment = true;
+        }
         break;
     }
   }
@@ -171,7 +203,10 @@ export function searchFiles(
     !parsed.folder &&
     !parsed.favorite &&
     parsed.before === null &&
-    parsed.after === null;
+    parsed.after === null &&
+    parsed.from.length === 0 &&
+    parsed.to.length === 0 &&
+    !parsed.hasAttachment;
   if (empty) {
     return [];
   }
@@ -223,6 +258,21 @@ function passesFilters(file: FileEntry, { parsed, folders }: Context): boolean {
     if (!folders || !folderChain(file, folders).some((n) => n.includes(parsed.folder!))) {
       return false;
     }
+  }
+  // Mail operators ask about an email's headers, so only emails can pass.
+  const mail = file.mail;
+  for (const word of parsed.from) {
+    if (!mail || !(mail.from.toLowerCase().includes(word) || mail.fromAddress.toLowerCase().includes(word))) {
+      return false;
+    }
+  }
+  for (const word of parsed.to) {
+    if (!mail || !mail.to.some((address) => address.toLowerCase().includes(word))) {
+      return false;
+    }
+  }
+  if (parsed.hasAttachment && (!mail || mail.attachmentIds.length === 0)) {
+    return false;
   }
   return true;
 }

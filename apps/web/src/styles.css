@@ -6310,3 +6310,25 @@ button.link {
   justify-content: space-between;
   gap: 12px;
 }
+
+.result-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.result-attachment {
+  max-width: 220px;
+  padding: 2px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--ink-1);
+  color: var(--paper);
+  font: inherit;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}

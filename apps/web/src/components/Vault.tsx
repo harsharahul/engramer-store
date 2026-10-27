@@ -3131,6 +3131,7 @@ export function Vault() {
             <SearchResults
               hits={shownHits}
               folders={store.folders}
+              files={store.files}
               cursor={searchCursor}
               selection={selection}
               onSelect={select}

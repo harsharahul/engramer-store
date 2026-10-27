@@ -78,9 +78,17 @@ export function ResultRow(props: {
   onSelect: (event: React.MouseEvent) => void;
   onOpen: () => void;
   onMenu: (x: number, y: number) => void;
+  /** The library, so an email's row can name its attachments. */
+  files?: ReadonlyMap<string, FileEntry>;
+  /** Opens another file, such as one of an email's attachments. */
+  onOpenFile?: (id: string) => void;
 }) {
   const { hit } = props;
   const longPress = useLongPress(props.onMenu);
+  const mail = hit.file.mail;
+  const attachments = (mail?.attachmentIds ?? [])
+    .map((id) => props.files?.get(id))
+    .filter((file): file is FileEntry => file !== undefined && !file.trashed);
 
   return (
     <div
@@ -112,7 +120,10 @@ export function ResultRow(props: {
           <Highlighted value={hit.file.name} ranges={hit.nameRanges} />
         </div>
         <div className="result-where">
-          {props.path ? (
+          {mail ? (
+            // An email is found by who sent it and when, more than by where it is filed.
+            <span className="result-sender">{mail.from || mail.fromAddress}</span>
+          ) : props.path ? (
             <span className={hit.matchedFolder ? "result-folder hit" : "result-folder"}>
               <FolderGlyph size={11} /> {props.path}
             </span>
@@ -121,8 +132,25 @@ export function ResultRow(props: {
               <FolderGlyph size={11} /> All files
             </span>
           )}
-          <span className="result-date">{formatDate(hit.file.mtime)}</span>
+          <span className="result-date">{formatDate(mail?.date || hit.file.mtime)}</span>
         </div>
+        {attachments.length > 0 && props.onOpenFile && (
+          <div className="result-attachments">
+            {attachments.map((file) => (
+              <button
+                key={file.id}
+                type="button"
+                className="result-attachment"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onOpenFile!(file.id);
+                }}
+              >
+                {file.name}
+              </button>
+            ))}
+          </div>
+        )}
         {hit.matchedText && (
           <div className="snippet">
             <Highlighted value={hit.matchedText} ranges={hit.textRanges} />
@@ -144,6 +172,8 @@ export function SearchResults(props: {
   onSelect: (id: string, event: React.MouseEvent) => void;
   onOpen: (id: string) => void;
   onMenu: (id: string, x: number, y: number) => void;
+  /** The library, so email rows can name and open their attachments. */
+  files?: ReadonlyMap<string, FileEntry>;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -160,7 +190,8 @@ export function SearchResults(props: {
         <p>
           Search covers names, tags, folder names, and text inside documents, decrypted only on
           this device. Try <code>tag:receipts</code>, <code>type:image</code>,{" "}
-          <code>before:2026</code>, or a folder's name; one-letter typos are forgiven.
+          <code>before:2026</code>, <code>from:jane</code>, or a folder's name; one-letter typos are
+          forgiven.
         </p>
       </div>
     );
@@ -178,6 +209,8 @@ export function SearchResults(props: {
           onSelect={(e) => props.onSelect(hit.file.id, e)}
           onOpen={() => props.onOpen(hit.file.id)}
           onMenu={(x, y) => props.onMenu(hit.file.id, x, y)}
+          files={props.files}
+          onOpenFile={props.onOpen}
         />
       ))}
     </div>
