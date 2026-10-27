@@ -23,6 +23,7 @@ import {
   groundFacts,
   maskTail,
   mergeFacts,
+  withExactAcceptance,
   type Fact,
   type FactEvidence,
 } from "./facts";
@@ -145,7 +146,7 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
   const evidence: FactEvidence[] = [];
   for (const fact of kept) {
     if (fact.kind !== "identifier") {
-      facts.push(fact);
+      facts.push(withExactAcceptance(fact));
       continue;
     }
     // Redacted only now, after grounding and merging have had the real value.
@@ -153,7 +154,7 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
     // metadata and one built from the whole number would put it right back.
     const tail = maskTail(fact.value);
     const id = factId("identifier", tail);
-    facts.push({ ...fact, id, value: tail, masked: tail });
+    facts.push(withExactAcceptance({ ...fact, id, value: tail, masked: tail }));
     evidence.push({ id, full: fact.value });
   }
   return { facts, evidence, decoded };

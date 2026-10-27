@@ -101,6 +101,19 @@ describe("scanForFacts", () => {
     expect(out.evidence.find((e) => e.id === id!.id)!.full).toBe("LRK-449022");
   });
 
+  it("an exact booking time is accepted on arrival", async () => {
+    const raw = `<script type="application/ld+json">{"@type":"LodgingReservation",
+      "checkinTime":"2027-03-04T15:00:00-05:00","reservationFor":{"name":"The Larkspur Hotel"}}</script>`;
+    const out = await scanForFacts({ name: "stay.html", mime: "text/html", raw });
+    expect(out.facts.find((f) => f.kind === "event")!.accepted).toBe("exact");
+  });
+
+  it("a label-rule date is not accepted on its own", async () => {
+    const out = await scanForFacts({ ...base, text: "Benefit End Date: 19 October 2027" });
+    expect(out.facts.length).toBeGreaterThan(0);
+    expect(out.facts.every((f) => f.accepted === undefined)).toBe(true);
+  });
+
   it("reads invoice data from an email record's HTML", async () => {
     const raw = `<html><script type="application/ld+json">{
       "@type": "Invoice",

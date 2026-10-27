@@ -18,7 +18,7 @@
 
 import { decide, decided } from "../decisions";
 import { lookupAirport } from "./airports";
-import type { Fact } from "./facts";
+import { EXACT_SOURCES, isTracked, type Fact } from "./facts";
 
 export interface TripFile {
   id: string;
@@ -52,13 +52,7 @@ export interface ItineraryLeg {
 }
 
 /** Sources whose full-confidence facts may cluster without confirmation. */
-export const EXACT_SOURCES: ReadonlySet<Fact["source"]> = new Set([
-  "barcode",
-  "mrz",
-  "jsonld",
-  "ics",
-  "user",
-]);
+export { EXACT_SOURCES };
 
 /** Events this many days apart still belong to one candidate. */
 const WINDOW_DAYS = 14;
@@ -67,12 +61,7 @@ const MERGE_GAP_DAYS = 45;
 /** A trip this long over is history, not a suggestion. */
 const RECENT_PAST_DAYS = 60;
 
-function usable(fact: Fact): boolean {
-  if (fact.dismissed) {
-    return false;
-  }
-  return fact.confirmed === true || (fact.confidence === 1 && EXACT_SOURCES.has(fact.source));
-}
+const usable = isTracked;
 
 function dayOf(iso: string): number {
   const [y, m, d] = iso.split("-").map(Number);

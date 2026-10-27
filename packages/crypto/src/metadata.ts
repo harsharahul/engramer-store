@@ -25,6 +25,8 @@ export interface StoredFact {
   time?: string;
   /** IANA zone the time belongs to, on the rare occasion it is known. */
   zone?: string;
+  /** The document's own words for what this date is. */
+  label?: string;
   unit?: string;
   /** Last four characters of a reference number, never the whole of one. */
   masked?: string;
@@ -32,6 +34,10 @@ export interface StoredFact {
   confidence: number;
   ambiguous?: boolean;
   confirmed?: boolean;
+  /** Counts without the owner's yes: "exact", "agreement" or "grounded". */
+  accepted?: string;
+  /** Which reader or readers produced it. */
+  reader?: string;
   dismissed?: boolean;
   /** The contents this was read from, so a change to them can be noticed. */
   digest?: string;

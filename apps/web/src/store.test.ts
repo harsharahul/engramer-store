@@ -224,6 +224,23 @@ describe("metadataOf", () => {
     expect(metadataOf(entry({ facts })).facts).toEqual(facts);
   });
 
+  it("keeps a fact's acceptance and reader, which a patch would otherwise erase", () => {
+    const facts = [
+      {
+        id: "event:2027-03-04 check-in",
+        kind: "event" as const,
+        document: "hotel-booking" as const,
+        value: "2027-03-04",
+        label: "Check-in",
+        source: "jsonld" as const,
+        confidence: 1,
+        accepted: "exact" as const,
+        reader: "booking data",
+      },
+    ];
+    expect(metadataOf(entry({ facts })).facts).toEqual(facts);
+  });
+
   it("writes no facts field at all for a file that carries none", () => {
     expect(metadataOf(entry())).not.toHaveProperty("facts");
   });

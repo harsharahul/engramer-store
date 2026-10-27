@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   asFacts,
   groundFacts,
+  isTracked,
   maskTail,
   mergeFacts,
   offeredFacts,
@@ -250,5 +251,27 @@ describe("mergeFacts", () => {
     const merged = mergeFacts([], many);
     expect(merged.length).toBeLessThanOrEqual(12);
     expect(merged[0]!.confidence).toBe(1);
+  });
+});
+
+describe("isTracked", () => {
+  it("counts confirmed or accepted, never dismissed", () => {
+    expect(isTracked(fact({ confirmed: true }))).toBe(true);
+    expect(isTracked(fact({ accepted: "exact" }))).toBe(true);
+    expect(isTracked(fact({ accepted: "agreement" }))).toBe(true);
+    expect(isTracked(fact())).toBe(false);
+    expect(isTracked(fact({ accepted: "exact", dismissed: true }))).toBe(false);
+    expect(isTracked(fact({ confirmed: true, dismissed: true }))).toBe(false);
+  });
+
+  it("reads an exact fact stored before the marker existed as accepted", () => {
+    // Booking data read by an earlier version carries no marker but counted
+    // then; it must keep counting.
+    const [old] = asFacts([fact({ source: "jsonld", confidence: 1, kind: "event" })]);
+    expect(old!.accepted).toBe("exact");
+    const [soft] = asFacts([fact({ source: "label", confidence: 0.7 })]);
+    expect(soft!.accepted).toBeUndefined();
+    const [offered] = asFacts([fact({ source: "barcode", confidence: 0.6 })]);
+    expect(offered!.accepted).toBeUndefined();
   });
 });

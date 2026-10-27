@@ -132,6 +132,16 @@ export interface Fact {
   ambiguous?: boolean;
   /** Pinned by the owner. Never overwritten by a later scan. */
   confirmed?: boolean;
+  /**
+   * Counts without the owner's yes, and on what basis: an exact reader
+   * (booking data, a barcode, an invite, a passport's zone), two independent
+   * readers agreeing, or a grounded reading from a reader whose measured
+   * accuracy for this task allows it. Distinct from `confirmed`, so "the
+   * owner said so" stays tellable apart from "the evidence said so".
+   */
+  accepted?: "exact" | "agreement" | "grounded";
+  /** Which reader or readers produced this, for the line that says so. */
+  reader?: string;
   dismissed?: boolean;
   /** The contents this was read from, so a change can be noticed. */
   digest?: string;
@@ -219,7 +229,26 @@ export function soonestDated(facts: Fact[]): string | undefined {
  * no free text to ground them against, and their own check digits or fixed
  * field positions already proved them.
  */
-const STRUCTURED: ReadonlySet<FactSource> = new Set(["barcode", "mrz", "jsonld", "ics", "user"]);
+/**
+ * Sources that state a fact rather than suggest it: exempt from prose
+ * grounding, and at full confidence accepted without a yes.
+ */
+export const EXACT_SOURCES: ReadonlySet<FactSource> = new Set(["barcode", "mrz", "jsonld", "ics", "user"]);
+
+/** Whether a fact counts: the owner confirmed it, or the evidence was accepted; never once dismissed. */
+export function isTracked(fact: Fact): boolean {
+  return !fact.dismissed && (fact.confirmed === true || fact.accepted !== undefined);
+}
+
+/** An exact reader's full-confidence fact, which is accepted as it is read. */
+export function withExactAcceptance(fact: Fact): Fact {
+  return fact.accepted === undefined &&
+    fact.confidence === 1 &&
+    fact.source !== "user" &&
+    EXACT_SOURCES.has(fact.source)
+    ? { ...fact, accepted: "exact" }
+    : fact;
+}
 
 const MONTHS = [
   "january",
@@ -317,7 +346,9 @@ export function asFacts(raw: unknown): Fact[] {
   if (!Array.isArray(raw)) {
     return [];
   }
-  return raw.filter(isFactShaped).slice(0, MAX_FACTS_PER_FILE);
+  // Facts read before the accepted marker existed counted on their source
+  // alone; they keep counting, and carry the marker from the next write.
+  return raw.filter(isFactShaped).slice(0, MAX_FACTS_PER_FILE).map(withExactAcceptance);
 }
 
 function isFactShaped(value: unknown): value is Fact {
@@ -344,7 +375,7 @@ function isFactShaped(value: unknown): value is Fact {
 export function groundFacts(facts: Fact[], source: string): Fact[] {
   const haystack = normalize(source);
   return facts.filter((fact) => {
-    if (STRUCTURED.has(fact.source)) {
+    if (EXACT_SOURCES.has(fact.source)) {
       return true;
     }
     if (!renderings(fact).some((form) => haystack.includes(normalize(form)))) {
