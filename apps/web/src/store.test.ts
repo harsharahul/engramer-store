@@ -331,6 +331,29 @@ describe("uploadFiles", () => {
     expect(rig.stampedSourceIds).toContain("asset-77");
     expect(rig.stampedSourceIds).toContain(undefined);
   });
+
+  it("uploadFiles writes a source's extra metadata into the file", async () => {
+    useStore.setState({
+      session: {
+        email: "t@example.com",
+        token: "t",
+        masterKey: generateKey(),
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      refreshUsage: async () => {},
+    });
+    // An attachment knows which email it came with; analysis, which would
+    // call it "Other", must not overwrite what the caller set.
+    const attachment = Object.assign(
+      new File([new Uint8Array(8)], "ticket.pdf", { type: "application/pdf" }),
+      { meta: { mailParent: "e1", category: "Receipts" } },
+    );
+    await useStore.getState().uploadFiles([attachment], "folder-1");
+    const stored = useStore.getState().files.get("up-ticket.pdf")!;
+    expect(stored.mailParent).toBe("e1");
+    expect(stored.category).toBe("Receipts");
+  });
 });
 
 /**

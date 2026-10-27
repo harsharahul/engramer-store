@@ -1815,6 +1815,9 @@ export const useStore = create<StoreState>((set, get) => {
             // what keeps the automatic backup from uploading it again.
             prepared.meta.sourceId = file.sourceId;
           }
+          if (file.meta) {
+            Object.assign(prepared.meta, file.meta);
+          }
           // Root uploads are auto-filed into a category folder; uploads into a
           // folder the user picked stay where the user put them.
           const destination =
@@ -1931,6 +1934,9 @@ export const useStore = create<StoreState>((set, get) => {
                 },
               }
             : analyzed;
+          if (item.file.meta) {
+            Object.assign(prepared.meta, item.file.meta);
+          }
           const destination =
             item.path.length > 0
               ? (folderIds.get(pathKey(item.path)) ?? baseFolderId)

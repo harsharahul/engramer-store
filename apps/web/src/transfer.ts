@@ -483,6 +483,9 @@ export interface UploadSource {
   /** The photo-library asset this came from, when the picker said; the
    * upload stamps it so the backup ledger recognizes the file. */
   readonly sourceId?: string;
+  /** Metadata the caller already knows, such as the email an attachment
+   * came with; written over what analysis found. */
+  readonly meta?: Partial<FileMetadata>;
   /** A shell-generated poster frame as JPEG bytes, for video sources
    * whose canvas capture the platform may refuse; null when the shell
    * cannot make one. */
