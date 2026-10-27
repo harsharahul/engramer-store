@@ -66,6 +66,7 @@ vi.mock("./api", async (importOriginal) => {
 import { api, ApiError } from "./api";
 import { AssistantError } from "./intel/assistant";
 import { READER_VERSION } from "./intel/reading";
+import { readingFingerprint } from "./intel/summarize";
 import { useStore, type FileEntry } from "./store";
 import { spendModelReads, startOfOpen } from "./modelbudget";
 
@@ -284,6 +285,7 @@ describe("reading mail", () => {
     scoreState.value = {
       reader: "apple",
       version: READER_VERSION.apple,
+      prompt: readingFingerprint(),
       tasks: { mailKind: { accuracy: 0.95, cases: 30 } },
     };
   };
@@ -320,6 +322,7 @@ describe("reading mail", () => {
     scoreState.value = {
       reader: "apple",
       version: READER_VERSION.apple,
+      prompt: readingFingerprint(),
       tasks: { mailKind: { accuracy: 0.95, cases: 40, byKind: { newsletter: { precision: 1, offered: 40 } } } },
     };
     library([email({ id: "c" })]);

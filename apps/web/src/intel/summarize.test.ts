@@ -5,6 +5,7 @@ import {
   headChunk,
   outcomeFor,
   sanitizeSummary,
+  readingFingerprint,
   readingSchema,
   summarize,
   summarySchema,
@@ -192,5 +193,14 @@ describe("summarize with facts", () => {
       ["expiry", "2026-10-05", "model"],
       ["due", "2025-09-30", "model"],
     ]);
+  });
+});
+
+describe("readingFingerprint", () => {
+  it("names the request the reader is sent, so measured scores can be tied to it", () => {
+    expect(readingFingerprint()).toMatch(/^[0-9a-f]{8}$/);
+    expect(readingFingerprint()).toBe(readingFingerprint());
+    // Another list of kinds is another prompt.
+    expect(readingFingerprint(["Receipts", "Travel"])).not.toBe(readingFingerprint());
   });
 });

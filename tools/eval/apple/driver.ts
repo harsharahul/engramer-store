@@ -15,7 +15,7 @@ import { EVAL_CASES } from "../../../apps/web/src/intel/eval/cases";
 import { factCases, kindCases, scoreKinds, scoreReader } from "../../../apps/web/src/intel/eval/score";
 import { EMAIL_MIME } from "../../../apps/web/src/mail/kind";
 import { MODEL_READER, READER_VERSION } from "../../../apps/web/src/intel/reading";
-import { summarize } from "../../../apps/web/src/intel/summarize";
+import { readingFingerprint, summarize } from "../../../apps/web/src/intel/summarize";
 
 const [binary, out] = process.argv.slice(2);
 if (!binary || !out) {
@@ -78,6 +78,7 @@ const kinds = await scoreKinds(kindCases(EVAL_CASES), async (evalCase) => readin
 const scores = {
   reader: MODEL_READER,
   version: READER_VERSION[MODEL_READER],
+  prompt: readingFingerprint(),
   measuredAt: new Date().toISOString().slice(0, 10),
   cases: EVAL_CASES.length,
   // How many readings each figure rests on: a precision over a handful of

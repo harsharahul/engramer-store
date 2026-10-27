@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Fact } from "./facts";
 import { acceptance, MIN_SAMPLE, saneFact, stakesOf, trustedKind, trustedMailKind, type ReaderScores } from "./confidence";
 import { READER_VERSION } from "./reading";
+import { readingFingerprint } from "./summarize";
 
 const NOW = Date.UTC(2027, 2, 1);
 
@@ -17,10 +18,12 @@ const fact = (over: Partial<Fact>): Fact => ({
 });
 
 const CURRENT = READER_VERSION.apple!;
+const PROMPT = readingFingerprint();
 
 const scores = (dates: { precision: number; offered: number }, version = CURRENT): ReaderScores => ({
   reader: "apple",
   version,
+  prompt: PROMPT,
   tasks: { dates: { ...dates, recall: 0.5, expected: 40 }, amounts: { precision: 1, recall: 0.3, offered: 3, expected: 10 } },
 });
 
@@ -43,6 +46,12 @@ describe("acceptance", () => {
 
   it("scores measured for another version of the reader are not trusted", () => {
     expect(acceptance(fact({}), { scores: scores({ precision: 0.99, offered: 80 }, 0), siblings: [], now: NOW })).toBeNull();
+  });
+
+  it("scores measured with another prompt are not trusted", () => {
+    expect(acceptance(fact({}), { scores: { ...trusted, prompt: "0000beef" }, siblings: [], now: NOW })).toBeNull();
+    const { prompt: _, ...unmarked } = trusted;
+    expect(acceptance(fact({}), { scores: unmarked, siblings: [], now: NOW })).toBeNull();
   });
 
   it("a departure time from the model alone is never accepted", () => {
@@ -85,6 +94,7 @@ describe("trustedKind", () => {
   const kindScores = (accuracy: number, cases: number, version = CURRENT): ReaderScores => ({
     reader: "apple",
     version,
+    prompt: PROMPT,
     tasks: { mailKind: { accuracy, cases } },
   });
 
@@ -100,12 +110,17 @@ describe("trustedKind", () => {
   it("kind scores from another version of the reader are not used", () => {
     expect(trustedKind(kindScores(0.95, 30, 0))).toBe(false);
   });
+
+  it("kind scores measured with another prompt are not used", () => {
+    expect(trustedKind({ ...kindScores(0.95, 30), prompt: "0000beef" })).toBe(false);
+  });
 });
 
 describe("trustedMailKind", () => {
   const newsletterScores = (precision: number, offered: number, version = CURRENT): ReaderScores => ({
     reader: "apple",
     version,
+    prompt: PROMPT,
     tasks: { mailKind: { accuracy: 0.95, cases: 40, byKind: { newsletter: { precision, offered } } } },
   });
 
@@ -119,5 +134,6 @@ describe("trustedMailKind", () => {
     expect(trustedMailKind(newsletterScores(1, 2), "newsletter")).toBe(false);
     expect(trustedMailKind(newsletterScores(1, MIN_SAMPLE, 0), "newsletter")).toBe(false);
     expect(trustedMailKind(newsletterScores(1, MIN_SAMPLE), "bill")).toBe(false);
+    expect(trustedMailKind({ ...newsletterScores(1, MIN_SAMPLE), prompt: "0000beef" }, "newsletter")).toBe(false);
   });
 });

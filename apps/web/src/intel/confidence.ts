@@ -6,13 +6,15 @@
  * merge (facts.ts); a model reading alone counts only for a task where the
  * reader's precision, measured on the eval set over enough readings and for
  * this version of the reader, is at least 98%, only when the stakes allow
- * one reader, and only when the value passes the sanity checks. Everything
- * else waits for a yes.
+ * one reader, and only when the value passes the sanity checks. Scores count
+ * only for the reader version and the exact prompt they were measured with.
+ * Everything else waits for a yes.
  */
 
 import { isRealDate } from "./dates";
 import { EXACT_SOURCES, type Fact } from "./facts";
 import { READER_VERSION } from "./reading";
+import { readingFingerprint } from "./summarize";
 import shipped from "./eval/scores.json";
 
 export type Stakes = "high" | "normal" | "low";
@@ -38,6 +40,8 @@ export interface TaskScore {
 export interface ReaderScores {
   reader: string;
   version: number;
+  /** The reading request measured (readingFingerprint), absent in older scores. */
+  prompt?: string;
   tasks: {
     dates?: TaskScore;
     amounts?: TaskScore;
@@ -98,13 +102,17 @@ export function modelScores(): ReaderScores {
   return shipped as ReaderScores;
 }
 
+/** Scores measured for this version of the reader and this exact prompt. */
+function current(scores: ReaderScores | undefined): scores is ReaderScores {
+  return scores !== undefined && scores.version === READER_VERSION[scores.reader] && scores.prompt === readingFingerprint();
+}
+
 /** Whether the model's naming of an email's kind is stored as a tag. */
 export function trustedKind(scores: ReaderScores | undefined): boolean {
   const kind = scores?.tasks.mailKind;
   return (
-    scores !== undefined &&
+    current(scores) &&
     kind !== undefined &&
-    scores.version === READER_VERSION[scores.reader] &&
     kind.cases >= MIN_KIND_CASES &&
     kind.accuracy >= KIND_BAR
   );
@@ -118,9 +126,8 @@ export function trustedKind(scores: ReaderScores | undefined): boolean {
 export function trustedMailKind(scores: ReaderScores | undefined, kind: string): boolean {
   const named = scores?.tasks.mailKind?.byKind?.[kind];
   return (
-    scores !== undefined &&
+    current(scores) &&
     named !== undefined &&
-    scores.version === READER_VERSION[scores.reader] &&
     named.offered >= MIN_SAMPLE &&
     named.precision >= PRECISION_BAR
   );
@@ -134,11 +141,9 @@ export function acceptance(
   if (fact.confidence === 1 && fact.source !== "user" && EXACT_SOURCES.has(fact.source)) {
     return "exact";
   }
-  if (fact.source !== "model" || !ctx.scores || stakesOf(fact) === "high") {
-    return null;
-  }
-  // Scores measured for another version of the reader say nothing about this one.
-  if (ctx.scores.version !== READER_VERSION[ctx.scores.reader]) {
+  // Scores measured for another version of the reader, or another prompt,
+  // say nothing about this one.
+  if (fact.source !== "model" || !current(ctx.scores) || stakesOf(fact) === "high") {
     return null;
   }
   const score = ctx.scores.tasks[fact.kind === "amount" ? "amounts" : "dates"];
