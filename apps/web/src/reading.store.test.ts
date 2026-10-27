@@ -65,6 +65,7 @@ vi.mock("./api", async (importOriginal) => {
 
 import { api, ApiError } from "./api";
 import { AssistantError } from "./intel/assistant";
+import { READER_VERSION } from "./intel/reading";
 import { useStore, type FileEntry } from "./store";
 import { spendModelReads, startOfOpen } from "./modelbudget";
 
@@ -282,7 +283,7 @@ describe("reading mail", () => {
   const trustedKinds = () => {
     scoreState.value = {
       reader: "apple",
-      version: 1,
+      version: READER_VERSION.apple,
       tasks: { mailKind: { accuracy: 0.95, cases: 30 } },
     };
   };

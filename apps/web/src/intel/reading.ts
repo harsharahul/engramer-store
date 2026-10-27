@@ -22,8 +22,9 @@ export const MODEL_READER = "apple";
  * larger Mac model, Chrome's built-in model and a web model pack. */
 export const READER_RANK: Readonly<Record<string, number>> = { [MODEL_READER]: 2 };
 
-/** Raised when a reader's prompt or model changes, never for a storage change. */
-export const READER_VERSION: Readonly<Record<string, number>> = { [MODEL_READER]: 1 };
+/** Raised when a reader's prompt or model changes, never for a storage change.
+ * Version 2 reads mail: its kind, and emails from 60 characters. */
+export const READER_VERSION: Readonly<Record<string, number>> = { [MODEL_READER]: 2 };
 
 /** Tries per file per reader, counted across devices, before a reading is final. */
 export const MAX_TRIES = 3;
@@ -175,7 +176,9 @@ export function needsReading(
   }
   if (stamp.reader === reader && (READER_VERSION[reader] ?? 0) > stamp.version) {
     const when = file.mail?.date || file.createdAt;
-    return EMPTY_OUTCOMES.has(stamp.outcome) || opts.now - when <= RECENT_DAYS * DAY;
+    // An email an earlier version found too short may be long enough now.
+    const shortMail = stamp.outcome === "short" && file.mail !== undefined;
+    return EMPTY_OUTCOMES.has(stamp.outcome) || shortMail || opts.now - when <= RECENT_DAYS * DAY;
   }
   return false;
 }

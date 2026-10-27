@@ -4,6 +4,7 @@ import {
   emailsOutsideWindow,
   legacyOf,
   needsReading,
+  READER_VERSION,
   readingWindowMonths,
   setReadingWindowMonths,
   stampInto,
@@ -27,7 +28,7 @@ const file = (over: Partial<ReadingCandidate> = {}): ReadingCandidate => ({
 const stamp = (over: Partial<ReadingStamp> = {}): ReadingStamp => ({
   reader: "apple",
   rank: 2,
-  version: 1,
+  version: READER_VERSION.apple!,
   digest: "d1",
   tasks: ["summary", "facts"],
   outcome: "found",
@@ -94,6 +95,17 @@ describe("needsReading", () => {
     expect(needsReading(file({ reading: older({ outcome: "none" }) }), "apple", wants)).toBe(true);
     expect(needsReading(file({ reading: older({ outcome: "declined" }) }), "apple", wants)).toBe(true);
     expect(needsReading(file({ createdAt: NOW - 10 * DAY, reading: older({ outcome: "found" }) }), "apple", wants)).toBe(true);
+  });
+
+  it("the first mail reader re-reads emails the earlier one found too short", () => {
+    // Version 2 reads an email from 60 characters; version 1 needed more.
+    const email = { mime: "message/rfc822", mail: { date: NOW - 200 * DAY } };
+    expect(needsReading(file({ ...email, reading: stamp({ version: 1, outcome: "short" }) }), "apple", wants)).toBe(true);
+    expect(needsReading(file({ ...email, assistVersion: 1, noSummary: "short" }), "apple", wants)).toBe(true);
+    // Once read by this version, a short email stays read.
+    expect(needsReading(file({ ...email, reading: stamp({ outcome: "short" }) }), "apple", wants)).toBe(false);
+    // A short document is not mail: nothing about it changed.
+    expect(needsReading(file({ reading: stamp({ version: 1, outcome: "short" }) }), "apple", wants)).toBe(false);
   });
 
   it("never reads media, a file with no text, or the trash", () => {

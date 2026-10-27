@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Fact } from "./facts";
 import { acceptance, MIN_SAMPLE, saneFact, stakesOf, trustedKind, type ReaderScores } from "./confidence";
+import { READER_VERSION } from "./reading";
 
 const NOW = Date.UTC(2027, 2, 1);
 
@@ -15,7 +16,9 @@ const fact = (over: Partial<Fact>): Fact => ({
   ...over,
 });
 
-const scores = (dates: { precision: number; offered: number }, version = 1): ReaderScores => ({
+const CURRENT = READER_VERSION.apple!;
+
+const scores = (dates: { precision: number; offered: number }, version = CURRENT): ReaderScores => ({
   reader: "apple",
   version,
   tasks: { dates: { ...dates, recall: 0.5, expected: 40 }, amounts: { precision: 1, recall: 0.3, offered: 3, expected: 10 } },
@@ -79,7 +82,7 @@ describe("saneFact", () => {
 });
 
 describe("trustedKind", () => {
-  const kindScores = (accuracy: number, cases: number, version = 1): ReaderScores => ({
+  const kindScores = (accuracy: number, cases: number, version = CURRENT): ReaderScores => ({
     reader: "apple",
     version,
     tasks: { mailKind: { accuracy, cases } },
