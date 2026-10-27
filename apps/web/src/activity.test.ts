@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   ACTIVITY_LOG_LIMIT,
   describeProcessing,
+  progressLabel,
   loadActivityLog,
   saveActivityLog,
   unreadCount,
@@ -126,5 +127,16 @@ describe("describeProcessing with the assistant", () => {
     });
     expect(described.title).toBe("Processed 12 files");
     expect(described.detail).toBe("9 summarized · 3 summaries wait for the app to be in front");
+  });
+});
+
+describe("progressLabel", () => {
+  it("counts against a known total", () => {
+    expect(progressLabel(3, 10)).toBe("3 of 10");
+  });
+
+  it("says so far when the total is not known yet", () => {
+    // A mailbox file does not say how many messages it holds until it is read.
+    expect(progressLabel(41, 0)).toBe("41 so far");
   });
 });

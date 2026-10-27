@@ -15,7 +15,8 @@ export type ActivityKind =
   | "backup"
   | "uploading"
   | "downloading"
-  | "connecting";
+  | "connecting"
+  | "importing";
 
 export interface ActivityJob {
   kind: ActivityKind;
@@ -80,6 +81,11 @@ export function unreadCount(log: readonly ActivityEntry[]): number {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+/** A job's count: against its total, or as a running count while the total is unknown. */
+export function progressLabel(done: number, total: number): string {
+  return total > 0 ? `${done} of ${total}` : `${done} so far`;
+}
+
 export interface ProcessingCounts {
   files: number;
   previews: number;
@@ -134,5 +140,42 @@ export function describeProcessing(counts: ProcessingCounts): { title: string; d
       : null;
   const tail = counts.stopped ? "continues next time the app is open" : null;
   const detail = [parts.join(" · "), failed, paused, tail].filter(Boolean).join(" · ");
+  return detail ? { title, detail } : { title };
+}
+
+/** What a mail import did, in one line, with what it left out named after. */
+export function describeImport(
+  report: {
+    imported: number;
+    alreadyPresent: number;
+    skipped: { name: string; reason: string }[];
+    attachments: number;
+  },
+  stopped: boolean,
+): { title: string; detail?: string } {
+  const did =
+    report.imported > 0
+      ? `Imported ${plural(report.imported, "email")}${
+          report.attachments > 0 ? ` and ${plural(report.attachments, "attachment")}` : ""
+        }`
+      : "No new emails";
+  const parts = [did];
+  if (report.alreadyPresent > 0) {
+    parts.push(`${report.alreadyPresent} already present`);
+  }
+  if (report.skipped.length > 0) {
+    parts.push(`${report.skipped.length} skipped`);
+  }
+  const title = `${stopped ? "Stopped. " : ""}${parts.join("; ")}`;
+  const skipped =
+    report.skipped.length > 0
+      ? `${report.skipped
+          .slice(0, 3)
+          .map((s) => `${s.name}: ${s.reason}`)
+          .join(" · ")}${report.skipped.length > 3 ? "…" : ""}`
+      : null;
+  // Importing again skips what is stored, so it picks up where this stopped.
+  const tail = stopped ? "import the same file again to continue" : null;
+  const detail = [skipped, tail].filter(Boolean).join(" · ");
   return detail ? { title, detail } : { title };
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
-import { unreadCount } from "../activity";
+import { progressLabel, unreadCount } from "../activity";
 import { formatDate } from "../format";
 import { loadSeen, markSeen, noticeKeys, NOTICES_SEEN_EVENT, noticeEvents, unseenCount } from "../notices";
 import { LibraryIntel } from "./FactsPanel";
@@ -59,7 +59,7 @@ export function ActivityBell(props: { open: boolean; onToggle: () => void }) {
       size="md"
       className={cn("activity-bell", capsuleIcon, busy && "busy")}
       label="Notices"
-      title={busy ? `${job?.title ?? "Uploading"} · ${done} of ${total}` : "Notices"}
+      title={busy ? `${job?.title ?? "Uploading"} · ${progressLabel(done, total)}` : "Notices"}
       aria-expanded={props.open}
       aria-pressed={props.open}
       onClick={props.onToggle}
@@ -172,7 +172,7 @@ export function ActivityPanel(props: {
                 <span className="spinner" />
                 <b>{job.title}</b>
                 <span className="activity-job-count">
-                  {job.done} of {job.total}
+                  {progressLabel(job.done, job.total)}
                   {job.failed > 0 ? ` · ${job.failed} failed` : ""}
                 </span>
                 {job.stop && (

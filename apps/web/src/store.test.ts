@@ -959,6 +959,100 @@ describe("ensureFolderPath", () => {
   });
 });
 
+/**
+ * The importer is a store job: it files records and attachments through the
+ * same upload path as any file, links them both ways, and narrates through
+ * the bell rather than adding an upload row per email.
+ */
+describe("importMail", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  it("stores an email and its attachment through the upload path, linked both ways", async () => {
+    const masterKey = generateKey();
+    useStore.setState({
+      session: { email: "t@example.com", token: "t", masterKey, privateKey: new Uint8Array(32), publicKey: "" },
+      refreshUsage: async () => {},
+      folders: new Map(),
+      files: new Map(),
+      uploads: [],
+    });
+    let folderCount = 0;
+    (api as unknown as Record<string, unknown>).createFolder = async (
+      parentId: string | null,
+      encryptedKey: FolderDto["encryptedKey"],
+      encryptedMeta: FolderDto["encryptedMeta"],
+    ): Promise<FolderDto> => ({
+      id: `dir-${++folderCount}`,
+      parentId,
+      encryptedKey,
+      encryptedMeta,
+      deleted: false,
+      updateSeq: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    (api as unknown as Record<string, unknown>).patchFile = async (
+      id: string,
+      patch: { encryptedMeta: FileDto["encryptedMeta"] },
+    ): Promise<FileDto> => {
+      const file = useStore.getState().files.get(id)!;
+      return {
+        id,
+        folderId: file.folderId,
+        encryptedKey: secretBoxSeal(file.key, masterKey),
+        encryptedMeta: patch.encryptedMeta,
+        size: file.size,
+        thumbSize: 0,
+        indexSize: 0,
+        uploaded: true,
+        trashed: false,
+        deleted: false,
+        updateSeq: 2,
+        createdAt: 1,
+        updatedAt: 2,
+      };
+    };
+    const eml = [
+      "From: Example Air <bookings@example.com>",
+      "Subject: Your ticket",
+      "Date: Mon, 15 Jun 2026 12:00:00 +0000",
+      "Message-ID: <ticket-1@example.com>",
+      'Content-Type: multipart/mixed; boundary="m"',
+      "",
+      "--m",
+      "Content-Type: text/plain",
+      "",
+      "Attached.",
+      "--m",
+      'Content-Type: application/pdf; name="ticket.pdf"',
+      'Content-Disposition: attachment; filename="ticket.pdf"',
+      "Content-Transfer-Encoding: base64",
+      "",
+      "JVBERi0xLjQK",
+      "--m--",
+      "",
+    ].join("\r\n");
+    const source = new File([eml], "ticket.eml", { type: "message/rfc822" });
+
+    const report = await useStore.getState().importMail([source]);
+
+    expect(report).toEqual({ imported: 1, alreadyPresent: 0, skipped: [], attachments: 1 });
+    const files = useStore.getState().files;
+    const record = files.get("up-Your ticket.email")!;
+    const ticket = files.get("up-ticket.pdf")!;
+    expect(record.mail).toMatchObject({ messageId: "<ticket-1@example.com>", attachmentIds: [ticket.id] });
+    expect(ticket.mailParent).toBe(record.id);
+    const folders = useStore.getState().folders;
+    expect(folders.get(record.folderId!)!.name).toBe("Imported");
+    expect(folders.get(ticket.folderId!)!.name).toBe("2026");
+    // One bell job, no upload rows.
+    expect(useStore.getState().uploads).toEqual([]);
+    expect(useStore.getState().activity.log[0]!.title).toBe("Imported 1 email and 1 attachment");
+  });
+});
+
 describe("decryptSharedFile", () => {
   beforeAll(async () => {
     await ready();

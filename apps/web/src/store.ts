@@ -52,6 +52,7 @@ import {
 import { checkPin, KeyChangedError, pinKey, pinnedKey } from "./keypins";
 import { autoReleaseMatches, forgetAutoRelease } from "./autorelease";
 import { holdTransferLock, releaseTransferLock } from "./wakelock";
+import { importMail as runMailImport, type ImportReport } from "./mail/importer";
 import {
   analyzeFile,
   downloadAndDecrypt,
@@ -421,6 +422,8 @@ interface StoreState {
   createFolder: (name: string, parentId: string | null) => Promise<void>;
   /** Finds or creates a folder path from the root; returns the last folder's id. */
   ensureFolderPath: (path: string[]) => Promise<string>;
+  /** Imports .eml and .mbox files as email records and attachment files. */
+  importMail: (sources: UploadSource[]) => Promise<ImportReport>;
   renameFolder: (id: string, name: string) => Promise<void>;
   deleteFolder: (id: string) => Promise<void>;
   uploadFiles: (files: UploadSource[], folderId: string | null) => Promise<void>;
@@ -1308,6 +1311,46 @@ export const useStore = create<StoreState>((set, get) => {
 
   /** Find or create a root folder for a category. */
   const ensureCategoryFolder = (name: string): Promise<string> => ensureFolderPath([name]);
+
+  /**
+   * Stores one source in a folder through the same analysis and upload
+   * steps as a picked file, but without an upload row: background jobs
+   * (photo backup, mail import) narrate through the bell instead. Answers
+   * the stored file's id and the digest taken on the way up.
+   */
+  const storeSource = async (
+    file: UploadSource,
+    folderId: string | null,
+    opts?: { defer?: boolean; meta?: Partial<FileMetadata> },
+  ): Promise<{ id: string; digest?: string }> => {
+    const key = masterKey();
+    let local: UploadSource = file;
+    try {
+      // Native image sources become real bytes inside the slot, which
+      // bounds how many are held at once; videos stay streamed handles.
+      const prepared = await withAnalysisSlot(async () => {
+        local = await materializeForAnalysis(file);
+        return opts?.defer
+          ? analyzeFile(local, undefined, undefined, { defer: true })
+          : analyzeFile(local);
+      });
+      Object.assign(prepared.meta, file.meta, opts?.meta);
+      const journal = journalFor(local, folderId);
+      const result = await encryptAndUpload(
+        local,
+        folderId,
+        key,
+        prepared,
+        () => {},
+        undefined,
+        journal ? { journal } : undefined,
+      );
+      applyFile(result.dto);
+      return { id: result.dto.id, digest: get().files.get(result.dto.id)?.digest };
+    } finally {
+      void local.dispose?.();
+    }
+  };
 
   const state: StoreState = {
     session: null,
@@ -2559,35 +2602,29 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     backupAsset: async (file, sourceId) => {
-      const key = masterKey();
-      let local: UploadSource = file;
+      const destination = await ensureCategoryFolder("Camera Roll");
+      // Deferred: the heavy scanners leave their flags unset and the
+      // backfill sweeps finish the job from whichever device is open. The
+      // library id rides inside the encrypted metadata, so a reinstall
+      // rebuilds its ledger from the synced library alone.
+      const stored = await storeSource(file, destination, { defer: true, meta: { sourceId } });
+      return stored.id;
+    },
+
+    importMail: async (sources) => {
+      holdTransferLock();
       try {
-        // Deferred: the heavy scanners leave their flags unset and the
-        // backfill sweeps finish the job from whichever device is open.
-        // Native image sources become real bytes inside the slot, which
-        // bounds how many are held at once; videos stay streamed handles.
-        const prepared = await withAnalysisSlot(async () => {
-          local = await materializeForAnalysis(file);
-          return analyzeFile(local, undefined, undefined, { defer: true });
+        return await runMailImport(sources, {
+          files: () => get().files.values(),
+          ensureFolderPath,
+          store: (file, folderId) => storeSource(file, folderId),
+          setMail: (id, mail) => patchFileMeta(id, { mail }),
+          begin: (job) => get().beginActivity(job),
+          update: (patch) => get().updateActivity(patch),
+          finish: (title, detail) => get().finishActivity("importing", title, detail),
         });
-        // The library id rides inside the encrypted metadata, so a
-        // reinstall rebuilds its ledger from the synced library alone.
-        prepared.meta.sourceId = sourceId;
-        const destination = await ensureCategoryFolder("Camera Roll");
-        const journal = journalFor(local, destination);
-        const result = await encryptAndUpload(
-          local,
-          destination,
-          key,
-          prepared,
-          () => {},
-          undefined,
-          journal ? { journal } : undefined,
-        );
-        applyFile(result.dto);
-        return result.dto.id;
       } finally {
-        void local.dispose?.();
+        releaseTransferLock();
       }
     },
 
