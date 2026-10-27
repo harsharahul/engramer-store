@@ -12,11 +12,12 @@
 import { useEffect, useState } from "react";
 import { decide, decided, DECISIONS_EVENT, decisionEvents } from "../decisions";
 import { useStore, type FileEntry } from "../store";
-import { DATED_KINDS, isTracked, type Fact, type FactEvidence } from "../intel/facts";
+import { isDated, isTracked, type FactEvidence } from "../intel/facts";
+import { itemsOf } from "../intel/agenda";
 import { basisLabel, describeFact, shown, whenLabel } from "../intel/describe";
 import { insightsFor, type Insight } from "../intel/insights";
 import { duplicatesByDigest } from "../intel/duplicates";
-import { tripTags, upcomingFacts } from "../notices";
+import { tripTags } from "../notices";
 import { factToCalendar } from "../intel/ics";
 import { triggerDownload } from "../download";
 import { TripCard } from "./TripCard";
@@ -61,7 +62,7 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
   const inTrip = new Set([...tripsByTag.values()].flat().map((file) => file.id));
 
   // The same computation the bell counts and the notifications read.
-  const upcoming = upcomingFacts(live, now).filter(
+  const upcoming = itemsOf(live, now, { name: "coming-up" }).filter(
     (entry) =>
       !spokenFor.has(entry.file.id) &&
       // A trip card already presents its members' events as an itinerary;
@@ -163,10 +164,6 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
       )}
     </div>
   );
-}
-
-function isDated(fact: Fact): boolean {
-  return DATED_KINDS.has(fact.kind);
 }
 
 /**

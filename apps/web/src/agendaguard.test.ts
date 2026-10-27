@@ -38,4 +38,8 @@ describe("one model for dates and trips", () => {
     // A notice key built as `trip:${tag}` is the notice namespace, not a tag test.
     expect(offenders([/startsWith\(\s*["'`]trip:/, /["']trip:/], [join("intel", "trips.ts")])).toEqual([]);
   });
+
+  it("defines isDated once", () => {
+    expect(offenders([/\b(?:function|const)\s+isDated\b/], [join("intel", "facts.ts")])).toEqual([]);
+  });
 });

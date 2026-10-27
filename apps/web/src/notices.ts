@@ -10,10 +10,10 @@
  */
 
 import { decide, decided, DECISIONS_EVENT, decisionEvents } from "./decisions";
-import { daysUntil } from "./intel/dates";
+import { itemsOf } from "./intel/agenda";
 import { describeFact } from "./intel/describe";
 import { duplicatesByDigest } from "./intel/duplicates";
-import { DATED_KINDS, isTracked, type Fact } from "./intel/facts";
+import type { Fact } from "./intel/facts";
 import { insightsFor, type Severity } from "./intel/insights";
 import { isTripTag } from "./intel/trips";
 
@@ -27,19 +27,10 @@ export interface NoticeFile {
   createdAt: number;
 }
 
-/** Near enough to be worth saying without being asked. */
-export const HORIZON_DAYS = 120;
-export const RECENTLY_PAST_DAYS = 30;
 /** Near enough to interrupt for. */
 export const DUE_DAYS = 30;
 
 const MEMORY_LIMIT = 500;
-
-export interface Upcoming<F extends NoticeFile = NoticeFile> {
-  file: F;
-  fact: Fact;
-  days: number;
-}
 
 export interface Notice {
   key: string;
@@ -47,23 +38,6 @@ export interface Notice {
   body: string;
   fileId: string | null;
   severity: Severity;
-}
-
-function isDated(fact: Fact): boolean {
-  return DATED_KINDS.has(fact.kind);
-}
-
-/** Confirmed dated facts within the horizon, soonest first. */
-export function upcomingFacts<F extends NoticeFile>(files: readonly F[], now: number): Upcoming<F>[] {
-  return files
-    .filter((file) => !file.trashed)
-    .flatMap((file) =>
-      file.facts
-        .filter((fact) => isTracked(fact) && isDated(fact))
-        .map((fact) => ({ file, fact, days: daysUntil(fact.value, now) })),
-    )
-    .filter((entry) => entry.days > -RECENTLY_PAST_DAYS && entry.days < HORIZON_DAYS)
-    .sort((a, b) => a.days - b.days);
 }
 
 export function tripTags(files: readonly NoticeFile[]): string[] {
@@ -88,7 +62,7 @@ export function noticeKeys(files: readonly NoticeFile[], now: number): string[] 
   for (const tag of tripTags(live)) {
     keys.push(`trip:${tag}`);
   }
-  for (const { file, fact } of upcomingFacts(live, now)) {
+  for (const { file, fact } of itemsOf(live, now, { name: "coming-up" })) {
     keys.push(`fact:${file.id}:${fact.id}`);
   }
   for (const insight of insightsFor(live, now)) {
@@ -103,7 +77,7 @@ export function noticeKeys(files: readonly NoticeFile[], now: number): string[] 
 /** The items worth a system notification: dated, and close. */
 export function dueNotices(files: readonly NoticeFile[], now: number): Notice[] {
   const live = files.filter((file) => !file.trashed);
-  const notices: Notice[] = upcomingFacts(live, now)
+  const notices: Notice[] = itemsOf(live, now, { name: "coming-up" })
     .filter((entry) => entry.days <= DUE_DAYS)
     .map(({ file, fact, days }) => ({
       key: `fact:${file.id}:${fact.id}`,

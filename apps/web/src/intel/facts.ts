@@ -169,6 +169,11 @@ export const MAX_FACTS_PER_FILE = 12;
 /** Kinds that name a moment worth being reminded about. */
 export const DATED_KINDS: ReadonlySet<string> = new Set(["expiry", "due", "event", "dated"]);
 
+/** Whether a fact names such a moment, whoever read it. */
+export function isDated(fact: Pick<Fact, "kind">): boolean {
+  return DATED_KINDS.has(fact.kind);
+}
+
 /**
  * A deadline slightly past is still actionable; one long past is history.
  * An invoice due last week is worth surfacing, a licence that expired in
