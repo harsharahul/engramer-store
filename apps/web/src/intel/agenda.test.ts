@@ -119,10 +119,25 @@ describe("tripsOf", () => {
 
 describe("hasAgenda", () => {
   it("is true for a trip tag or a tracked date, false otherwise", () => {
-    expect(hasAgenda([file("a", [], { tags: ["trip:lisbon-2026-11"] })], NOW)).toBe(true);
-    expect(hasAgenda([file("a", [fact("x", iso(400))])], NOW)).toBe(true);
-    expect(hasAgenda([file("a", [fact("x", iso(1), { confirmed: undefined })]), file("b", [], { tags: ["receipts"] })], NOW)).toBe(false);
-    expect(hasAgenda([file("a", [fact("x", iso(1))], { trashed: true })], NOW)).toBe(false);
+    expect(hasAgenda([file("a", [], { tags: ["trip:lisbon-2026-11"] })])).toBe(true);
+    expect(hasAgenda([file("a", [fact("x", iso(400))])])).toBe(true);
+    expect(hasAgenda([file("a", [fact("x", iso(1), { confirmed: undefined })]), file("b", [], { tags: ["receipts"] })])).toBe(false);
+    expect(hasAgenda([file("a", [fact("x", iso(1))], { trashed: true })])).toBe(false);
+  });
+
+  it("stops at the first dated thing, so a large library is not walked on every render", () => {
+    const unread = {
+      id: "later",
+      trashed: false,
+      get tags(): string[] {
+        throw new Error("read past the first hit");
+      },
+      get facts(): Fact[] {
+        throw new Error("read past the first hit");
+      },
+    } as AgendaFile;
+    expect(hasAgenda([file("trip", [], { tags: ["trip:lisbon-2026-11"] }), unread])).toBe(true);
+    expect(hasAgenda([file("bill", [fact("x", iso(1))]), unread])).toBe(true);
   });
 });
 

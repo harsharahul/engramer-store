@@ -105,7 +105,11 @@ export function tripsOf<F extends AgendaFile>(files: readonly F[]): Trip<F>[] {
   return [...byTag.values()].sort((a, b) => a.tag.localeCompare(b.tag));
 }
 
-/** Whether the library holds anything dated: a trip, or a date that counts. */
-export function hasAgenda(files: readonly AgendaFile[], now: number): boolean {
-  return tripsOf(files).length > 0 || itemsOf(files, now, { name: "all" }).length > 0;
+/**
+ * Whether the library holds anything dated: a trip, or a date that counts.
+ * Asked on every render, so it stops at the first one rather than building
+ * the lists; the predicates are the ones the lists use.
+ */
+export function hasAgenda(files: readonly AgendaFile[]): boolean {
+  return files.some((file) => !file.trashed && (file.tags.some(isTripTag) || file.facts.some(isTrackedDate)));
 }

@@ -2437,7 +2437,7 @@ export function Vault() {
   const expiringCount = liveFiles.filter((f) => soonestDated(f.facts) !== undefined).length;
   // The calendar earns its place once anything is on it: a confirmed dated
   // fact or a trip. Before that, the sidebar stays as short as it was.
-  const calendarWorthy = hasAgenda(liveFiles, Date.now());
+  const calendarWorthy = hasAgenda(liveFiles);
 
   const searchSuggestions = (
     <>
