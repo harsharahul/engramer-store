@@ -114,6 +114,7 @@ import { factsEnabled, scanForFacts } from "./intel/scan";
 import { assistantAvailableNow, assistantEnabled, lastAssistantState } from "./intel/assistant";
 import { CATEGORIES } from "./intel/categorize";
 import { MIN_TEXT, cleanTags, outcomeFor, summarize } from "./intel/summarize";
+import { MODEL_SCORES, acceptance } from "./intel/confidence";
 import {
   MAX_TRIES,
   MODEL_READER,
@@ -3176,7 +3177,14 @@ export const useStore = create<StoreState>((set, get) => {
             meta.category = reading.kind;
           }
           if (reading.facts.length > 0) {
-            const fresh = reading.facts.map((fact) => ({ ...fact, digest: current.digest }));
+            // Named for the reader that proposed them, and counted without a
+            // yes only where that reader's measured accuracy allows (intel/confidence.ts).
+            const now = Date.now();
+            const fresh = reading.facts.map((fact) => {
+              const read: Fact = { ...fact, digest: current.digest, reader: MODEL_READER };
+              const basis = acceptance(read, { scores: MODEL_SCORES, siblings: reading.facts, now });
+              return basis === "grounded" ? { ...read, accepted: basis } : read;
+            });
             meta.facts = mergeFacts(meta.facts ? asFacts(meta.facts) : current.facts, fresh);
             outcome.facts += fresh.length;
           }

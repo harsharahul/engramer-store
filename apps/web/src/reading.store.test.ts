@@ -187,6 +187,23 @@ describe("a reading that keeps failing", () => {
   });
 });
 
+describe("what a reading proposes", () => {
+  it("with today's measured scores a model date is named for its reader and waits for a yes", async () => {
+    model.facts = true;
+    model.summarize.mockResolvedValue({
+      summary: "A synthetic bill.",
+      tags: [],
+      kind: null,
+      facts: [{ id: "due:2027-04-10", kind: "due", document: "invoice", value: "2027-04-10", label: "Payment due", source: "model", confidence: 0.45 }],
+    });
+    library([note()]);
+    await useStore.getState().processFile("n1");
+    const due = useStore.getState().files.get("n1")!.facts.find((f) => f.kind === "due")!;
+    expect(due).toMatchObject({ reader: "apple", source: "model" });
+    expect(due.accepted).toBeUndefined();
+  });
+});
+
 describe("what a reading stamps", () => {
   it("a summary written by the pass leaves a stamp older builds also read", async () => {
     library([note()]);
