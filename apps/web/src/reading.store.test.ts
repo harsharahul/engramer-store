@@ -30,11 +30,18 @@ vi.mock("./intel/scan", async (importOriginal) => ({
   factsEnabled: () => model.facts,
 }));
 
-const writes = vi.hoisted(() => ({ count: 0 }));
+const writes = vi.hoisted(() => ({ count: 0, blobs: 0 }));
+
 
 vi.mock("./api", async (importOriginal) => {
   const original = await importOriginal<typeof import("./api")>();
-  return { ...original, api: { ...original.api } };
+  return {
+    ...original,
+    api: { ...original.api },
+    uploadBlob: async () => {
+      writes.blobs++;
+    },
+  };
 });
 
 import { api, ApiError } from "./api";
@@ -83,6 +90,7 @@ beforeEach(() => {
   model.summarize.mockResolvedValue({ summary: "A synthetic note.", tags: [], kind: null, facts: [] });
   model.facts = false;
   writes.count = 0;
+  writes.blobs = 0;
   // An older server's answer, so bulk writes take the single route stubbed below.
   (api as unknown as Record<string, unknown>).batchFiles = async () => {
     throw new ApiError(404, "not found");
@@ -160,6 +168,74 @@ describe("what a reading stamps", () => {
     expect(file.reading).toMatchObject({ reader: "apple", rank: 2, digest: "d1", outcome: "found", tasks: ["summary"] });
     expect(file.assistVersion).toBe(1);
     expect(file.summary).toBe("A synthetic note.");
+  });
+});
+
+/**
+ * The standing guards: a second pass of any kind over the same library
+ * reads nothing and writes nothing. If one of these fails, a loop is back.
+ */
+describe("no reading loops", () => {
+  it("run twice: a second processing pass reads nothing and writes nothing", async () => {
+    library([note({ id: "a" }), note({ id: "b" }), note({ id: "c" })]);
+    await useStore.getState().processLibrary();
+    expect(model.summarize).toHaveBeenCalledTimes(3);
+    const after = writes.count;
+    model.summarize.mockClear();
+    await useStore.getState().processLibrary();
+    expect(model.summarize).not.toHaveBeenCalled();
+    expect(writes.count).toBe(after);
+  });
+
+  it("run twice: a second date sweep writes nothing", async () => {
+    model.facts = true;
+    library([note({ text: "Benefit End Date: 19 October 2027" })]);
+    expect(await useStore.getState().scanLibraryForFacts()).toBe(1);
+    const after = { count: writes.count, blobs: writes.blobs };
+    await useStore.getState().scanLibraryForFacts();
+    expect(writes.count).toBe(after.count);
+    expect(writes.blobs).toBe(after.blobs);
+  });
+
+  it("an unstable model causes no re-reads", async () => {
+    let n = 0;
+    model.summarize.mockImplementation(async () => ({ summary: `Reading number ${++n}.`, tags: [], kind: null, facts: [] }));
+    library([note({ id: "a" }), note({ id: "b" })]);
+    await useStore.getState().processLibrary();
+    await useStore.getState().processLibrary();
+    expect(model.summarize).toHaveBeenCalledTimes(2);
+  });
+
+  it("same-rank race: a result for contents another device already stamped is dropped", async () => {
+    library([note()]);
+    // While this device's model reads, another device's stamp for the same
+    // contents arrives by sync.
+    model.summarize.mockImplementation(async () => {
+      const file = useStore.getState().files.get("n1")!;
+      useStore.setState({
+        files: new Map([
+          [
+            "n1",
+            {
+              ...file,
+              summary: "Their summary.",
+              reading: { reader: "apple", rank: 2, version: 1, digest: "d1", tasks: ["summary"], outcome: "found", tries: 1, at: 2 },
+            },
+          ],
+        ]),
+      });
+      return { summary: "Our summary.", tags: [], kind: null, facts: [] };
+    });
+    await useStore.getState().processFile("n1");
+    expect(useStore.getState().files.get("n1")!.summary).toBe("Their summary.");
+    expect(writes.count).toBe(0);
+  });
+
+  it("our own metadata write leaves nothing owed for the same file", async () => {
+    library([note()]);
+    await useStore.getState().processFile("n1");
+    const { needsProcessing } = await import("./store");
+    expect(needsProcessing(useStore.getState().files.get("n1")!)).toBe(false);
   });
 });
 

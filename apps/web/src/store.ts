@@ -117,6 +117,7 @@ import { MIN_TEXT, cleanTags, outcomeFor, summarize } from "./intel/summarize";
 import {
   MAX_TRIES,
   MODEL_READER,
+  READER_RANK,
   modelStamp,
   needsReading,
   stampInto,
@@ -3119,6 +3120,21 @@ export const useStore = create<StoreState>((set, get) => {
         const factsWanted = factsEnabled();
         const stamp = (outcome: ReadingStamp["outcome"]) =>
           stampInto(meta, modelStamp({ digest: current.digest, factsWanted, outcome, now: Date.now() }));
+        // Whether another device finished these same contents while this one
+        // was reading: its stamp, at equal or stronger rank, stands, and this
+        // result is dropped instead of written over it.
+        const startedWith = stampOf(current)?.at;
+        const readElsewhere = () => {
+          const latest = get().files.get(current.id);
+          const theirs = latest ? stampOf(latest) : undefined;
+          return (
+            theirs !== undefined &&
+            theirs.at !== startedWith &&
+            theirs.outcome !== "retrying" &&
+            theirs.digest === current.digest &&
+            theirs.rank <= READER_RANK[MODEL_READER]!
+          );
+        };
         if (!text || text.length < MIN_TEXT) {
           stamp("short");
           return;
@@ -3135,6 +3151,9 @@ export const useStore = create<StoreState>((set, get) => {
             withFacts: factsWanted,
             signal,
           });
+          if (readElsewhere()) {
+            return;
+          }
           if (!reading) {
             stamp("unsupported");
             return;
@@ -3161,6 +3180,9 @@ export const useStore = create<StoreState>((set, get) => {
             throw error;
           }
           const verdict = outcomeFor(error);
+          if (readElsewhere()) {
+            return;
+          }
           if (verdict === "paused") {
             outcome.summaryPaused = 1;
           } else if (verdict) {
@@ -3605,6 +3627,16 @@ export const useStore = create<StoreState>((set, get) => {
             opts?.onOutcome?.(file.id, true);
             continue;
           }
+          const merged = mergeFacts(
+            current.facts,
+            scanned.facts.map((fact) => ({ ...fact, digest: current.digest })),
+          );
+          if (JSON.stringify(merged) === JSON.stringify(current.facts)) {
+            // Nothing new: writing the same facts again would only sync a
+            // change that is not one, and a sync is what schedules a pass.
+            opts?.onOutcome?.(file.id, true);
+            continue;
+          }
           await uploadBlob(
             file.id,
             "index",
@@ -3622,12 +3654,7 @@ export const useStore = create<StoreState>((set, get) => {
           // facts are all unanswered, and a rescan folding into what exists
           // is what lets a better reader supersede a worse reading without
           // duplicating what it merely re-found.
-          await patchFileMeta(file.id, {
-            facts: mergeFacts(
-              current.facts,
-              scanned.facts.map((fact) => ({ ...fact, digest: current.digest })),
-            ),
-          });
+          await patchFileMeta(file.id, { facts: merged });
           found++;
           opts?.onOutcome?.(file.id, true);
         } catch {
