@@ -65,6 +65,18 @@ describe("categorize", () => {
     expect(categorize({ name: "logo.svg", mime: "image/svg+xml", mtime: MTIME }).category).toBe("Design");
   });
 
+  it("email records are categorized as Mail", () => {
+    const result = categorize({
+      name: "Your invoice.email",
+      mime: "application/vnd.engram.email+json",
+      mtime: MTIME,
+      // Words that would otherwise send it to Receipts.
+      text: "Your invoice\nAmount due USD 65",
+    });
+    expect(result.category).toBe("Mail");
+    expect(result.tags).toContain("mail");
+  });
+
   it("falls back to Other and always tags category and year", () => {
     const result = categorize({ name: "mystery.bin", mime: "", mtime: MTIME });
     expect(result.category).toBe("Other");

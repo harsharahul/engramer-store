@@ -430,3 +430,40 @@ describe("downloadContent and the moving digest", () => {
     await expect(downloadContent("f1", key, staleDigest)).rejects.toBeInstanceOf(IntegrityError);
   });
 });
+
+/**
+ * A booking email carries schema.org reservation data in its HTML, which
+ * the search text leaves out; the reservation reader has to see the HTML as
+ * the sender wrote it, the same as for a saved confirmation page.
+ */
+describe("email records and the reservation reader", () => {
+  it("booking JSON-LD inside an email record becomes reservation facts", async () => {
+    const { scanForFacts } = await import("./intel/scan");
+    const { analyzeFile } = await import("./transfer");
+    vi.mocked(scanForFacts).mockClear();
+    const html =
+      '<html><script type="application/ld+json">{"@type":"LodgingReservation",' +
+      '"reservationNumber":"SYN-1001","checkinTime":"2027-03-04T15:00:00-05:00"}</script>' +
+      "<p>See you soon</p></html>";
+    const record = {
+      v: 1,
+      messageId: "<b2@example.com>",
+      date: Date.UTC(2027, 1, 1),
+      from: { name: "Example Stays", address: "stays@example.com" },
+      to: ["guest@example.com"],
+      cc: [],
+      subject: "Your stay",
+      headers: "",
+      text: "See you soon",
+      html,
+      inline: [],
+      attachments: [],
+      source: { kind: "import", label: "export.mbox" },
+    };
+    const file = new File([JSON.stringify(record)], "Your stay.email", {
+      type: "application/vnd.engram.email+json",
+    });
+    await analyzeFile(file);
+    expect(scanForFacts).toHaveBeenCalledWith(expect.objectContaining({ raw: html }));
+  });
+});

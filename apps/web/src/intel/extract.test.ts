@@ -71,3 +71,52 @@ describe("office text extraction", () => {
     expect(await extractText(file)).toBeUndefined();
   });
 });
+
+describe("email record text", () => {
+  const emailFile = (record: Record<string, unknown>) =>
+    new File([JSON.stringify(record)], "Your booking.email", {
+      type: "application/vnd.engram.email+json",
+    });
+  const base = {
+    v: 1,
+    messageId: "<b1@example.com>",
+    date: Date.UTC(2026, 0, 5),
+    from: { name: "Example Air", address: "bookings@example.com" },
+    to: ["traveller@example.com", "other@example.com"],
+    cc: [],
+    subject: "Your booking to Lisbon",
+    headers: "",
+    inline: [],
+    attachments: [],
+    source: { kind: "import", label: "export.mbox" },
+  };
+
+  it("extractText reads subject, sender and body of an email record", async () => {
+    const text = await extractText(
+      emailFile({ ...base, text: "Flight TP 236 leaves at 18:10.", html: "<p>ignored</p>" }),
+    );
+    const lines = text!.split("\n");
+    expect(lines[0]).toBe("Your booking to Lisbon");
+    expect(lines[1]).toBe("From: Example Air <bookings@example.com>");
+    expect(lines[2]).toBe("To: traveller@example.com, other@example.com");
+    expect(text).toContain("Flight TP 236 leaves at 18:10.");
+    expect(text).not.toContain("ignored");
+  });
+
+  it("extractText falls back to the HTML as text", async () => {
+    const text = await extractText(
+      emailFile({
+        ...base,
+        html:
+          "<html><head><style>p { color: red }</style></head><body>" +
+          "<p>Check-in&nbsp;from 15:00</p><p>Casa &amp; Rio</p>" +
+          "<script>track()</script></body></html>",
+      }),
+    );
+    expect(text).toContain("Check-in from 15:00");
+    expect(text).toContain("Casa & Rio");
+    expect(text).not.toContain("color: red");
+    expect(text).not.toContain("track()");
+    expect(text).not.toContain("<p>");
+  });
+});

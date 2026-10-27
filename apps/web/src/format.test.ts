@@ -12,6 +12,12 @@ describe("fileKind", () => {
   const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
+  it("fileKind says mail for an email record", () => {
+    expect(fileKind("application/vnd.engram.email+json", "Your booking.email")).toBe("mail");
+    // By name alone, as a share sheet hands it over.
+    expect(fileKind("", "Your booking.email")).toBe("mail");
+  });
+
   it("recognises presentations and OpenDocument files", () => {
     expect(fileKind("", "deck.pptx")).toBe("slides");
     expect(fileKind("application/vnd.oasis.opendocument.presentation", "talk.odp")).toBe("slides");

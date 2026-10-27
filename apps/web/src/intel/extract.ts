@@ -1,5 +1,6 @@
 import type { ExifSignals } from "./categorize";
 import type { UploadSource } from "../transfer";
+import { isEmailRecord, parseEmailRecord } from "../mail/kind";
 
 const TEXT_READ_LIMIT = 512 * 1024;
 const TEXT_STORE_LIMIT = 100_000;
@@ -54,6 +55,9 @@ function isOffice(file: { name: string; type: string }): boolean {
  */
 export async function extractText(file: UploadSource): Promise<string | undefined> {
   try {
+    if (isEmailRecord(file.name, file.type)) {
+      return await extractEmailText(file);
+    }
     if (isTextual(file) && file.size <= TEXT_READ_LIMIT) {
       const text = await file.text();
       return text.slice(0, TEXT_STORE_LIMIT) || undefined;
@@ -68,6 +72,41 @@ export async function extractText(file: UploadSource): Promise<string | undefine
     // Extraction is best-effort; the file still uploads without search text.
   }
   return undefined;
+}
+
+/**
+ * An email's searchable text: subject, sender and recipients first, so a
+ * search by person or subject meets them before the body, then the plain
+ * body, or the HTML body read as text when the message has no plain one.
+ */
+async function extractEmailText(file: UploadSource): Promise<string | undefined> {
+  const record = parseEmailRecord(await file.text());
+  if (!record) {
+    return undefined;
+  }
+  const sender = record.from.name && record.from.name !== record.from.address
+    ? `${record.from.name} <${record.from.address}>`
+    : record.from.address;
+  const lines = [
+    record.subject,
+    `From: ${sender}`,
+    ...(record.to.length > 0 ? [`To: ${record.to.join(", ")}`] : []),
+    ...(record.cc.length > 0 ? [`Cc: ${record.cc.join(", ")}`] : []),
+    "",
+    record.text ?? (record.html ? htmlToText(record.html) : ""),
+  ];
+  return lines.join("\n").slice(0, TEXT_STORE_LIMIT).trim() || undefined;
+}
+
+/** HTML read as text: head, style and script dropped, blocks on their own lines. */
+export function htmlToText(html: string): string {
+  return xmlToText(
+    html
+      .replace(/<(head|style|script|noscript|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/&nbsp;/gi, " "),
+    /<\/(?:p|div|tr|li|h[1-6]|table|blockquote)\s*>/gi,
+  );
 }
 
 /** Tags stripped, paragraph boundaries kept, entities restored. */

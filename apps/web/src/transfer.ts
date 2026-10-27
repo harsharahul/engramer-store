@@ -42,6 +42,7 @@ import { isHandheld } from "./analysisslot";
 import { diag } from "./diag";
 import { nativeOfflineRead } from "./native";
 import { mimeFromName } from "./nativefile";
+import { isEmailRecord, parseEmailRecord } from "./mail/kind";
 
 const THUMB_SIZE = 512;
 
@@ -654,9 +655,15 @@ export async function analyzeFile(
       file.type === "text/html" ||
       file.type === "message/rfc822" ||
       /\.(?:html?|eml)$/i.test(file.name);
-    const raw = keepsMarkup
-      ? await withDeadline(file.text(), ANALYSIS_DEADLINE_MS, signal).catch(() => undefined)
-      : undefined;
+    // An email record keeps the sender's HTML inside it; that is the
+    // markup the reader wants, not the record's JSON.
+    const raw = isEmailRecord(file.name, file.type)
+      ? await withDeadline(file.text(), ANALYSIS_DEADLINE_MS, signal)
+          .then((json) => (json === undefined ? undefined : parseEmailRecord(json)?.html))
+          .catch(() => undefined)
+      : keepsMarkup
+        ? await withDeadline(file.text(), ANALYSIS_DEADLINE_MS, signal).catch(() => undefined)
+        : undefined;
     const found = await withDeadline(
       scanForFacts({
         name: file.name,

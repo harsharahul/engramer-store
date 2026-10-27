@@ -11,8 +11,7 @@
 import { contentDigest, type MailMeta } from "@engramer/crypto";
 import type { ParsedMessage } from "../intel/mime";
 
-/** The record's file type. */
-export const EMAIL_MIME = "application/vnd.engram.email+json";
+export { EMAIL_MIME } from "./kind";
 
 /** Caps on what one record holds, in bytes. */
 export const HEADERS_MAX = 64 * 1024;

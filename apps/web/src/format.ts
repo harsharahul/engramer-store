@@ -1,3 +1,5 @@
+import { isEmailRecord } from "./mail/kind";
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) {
     return `${bytes} B`;
@@ -34,12 +36,14 @@ export type FileKind =
   | "archive"
   | "link"
   | "slides"
+  | "mail"
   | "other";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 export function fileKind(mime: string, name: string): FileKind {
+  if (isEmailRecord(name, mime)) return "mail";
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
   if (mime.startsWith("audio/")) return "audio";

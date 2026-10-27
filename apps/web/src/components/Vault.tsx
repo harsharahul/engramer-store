@@ -239,7 +239,7 @@ type View =
   | { kind: "album"; tag: string };
 
 const CATEGORY_ORDER = [
-  "Photos", "Screenshots", "Documents", "Receipts", "Notes", "Code", "Videos",
+  "Photos", "Screenshots", "Documents", "Receipts", "Mail", "Notes", "Code", "Videos",
   "Audio", "Spreadsheets", "Presentations", "Design", "Archives", "Books", "Other",
 ];
 
