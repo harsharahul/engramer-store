@@ -5,6 +5,26 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Added
+- **Mail import.** Saved messages (`.eml`) and mailbox exports (`.mbox`,
+  including Google Takeout and Apple Mail export folders) import from the
+  New menu, the command palette, or a drop. Each message becomes an email
+  record in Mail/Imported and each attachment a file in
+  Mail/Imported/Attachments/<year>, linked both ways; tracking pixels are
+  dropped. Exports of any size are read a chunk at a time and parsed on the
+  device. Importing the same file again adds only what is new, and the
+  import runs in the notice center with Stop and a summary that names
+  anything skipped.
+- **An email viewer.** The preview shows an email's sender, recipients,
+  date and attachments, with its body in a sandboxed frame that runs no
+  script. Remote images stay off until asked for, links open in a new tab
+  showing their real address, and Save as PDF stores a plain copy beside
+  the email.
+- **Mail in search and details.** `type:email`, `from:`, `to:` and
+  `has:attachment` filter search; email results show the sender, date and
+  attachment chips. The details pane lists an email's people and
+  attachments, and an attachment names the email it came with.
+
 ### Security
 - **Dependency advisories patched.** `dompurify` 3.4.17 (sanitizer
   bypasses in the HTML sanitizer the web client applies to rendered
@@ -36,6 +56,11 @@ All notable changes to Engram Store are documented here, following
   deletion of a file the vault no longer has counts as done.
 
 ### Changed
+- **Search warm-up downloads index blobs in batches.** A new device or
+  session fetches the encrypted search index 200 files per request
+  (`POST /api/files/index/batch`, on the server and the on-device vault)
+  instead of one request per file, and falls back to single requests on an
+  older server.
 - **Profile says where the office editor and intelligence come from on a
   server vault.** The "This device" card now explains that both run on
   the device and are fetched from the server the first time they are
