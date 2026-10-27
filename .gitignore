@@ -16,6 +16,7 @@ data/
 HANDOFF.md
 PLAN.md
 *.local.md
+*.local.html
 
 # Playwright MCP artifacts
 .playwright-mcp/
