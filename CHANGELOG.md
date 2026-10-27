@@ -6,6 +6,12 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Added
+- **The on-device assistant reads mail.** Emails are read newest first and
+  from far shorter text than documents, inside a window of the last 12
+  months (3 to 12 in Profile, following the account); older mail stays
+  searchable and its booking data is still read. An import's summary says
+  how many dates it found. On a phone, at most 40 readings start per app
+  open; the rest wait for the next open.
 - **More bookings, bills, deliveries and invites read exactly.** Event
   tickets, restaurant tables, bus and boat trips join flights, stays, car
   rentals and trains in the booking data read from confirmation emails and
@@ -48,6 +54,13 @@ All notable changes to Engram Store are documented here, following
   collections in the server's request validation).
 
 ### Fixed
+- **The assistant's refusals and limits are understood on macOS 27 and iOS
+  27.** The newer systems report them under new error types, which arrived as
+  unknown errors: a refusal was retried instead of recorded, a rate limit or
+  a model still downloading spent a try instead of pausing, and an overlong
+  document was not retried with less text.
+- **A reading that swaps one tag for another saves the change.** Tags were
+  written only when their number changed.
 - **Rereading a document for dates no longer rewrites it when nothing
   changed.** Every rescan used to store the same facts again, which synced a
   change that was not one and could schedule yet another pass.
@@ -75,6 +88,13 @@ All notable changes to Engram Store are documented here, following
   deletion of a file the vault no longer has counts as done.
 
 ### Changed
+- **A model's reading counts without a yes only where its accuracy is
+  measured.** Precision per task is measured on a synthetic eval set for the
+  version of the reader that ships; a model reading counts on its own only
+  above 98% over enough readings, never for travel times, identity document
+  expiries or legal deadlines, and only when the value passes sanity checks.
+  The kind of an email is used the same way. Today's measurements are below
+  the bar, so model readings keep waiting for a yes.
 - **Each file is read once, and failures stop.** Every reading by the
   on-device model leaves one synced stamp (reader, rank, version, contents,
   tasks, outcome), so no device reads what another already has; a file is
