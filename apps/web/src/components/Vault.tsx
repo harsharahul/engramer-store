@@ -120,7 +120,8 @@ import {
   generate as assistantGenerate,
   setAssistantEnabled,
 } from "../intel/assistant";
-import { DATED_KINDS, isTracked, soonestDated } from "../intel/facts";
+import { soonestDated } from "../intel/facts";
+import { hasAgenda } from "../intel/agenda";
 import { extractText } from "../intel/extract";
 import { CalendarView } from "./CalendarView";
 import { HeadsUp, TripHeadsUp } from "./HeadsUp";
@@ -2436,11 +2437,7 @@ export function Vault() {
   const expiringCount = liveFiles.filter((f) => soonestDated(f.facts) !== undefined).length;
   // The calendar earns its place once anything is on it: a confirmed dated
   // fact or a trip. Before that, the sidebar stays as short as it was.
-  const calendarWorthy = liveFiles.some(
-    (f) =>
-      f.tags.some((tag) => tag.startsWith("trip:")) ||
-      f.facts.some((fact) => isTracked(fact) && DATED_KINDS.has(fact.kind)),
-  );
+  const calendarWorthy = hasAgenda(liveFiles);
 
   const searchSuggestions = (
     <>

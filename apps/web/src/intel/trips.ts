@@ -369,10 +369,18 @@ export function factsFingerprint(
     .join("|");
 }
 
+/** Every trip's shared tag starts with this. */
+export const TRIP_PREFIX = "trip:";
+
+/** The one test for whether a tag names a trip. */
+export function isTripTag(tag: string): boolean {
+  return tag.startsWith(TRIP_PREFIX);
+}
+
 /** The shared tag a confirmation writes: the trip's name in the Library. */
 export function tripTag(suggestion: TripSuggestion): string {
   const where = suggestion.destination ? slug(suggestion.destination) : suggestion.start;
-  return `trip:${where}-${suggestion.start.slice(0, 7)}`;
+  return `${TRIP_PREFIX}${where}-${suggestion.start.slice(0, 7)}`;
 }
 
 function legKind(fact: Fact): ItineraryLeg["kind"] {

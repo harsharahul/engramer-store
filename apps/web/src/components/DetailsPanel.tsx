@@ -5,6 +5,7 @@ import { FileFacts } from "./FactsPanel";
 import { useStore, type FileEntry } from "../store";
 import { mailRows } from "../mail/details";
 import { albumTitle, isAlbumTag, isReservedTag } from "../albums";
+import { isTripTag } from "../intel/trips";
 import { useSheetDrag } from "../sheetdrag";
 import { MOBILE_QUERY, useMediaQuery } from "../media";
 import { thumbnailUrl } from "../thumbs";
@@ -318,7 +319,7 @@ export function DetailsPanel(props: {
         <span className="details-label">Tags</span>
         <div className="tag-input compact">
           {file.tags
-            .filter((tag) => !isReservedTag(tag) || tag.startsWith("trip:"))
+            .filter((tag) => !isReservedTag(tag) || isTripTag(tag))
             .map((tag) => (
             <span key={tag} className="tag editable">
               <button className="tag-link" title={`Search tag:${tag}`} onClick={() => props.onTagClick(tag)}>

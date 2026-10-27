@@ -17,9 +17,10 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { FileEntry } from "../store";
-import { DATED_KINDS, isTracked, type Fact } from "../intel/facts";
+import type { Fact } from "../intel/facts";
+import { itemsOf, tripsOf } from "../intel/agenda";
 import { describeFact, shown } from "../intel/describe";
-import { factsFingerprint, tripTitle } from "../intel/trips";
+import { factsFingerprint } from "../intel/trips";
 import { Button } from "./ui/button";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -94,39 +95,21 @@ export function CalendarView(props: { files: FileEntry[]; onOpen: (id: string) =
 
   const byDay = useMemo(() => {
     const map = new Map<string, DayEntry[]>();
-    for (const file of live) {
-      for (const fact of file.facts) {
-        if (isTracked(fact) && DATED_KINDS.has(fact.kind)) {
-          map.set(fact.value, [...(map.get(fact.value) ?? []), { file, fact }]);
-        }
-      }
+    for (const { file, fact } of itemsOf(live, Date.now(), { name: "all" })) {
+      map.set(fact.value, [...(map.get(fact.value) ?? []), { file, fact }]);
     }
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fingerprint]);
 
-  const trips = useMemo(() => {
-    const byTag = new Map<string, string[]>();
-    for (const file of live) {
-      for (const tag of file.tags) {
-        if (!tag.startsWith("trip:")) {
-          continue;
-        }
-        const dates = file.facts
-          .filter((fact) => fact.kind === "event" && isTracked(fact))
-          .map((fact) => fact.value);
-        byTag.set(tag, [...(byTag.get(tag) ?? []), ...dates]);
-      }
-    }
-    const raw = [...byTag.entries()]
-      .filter(([, dates]) => dates.length > 0)
-      .map(([tag, dates]) => {
-        const sorted = [...dates].sort();
-        return { tag, title: tripTitle(tag), start: sorted[0]!, end: sorted[sorted.length - 1]! };
-      });
-    return laneTrips(raw);
+  const trips = useMemo(
+    () =>
+      laneTrips(
+        tripsOf(live).flatMap(({ tag, title, start, end }) => (start && end ? [{ tag, title, start, end }] : [])),
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fingerprint]);
+    [fingerprint],
+  );
 
   // The visible weeks: leading blanks, the days, trailing blanks.
   const weeks = useMemo(() => {

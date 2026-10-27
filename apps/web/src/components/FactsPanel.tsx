@@ -12,11 +12,11 @@
 import { useEffect, useState } from "react";
 import { decide, decided, DECISIONS_EVENT, decisionEvents } from "../decisions";
 import { useStore, type FileEntry } from "../store";
-import { DATED_KINDS, isTracked, type Fact, type FactEvidence } from "../intel/facts";
+import { isDated, isTracked, type FactEvidence } from "../intel/facts";
+import { itemsOf, tripsOf } from "../intel/agenda";
 import { basisLabel, describeFact, shown, whenLabel } from "../intel/describe";
 import { insightsFor, type Insight } from "../intel/insights";
 import { duplicatesByDigest } from "../intel/duplicates";
-import { tripTags, upcomingFacts } from "../notices";
 import { factToCalendar } from "../intel/ics";
 import { triggerDownload } from "../download";
 import { TripCard } from "./TripCard";
@@ -51,17 +51,11 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
   const spokenFor = new Set(insights.map((insight) => insight.fileId).filter(Boolean));
 
   // Confirmed trips are shared tags; the members' events are the itinerary.
-  const tripsByTag = new Map<string, FileEntry[]>();
-  for (const tag of tripTags(live)) {
-    tripsByTag.set(
-      tag,
-      live.filter((file) => file.tags.includes(tag)),
-    );
-  }
-  const inTrip = new Set([...tripsByTag.values()].flat().map((file) => file.id));
+  const trips = tripsOf(live);
+  const inTrip = new Set(trips.flatMap((trip) => trip.members.map((file) => file.id)));
 
   // The same computation the bell counts and the notifications read.
-  const upcoming = upcomingFacts(live, now).filter(
+  const upcoming = itemsOf(live, now, { name: "coming-up" }).filter(
     (entry) =>
       !spokenFor.has(entry.file.id) &&
       // A trip card already presents its members' events as an itinerary;
@@ -75,7 +69,7 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
     upcoming.length === 0 &&
     insights.length === 0 &&
     duplicates.length === 0 &&
-    tripsByTag.size === 0
+    trips.length === 0
   ) {
     return (
       <p className="panel-quiet">Nothing needs your attention.</p>
@@ -84,11 +78,9 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
 
   return (
     <div className="intel">
-      {[...tripsByTag.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([tag, members]) => (
-          <TripCard key={tag} tag={tag} members={members} onOpen={props.onOpen} />
-        ))}
+      {trips.map((trip) => (
+        <TripCard key={trip.tag} tag={trip.tag} members={trip.members} onOpen={props.onOpen} />
+      ))}
       {upcoming.length > 0 && (
         <div className="intel-group">
           <h4>
@@ -163,10 +155,6 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
       )}
     </div>
   );
-}
-
-function isDated(fact: Fact): boolean {
-  return DATED_KINDS.has(fact.kind);
 }
 
 /**

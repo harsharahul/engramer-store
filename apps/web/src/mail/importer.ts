@@ -11,7 +11,8 @@
  */
 
 import type { MailMeta } from "@engramer/crypto";
-import { DATED_KINDS, isTracked, type Fact } from "../intel/facts";
+import { itemsOf } from "../intel/agenda";
+import type { Fact } from "../intel/facts";
 import { describeImport, type ActivityJob } from "../activity";
 import { parseMessage, type ParsedMessage } from "../intel/mime";
 import type { UploadSource } from "../transfer";
@@ -310,16 +311,12 @@ export async function importMail(sources: UploadSource[], target: ImportTarget):
   await Promise.all(inFlight);
 
   // A date the email and its attachment both state is one new date.
-  const dates = new Set<string>();
-  for (const file of target.files()) {
-    if (stored.has(file.id)) {
-      for (const fact of file.facts ?? []) {
-        if (isTracked(fact) && DATED_KINDS.has(fact.kind)) {
-          dates.add(`${fact.kind}|${fact.value}|${fact.time ?? ""}`);
-        }
-      }
-    }
-  }
+  const storedFiles = [...target.files()]
+    .filter((file) => stored.has(file.id))
+    .map((file) => ({ id: file.id, tags: [], facts: file.facts ?? [], trashed: false }));
+  const dates = new Set(
+    itemsOf(storedFiles, Date.now(), { name: "all" }).map(({ fact }) => `${fact.kind}|${fact.value}|${fact.time ?? ""}`),
+  );
   report.dates = dates.size;
 
   const said = describeImport(report, controller.signal.aborted);

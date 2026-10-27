@@ -1,4 +1,4 @@
-import { slug } from "./intel/trips";
+import { slug, TRIP_PREFIX } from "./intel/trips";
 
 /**
  * Albums are a reserved namespace inside the ordinary encrypted tags: a file
@@ -17,7 +17,7 @@ import { slug } from "./intel/trips";
 
 export const ALBUM_PREFIX = "album:";
 
-const RESERVED_PREFIXES = [ALBUM_PREFIX, "trip:", "mail:"];
+const RESERVED_PREFIXES = [ALBUM_PREFIX, TRIP_PREFIX, "mail:"];
 
 /** A tag the free-tag editor must not create or edit. */
 export function isReservedTag(tag: string): boolean {
