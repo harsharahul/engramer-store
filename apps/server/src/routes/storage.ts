@@ -55,6 +55,9 @@ const patchFileSchema = z.object({
 /** Rows one batch request may touch; a client chunks anything larger. */
 const BATCH_MAX = 500;
 
+/** Files whose search index one batch download may name. */
+const indexBatchSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(BATCH_MAX) });
+
 const batchSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("patch"),
@@ -1134,6 +1137,37 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   app.get("/api/files/:id/data", auth, (request, reply) => downloadBlob(request, reply, "data"));
   app.get("/api/files/:id/thumbnail", auth, (request, reply) => downloadBlob(request, reply, "thumb"));
   app.get("/api/files/:id/index", auth, (request, reply) => downloadBlob(request, reply, "index"));
+
+  /**
+   * Many files' search index blobs in one answer, so a device warming the
+   * search index makes one request per batch instead of one per file. Each
+   * frame is [u32 id length][id][u32 blob length][blob], big-endian, in the
+   * order asked; a file the caller cannot read, or one with no index, is
+   * left out rather than failing the batch.
+   */
+  app.post("/api/files/index/batch", auth, async (request, reply) => {
+    const { ids } = indexBatchSchema.parse(request.body);
+    const frames: Buffer[] = [];
+    for (const id of ids) {
+      const file = (await getAccessibleFile(id, request.user.uid))?.file;
+      if (!file || !file.index_size) {
+        continue;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of await app.blobs.get(blobKey(id, "index", 0))) {
+        chunks.push(chunk as Buffer);
+      }
+      const blob = Buffer.concat(chunks);
+      const idBytes = Buffer.from(id, "utf8");
+      const head = Buffer.alloc(4);
+      head.writeUInt32BE(idBytes.length);
+      const size = Buffer.alloc(4);
+      size.writeUInt32BE(blob.length);
+      frames.push(head, idBytes, size, blob);
+    }
+    reply.header("content-type", "application/octet-stream");
+    return reply.send(Buffer.concat(frames));
+  });
 
   app.patch("/api/files/:id", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
