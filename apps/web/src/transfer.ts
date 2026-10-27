@@ -657,7 +657,8 @@ export async function analyzeFile(
     const keepsMarkup =
       file.type === "text/html" ||
       file.type === "message/rfc822" ||
-      /\.(?:html?|eml)$/i.test(file.name);
+      file.type === "text/calendar" ||
+      /\.(?:html?|eml|ics)$/i.test(file.name);
     // An email record keeps the sender's HTML inside it; that is the
     // markup the reader wants, not the record's JSON.
     const raw = isEmailRecord(file.name, file.type)

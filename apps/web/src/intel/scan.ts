@@ -29,6 +29,7 @@ import {
 import { harvestFacts, labelledFacts, structuralDatedFacts } from "./labels";
 import { mrzFacts } from "./mrz";
 import { structuredDataFacts } from "./reservation";
+import { icsFacts } from "./icsread";
 
 const PREF_KEY = "engram-facts";
 
@@ -95,6 +96,10 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
   // and exempt from prose grounding for the same reason barcodes are.
   if (input.raw) {
     found.push(...structuredDataFacts(input.raw));
+    // A calendar invite is the same tier: the sender's calendar speaking.
+    if (input.mime === "text/calendar" || /\.ics$/i.test(input.name)) {
+      found.push(...icsFacts(input.raw));
+    }
   }
 
   const text = input.text ?? "";
