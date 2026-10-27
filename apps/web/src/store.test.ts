@@ -969,7 +969,7 @@ describe("importMail", () => {
     await ready();
   });
 
-  it("stores an email and its attachment through the upload path, linked both ways", async () => {
+  const rigImport = () => {
     const masterKey = generateKey();
     useStore.setState({
       session: { email: "t@example.com", token: "t", masterKey, privateKey: new Uint8Array(32), publicKey: "" },
@@ -1014,6 +1014,9 @@ describe("importMail", () => {
         updatedAt: 2,
       };
     };
+  };
+
+  const ticketEml = () => {
     const eml = [
       "From: Example Air <bookings@example.com>",
       "Subject: Your ticket",
@@ -1034,9 +1037,12 @@ describe("importMail", () => {
       "--m--",
       "",
     ].join("\r\n");
-    const source = new File([eml], "ticket.eml", { type: "message/rfc822" });
+    return new File([eml], "ticket.eml", { type: "message/rfc822" });
+  };
 
-    const report = await useStore.getState().importMail([source]);
+  it("stores an email and its attachment through the upload path, linked both ways", async () => {
+    rigImport();
+    const report = await useStore.getState().importMail([ticketEml()]);
 
     expect(report).toEqual({ imported: 1, alreadyPresent: 0, skipped: [], attachments: 1 });
     const files = useStore.getState().files;
@@ -1050,6 +1056,16 @@ describe("importMail", () => {
     // One bell job, no upload rows.
     expect(useStore.getState().uploads).toEqual([]);
     expect(useStore.getState().activity.log[0]!.title).toBe("Imported 1 email and 1 attachment");
+  });
+
+  it("a second import started meanwhile waits and stores nothing twice", async () => {
+    rigImport();
+    const [first, second] = await Promise.all([
+      useStore.getState().importMail([ticketEml()]),
+      useStore.getState().importMail([ticketEml()]),
+    ]);
+    expect(first.imported).toBe(1);
+    expect(second).toMatchObject({ imported: 0, alreadyPresent: 1 });
   });
 });
 

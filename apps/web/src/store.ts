@@ -1312,6 +1312,26 @@ export const useStore = create<StoreState>((set, get) => {
   /** Find or create a root folder for a category. */
   const ensureCategoryFolder = (name: string): Promise<string> => ensureFolderPath([name]);
 
+  /** Mail imports run one after another: each checks for duplicates
+   * against what the last one stored. */
+  let mailImports: Promise<unknown> = Promise.resolve();
+  const importMailNow = async (sources: UploadSource[]): Promise<ImportReport> => {
+    holdTransferLock();
+    try {
+      return await runMailImport(sources, {
+        files: () => get().files.values(),
+        ensureFolderPath,
+        store: (file, folderId) => storeSource(file, folderId),
+        setMail: (id, mail) => patchFileMeta(id, { mail }),
+        begin: (job) => get().beginActivity(job),
+        update: (patch) => get().updateActivity(patch),
+        finish: (title, detail) => get().finishActivity("importing", title, detail),
+      });
+    } finally {
+      releaseTransferLock();
+    }
+  };
+
   /**
    * Stores one source in a folder through the same analysis and upload
    * steps as a picked file, but without an upload row: background jobs
@@ -2611,21 +2631,10 @@ export const useStore = create<StoreState>((set, get) => {
       return stored.id;
     },
 
-    importMail: async (sources) => {
-      holdTransferLock();
-      try {
-        return await runMailImport(sources, {
-          files: () => get().files.values(),
-          ensureFolderPath,
-          store: (file, folderId) => storeSource(file, folderId),
-          setMail: (id, mail) => patchFileMeta(id, { mail }),
-          begin: (job) => get().beginActivity(job),
-          update: (patch) => get().updateActivity(patch),
-          finish: (title, detail) => get().finishActivity("importing", title, detail),
-        });
-      } finally {
-        releaseTransferLock();
-      }
+    importMail: (sources) => {
+      const run = mailImports.then(() => importMailNow(sources));
+      mailImports = run.catch(() => {});
+      return run;
     },
 
     // Album edits are metadata rewrites, one sealed write per file in one

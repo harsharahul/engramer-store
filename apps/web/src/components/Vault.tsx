@@ -36,6 +36,7 @@ import {
 } from "../search/natural";
 import { SCENES } from "../intel/scenes";
 import { collectDropped, fromDirectoryInput, type TreeFile } from "../uploader";
+import { routeDrop, routeTree } from "../mail/route";
 import { MOBILE_QUERY, useMediaQuery, useViewportWidth } from "../media";
 import {
   DETAILS_DEFAULT,
@@ -526,6 +527,7 @@ export function Vault() {
   const lastSelected = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
+  const mailInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
@@ -1104,13 +1106,29 @@ export function Vault() {
     diag("details", `opened as a ${isMobile ? "sheet" : "pane"}`);
   };
 
+  const importMailFrom = useCallback(
+    (sources: UploadSource[]) => {
+      if (sources.length > 0) {
+        void store.importMail(sources);
+        showToast(
+          `Importing mail from ${sources.length === 1 ? sources[0]!.name : `${sources.length} files`}`,
+        );
+      }
+    },
+    [store, showToast],
+  );
+
+  // Saved messages and mailbox exports are mail wherever they arrive from:
+  // they import as email records, and the rest uploads as files.
   const uploadTo = useCallback(
-    (files: UploadSource[]) => {
+    (picked: UploadSource[]) => {
+      const { mail, files } = routeDrop(picked);
+      importMailFrom(mail);
       if (files.length > 0) {
         void store.uploadFiles(files, currentFolderId);
       }
     },
-    [store, currentFolderId],
+    [store, currentFolderId, importMailFrom],
   );
 
   const fileMenuItems = (file: FileEntry): MenuItem[] => [
@@ -1737,7 +1755,9 @@ export function Vault() {
     dragDepth.current = 0;
     setDragging(false);
     const transfer = event.dataTransfer;
-    void collectDropped(transfer).then((items) => {
+    void collectDropped(transfer).then((dropped) => {
+      const { mail, files: items } = routeTree(dropped);
+      importMailFrom(mail);
       if (items.length === 0) {
         return;
       }
@@ -1973,6 +1993,12 @@ export function Vault() {
       icon: <UploadGlyph size={15} />,
       run: () => folderInput.current?.click(),
     },
+    {
+      id: "import-mail",
+      label: "Import mail…",
+      icon: <UploadGlyph size={15} />,
+      run: () => mailInput.current?.click(),
+    },
     { id: "new-u", label: "", divider: true, run: () => {} },
     { id: "new-note", label: "Note", icon: <NoteGlyph size={15} />, run: () => setNewNoteOpen(true) },
     {
@@ -2030,6 +2056,7 @@ export function Vault() {
           icon: <FolderGlyph size={15} />,
           run: () => folderInput.current?.click(),
         },
+        { id: "import-mail", label: "Import mail", icon: <UploadGlyph size={15} />, run: () => mailInput.current?.click() },
         { id: "new-folder", label: "New folder", icon: <PlusGlyph size={15} />, run: () => setNewFolderOpen(true) },
         { id: "new-note", label: "New note", icon: <NoteGlyph size={15} />, run: () => setNewNoteOpen(true) },
         {
@@ -2090,6 +2117,7 @@ export function Vault() {
           ]
         : []),
       { id: "upload", label: "Upload files", hint: "encrypt and store", run: () => fileInput.current?.click() },
+      { id: "import-mail", label: "Import mail", hint: "from .eml or .mbox files", run: () => mailInput.current?.click() },
       { id: "new-note", label: "New note", hint: "write, encrypted", run: () => setNewNoteOpen(true) },
       {
         id: "new-document",
@@ -2858,10 +2886,24 @@ export function Vault() {
             hidden
             {...{ webkitdirectory: "" }}
             onChange={(e) => {
-              const items = fromDirectoryInput([...(e.target.files ?? [])]);
+              const { mail, files: items } = routeTree(fromDirectoryInput([...(e.target.files ?? [])]));
+              importMailFrom(mail);
               if (items.length > 0) {
                 void store.uploadTree(items, currentFolderId);
               }
+              e.target.value = "";
+            }}
+          />
+          <input
+            ref={mailInput}
+            type="file"
+            multiple
+            hidden
+            accept=".eml,.mbox,message/rfc822,application/mbox"
+            onChange={(e) => {
+              // Whatever is picked here is taken as mail, so the "mbox" file
+              // inside an Apple Mail export, which has no extension, works too.
+              importMailFrom([...(e.target.files ?? [])]);
               e.target.value = "";
             }}
           />
