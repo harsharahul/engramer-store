@@ -120,7 +120,7 @@ import {
   generate as assistantGenerate,
   setAssistantEnabled,
 } from "../intel/assistant";
-import { DATED_KINDS, soonestDated } from "../intel/facts";
+import { DATED_KINDS, isTracked, soonestDated } from "../intel/facts";
 import { extractText } from "../intel/extract";
 import { CalendarView } from "./CalendarView";
 import { HeadsUp, TripHeadsUp } from "./HeadsUp";
@@ -2439,7 +2439,7 @@ export function Vault() {
   const calendarWorthy = liveFiles.some(
     (f) =>
       f.tags.some((tag) => tag.startsWith("trip:")) ||
-      f.facts.some((fact) => fact.confirmed && !fact.dismissed && DATED_KINDS.has(fact.kind)),
+      f.facts.some((fact) => isTracked(fact) && DATED_KINDS.has(fact.kind)),
   );
 
   const searchSuggestions = (

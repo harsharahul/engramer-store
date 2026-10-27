@@ -18,7 +18,7 @@
  * doing it in the most authoritative voice the product has.
  */
 
-import type { Fact } from "./facts";
+import { isTracked, type Fact } from "./facts";
 import { daysUntil } from "./dates";
 import { travelSpans, type TravelSpan } from "./trips";
 
@@ -84,7 +84,7 @@ function monthsBefore(iso: string, months: number): string {
  * rather than by silently withdrawing what they asked to be told.
  */
 function usable(file: FactfulFile): Fact[] {
-  return file.facts.filter((fact) => fact.confirmed && !fact.dismissed);
+  return file.facts.filter(isTracked);
 }
 
 function expiriesOf(files: FactfulFile[], document: Fact["document"]) {
@@ -107,7 +107,7 @@ const WARRANTY_WARN_DAYS = 30;
  * exact events, so a ratified trip passes this bar on its own.
  */
 function confirmedSpans(files: FactfulFile[], now: number): TravelSpan[] {
-  return travelSpans(files, (fact) => fact.confirmed === true && !fact.dismissed).filter(
+  return travelSpans(files, isTracked).filter(
     (span) => daysUntil(span.end, now) >= 0,
   );
 }

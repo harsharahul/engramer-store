@@ -224,13 +224,14 @@ export function offeredFacts(
 
 /**
  * The nearest date a file is actually tracking, or nothing if it tracks none.
- * Only confirmed facts count: an unconfirmed reading has not been agreed to,
- * and listing a file by a date nobody accepted would be acting on a guess.
+ * Only tracked facts count (confirmed, or accepted on evidence): a reading
+ * waiting for a yes has not been agreed to, and listing a file by it would be
+ * acting on a guess.
  */
 export function soonestDated(facts: Fact[]): string | undefined {
   let soonest: string | undefined;
   for (const fact of facts) {
-    if (!fact.confirmed || fact.dismissed || !DATED_KINDS.has(fact.kind)) {
+    if (!isTracked(fact) || !DATED_KINDS.has(fact.kind)) {
       continue;
     }
     if (soonest === undefined || fact.value < soonest) {
@@ -254,6 +255,19 @@ export const EXACT_SOURCES: ReadonlySet<FactSource> = new Set(["barcode", "mrz",
 /** Whether a fact counts: the owner confirmed it, or the evidence was accepted; never once dismissed. */
 export function isTracked(fact: Fact): boolean {
   return !fact.dismissed && (fact.confirmed === true || fact.accepted !== undefined);
+}
+
+/** Whether the owner has answered this fact either way. */
+export function ownerDecided(fact: Fact): boolean {
+  return fact.confirmed === true || fact.dismissed === true;
+}
+
+/** Why a fact counts, for the line that says so; null while it waits for a yes. */
+export function basisOf(fact: Fact): "confirmed" | "exact" | "agreement" | "grounded" | null {
+  if (fact.dismissed) {
+    return null;
+  }
+  return fact.confirmed ? "confirmed" : (fact.accepted ?? null);
 }
 
 /** An exact reader's full-confidence fact, which is accepted as it is read. */

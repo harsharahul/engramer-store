@@ -101,12 +101,20 @@ import {
 } from "./activity";
 import { isPdf } from "./intel/extract";
 import { CLIP_MODEL_VERSION, embedImage, semanticEnabled } from "./intel/semantic";
-import { asFacts, mergeFacts, reconcileFacts, settleDisputes, type Fact, type FactEvidence } from "./intel/facts";
+import {
+  asFacts,
+  mergeFacts,
+  ownerDecided,
+  reconcileFacts,
+  settleDisputes,
+  type Fact,
+  type FactEvidence,
+} from "./intel/facts";
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import { assistantAvailableNow, assistantEnabled, lastAssistantState } from "./intel/assistant";
 import { CATEGORIES } from "./intel/categorize";
 import { ASSIST_VERSION, MIN_TEXT, cleanTags, needsSummary, outcomeFor, summarize } from "./intel/summarize";
-import { EXACT_SOURCES, tripTag, type TripSuggestion } from "./intel/trips";
+import { tripTag, type TripSuggestion } from "./intel/trips";
 import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
 import { blankDocument, DOCX_MIME, XLSX_MIME } from "./office/templates";
@@ -2733,16 +2741,12 @@ export const useStore = create<StoreState>((set, get) => {
           continue;
         }
         // Accepting the group is ratification: the exact events that formed
-        // it become confirmed in the same write, so the rules that speak
-        // only on confirmed facts may now speak about this trip. Soft
-        // unconfirmed facts never took part in the grouping and stay
-        // unconfirmed; nobody has looked at them yet.
+        // it become confirmed in the same write: they already counted on
+        // their evidence, and now they are the owner's word too. Soft
+        // facts never took part in the grouping and stay as they were;
+        // nobody has looked at them yet.
         const facts = file.facts.map((fact) =>
-          fact.kind === "event" &&
-          !fact.dismissed &&
-          !fact.confirmed &&
-          fact.confidence === 1 &&
-          EXACT_SOURCES.has(fact.source)
+          fact.kind === "event" && !ownerDecided(fact) && fact.accepted === "exact"
             ? { ...fact, confirmed: true }
             : fact,
         );
@@ -3468,7 +3472,7 @@ export const useStore = create<StoreState>((set, get) => {
           // file whose facts are all unanswered is fair game for a rescan,
           // which is what lets a reader improvement reach documents that
           // were read badly the first time.
-          file.facts.every((fact) => !fact.confirmed && !fact.dismissed) &&
+          file.facts.every((fact) => !ownerDecided(fact)) &&
           (file.hasText || file.text !== undefined),
       );
       let found = 0;

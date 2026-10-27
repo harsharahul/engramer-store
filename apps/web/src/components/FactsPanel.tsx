@@ -12,8 +12,8 @@
 import { useEffect, useState } from "react";
 import { decide, decided, DECISIONS_EVENT, decisionEvents } from "../decisions";
 import { useStore, type FileEntry } from "../store";
-import { DATED_KINDS, type Fact, type FactEvidence } from "../intel/facts";
-import { describeFact, shown, sourceLabel, whenLabel } from "../intel/describe";
+import { DATED_KINDS, isTracked, type Fact, type FactEvidence } from "../intel/facts";
+import { basisLabel, describeFact, shown, whenLabel } from "../intel/describe";
 import { insightsFor, type Insight } from "../intel/insights";
 import { duplicatesByDigest } from "../intel/duplicates";
 import { tripTags, upcomingFacts } from "../notices";
@@ -272,9 +272,9 @@ export function FileFacts(props: { file: FileEntry }) {
           </div>
           <div className="filefact-meta">
             <span title={`Confidence ${Math.round(fact.confidence * 100)}%`}>
-              {sourceLabel(fact.source)}
+              {basisLabel(fact)}
             </span>
-            {fact.confirmed ? (
+            {isTracked(fact) ? (
               <>
                 {isDated(fact) && <span>· {whenLabel(fact.value, now)}</span>}
                 {fact.stale && (

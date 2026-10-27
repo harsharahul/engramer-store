@@ -18,7 +18,7 @@
 
 import { decide, decided } from "../decisions";
 import { lookupAirport } from "./airports";
-import { EXACT_SOURCES, isTracked, type Fact } from "./facts";
+import { isTracked, type Fact } from "./facts";
 
 export interface TripFile {
   id: string;
@@ -50,9 +50,6 @@ export interface ItineraryLeg {
   codes?: string[];
   kind: "flight" | "stay" | "car" | "other";
 }
-
-/** Sources whose full-confidence facts may cluster without confirmation. */
-export { EXACT_SOURCES };
 
 /** Events this many days apart still belong to one candidate. */
 const WINDOW_DAYS = 14;
@@ -365,7 +362,7 @@ export function factsFingerprint(
         `${file.id}:${file.tags?.join() ?? ""}:${file.facts
           .map(
             (fact) =>
-              `${fact.id}${fact.confirmed ? "+" : ""}${fact.dismissed ? "-" : ""}${fact.value}${fact.time ?? ""}`,
+              `${fact.id}${isTracked(fact) ? "+" : ""}${fact.dismissed ? "-" : ""}${fact.value}${fact.time ?? ""}`,
           )
           .join(",")}`,
     )

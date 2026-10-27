@@ -8,7 +8,7 @@
  * the most authority.
  */
 
-import type { Fact } from "./facts";
+import { basisOf, type Fact } from "./facts";
 import { daysUntil } from "./dates";
 
 const DOCUMENT_LABELS: Record<string, string> = {
@@ -75,6 +75,20 @@ export function documentLabel(document: string): string {
 
 export function sourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? source;
+}
+
+/** Why a fact counts, in words, or which reader proposed one still waiting for a yes. */
+export function basisLabel(fact: Fact): string {
+  switch (basisOf(fact)) {
+    case "confirmed":
+      return fact.source === "user" ? "entered by you" : "confirmed by you";
+    case "agreement":
+      return "two readers agree";
+    case "grounded":
+      return "read by the on-device model, found in the text";
+    default:
+      return sourceLabel(fact.source);
+  }
 }
 
 /**
