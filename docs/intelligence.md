@@ -134,8 +134,19 @@ on-device model from the document's opening pages. The reading rides the
 same one pass that fills in previews and labels, narrated through the bell
 where it can be stopped, and whichever signed-in device can run the model
 does the reading; every other device sees the result, because it lives in
-the encrypted metadata like every other signal. Files that are already
-summarized are never read again until the model changes.
+the encrypted metadata like every other signal.
+
+**Each file is read once.** A reading leaves one stamp in the file's
+encrypted metadata: which reader, at what rank and version, of which
+contents, for which tasks, and what came of it. A file is read again only
+when its contents change, when a stronger reader for a wanted task is
+available, when you ask, or when the reader itself changes (and then only
+files whose reading came back empty or declined, or that are recent). A
+different answer, another device having read it, a restart or a sync is
+never a reason. A reading that fails for a passing reason, such as a
+deadline, is tried again, three times in all across your devices; then it
+stops and says why, and Profile offers Retry. If another device finishes
+the same contents while this one is still reading, its reading stands.
 
 What is stored is checked before it is stored: one sentence under a hard
 cap, with reference numbers and addresses masked to their last four
@@ -225,6 +236,13 @@ metadata and index blob like every other derived signal.
   check digits, so a misread is detectable. A failed check discards the whole
   read rather than lowering its confidence, because being able to tell that a
   scan went wrong is the only reason to prefer the zone over the printed text.
+- **Booking data, bills, deliveries and invites.** Confirmation emails and
+  saved pages carry schema.org data about themselves: flights, stays, car
+  rentals, trains, buses, boats, event tickets and restaurant tables; a
+  bill's due date, amount and number; a parcel's delivery window and
+  tracking number. Calendar invites (`.ics`, uploaded or attached to mail)
+  state their events' times. These are read as stated, at full confidence,
+  with times kept in the zone they were written in.
 - **Labelled dates.** "Expires", "Valid until", "Renewal date", "Payment due"
   and their common variants, over the text extraction already produces. A
   deadline is claimed only where the document labelled one; an unlabelled date
@@ -240,11 +258,20 @@ metadata and index blob like every other derived signal.
   offered like every other reading, marked "proposed and checked against
   the document", and confirmed by you or not at all.
 
-**Nothing is acted on until you confirm it.** Facts arrive as suggestions in a
-single line above your files and move into the library once accepted. A date
-that could be read two ways (`03/04/2028`) offers both readings as dates rather
-than picking one. A wrong expiry date is worse than no expiry date, because it
-gets relied on.
+**What counts without asking, and what waits for a yes.** A fact counts
+(for the bell, notifications, the calendar, Expiring soon and trips) when you
+confirmed it, or when the evidence settles it on its own: a reading from a
+barcode, a passport's zone, booking data or an invite, or two independent
+readers (a labelled date and the assistant) stating the same value. Everything
+else arrives as a suggestion in a single line above your files and counts
+once you accept it. One fixed order decides between readings of the same
+thing: your answer, then exact data, then the rest. Where the assistant and a
+labelled date disagree about a due date, an expiry or an amount due, both are
+offered as one question ("Which one?"), and your answer settles both. A date
+that could be read two ways (`03/04/2028`) offers both readings as dates
+rather than picking one. A wrong expiry date is worse than no expiry date,
+because it gets relied on. Each fact in a file's details says why it counts:
+"confirmed by you", "read from the booking data", "two readers agree".
 
 **Reference numbers are kept short.** Metadata carries the last four
 characters; the whole value lives in the file's index blob and is fetched only
