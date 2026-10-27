@@ -9,7 +9,7 @@ import type { FileDto } from "./api";
  */
 
 const model = vi.hoisted(() => ({
-  summarize: vi.fn(async (): Promise<unknown> => ({ summary: "A synthetic note.", tags: [], kind: null, facts: [] })),
+  summarize: vi.fn(async (_input: unknown): Promise<unknown> => ({ summary: "A synthetic note.", tags: [], kind: null, facts: [] })),
   facts: false,
 }));
 
@@ -24,6 +24,19 @@ vi.mock("./intel/assistant", async (importOriginal) => ({
   assistantAvailableNow: () => true,
   lastAssistantState: () => ({ state: "available", contextSize: 4096 }),
 }));
+
+// The shipped scores by default; a test may stand in others.
+const scoreState = vi.hoisted(() => ({ value: undefined as unknown, shipped: undefined as unknown }));
+vi.mock("./intel/eval/scores.json", async (importOriginal) => {
+  const actual = (await importOriginal<{ default: unknown }>()).default;
+  scoreState.shipped = actual;
+  scoreState.value = actual;
+  return {
+    get default() {
+      return scoreState.value;
+    },
+  };
+});
 
 vi.mock("./intel/scan", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./intel/scan")>()),
@@ -87,6 +100,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  scoreState.value = scoreState.shipped;
   model.summarize.mockReset();
   model.summarize.mockResolvedValue({ summary: "A synthetic note.", tags: [], kind: null, facts: [] });
   model.facts = false;
@@ -201,6 +215,96 @@ describe("what a reading proposes", () => {
     const due = useStore.getState().files.get("n1")!.facts.find((f) => f.kind === "due")!;
     expect(due).toMatchObject({ reader: "apple", source: "model" });
     expect(due.accepted).toBeUndefined();
+  });
+});
+
+describe("reading mail", () => {
+  const email = (over: Partial<FileEntry> = {}): FileEntry =>
+    note({
+      name: "Your water bill.email",
+      mime: "application/vnd.engram.email+json",
+      category: "Mail",
+      text: "Your water bill\nFrom: billing@example.com\n\nUSD 64.10, due 15 May 2027.",
+      ...over,
+    });
+
+  const trustedKinds = () => {
+    scoreState.value = {
+      reader: "apple",
+      version: 1,
+      tasks: { mailKind: { accuracy: 0.95, cases: 30 } },
+    };
+  };
+
+  it("an email's kind is not stored while its measured accuracy is low", async () => {
+    model.summarize.mockResolvedValue({ summary: "A water bill.", tags: [], kind: null, facts: [], mailKind: "bill" });
+    library([email({ tags: ["mail"] })]);
+    await useStore.getState().processFile("n1");
+    expect(useStore.getState().files.get("n1")!.tags).toEqual(["mail"]);
+  });
+
+  it("a trusted kind is stored as a tag, replacing the older one", async () => {
+    trustedKinds();
+    model.summarize.mockResolvedValue({ summary: "A water bill.", tags: [], kind: null, facts: [], mailKind: "bill" });
+    library([email({ tags: ["mail", "mail:other"] })]);
+    await useStore.getState().processFile("n1");
+    const tags = useStore.getState().files.get("n1")!.tags;
+    expect(tags).toContain("mail:bill");
+    expect(tags).not.toContain("mail:other");
+  });
+
+  it("a newsletter's dates are set aside only when the kind is trusted", async () => {
+    model.facts = true;
+    const sale = { summary: "A sale.", tags: [], kind: null, mailKind: "newsletter", facts: [{ id: "due:2027-05-30", kind: "due", document: "other", value: "2027-05-30", label: "Sale ends", source: "model", confidence: 0.45 }] };
+    model.summarize.mockResolvedValue(sale);
+    library([email({ id: "a" })]);
+    await useStore.getState().processFile("a");
+    expect(useStore.getState().files.get("a")!.facts.map((f) => f.value)).toEqual(["2027-05-30"]);
+    trustedKinds();
+    library([email({ id: "b" })]);
+    await useStore.getState().processFile("b");
+    expect(useStore.getState().files.get("b")!.facts).toEqual([]);
+  });
+
+  it("a short email is still read", async () => {
+    library([email()]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize).toHaveBeenCalledTimes(1);
+    expect(model.summarize.mock.calls[0]![0]).toMatchObject({ mail: true });
+  });
+
+  it("an email with booking data is summarized but not asked for dates", async () => {
+    model.facts = true;
+    const booked = {
+      id: "event:2027-04-08 check-in",
+      kind: "event" as const,
+      document: "hotel-booking" as const,
+      value: "2027-04-08",
+      label: "Check-in",
+      source: "jsonld" as const,
+      confidence: 1,
+      accepted: "exact" as const,
+    };
+    library([email({ facts: [booked] })]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize.mock.calls[0]![0]).toMatchObject({ withFacts: false });
+    // The dates were read exactly; the stamp says so, or the file would be read again for them.
+    expect(stampOf()?.tasks).toContain("facts");
+  });
+
+  it("email records are read newest first", async () => {
+    const day = 86_400_000;
+    library([
+      email({ id: "old", name: "Old.email", mail: { messageId: "<o>", from: "", fromAddress: "", to: [], date: 1 * day, subject: "Old", attachmentIds: [] } }),
+      email({ id: "new", name: "New.email", mail: { messageId: "<n>", from: "", fromAddress: "", to: [], date: 3 * day, subject: "New", attachmentIds: [] } }),
+      email({ id: "mid", name: "Mid.email", mail: { messageId: "<m>", from: "", fromAddress: "", to: [], date: 2 * day, subject: "Mid", attachmentIds: [] } }),
+    ]);
+    await useStore.getState().processLibrary();
+    expect(model.summarize.mock.calls.map((call) => (call[0] as { name: string }).name)).toEqual([
+      "New.email",
+      "Mid.email",
+      "Old.email",
+    ]);
   });
 });
 

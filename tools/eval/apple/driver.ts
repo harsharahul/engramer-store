@@ -12,7 +12,8 @@ import { createInterface } from "node:readline";
 import { generate, type AssistantTransport } from "../../../apps/web/src/intel/assistant";
 import { CATEGORIES } from "../../../apps/web/src/intel/categorize";
 import { EVAL_CASES } from "../../../apps/web/src/intel/eval/cases";
-import { scoreReader } from "../../../apps/web/src/intel/eval/score";
+import { scoreKinds, scoreReader } from "../../../apps/web/src/intel/eval/score";
+import { EMAIL_MIME } from "../../../apps/web/src/mail/kind";
 import { MODEL_READER, READER_VERSION } from "../../../apps/web/src/intel/reading";
 import { summarize } from "../../../apps/web/src/intel/summarize";
 
@@ -52,11 +53,12 @@ for (const evalCase of textCases) {
   const text = evalCase.text;
   try {
     const reading = await summarize(
-      { text, name: evalCase.name, categories: CATEGORIES, contextSize: 8192, withFacts: true },
+      { text, name: evalCase.name, categories: CATEGORIES, contextSize: 8192, withFacts: true, mail: evalCase.mime === EMAIL_MIME },
       (request) => generate(request, transport),
     );
     readings.set(evalCase.id, reading);
-    process.stdout.write(`${evalCase.id}: ${reading?.facts.map((f) => `${f.kind} ${f.value}${f.time ? ` ${f.time}` : ""}`).join(", ") || "(none)"}\n`);
+    const facts = reading?.facts.map((f) => `${f.kind} ${f.value}${f.time ? ` ${f.time}` : ""}`).join(", ") || "(none)";
+    process.stdout.write(`${evalCase.id}: ${facts} | kind ${reading?.mailKind ?? "-"} (want ${evalCase.mailKind ?? "-"})\n`);
   } catch (error) {
     readings.set(evalCase.id, null);
     process.stdout.write(`${evalCase.id}: failed ${JSON.stringify(error)}\n`);
@@ -71,6 +73,7 @@ const counts = (score: Awaited<ReturnType<typeof scoreReader>>) => ({
 });
 const dates = await scoreReader(textCases, read, "dates");
 const amounts = await scoreReader(textCases, read, "amounts");
+const kinds = await scoreKinds(textCases, async (evalCase) => readings.get(evalCase.id)?.mailKind ?? null);
 const scores = {
   reader: MODEL_READER,
   version: READER_VERSION[MODEL_READER],
@@ -81,6 +84,7 @@ const scores = {
   tasks: {
     dates: { precision: dates.precision, recall: dates.recall, ...counts(dates) },
     amounts: { precision: amounts.precision, recall: amounts.recall, ...counts(amounts) },
+    mailKind: kinds,
   },
 };
 writeFileSync(out, `${JSON.stringify(scores, null, 2)}\n`);

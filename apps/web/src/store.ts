@@ -113,8 +113,9 @@ import {
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import { assistantAvailableNow, assistantEnabled, lastAssistantState } from "./intel/assistant";
 import { CATEGORIES } from "./intel/categorize";
-import { MIN_TEXT, cleanTags, outcomeFor, summarize } from "./intel/summarize";
-import { MODEL_SCORES, acceptance } from "./intel/confidence";
+import { MIN_MAIL_TEXT, MIN_TEXT, cleanTags, outcomeFor, summarize } from "./intel/summarize";
+import { isEmailRecord } from "./mail/kind";
+import { acceptance, modelScores, trustedKind } from "./intel/confidence";
 import {
   MAX_TRIES,
   MODEL_READER,
@@ -1262,6 +1263,11 @@ export const useStore = create<StoreState>((set, get) => {
     }
     set({ files, indexWarm });
   };
+
+  /** Whether a pass changed a file's tags: by content, since one tag can
+   * replace another (an email's kind) without the count moving. */
+  const tagsChanged = (next: ReadonlySet<string>, before: readonly string[]): boolean =>
+    next.size !== before.length || before.some((tag) => !next.has(tag));
 
   const normalizeTags = (tags: readonly string[]): string[] => [
     ...new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean)),
@@ -3142,10 +3148,14 @@ export const useStore = create<StoreState>((set, get) => {
             theirs.rank <= READER_RANK[MODEL_READER]!
           );
         };
-        if (!text || text.length < MIN_TEXT) {
+        const mail = isEmailRecord(current.name, current.mime);
+        if (!text || text.length < (mail ? MIN_MAIL_TEXT : MIN_TEXT)) {
           stamp("short");
           return;
         }
+        // An email whose dates came from its own booking data needs only the
+        // summary; its dates are read, exactly, and the stamp says so.
+        const askFacts = factsWanted && !(mail && current.facts.some((fact) => fact.accepted === "exact"));
         const state = lastAssistantState();
         try {
           const reading = await summarize({
@@ -3155,7 +3165,8 @@ export const useStore = create<StoreState>((set, get) => {
             contextSize: state.state === "available" ? state.contextSize : 4096,
             // Date reading is its own switch; when it is on, the same
             // reading proposes the document's dates, grounded and offered.
-            withFacts: factsWanted,
+            withFacts: askFacts,
+            mail,
             signal,
           });
           if (readElsewhere()) {
@@ -3170,19 +3181,33 @@ export const useStore = create<StoreState>((set, get) => {
           for (const tag of cleanTags(reading.tags, [...tags])) {
             tags.add(tag);
           }
+          const scores = modelScores();
+          const kindTrusted = trustedKind(scores);
+          if (reading.mailKind && kindTrusted) {
+            // One kind per email: a newer reading replaces the older one.
+            for (const tag of [...tags]) {
+              if (tag.startsWith("mail:")) {
+                tags.delete(tag);
+              }
+            }
+            tags.add(`mail:${reading.mailKind}`);
+          }
           // The model's kind may sharpen a bare Documents or Other, never
           // override a category a stronger signal chose.
           const category = meta.category ?? current.category;
           if (reading.kind && (category === "Documents" || category === "Other") && reading.kind !== category) {
             meta.category = reading.kind;
           }
-          if (reading.facts.length > 0) {
+          // A newsletter's dates are offers and sale ends, not the owner's
+          // dates; set aside only when the kind itself is trusted.
+          const proposals = kindTrusted && reading.mailKind === "newsletter" ? [] : reading.facts;
+          if (proposals.length > 0) {
             // Named for the reader that proposed them, and counted without a
             // yes only where that reader's measured accuracy allows (intel/confidence.ts).
             const now = Date.now();
-            const fresh = reading.facts.map((fact) => {
+            const fresh = proposals.map((fact) => {
               const read: Fact = { ...fact, digest: current.digest, reader: MODEL_READER };
-              const basis = acceptance(read, { scores: MODEL_SCORES, siblings: reading.facts, now });
+              const basis = acceptance(read, { scores, siblings: proposals, now });
               return basis === "grounded" ? { ...read, accepted: basis } : read;
             });
             meta.facts = mergeFacts(meta.facts ? asFacts(meta.facts) : current.facts, fresh);
@@ -3359,7 +3384,7 @@ export const useStore = create<StoreState>((set, get) => {
           outcome.facts = facts.length;
         }
         await readSummary(current, readText ? prepared.text : await keptText(current));
-        if (tags.size !== current.tags.length) {
+        if (tagsChanged(tags, current.tags)) {
           meta.tags = normalizeTags([...tags]);
         }
         if (Object.keys(meta).length > 0) {
@@ -3402,7 +3427,7 @@ export const useStore = create<StoreState>((set, get) => {
           }
           outcome.tagged = 1;
         }
-        if (tags.size !== current.tags.length) {
+        if (tagsChanged(tags, current.tags)) {
           meta.tags = normalizeTags([...tags]);
         }
         await patchFileMeta(id, meta);
@@ -3440,7 +3465,7 @@ export const useStore = create<StoreState>((set, get) => {
         labelFrom(await readScenes(clip));
       }
       await readSummary(file, file.text ?? (await keptText(file)));
-      if (tags.size !== file.tags.length) {
+      if (tagsChanged(tags, file.tags)) {
         meta.tags = normalizeTags([...tags]);
       }
       if (Object.keys(meta).length > 0) {
@@ -3504,8 +3529,16 @@ export const useStore = create<StoreState>((set, get) => {
             needsProcessing(f) &&
             (opts?.maxBytes === undefined || !wantsOriginal(f) || f.size <= opts.maxBytes),
         )
-        // Smallest first: many quick wins before one large video.
-        .sort((a, b) => a.size - b.size);
+        // Smallest first: many quick wins before one large video. Mail comes
+        // after, newest first: this week's bill before last year's.
+        .sort((a, b) => {
+          const ma = a.mail?.date;
+          const mb = b.mail?.date;
+          if (ma !== undefined || mb !== undefined) {
+            return ma === undefined ? -1 : mb === undefined ? 1 : mb - ma;
+          }
+          return a.size - b.size;
+        });
       if (candidates.length === 0) {
         return counts;
       }

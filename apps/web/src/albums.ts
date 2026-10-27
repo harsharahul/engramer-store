@@ -17,7 +17,7 @@ import { slug } from "./intel/trips";
 
 export const ALBUM_PREFIX = "album:";
 
-const RESERVED_PREFIXES = [ALBUM_PREFIX, "trip:"];
+const RESERVED_PREFIXES = [ALBUM_PREFIX, "trip:", "mail:"];
 
 /** A tag the free-tag editor must not create or edit. */
 export function isReservedTag(tag: string): boolean {

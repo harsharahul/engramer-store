@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Fact } from "./facts";
-import { acceptance, MIN_SAMPLE, saneFact, stakesOf, type ReaderScores } from "./confidence";
+import { acceptance, MIN_SAMPLE, saneFact, stakesOf, trustedKind, type ReaderScores } from "./confidence";
 
 const NOW = Date.UTC(2027, 2, 1);
 
@@ -75,5 +75,26 @@ describe("saneFact", () => {
     expect(saneFact(fact({ value: "2091-01-01" }), [], NOW)).toBe(false);
     expect(saneFact(fact({ kind: "amount", value: "65.00", label: "Amount due" }), [], NOW)).toBe(false);
     expect(saneFact(fact({ kind: "amount", value: "65.00", unit: "USD", label: "Amount due" }), [], NOW)).toBe(true);
+  });
+});
+
+describe("trustedKind", () => {
+  const kindScores = (accuracy: number, cases: number, version = 1): ReaderScores => ({
+    reader: "apple",
+    version,
+    tasks: { mailKind: { accuracy, cases } },
+  });
+
+  it("a kind named right a third of the time is not used", () => {
+    expect(trustedKind(kindScores(0.33, 24))).toBe(false);
+  });
+
+  it("a kind named right nearly always, over enough cases, is used", () => {
+    expect(trustedKind(kindScores(0.95, 30))).toBe(true);
+    expect(trustedKind(kindScores(0.95, 5))).toBe(false);
+  });
+
+  it("kind scores from another version of the reader are not used", () => {
+    expect(trustedKind(kindScores(0.95, 30, 0))).toBe(false);
   });
 });

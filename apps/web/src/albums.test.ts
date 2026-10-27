@@ -45,6 +45,8 @@ describe("isAlbumTag / isReservedTag", () => {
     expect(isAlbumTag("album:")).toBe(false);
     expect(isAlbumTag("albums")).toBe(false);
     expect(isReservedTag("album:x")).toBe(true);
+    // The kind of an email, set by its reading, is not a free tag either.
+    expect(isReservedTag("mail:bill")).toBe(true);
     expect(isReservedTag("trip:rome-2026-03")).toBe(true);
     expect(isReservedTag("holiday")).toBe(false);
   });

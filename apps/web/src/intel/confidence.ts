@@ -38,8 +38,13 @@ export interface TaskScore {
 export interface ReaderScores {
   reader: string;
   version: number;
-  tasks: { dates?: TaskScore; amounts?: TaskScore };
+  tasks: { dates?: TaskScore; amounts?: TaskScore; mailKind?: { accuracy: number; cases: number } };
 }
+
+/** How often an email's kind must be named right before the kind is used. */
+export const KIND_BAR = 0.9;
+/** Cases a kind accuracy must rest on. */
+export const MIN_KIND_CASES = 20;
 
 /** How much a wrong value would cost: high needs exact evidence or agreement. */
 export function stakesOf(fact: Fact): Stakes {
@@ -85,7 +90,25 @@ export function saneFact(fact: Fact, siblings: readonly Fact[], now: number): bo
 }
 
 /** The scores measured for the model reader this build ships (tools/eval/apple). */
-export const MODEL_SCORES: ReaderScores = shipped;
+export function modelScores(): ReaderScores {
+  return shipped as ReaderScores;
+}
+
+/**
+ * Whether the model's naming of an email's kind is used: stored as a tag, and
+ * a newsletter's dates set aside. A wrong kind would mislabel the email, or
+ * worse, drop a bill's due date as if it were a sale's end.
+ */
+export function trustedKind(scores: ReaderScores | undefined): boolean {
+  const kind = scores?.tasks.mailKind;
+  return (
+    scores !== undefined &&
+    kind !== undefined &&
+    scores.version === READER_VERSION[scores.reader] &&
+    kind.cases >= MIN_KIND_CASES &&
+    kind.accuracy >= KIND_BAR
+  );
+}
 
 /** Whether a reading counts without a yes, and on what basis; null while it must ask. */
 export function acceptance(
