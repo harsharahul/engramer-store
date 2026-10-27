@@ -114,6 +114,30 @@ export interface FileMetadata {
    * one is fetched only when a fact is opened.
    */
   facts?: StoredFact[];
+  /**
+   * Set on an email record: who sent it, to whom, when, and the files that
+   * came with it. Kept in metadata so the mail list, search rows, and the
+   * duplicate check by Message-ID cost no extra request.
+   */
+  mail?: MailMeta;
+  /** Set on a file that came with an email: the id of that email's record. */
+  mailParent?: string;
+}
+
+/** The headers an email record carries in its metadata. */
+export interface MailMeta {
+  /** The Message-ID header, angle brackets included; the duplicate key. */
+  messageId: string;
+  /** The sender's display name, or the address when there is none. */
+  from: string;
+  fromAddress: string;
+  /** Recipient addresses, at most 10. */
+  to: string[];
+  /** When it was sent, milliseconds since the epoch. */
+  date: number;
+  subject: string;
+  /** The files that came with it, in the order the email lists them. */
+  attachmentIds: string[];
 }
 
 export interface FolderMetadata {

@@ -11,6 +11,10 @@ import type { FileMetadata } from "@engramer/crypto";
  * the file, while a fact is something the file said. Restoring older contents
  * has to restore what those contents said, or the file would carry an expiry
  * date that no version of it ever contained.
+ *
+ * The mail link is provenance, like the name: which email a file came with
+ * does not change when older bytes come back. A version stored without it
+ * must not erase it, or the next import would store that email again.
  */
 export function mergeRestoredMeta(current: FileMetadata, version: FileMetadata): FileMetadata {
   return {
@@ -19,5 +23,7 @@ export function mergeRestoredMeta(current: FileMetadata, version: FileMetadata):
     category: current.category,
     tags: current.tags,
     favorite: current.favorite,
+    ...(current.mail ? { mail: current.mail } : {}),
+    ...(current.mailParent ? { mailParent: current.mailParent } : {}),
   };
 }

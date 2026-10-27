@@ -17,6 +17,7 @@ import {
   secretBoxSeal,
   utf8Encode,
   type FileMetadata,
+  type MailMeta,
   type SecretBox,
 } from "@engramer/crypto";
 import {
@@ -161,6 +162,10 @@ export interface FileEntry {
   digest?: string;
   /** The photo-library asset this file was backed up from, if any. */
   sourceId?: string;
+  /** Set on an email record: its headers and the files that came with it. */
+  mail?: MailMeta;
+  /** Set on a file that came with an email: that email's record id. */
+  mailParent?: string;
   /** Set once a read has found the contents disagreeing with that digest. */
   corrupt?: boolean;
   /** Set once a read in this session has matched it. Not remembered across
@@ -591,6 +596,8 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array, prior?: FileEntry): Fi
     facts: asFacts(meta.facts),
     digest: meta.digest,
     sourceId: meta.sourceId,
+    ...(meta.mail ? { mail: meta.mail } : {}),
+    ...(meta.mailParent ? { mailParent: meta.mailParent } : {}),
     favorite: meta.favorite ?? false,
     key,
     hasThumb: dto.thumbSize > 0,
@@ -648,6 +655,8 @@ export function entryFromUpdate(
     facts: asFacts(meta.facts),
     digest: meta.digest,
     sourceId: meta.sourceId,
+    ...(meta.mail ? { mail: meta.mail } : {}),
+    ...(meta.mailParent ? { mailParent: meta.mailParent } : {}),
     favorite: meta.favorite ?? false,
     hasThumb: dto.thumbSize > 0,
     // The owner's tree and wrapping stay the owner's business.
@@ -691,6 +700,8 @@ export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEnt
     facts: asFacts(meta.facts),
     digest: meta.digest,
     sourceId: meta.sourceId,
+    ...(meta.mail ? { mail: meta.mail } : {}),
+    ...(meta.mailParent ? { mailParent: meta.mailParent } : {}),
     favorite: meta.favorite ?? false,
     key,
     hasThumb: dto.thumbSize > 0,
@@ -747,6 +758,10 @@ export function metadataOf(file: FileEntry): FileMetadata {
     // Same hazard for the backup link: dropping it would make a later
     // pass re-upload every already-backed-up photo.
     ...(file.sourceId ? { sourceId: file.sourceId } : {}),
+    // The duplicate check reads the Message-ID, and an attachment's link
+    // back to its email lives only here: a rename must keep both.
+    ...(file.mail ? { mail: file.mail } : {}),
+    ...(file.mailParent ? { mailParent: file.mailParent } : {}),
   };
 }
 

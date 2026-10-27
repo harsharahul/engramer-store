@@ -66,6 +66,7 @@ export {
 export {
   type FileMetadata,
   type FolderMetadata,
+  type MailMeta,
   encryptFileMetadata,
   decryptFileMetadata,
   encryptFolderMetadata,

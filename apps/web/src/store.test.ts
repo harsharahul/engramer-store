@@ -241,6 +241,25 @@ describe("metadataOf", () => {
     expect(metadataOf(entry())).not.toHaveProperty("sourceId");
   });
 
+  it("metadataOf keeps an email's mail fields", () => {
+    const mail = {
+      messageId: "<booking-1@example.com>",
+      from: "Example Air",
+      fromAddress: "bookings@example.com",
+      to: ["traveller@example.com"],
+      date: 1_760_000_000_000,
+      subject: "Your booking",
+      attachmentIds: ["att-1", "att-2"],
+    };
+    expect(metadataOf(entry({ mail })).mail).toEqual(mail);
+    expect(metadataOf(entry())).not.toHaveProperty("mail");
+  });
+
+  it("metadataOf keeps an attachment's mailParent", () => {
+    expect(metadataOf(entry({ mailParent: "email-7" })).mailParent).toBe("email-7");
+    expect(metadataOf(entry())).not.toHaveProperty("mailParent");
+  });
+
   it("still carries the fields it always did", () => {
     const meta = metadataOf(entry({ category: "Documents", favorite: true }));
     expect(meta).toMatchObject({
@@ -941,6 +960,50 @@ describe("entryFromUpdate", () => {
     expect(updated.ownerEmail).toBe("owner@example.com");
     // The owner's tree is not this account's business.
     expect(updated.folderId).toBeNull();
+  });
+
+  it("entryFromUpdate keeps mail fields on a shared file", async () => {
+    const { entryFromUpdate } = await import("./store");
+    const { encryptFileMetadata: encMeta, secretBoxSeal: seal } = await import("@engramer/crypto");
+    const fileKey = generateKey();
+    const mail = {
+      messageId: "<bill-3@example.com>",
+      from: "Example Power",
+      fromAddress: "billing@example.com",
+      to: ["owner@example.com"],
+      date: 1_760_000_000_000,
+      subject: "Your bill",
+      attachmentIds: ["att-9"],
+    };
+    const prior = entry({ id: "shared-2", key: fileKey, shared: true, role: "viewer" });
+    const dto = {
+      id: "shared-2",
+      folderId: "owners-folder",
+      encryptedKey: seal(fileKey, generateKey()),
+      encryptedMeta: encMeta(
+        {
+          name: "Your bill.email",
+          mime: "application/vnd.engram.email+json",
+          size: 12,
+          mtime: 9,
+          mail,
+          mailParent: "email-1",
+        },
+        fileKey,
+      ),
+      size: 12,
+      thumbSize: 0,
+      indexSize: 0,
+      uploaded: true,
+      trashed: false,
+      deleted: false,
+      updateSeq: 6,
+      createdAt: 1,
+      updatedAt: 9,
+    };
+    const updated = entryFromUpdate(prior, dto, generateKey());
+    expect(updated.mail).toEqual(mail);
+    expect(updated.mailParent).toBe("email-1");
   });
 
   it("still unwraps an owned file with the master key", async () => {
