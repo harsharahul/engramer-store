@@ -12,12 +12,46 @@ export function isEmailRecord(name: string, mime: string): boolean {
   return mime === EMAIL_MIME || /\.email$/i.test(name);
 }
 
-/** The record a file holds, or undefined when it is not one this version reads. */
+const isString = (value: unknown): value is string => typeof value === "string";
+const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
+
+/**
+ * The record a file holds, or undefined when it is not one this version
+ * reads. Every field the viewer touches is checked: any file can be named
+ * .email, and one can be shared in by anyone.
+ */
 export function parseEmailRecord(json: string): EmailRecord | undefined {
+  let value: Record<string, unknown>;
   try {
-    const value = JSON.parse(json) as Partial<EmailRecord> | null;
-    return value && value.v === 1 && typeof value.subject === "string" ? (value as EmailRecord) : undefined;
+    const parsed: unknown = JSON.parse(json);
+    if (!parsed || typeof parsed !== "object") {
+      return undefined;
+    }
+    value = parsed as Record<string, unknown>;
   } catch {
     return undefined;
   }
+  const from = value.from as Record<string, unknown> | null | undefined;
+  const ok =
+    value.v === 1 &&
+    isString(value.messageId) &&
+    typeof value.date === "number" &&
+    typeof from === "object" &&
+    from !== null &&
+    isString(from.name) &&
+    isString(from.address) &&
+    isStrings(value.to) &&
+    isStrings(value.cc) &&
+    isString(value.subject) &&
+    isString(value.headers) &&
+    (value.text === undefined || isString(value.text)) &&
+    (value.html === undefined || isString(value.html)) &&
+    Array.isArray(value.inline) &&
+    value.inline.every((part: Record<string, unknown>) => isString(part?.cid) && isString(part.mime) && isString(part.data)) &&
+    Array.isArray(value.attachments) &&
+    value.attachments.every(
+      (part: Record<string, unknown>) =>
+        isString(part?.name) && isString(part.mime) && typeof part.size === "number" && isString(part.digest),
+    );
+  return ok ? (value as unknown as EmailRecord) : undefined;
 }
