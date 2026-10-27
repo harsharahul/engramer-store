@@ -26,6 +26,7 @@ vi.mock("./analysisslot", async (importOriginal) => ({
 
 import {
   HANDHELD_AUTO_MAX_BYTES,
+  HANDHELD_MODEL_READS_PER_OPEN,
   autoBackfillEnabled,
   backfillDelayMs,
   resetBackfillSession,
@@ -60,6 +61,7 @@ const session = {
 interface SweepCall {
   skip?: { has(id: string): boolean; add(id: string): void };
   maxBytes?: number;
+  modelBudget?: number;
   stop?: () => boolean;
   onOutcome?: (id: string, ok: boolean) => void;
 }
@@ -300,5 +302,38 @@ describe("scheduleBackfill", () => {
     scheduleBackfill();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(calls.process).toHaveLength(1);
+  });
+});
+
+/**
+ * A phone opening onto a 20,000-email import must not spend the whole open
+ * reading mail with the model. Each open gets a fixed number of model
+ * readings; what is left waits for the next open, newest first.
+ */
+describe("the model budget on a phone", () => {
+  it("a phone reads at most 40 files with the model per open", async () => {
+    resetBackfillSession();
+    knobs.handheld = true;
+    const calls = install();
+    useStore.setState({
+      processLibrary: async (o?: SweepCall) => {
+        calls.process.push(o ?? {});
+        return { ...counts(30), summaries: 30 };
+      },
+    });
+    await runBackfill();
+    expect(calls.process[0]!.modelBudget).toBe(HANDHELD_MODEL_READS_PER_OPEN);
+    await runBackfill();
+    // What the first pass spent comes off what is left for this open.
+    expect(calls.process[1]!.modelBudget).toBe(HANDHELD_MODEL_READS_PER_OPEN - 30);
+    resetBackfillSession();
+    await runBackfill();
+    expect(calls.process[2]!.modelBudget).toBe(HANDHELD_MODEL_READS_PER_OPEN);
+  });
+
+  it("a desktop pass has no model budget", async () => {
+    const calls = install();
+    await runBackfill();
+    expect(calls.process[0]!.modelBudget).toBeUndefined();
   });
 });

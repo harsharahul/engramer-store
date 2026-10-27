@@ -574,7 +574,13 @@ interface StoreState {
   /** The file's extracted text, fetched and decrypted on demand. */
   loadText: (id: string) => Promise<string | undefined>;
   /** The pass over every file that owes something, a few at a time. */
-  processLibrary: (opts?: SweepOptions & { maxBytes?: number }) => Promise<ProcessingCounts>;
+  processLibrary: (
+    opts?: SweepOptions & {
+      maxBytes?: number;
+      /** At most this many model readings in this pass; the rest stay owed. */
+      modelBudget?: number;
+    },
+  ) => Promise<ProcessingCounts>;
   /** Reads (or re-reads) the text of one stored image or scan. */
   recognizeFile: (id: string) => Promise<boolean>;
   /** Reads dates out of documents stored before this feature existed. */
@@ -862,13 +868,20 @@ export function needsProcessing(file: FileEntry): boolean {
     (ocrEnabled() && needsText(file)) ||
     (semanticEnabled() &&
       (needsClip(file, CLIP_MODEL_VERSION) || needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION))) ||
-    (assistantEnabled() &&
-      assistantAvailableNow() &&
-      needsReading(file, MODEL_READER, {
-        factsWanted: factsEnabled(),
-        now: Date.now(),
-        windowMonths: readingWindowMonths(),
-      }))
+    owesModelReading(file)
+  );
+}
+
+/** Whether this device should read the file with the on-device model now. */
+export function owesModelReading(file: FileEntry): boolean {
+  return (
+    assistantEnabled() &&
+    assistantAvailableNow() &&
+    needsReading(file, MODEL_READER, {
+      factsWanted: factsEnabled(),
+      now: Date.now(),
+      windowMonths: readingWindowMonths(),
+    })
   );
 }
 
@@ -3094,14 +3107,7 @@ export const useStore = create<StoreState>((set, get) => {
         scenes:
           force.scenes ?? (semanticEnabled() && needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION)),
         summary:
-          force.summary ??
-          (assistantEnabled() &&
-            assistantAvailableNow() &&
-            needsReading(file, MODEL_READER, {
-        factsWanted: factsEnabled(),
-        now: Date.now(),
-        windowMonths: readingWindowMonths(),
-      })),
+          force.summary ?? owesModelReading(file),
       };
       if (
         !needs.thumb &&
@@ -3530,7 +3536,10 @@ export const useStore = create<StoreState>((set, get) => {
         failed: [],
         stopped: false,
         remaining: 0,
+        readingsDeferred: 0,
+        readingsStarted: 0,
       };
+      let modelBudget = opts?.modelBudget ?? Number.POSITIVE_INFINITY;
       const candidates = [...get().files.values()]
         .filter(
           (f) =>
@@ -3575,7 +3584,20 @@ export const useStore = create<StoreState>((set, get) => {
         get().updateActivity({ current: file.name });
         opts?.skip?.add(file.id);
         try {
-          const outcome = await get().processFile(file.id, { signal: abort.signal });
+          // A model reading spends the budget when it starts; once it is
+          // spent, a file still gets everything else and stays owed the
+          // reading, for the next pass.
+          let force: { summary?: boolean } | undefined;
+          if (owesModelReading(file)) {
+            if (modelBudget > 0) {
+              modelBudget--;
+              counts.readingsStarted! += 1;
+            } else {
+              force = { summary: false };
+              counts.readingsDeferred! += 1;
+            }
+          }
+          const outcome = await get().processFile(file.id, { signal: abort.signal, ...(force ? { force } : {}) });
           if (outcome) {
             counts.files++;
             counts.previews += outcome.previews;

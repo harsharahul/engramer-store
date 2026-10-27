@@ -218,6 +218,23 @@ describe("what a reading proposes", () => {
   });
 });
 
+describe("a budget for model readings", () => {
+  it("a pass reads at most its budget with the model, and the rest stay owed", async () => {
+    library(["a", "b", "c", "d", "e"].map((id) => note({ id })));
+    const counts = await useStore.getState().processLibrary({ modelBudget: 2 });
+    expect(model.summarize).toHaveBeenCalledTimes(2);
+    expect(counts.readingsDeferred).toBe(3);
+    expect(counts.readingsStarted).toBe(2);
+    const { needsProcessing } = await import("./store");
+    const owed = [...useStore.getState().files.values()].filter((f) => needsProcessing(f));
+    expect(owed).toHaveLength(3);
+    // A second pass with a fresh budget takes up exactly those.
+    model.summarize.mockClear();
+    await useStore.getState().processLibrary({ modelBudget: 10 });
+    expect(model.summarize).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe("reading mail", () => {
   const email = (over: Partial<FileEntry> = {}): FileEntry =>
     note({

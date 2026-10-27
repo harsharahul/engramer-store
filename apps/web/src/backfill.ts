@@ -87,10 +87,15 @@ export function backfillDelayMs(
 let attemptedProcess = new Set<string>();
 let attemptedFacts = new Set<string>();
 
+/** Model readings a phone makes per app open; the rest wait for the next. */
+export const HANDHELD_MODEL_READS_PER_OPEN = 40;
+let modelReadsThisOpen = 0;
+
 /** Forgets this session's attempts; the persisted record still stands. */
 export function resetBackfillSession(): void {
   attemptedProcess = new Set();
   attemptedFacts = new Set();
+  modelReadsThisOpen = 0;
 }
 
 let running = false;
@@ -167,8 +172,16 @@ export async function runBackfill(): Promise<BackfillResult | null> {
   };
 
   try {
-    const cap = isHandheld() ? { maxBytes: HANDHELD_AUTO_MAX_BYTES } : {};
+    const cap = isHandheld()
+      ? {
+          maxBytes: HANDHELD_AUTO_MAX_BYTES,
+          modelBudget: Math.max(0, HANDHELD_MODEL_READS_PER_OPEN - modelReadsThisOpen),
+        }
+      : {};
     const processed = await store.processLibrary({ ...pass("process", attemptedProcess), ...cap });
+    // Every reading started counts, failed ones too: the budget bounds the
+    // work, not only what came of it.
+    modelReadsThisOpen += processed.readingsStarted ?? processed.summaries + processed.summaryPaused;
     const facts =
       !stop() && factsEnabled()
         ? await useStore.getState().scanLibraryForFacts(pass("facts", attemptedFacts))

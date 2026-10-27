@@ -99,6 +99,10 @@ export interface ProcessingCounts {
   failed: string[];
   stopped: boolean;
   remaining: number;
+  /** Files left for a later open because this one's model readings were spent. */
+  readingsDeferred?: number;
+  /** Model readings this pass started, whatever came of them. */
+  readingsStarted?: number;
 }
 
 /** One sentence per outcome, in product words, counting only what landed. */
@@ -138,8 +142,12 @@ export function describeProcessing(counts: ProcessingCounts): { title: string; d
     counts.summaryPaused > 0
       ? `${plural(counts.summaryPaused, "summary", "summaries")} wait for the app to be in front`
       : null;
+  const deferred =
+    (counts.readingsDeferred ?? 0) > 0
+      ? `${plural(counts.readingsDeferred!, "document")} wait for the next open to be read`
+      : null;
   const tail = counts.stopped ? "continues next time the app is open" : null;
-  const detail = [parts.join(" · "), failed, paused, tail].filter(Boolean).join(" · ");
+  const detail = [parts.join(" · "), failed, paused, deferred, tail].filter(Boolean).join(" · ");
   return detail ? { title, detail } : { title };
 }
 

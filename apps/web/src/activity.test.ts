@@ -140,3 +140,23 @@ describe("progressLabel", () => {
     expect(progressLabel(41, 0)).toBe("41 so far");
   });
 });
+
+describe("readings left for the next open", () => {
+  it("says how many documents wait to be read", () => {
+    const described = describeProcessing({
+      files: 40,
+      previews: 0,
+      text: 0,
+      meaning: 0,
+      tagged: 0,
+      facts: 0,
+      summaries: 40,
+      summaryPaused: 0,
+      failed: [],
+      stopped: false,
+      remaining: 0,
+      readingsDeferred: 12,
+    });
+    expect(described.detail).toContain("12 documents wait for the next open to be read");
+  });
+});
