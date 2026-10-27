@@ -11,6 +11,7 @@
  */
 
 import type { ReadingStamp } from "@engramer/crypto";
+import { settingChanged } from "../settingsbus";
 
 export type { ReadingStamp };
 
@@ -28,6 +29,11 @@ export const READER_VERSION: Readonly<Record<string, number>> = { [MODEL_READER]
 export const MAX_TRIES = 3;
 
 const RECENT_DAYS = 90;
+const WINDOW_KEY = "engram-reading-window";
+const WINDOW_MIN = 3;
+const WINDOW_MAX = 12;
+/** A month, for the window: close enough, and the same on every device. */
+const MONTH = 30 * 86_400_000;
 const DAY = 86_400_000;
 const EMPTY_OUTCOMES = new Set<ReadingStamp["outcome"]>(["none", "declined", "unsupported", "language"]);
 const FINAL_OUTCOMES = new Set<ReadingStamp["outcome"]>(["failed", "user"]);
@@ -83,12 +89,57 @@ export function readable(file: ReadingCandidate): boolean {
   return !file.trashed && !/^(image|video|audio)\//.test(file.mime) && (file.hasText || file.inlineText);
 }
 
+/**
+ * How many months back the model reads mail: older emails stay kept and
+ * searchable and are read by the exact readers, but not by a model. Synced
+ * with the account; 3 to 12, 12 unless set.
+ */
+export function readingWindowMonths(): number {
+  try {
+    const stored = Number(localStorage.getItem(WINDOW_KEY));
+    return stored ? clampWindow(stored) : WINDOW_MAX;
+  } catch {
+    return WINDOW_MAX;
+  }
+}
+
+export function setReadingWindowMonths(months: number): void {
+  try {
+    localStorage.setItem(WINDOW_KEY, String(clampWindow(months)));
+    settingChanged();
+  } catch {
+    // Preference persistence is best-effort.
+  }
+}
+
+function clampWindow(months: number): number {
+  return Math.min(WINDOW_MAX, Math.max(WINDOW_MIN, Math.round(months)));
+}
+
+function outsideWindow(file: ReadingCandidate, months: number, now: number): boolean {
+  return file.mail !== undefined && now - file.mail.date > months * MONTH;
+}
+
+/** Email records the model will not read because they are older than the window. */
+export function emailsOutsideWindow(files: Iterable<ReadingCandidate>, months: number, now: number): number {
+  let count = 0;
+  for (const file of files) {
+    if (readable(file) && outsideWindow(file, months, now)) {
+      count++;
+    }
+  }
+  return count;
+}
+
 export function needsReading(
   file: ReadingCandidate,
   reader: string,
-  opts: { factsWanted: boolean; now: number },
+  opts: { factsWanted: boolean; now: number; windowMonths?: number },
 ): boolean {
   if (!readable(file)) {
+    return false;
+  }
+  if (opts.windowMonths !== undefined && outsideWindow(file, opts.windowMonths, opts.now)) {
     return false;
   }
   const stamp = stampOf(file);

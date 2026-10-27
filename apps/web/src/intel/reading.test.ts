@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { ReadingStamp } from "@engramer/crypto";
-import { legacyOf, needsReading, stampInto, stampOf, type ReadingCandidate } from "./reading";
+import {
+  emailsOutsideWindow,
+  legacyOf,
+  needsReading,
+  readingWindowMonths,
+  setReadingWindowMonths,
+  stampInto,
+  stampOf,
+  type ReadingCandidate,
+} from "./reading";
 
 const NOW = Date.UTC(2027, 5, 1);
 const DAY = 86_400_000;
@@ -109,5 +118,49 @@ describe("stamps that older builds understand", () => {
     expect(meta.reading?.outcome).toBe("found");
     expect(meta.assistVersion).toBe(1);
     expect(meta).toHaveProperty("noSummary", undefined);
+  });
+});
+
+describe("the reading window", () => {
+  const MONTH = 30 * DAY;
+  const email = (ageMonths: number) =>
+    file({ mime: "application/vnd.engram.email+json", mail: { date: NOW - ageMonths * MONTH } });
+
+  it("an email older than the window is not read by the model", () => {
+    expect(needsReading(email(13), "apple", { ...wants, windowMonths: 12 })).toBe(false);
+    expect(needsReading(email(11), "apple", { ...wants, windowMonths: 12 })).toBe(true);
+    expect(needsReading(email(4), "apple", { ...wants, windowMonths: 3 })).toBe(false);
+  });
+
+  it("documents are read whatever their age", () => {
+    expect(needsReading(file({ createdAt: NOW - 40 * MONTH }), "apple", { ...wants, windowMonths: 3 })).toBe(true);
+  });
+
+  it("counts the kept mail the model will not read", () => {
+    expect(emailsOutsideWindow([email(2), email(14), email(20), file()], 12, NOW)).toBe(2);
+  });
+
+  it("the window is clamped to 3..12 and defaults to 12", () => {
+    const backing = new Map<string, string>();
+    const before = (globalThis as { localStorage?: Storage }).localStorage;
+    (globalThis as { localStorage?: Storage }).localStorage = {
+      getItem: (k: string) => backing.get(k) ?? null,
+      setItem: (k: string, v: string) => void backing.set(k, String(v)),
+      removeItem: (k: string) => void backing.delete(k),
+      clear: () => backing.clear(),
+      key: () => null,
+      length: 0,
+    } as Storage;
+    try {
+      expect(readingWindowMonths()).toBe(12);
+      setReadingWindowMonths(1);
+      expect(readingWindowMonths()).toBe(3);
+      setReadingWindowMonths(40);
+      expect(readingWindowMonths()).toBe(12);
+      setReadingWindowMonths(6);
+      expect(readingWindowMonths()).toBe(6);
+    } finally {
+      (globalThis as { localStorage?: Storage }).localStorage = before;
+    }
   });
 });

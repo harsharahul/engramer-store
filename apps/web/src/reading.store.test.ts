@@ -295,9 +295,9 @@ describe("reading mail", () => {
   it("email records are read newest first", async () => {
     const day = 86_400_000;
     library([
-      email({ id: "old", name: "Old.email", mail: { messageId: "<o>", from: "", fromAddress: "", to: [], date: 1 * day, subject: "Old", attachmentIds: [] } }),
-      email({ id: "new", name: "New.email", mail: { messageId: "<n>", from: "", fromAddress: "", to: [], date: 3 * day, subject: "New", attachmentIds: [] } }),
-      email({ id: "mid", name: "Mid.email", mail: { messageId: "<m>", from: "", fromAddress: "", to: [], date: 2 * day, subject: "Mid", attachmentIds: [] } }),
+      email({ id: "old", name: "Old.email", mail: { messageId: "<o>", from: "", fromAddress: "", to: [], date: Date.now() - 3 * day, subject: "Old", attachmentIds: [] } }),
+      email({ id: "new", name: "New.email", mail: { messageId: "<n>", from: "", fromAddress: "", to: [], date: Date.now() - 1 * day, subject: "New", attachmentIds: [] } }),
+      email({ id: "mid", name: "Mid.email", mail: { messageId: "<m>", from: "", fromAddress: "", to: [], date: Date.now() - 2 * day, subject: "Mid", attachmentIds: [] } }),
     ]);
     await useStore.getState().processLibrary();
     expect(model.summarize.mock.calls.map((call) => (call[0] as { name: string }).name)).toEqual([

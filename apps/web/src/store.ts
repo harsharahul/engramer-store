@@ -120,6 +120,7 @@ import {
   MAX_TRIES,
   MODEL_READER,
   READER_RANK,
+  readingWindowMonths,
   modelStamp,
   needsReading,
   stampInto,
@@ -863,7 +864,11 @@ export function needsProcessing(file: FileEntry): boolean {
       (needsClip(file, CLIP_MODEL_VERSION) || needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION))) ||
     (assistantEnabled() &&
       assistantAvailableNow() &&
-      needsReading(file, MODEL_READER, { factsWanted: factsEnabled(), now: Date.now() }))
+      needsReading(file, MODEL_READER, {
+        factsWanted: factsEnabled(),
+        now: Date.now(),
+        windowMonths: readingWindowMonths(),
+      }))
   );
 }
 
@@ -908,7 +913,7 @@ export function pendingDerivatives(
     semantic?: boolean;
     scenesVersion?: number;
     /** Count files the model still owes a reading, given whether dates are wanted. */
-    readings?: { factsWanted: boolean; now: number };
+    readings?: { factsWanted: boolean; now: number; windowMonths?: number };
   } = {},
 ): {
   thumbs: number;
@@ -3092,7 +3097,11 @@ export const useStore = create<StoreState>((set, get) => {
           force.summary ??
           (assistantEnabled() &&
             assistantAvailableNow() &&
-            needsReading(file, MODEL_READER, { factsWanted: factsEnabled(), now: Date.now() })),
+            needsReading(file, MODEL_READER, {
+        factsWanted: factsEnabled(),
+        now: Date.now(),
+        windowMonths: readingWindowMonths(),
+      })),
       };
       if (
         !needs.thumb &&
