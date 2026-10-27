@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Fact } from "./facts";
-import { acceptance, MIN_SAMPLE, saneFact, stakesOf, trustedKind, type ReaderScores } from "./confidence";
+import { acceptance, MIN_SAMPLE, saneFact, stakesOf, trustedKind, trustedMailKind, type ReaderScores } from "./confidence";
 import { READER_VERSION } from "./reading";
 
 const NOW = Date.UTC(2027, 2, 1);
@@ -99,5 +99,25 @@ describe("trustedKind", () => {
 
   it("kind scores from another version of the reader are not used", () => {
     expect(trustedKind(kindScores(0.95, 30, 0))).toBe(false);
+  });
+});
+
+describe("trustedMailKind", () => {
+  const newsletterScores = (precision: number, offered: number, version = CURRENT): ReaderScores => ({
+    reader: "apple",
+    version,
+    tasks: { mailKind: { accuracy: 0.95, cases: 40, byKind: { newsletter: { precision, offered } } } },
+  });
+
+  it("a kind trusted overall is not enough to set a newsletter's dates aside", () => {
+    expect(trustedKind(newsletterScores(0.9, 40))).toBe(true);
+    expect(trustedMailKind(newsletterScores(0.9, 40), "newsletter")).toBe(false);
+  });
+
+  it("the newsletter kind's own precision, over enough emails, sets its dates aside", () => {
+    expect(trustedMailKind(newsletterScores(1, MIN_SAMPLE), "newsletter")).toBe(true);
+    expect(trustedMailKind(newsletterScores(1, 2), "newsletter")).toBe(false);
+    expect(trustedMailKind(newsletterScores(1, MIN_SAMPLE, 0), "newsletter")).toBe(false);
+    expect(trustedMailKind(newsletterScores(1, MIN_SAMPLE), "bill")).toBe(false);
   });
 });

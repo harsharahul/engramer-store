@@ -276,7 +276,6 @@ export const EVAL_CASES: readonly EvalCase[] = [
     mime: "application/pdf",
     text: "Trattoria Sole\n2 x Pasta 32.00\n1 x Wine 18.00\nTotal EUR 50.00\nThank you",
     expected: [{ kind: "amount", value: "50.00" }],
-    mailKind: "receipt",
   },
   {
     id: "utility-bill-text",

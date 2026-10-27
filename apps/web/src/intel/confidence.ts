@@ -38,7 +38,11 @@ export interface TaskScore {
 export interface ReaderScores {
   reader: string;
   version: number;
-  tasks: { dates?: TaskScore; amounts?: TaskScore; mailKind?: { accuracy: number; cases: number } };
+  tasks: {
+    dates?: TaskScore;
+    amounts?: TaskScore;
+    mailKind?: { accuracy: number; cases: number; byKind?: Record<string, { precision: number; offered: number }> };
+  };
 }
 
 /** How often an email's kind must be named right before the kind is used. */
@@ -94,11 +98,7 @@ export function modelScores(): ReaderScores {
   return shipped as ReaderScores;
 }
 
-/**
- * Whether the model's naming of an email's kind is used: stored as a tag, and
- * a newsletter's dates set aside. A wrong kind would mislabel the email, or
- * worse, drop a bill's due date as if it were a sale's end.
- */
+/** Whether the model's naming of an email's kind is stored as a tag. */
 export function trustedKind(scores: ReaderScores | undefined): boolean {
   const kind = scores?.tasks.mailKind;
   return (
@@ -107,6 +107,22 @@ export function trustedKind(scores: ReaderScores | undefined): boolean {
     scores.version === READER_VERSION[scores.reader] &&
     kind.cases >= MIN_KIND_CASES &&
     kind.accuracy >= KIND_BAR
+  );
+}
+
+/**
+ * Whether one kind, when the model names it, is right often enough to act on:
+ * a newsletter's dates are set aside only on this, because a bill called a
+ * newsletter would lose its due date. Measured to the bar a date is.
+ */
+export function trustedMailKind(scores: ReaderScores | undefined, kind: string): boolean {
+  const named = scores?.tasks.mailKind?.byKind?.[kind];
+  return (
+    scores !== undefined &&
+    named !== undefined &&
+    scores.version === READER_VERSION[scores.reader] &&
+    named.offered >= MIN_SAMPLE &&
+    named.precision >= PRECISION_BAR
   );
 }
 

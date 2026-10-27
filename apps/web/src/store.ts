@@ -116,7 +116,7 @@ import { CATEGORIES } from "./intel/categorize";
 import { MIN_MAIL_TEXT, MIN_TEXT, cleanTags, outcomeFor, summarize } from "./intel/summarize";
 import { isEmailRecord } from "./mail/kind";
 import { remainingModelReads, spendModelReads } from "./modelbudget";
-import { acceptance, modelScores, trustedKind } from "./intel/confidence";
+import { acceptance, modelScores, trustedKind, trustedMailKind } from "./intel/confidence";
 import {
   MAX_TRIES,
   MODEL_READER,
@@ -3198,8 +3198,7 @@ export const useStore = create<StoreState>((set, get) => {
             tags.add(tag);
           }
           const scores = modelScores();
-          const kindTrusted = trustedKind(scores);
-          if (reading.mailKind && kindTrusted) {
+          if (reading.mailKind && trustedKind(scores)) {
             // One kind per email: a newer reading replaces the older one.
             for (const tag of [...tags]) {
               if (tag.startsWith("mail:")) {
@@ -3215,8 +3214,10 @@ export const useStore = create<StoreState>((set, get) => {
             meta.category = reading.kind;
           }
           // A newsletter's dates are offers and sale ends, not the owner's
-          // dates; set aside only when the kind itself is trusted.
-          const proposals = kindTrusted && reading.mailKind === "newsletter" ? [] : reading.facts;
+          // dates; set aside only when the model's "newsletter" is itself
+          // measured right nearly always.
+          const newsletter = reading.mailKind === "newsletter" && trustedMailKind(scores, "newsletter");
+          const proposals = newsletter ? [] : reading.facts;
           if (proposals.length > 0) {
             // Named for the reader that proposed them, and counted without a
             // yes only where that reader's measured accuracy allows (intel/confidence.ts).

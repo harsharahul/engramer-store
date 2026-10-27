@@ -305,17 +305,26 @@ describe("reading mail", () => {
     expect(tags).not.toContain("mail:other");
   });
 
-  it("a newsletter's dates are set aside only when the kind is trusted", async () => {
+  it("a newsletter's dates are set aside only on the newsletter kind's own measured precision", async () => {
     model.facts = true;
     const sale = { summary: "A sale.", tags: [], kind: null, mailKind: "newsletter", facts: [{ id: "due:2027-05-30", kind: "due", document: "other", value: "2027-05-30", label: "Sale ends", source: "model", confidence: 0.45 }] };
     model.summarize.mockResolvedValue(sale);
     library([email({ id: "a" })]);
     await useStore.getState().processFile("a");
     expect(useStore.getState().files.get("a")!.facts.map((f) => f.value)).toEqual(["2027-05-30"]);
+    // Kinds named right 95% of the time could still call a bill a newsletter.
     trustedKinds();
     library([email({ id: "b" })]);
     await useStore.getState().processFile("b");
-    expect(useStore.getState().files.get("b")!.facts).toEqual([]);
+    expect(useStore.getState().files.get("b")!.facts.map((f) => f.value)).toEqual(["2027-05-30"]);
+    scoreState.value = {
+      reader: "apple",
+      version: READER_VERSION.apple,
+      tasks: { mailKind: { accuracy: 0.95, cases: 40, byKind: { newsletter: { precision: 1, offered: 40 } } } },
+    };
+    library([email({ id: "c" })]);
+    await useStore.getState().processFile("c");
+    expect(useStore.getState().files.get("c")!.facts).toEqual([]);
   });
 
   it("a short email is still read", async () => {

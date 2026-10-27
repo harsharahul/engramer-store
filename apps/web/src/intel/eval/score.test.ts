@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Fact } from "../facts";
-import { scoreKinds, scoreReader, type EvalCase } from "./score";
+import { EMAIL_MIME } from "../../mail/kind";
+import { EVAL_CASES } from "./cases";
+import { factCases, kindCases, scoreKinds, scoreReader, type EvalCase } from "./score";
 
 const evalCase = (id: string, expected: EvalCase["expected"], mailKind?: string): EvalCase => ({
   id,
@@ -57,5 +59,31 @@ describe("scoreKinds", () => {
     const score = await scoreKinds(cases, async (c) => (c.id === "a" ? "bill" : "booking"));
     // c carries no expected kind and is not counted.
     expect(score).toMatchObject({ accuracy: 0.5, cases: 2 });
+  });
+
+  it("measures each kind's precision: how often the kind was right when the reader named it", async () => {
+    const cases = [evalCase("a", [], "bill"), evalCase("b", [], "newsletter"), evalCase("c", [], "newsletter")];
+    // The reader calls the bill a newsletter and one newsletter a booking.
+    const named: Record<string, string> = { a: "newsletter", b: "newsletter", c: "booking" };
+    const score = await scoreKinds(cases, async (c) => named[c.id]!);
+    expect(score.byKind.newsletter).toEqual({ precision: 0.5, offered: 2 });
+    expect(score.byKind.booking).toEqual({ precision: 0, offered: 1 });
+    expect(score.byKind.bill).toBeUndefined();
+  });
+});
+
+describe("which cases score which task", () => {
+  it("the model's dates are scored on every case the app asks it dates for", () => {
+    const ids = factCases(EVAL_CASES).map((c) => c.id);
+    // An invite or a passport is read by the model for dates as well.
+    expect(ids).toEqual(expect.arrayContaining(["invite-review", "passport-specimen", "guesthouse-plain"]));
+    // Mail that carries booking data is not asked for dates.
+    expect(ids).not.toContain("flight-aquila");
+  });
+
+  it("the mail kind is scored on every email, booking mail too, and on nothing else", () => {
+    const emails = EVAL_CASES.filter((c) => c.mime === EMAIL_MIME);
+    expect(kindCases(EVAL_CASES).map((c) => c.id)).toEqual(emails.map((c) => c.id));
+    expect(EVAL_CASES.filter((c) => c.mailKind !== undefined && c.mime !== EMAIL_MIME).map((c) => c.id)).toEqual([]);
   });
 });

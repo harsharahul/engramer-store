@@ -12,7 +12,7 @@ import { createInterface } from "node:readline";
 import { generate, type AssistantTransport } from "../../../apps/web/src/intel/assistant";
 import { CATEGORIES } from "../../../apps/web/src/intel/categorize";
 import { EVAL_CASES } from "../../../apps/web/src/intel/eval/cases";
-import { scoreKinds, scoreReader } from "../../../apps/web/src/intel/eval/score";
+import { factCases, kindCases, scoreKinds, scoreReader } from "../../../apps/web/src/intel/eval/score";
 import { EMAIL_MIME } from "../../../apps/web/src/mail/kind";
 import { MODEL_READER, READER_VERSION } from "../../../apps/web/src/intel/reading";
 import { summarize } from "../../../apps/web/src/intel/summarize";
@@ -45,15 +45,16 @@ const transport: AssistantTransport = {
   listen: async () => () => {},
 };
 
-// The model reads text. Cases whose facts are stated as data are the exact
-// readers' to find, and mail that carries such data is not asked for dates.
-const textCases = EVAL_CASES.filter((evalCase) => !evalCase.exact);
+// Each case is read as the app reads it: mail that states its facts as data
+// is asked its kind but not its dates; everything else is asked both.
+const asked = new Set(factCases(EVAL_CASES).map((evalCase) => evalCase.id));
 const readings = new Map<string, Awaited<ReturnType<typeof summarize>>>();
-for (const evalCase of textCases) {
+for (const evalCase of EVAL_CASES) {
   const text = evalCase.text;
+  const withFacts = asked.has(evalCase.id);
   try {
     const reading = await summarize(
-      { text, name: evalCase.name, categories: CATEGORIES, contextSize: 8192, withFacts: true, mail: evalCase.mime === EMAIL_MIME },
+      { text, name: evalCase.name, categories: CATEGORIES, contextSize: 8192, withFacts, mail: evalCase.mime === EMAIL_MIME },
       (request) => generate(request, transport),
     );
     readings.set(evalCase.id, reading);
@@ -71,14 +72,14 @@ const counts = (score: Awaited<ReturnType<typeof scoreReader>>) => ({
   offered: score.perCase.reduce((sum, c) => sum + c.found + c.extra, 0),
   expected: score.perCase.reduce((sum, c) => sum + c.found + c.missed, 0),
 });
-const dates = await scoreReader(textCases, read, "dates");
-const amounts = await scoreReader(textCases, read, "amounts");
-const kinds = await scoreKinds(textCases, async (evalCase) => readings.get(evalCase.id)?.mailKind ?? null);
+const dates = await scoreReader(factCases(EVAL_CASES), read, "dates");
+const amounts = await scoreReader(factCases(EVAL_CASES), read, "amounts");
+const kinds = await scoreKinds(kindCases(EVAL_CASES), async (evalCase) => readings.get(evalCase.id)?.mailKind ?? null);
 const scores = {
   reader: MODEL_READER,
   version: READER_VERSION[MODEL_READER],
   measuredAt: new Date().toISOString().slice(0, 10),
-  cases: textCases.length,
+  cases: EVAL_CASES.length,
   // How many readings each figure rests on: a precision over a handful of
   // readings says nothing, and the app requires a minimum before trusting it.
   tasks: {

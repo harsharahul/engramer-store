@@ -9,6 +9,7 @@
  */
 
 import type { Fact, FactKind } from "../facts";
+import { EMAIL_MIME } from "../../mail/kind";
 
 export interface EvalCase {
   id: string;
@@ -83,17 +84,47 @@ export async function scoreReader(
   };
 }
 
+/** Cases the app asks a model for dates and amounts: all but mail that states them as data. */
+export function factCases(cases: readonly EvalCase[]): EvalCase[] {
+  return cases.filter((evalCase) => !(evalCase.exact && evalCase.mime === EMAIL_MIME));
+}
+
+/** Cases the app asks a model to name the kind of: every email, booking mail too. */
+export function kindCases(cases: readonly EvalCase[]): EvalCase[] {
+  return cases.filter((evalCase) => evalCase.mime === EMAIL_MIME);
+}
+
+export interface KindScore {
+  accuracy: number;
+  cases: number;
+  /** Per kind named: how often it was right when the classifier named it. */
+  byKind: Record<string, { precision: number; offered: number }>;
+}
+
 /** How often a classifier names an email's kind right, over cases that say. */
 export async function scoreKinds(
   cases: readonly EvalCase[],
   classify: (evalCase: EvalCase) => Promise<string | null>,
-): Promise<{ accuracy: number; cases: number }> {
+): Promise<KindScore> {
   const labelled = cases.filter((evalCase) => evalCase.mailKind !== undefined);
+  const named = new Map<string, { right: number; offered: number }>();
   let right = 0;
   for (const evalCase of labelled) {
-    if ((await classify(evalCase)) === evalCase.mailKind) {
+    const kind = await classify(evalCase);
+    if (kind === null) {
+      continue;
+    }
+    const tally = named.get(kind) ?? { right: 0, offered: 0 };
+    tally.offered++;
+    if (kind === evalCase.mailKind) {
+      tally.right++;
       right++;
     }
+    named.set(kind, tally);
   }
-  return { accuracy: labelled.length === 0 ? 1 : right / labelled.length, cases: labelled.length };
+  const byKind: KindScore["byKind"] = {};
+  for (const [kind, tally] of named) {
+    byKind[kind] = { precision: tally.right / tally.offered, offered: tally.offered };
+  }
+  return { accuracy: labelled.length === 0 ? 1 : right / labelled.length, cases: labelled.length, byKind };
 }
