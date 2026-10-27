@@ -36,11 +36,19 @@ function offenders(patterns: RegExp[], allowed: string[]): string[] {
 describe("one model for dates and trips", () => {
   it("tests a trip tag only through isTripTag", () => {
     // A notice key built as `trip:${tag}` is the notice namespace, not a tag test.
-    expect(offenders([/startsWith\(\s*["'`]trip:/, /["']trip:/], [join("intel", "trips.ts")])).toEqual([]);
+    expect(offenders([/startsWith\(\s*["'`]trip:/, /["']trip:/, /\/\^?trip:/], [join("intel", "trips.ts")])).toEqual([]);
+    // The prefix itself: trips.ts defines it, albums.ts reserves it.
+    expect(offenders([/\bTRIP_PREFIX\b/], [join("intel", "trips.ts"), "albums.ts"])).toEqual([]);
   });
 
   it("reads dated kinds only through the model", () => {
+    // facts.ts keeps soonestDated for the Expiring view until the Timeline replaces it.
     expect(offenders([/\bDATED_KINDS\b/], [join("intel", "facts.ts"), join("intel", "agenda.ts")])).toEqual([]);
+  });
+
+  it("filters tracked dates only through the model", () => {
+    // Calls, not imports: a file may use either predicate on its own.
+    expect(offenders([/\bisTracked\(.*\bisDated\(/, /\bisDated\(.*\bisTracked\(/], [join("intel", "agenda.ts")])).toEqual([]);
   });
 
   it("defines isDated once", () => {
