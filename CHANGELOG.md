@@ -6,6 +6,22 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Added
+- **More bookings, bills, deliveries and invites read exactly.** Event
+  tickets, restaurant tables, bus and boat trips join flights, stays, car
+  rentals and trains in the booking data read from confirmation emails and
+  saved pages; a bill's due date, amount and number and a parcel's delivery
+  window and tracking number are read the same way; and calendar invites
+  (`.ics`, uploaded or attached to mail) give their events' times, zones as
+  written. A booking type written with its full schema.org address is now
+  read like the short name.
+- **Facts settled by evidence count without a yes.** A date or amount read
+  from a barcode, a passport's zone, booking data or an invite, or stated
+  alike by two independent readers, counts for the bell, notifications, the
+  calendar, Expiring soon and trips at once, marked with why it counts; facts
+  stored earlier from such sources keep counting. Where the assistant and a
+  labelled date disagree about a due date or an expiry, the heads-up strip
+  asks once ("Which one?") and the answer settles both; booking data settles
+  the assistant's reading of the same day or amount without asking.
 - **Mail import.** Saved messages (`.eml`) and mailbox exports (`.mbox`,
   including Google Takeout and Apple Mail export folders) import from the
   New menu, the command palette, or a drop. Each message becomes an email
@@ -32,6 +48,9 @@ All notable changes to Engram Store are documented here, following
   collections in the server's request validation).
 
 ### Fixed
+- **Rereading a document for dates no longer rewrites it when nothing
+  changed.** Every rescan used to store the same facts again, which synced a
+  change that was not one and could schedule yet another pass.
 - **Search is ready far sooner on a large library.** Loading the search
   index on a new device or a new session applied each file's text with
   its own update of the whole library, so the wait grew with the square
@@ -56,6 +75,13 @@ All notable changes to Engram Store are documented here, following
   deletion of a file the vault no longer has counts as done.
 
 ### Changed
+- **Each file is read once, and failures stop.** Every reading by the
+  on-device model leaves one synced stamp (reader, rank, version, contents,
+  tasks, outcome), so no device reads what another already has; a file is
+  read again only when its contents change, a stronger reader arrives, or
+  the reader changes. A reading that keeps failing stops after three tries
+  across devices and says why, and Profile offers Retry. A reading another
+  device finished for the same contents meanwhile is kept.
 - **Search warm-up downloads index blobs in batches.** A new device or
   session fetches the encrypted search index 200 files per request
   (`POST /api/files/index/batch`, on the server and the on-device vault)

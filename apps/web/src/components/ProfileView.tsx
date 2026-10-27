@@ -53,7 +53,6 @@ import {
   stopBackfill,
 } from "../backfill";
 import { CLIP_MODEL_VERSION } from "../intel/semantic";
-import { ASSIST_VERSION } from "../intel/summarize";
 import { SCENES_VERSION } from "../intel/scenes";
 import { describeProcessing } from "../activity";
 import { SweepMemory, type SweepKind } from "../sweepmemory";
@@ -498,7 +497,7 @@ export function ProfileView(props: {
   // line answers for.
   const pending = pendingDerivatives(store.files, CLIP_MODEL_VERSION, {
     scenesVersion: SCENES_VERSION,
-    assistVersion: ASSIST_VERSION,
+    readings: { factsWanted: props.factsOn, now: Date.now() },
   });
   const autoPending = pendingDerivatives(store.files, CLIP_MODEL_VERSION, {
     ocr: props.ocrOn,
@@ -1935,8 +1934,23 @@ export function ProfileView(props: {
                   : assistant?.state === "available"
                     ? `${pending.summaries} document${pending.summaries === 1 ? "" : "s"} not yet summarized, on this device.`
                     : `${pending.summaries} document${pending.summaries === 1 ? " waits" : "s wait"} for a device that can summarize (a Mac or iPhone on macOS 26 or iOS 26).`}
+              {pending.failedReadings > 0 &&
+                ` ${pending.failedReadings} could not be read after three tries and wait${pending.failedReadings === 1 ? "s" : ""} for Retry.`}
             </div>
           </div>
+          {pending.failedReadings > 0 && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                void store.retryFailedReadings().then((count) => {
+                  props.onToast(`Trying ${count} document${count === 1 ? "" : "s"} again.`);
+                  scheduleBackfill();
+                });
+              }}
+            >
+              Retry
+            </Button>
+          )}
         </div>
         <div className="profile-row">
           <div className="profile-row-main">

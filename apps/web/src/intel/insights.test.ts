@@ -231,3 +231,12 @@ describe("travel rules", () => {
     expect(dayOf).not.toContain("checkin-opens");
   });
 });
+
+describe("facts that count without a yes", () => {
+  it("insights read an accepted passport expiry", () => {
+    const passport = fact({ document: "passport", value: "2027-02-14", confirmed: undefined, source: "mrz", confidence: 1, accepted: "exact" });
+    expect(ruleIds([file("f1", "passport.pdf", [passport])])).toContain("passport-six-months");
+    const offered = fact({ document: "passport", value: "2027-02-14", confirmed: undefined });
+    expect(ruleIds([file("f1", "passport.pdf", [offered])])).not.toContain("passport-six-months");
+  });
+});

@@ -23,12 +23,14 @@ import {
   groundFacts,
   maskTail,
   mergeFacts,
+  withExactAcceptance,
   type Fact,
   type FactEvidence,
 } from "./facts";
 import { harvestFacts, labelledFacts, structuralDatedFacts } from "./labels";
 import { mrzFacts } from "./mrz";
-import { reservationFacts } from "./reservation";
+import { structuredDataFacts } from "./reservation";
+import { icsFacts } from "./icsread";
 
 const PREF_KEY = "engram-facts";
 
@@ -94,7 +96,11 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
   // A reservation the document states about itself is the same tier: exact,
   // and exempt from prose grounding for the same reason barcodes are.
   if (input.raw) {
-    found.push(...reservationFacts(input.raw));
+    found.push(...structuredDataFacts(input.raw));
+    // A calendar invite is the same tier: the sender's calendar speaking.
+    if (input.mime === "text/calendar" || /\.ics$/i.test(input.name)) {
+      found.push(...icsFacts(input.raw));
+    }
   }
 
   const text = input.text ?? "";
@@ -140,7 +146,7 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
   const evidence: FactEvidence[] = [];
   for (const fact of kept) {
     if (fact.kind !== "identifier") {
-      facts.push(fact);
+      facts.push(withExactAcceptance(fact));
       continue;
     }
     // Redacted only now, after grounding and merging have had the real value.
@@ -148,7 +154,7 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
     // metadata and one built from the whole number would put it right back.
     const tail = maskTail(fact.value);
     const id = factId("identifier", tail);
-    facts.push({ ...fact, id, value: tail, masked: tail });
+    facts.push(withExactAcceptance({ ...fact, id, value: tail, masked: tail }));
     evidence.push({ id, full: fact.value });
   }
   return { facts, evidence, decoded };

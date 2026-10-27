@@ -82,6 +82,23 @@ describe("seen", () => {
   });
 });
 
+describe("facts that count without a yes", () => {
+  it("an accepted booking date raises a notice", () => {
+    const booked: NoticeFile = {
+      id: "f9",
+      name: "stay.email",
+      digest: "d9",
+      tags: [],
+      facts: [fact("g", "event", iso(5), { confirmed: undefined, source: "jsonld", confidence: 1, accepted: "exact", label: "Check-in" })],
+      trashed: false,
+      createdAt: 1,
+    };
+    expect(noticeKeys([booked], now)).toContain("fact:f9:g");
+    const offered = { ...booked, facts: [fact("h", "event", iso(5), { confirmed: undefined, label: "Check-in" })] };
+    expect(noticeKeys([offered], now)).not.toContain("fact:f9:h");
+  });
+});
+
 describe("dueNotices", () => {
   it("picks only dated items close enough to interrupt for, in words", () => {
     const due = dueNotices(files, now);

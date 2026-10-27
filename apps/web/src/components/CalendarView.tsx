@@ -17,7 +17,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { FileEntry } from "../store";
-import { DATED_KINDS, type Fact } from "../intel/facts";
+import { DATED_KINDS, isTracked, type Fact } from "../intel/facts";
 import { describeFact, shown } from "../intel/describe";
 import { factsFingerprint, tripTitle } from "../intel/trips";
 import { Button } from "./ui/button";
@@ -96,7 +96,7 @@ export function CalendarView(props: { files: FileEntry[]; onOpen: (id: string) =
     const map = new Map<string, DayEntry[]>();
     for (const file of live) {
       for (const fact of file.facts) {
-        if (fact.confirmed && !fact.dismissed && DATED_KINDS.has(fact.kind)) {
+        if (isTracked(fact) && DATED_KINDS.has(fact.kind)) {
           map.set(fact.value, [...(map.get(fact.value) ?? []), { file, fact }]);
         }
       }
@@ -113,7 +113,7 @@ export function CalendarView(props: { files: FileEntry[]; onOpen: (id: string) =
           continue;
         }
         const dates = file.facts
-          .filter((fact) => fact.kind === "event" && !fact.dismissed && fact.confirmed)
+          .filter((fact) => fact.kind === "event" && isTracked(fact))
           .map((fact) => fact.value);
         byTag.set(tag, [...(byTag.get(tag) ?? []), ...dates]);
       }

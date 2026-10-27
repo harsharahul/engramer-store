@@ -73,6 +73,10 @@ export type DocumentKind =
   | "itinerary"
   | "car-rental"
   | "event-ticket"
+  /** A parcel on its way: the delivery window from the carrier's data. */
+  | "delivery"
+  /** A table booked at a restaurant. */
+  | "dining"
   | "other";
 
 export type FactSource =
@@ -82,6 +86,8 @@ export type FactSource =
   | "mrz"
   /** schema.org reservation data a document carries about itself. */
   | "jsonld"
+  /** A calendar invite's own event times (RFC 5545). */
+  | "ics"
   /** A labelled date in extracted text. */
   | "label"
   /** Generic harvesting, the weakest signal. */
@@ -126,6 +132,19 @@ export interface Fact {
   ambiguous?: boolean;
   /** Pinned by the owner. Never overwritten by a later scan. */
   confirmed?: boolean;
+  /**
+   * Counts without the owner's yes, and on what basis: an exact reader
+   * (booking data, a barcode, an invite, a passport's zone), two independent
+   * readers agreeing, or a grounded reading from a reader whose measured
+   * accuracy for this task allows it. Distinct from `confirmed`, so "the
+   * owner said so" stays tellable apart from "the evidence said so".
+   */
+  accepted?: "exact" | "agreement" | "grounded";
+  /** Which reader or readers produced this, for the line that says so. */
+  reader?: string;
+  /** Another reading of the same slot disagrees: the id of that fact. The
+   * pair is offered once; the owner's answer settles both. */
+  disputed?: string;
   dismissed?: boolean;
   /** The contents this was read from, so a change can be noticed. */
   digest?: string;
@@ -171,17 +190,35 @@ export const RECENT_PAST_OFFER_DAYS = 60;
 export function offeredFacts(
   files: { id: string; trashed: boolean; facts: Fact[] }[],
   now: number,
-): { fileId: string; fact: Fact }[] {
-  const offered: { fileId: string; fact: Fact }[] = [];
+): { fileId: string; fact: Fact; alternative?: Fact }[] {
+  const offered: { fileId: string; fact: Fact; alternative?: Fact }[] = [];
   for (const file of files) {
     if (file.trashed) {
       continue;
     }
+    const byId = new Map(file.facts.map((fact) => [fact.id, fact]));
     for (const fact of file.facts) {
-      if (fact.confirmed || fact.dismissed || !DATED_KINDS.has(fact.kind)) {
+      if (isTracked(fact) || fact.dismissed) {
         continue;
       }
-      if (daysUntil(fact.value, now) < -RECENT_PAST_OFFER_DAYS) {
+      const partner = fact.disputed ? byId.get(fact.disputed) : undefined;
+      if (partner && ownerDecided(partner)) {
+        // Answered on the other side, perhaps by an older build that never
+        // settled the pair: the question was asked once.
+        continue;
+      }
+      if (!DATED_KINDS.has(fact.kind) && !partner) {
+        continue;
+      }
+      if (DATED_KINDS.has(fact.kind) && daysUntil(fact.value, now) < -RECENT_PAST_OFFER_DAYS) {
+        continue;
+      }
+      if (partner) {
+        // One question per disagreement, asked through the stronger reading.
+        if (partner.confidence > fact.confidence || (partner.confidence === fact.confidence && partner.id < fact.id)) {
+          continue;
+        }
+        offered.push({ fileId: file.id, fact, alternative: partner });
         continue;
       }
       offered.push({ fileId: file.id, fact });
@@ -192,13 +229,14 @@ export function offeredFacts(
 
 /**
  * The nearest date a file is actually tracking, or nothing if it tracks none.
- * Only confirmed facts count: an unconfirmed reading has not been agreed to,
- * and listing a file by a date nobody accepted would be acting on a guess.
+ * Only tracked facts count (confirmed, or accepted on evidence): a reading
+ * waiting for a yes has not been agreed to, and listing a file by it would be
+ * acting on a guess.
  */
 export function soonestDated(facts: Fact[]): string | undefined {
   let soonest: string | undefined;
   for (const fact of facts) {
-    if (!fact.confirmed || fact.dismissed || !DATED_KINDS.has(fact.kind)) {
+    if (!isTracked(fact) || !DATED_KINDS.has(fact.kind)) {
       continue;
     }
     if (soonest === undefined || fact.value < soonest) {
@@ -213,7 +251,39 @@ export function soonestDated(facts: Fact[]): string | undefined {
  * no free text to ground them against, and their own check digits or fixed
  * field positions already proved them.
  */
-const STRUCTURED: ReadonlySet<FactSource> = new Set(["barcode", "mrz", "jsonld", "user"]);
+/**
+ * Sources that state a fact rather than suggest it: exempt from prose
+ * grounding, and at full confidence accepted without a yes.
+ */
+export const EXACT_SOURCES: ReadonlySet<FactSource> = new Set(["barcode", "mrz", "jsonld", "ics", "user"]);
+
+/** Whether a fact counts: the owner confirmed it, or the evidence was accepted; never once dismissed. */
+export function isTracked(fact: Fact): boolean {
+  return !fact.dismissed && (fact.confirmed === true || fact.accepted !== undefined);
+}
+
+/** Whether the owner has answered this fact either way. */
+export function ownerDecided(fact: Fact): boolean {
+  return fact.confirmed === true || fact.dismissed === true;
+}
+
+/** Why a fact counts, for the line that says so; null while it waits for a yes. */
+export function basisOf(fact: Fact): "confirmed" | "exact" | "agreement" | "grounded" | null {
+  if (fact.dismissed) {
+    return null;
+  }
+  return fact.confirmed ? "confirmed" : (fact.accepted ?? null);
+}
+
+/** An exact reader's full-confidence fact, which is accepted as it is read. */
+export function withExactAcceptance(fact: Fact): Fact {
+  return fact.accepted === undefined &&
+    fact.confidence === 1 &&
+    fact.source !== "user" &&
+    EXACT_SOURCES.has(fact.source)
+    ? { ...fact, accepted: "exact" }
+    : fact;
+}
 
 const MONTHS = [
   "january",
@@ -311,7 +381,9 @@ export function asFacts(raw: unknown): Fact[] {
   if (!Array.isArray(raw)) {
     return [];
   }
-  return raw.filter(isFactShaped).slice(0, MAX_FACTS_PER_FILE);
+  // Facts read before the accepted marker existed counted on their source
+  // alone; they keep counting, and carry the marker from the next write.
+  return raw.filter(isFactShaped).slice(0, MAX_FACTS_PER_FILE).map(withExactAcceptance);
 }
 
 function isFactShaped(value: unknown): value is Fact {
@@ -338,7 +410,7 @@ function isFactShaped(value: unknown): value is Fact {
 export function groundFacts(facts: Fact[], source: string): Fact[] {
   const haystack = normalize(source);
   return facts.filter((fact) => {
-    if (STRUCTURED.has(fact.source)) {
+    if (EXACT_SOURCES.has(fact.source)) {
       return true;
     }
     if (!renderings(fact).some((form) => haystack.includes(normalize(form)))) {
@@ -412,12 +484,15 @@ function renderings(fact: Fact): string[] {
 }
 
 /**
- * Folds a rescan into what a file already carries.
+ * Folds a rescan into what a file already carries, in one fixed order.
  *
  * A decision the owner made outranks anything a later scan finds: a confirmed
  * fact survives a rescan that no longer sees it, and a dismissed one is not
- * quietly brought back. Otherwise the stronger source wins, so a barcode read
- * replaces the guess a labelled date made about the same value.
+ * quietly brought back. Then an exact reader outranks every softer one. Two
+ * independent readers that state the same value agree, and the fact counts.
+ * Where one slot (a due date, an expiry, an amount due) is read two ways:
+ * the owner's answer or an exact reading settles it; otherwise a model and a
+ * label rule that disagree are kept as a pair and asked about once.
  */
 export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
   const merged = new Map<string, Fact>();
@@ -442,12 +517,165 @@ export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
     if (prior.confirmed || prior.dismissed) {
       continue;
     }
-    if (fact.confidence > prior.confidence) {
-      merged.set(fact.id, fact);
-    }
+    merged.set(fact.id, pick(prior, fact));
   }
   // The cap has to drop the weakest rather than whichever arrived last.
-  return [...merged.values()]
+  return resolveSlots([...merged.values()])
     .sort((a, b) => b.confidence - a.confidence || a.value.localeCompare(b.value))
     .slice(0, MAX_FACTS_PER_FILE);
+}
+
+/** Kinds a document states once: two different readings of one disagree. */
+const SLOT_KINDS: ReadonlySet<FactKind> = new Set(["expiry", "due", "issued", "amount"]);
+/** Of all the amounts a document prints, the one it asks to be paid. */
+const TOTAL_LABEL = /due|total|balance|pay/i;
+/** Readers whose answers are grounded but not exact; two of them can agree or disagree. */
+const GROUNDED_READERS: ReadonlySet<FactSource> = new Set(["model", "label"]);
+
+function slotOf(fact: Fact): string | undefined {
+  if (!SLOT_KINDS.has(fact.kind)) {
+    return undefined;
+  }
+  if (fact.kind === "amount") {
+    return TOTAL_LABEL.test(fact.label ?? "") ? "amount" : undefined;
+  }
+  return fact.kind;
+}
+
+/** Whether two readings of a slot could be the same thing said two ways: an
+ * amount with no currency matches any; two named currencies must agree. */
+function comparable(a: Fact, b: Fact): boolean {
+  return a.kind !== "amount" || !a.unit || !b.unit || a.unit === b.unit;
+}
+
+function isExact(fact: Fact): boolean {
+  return withExactAcceptance(fact).accepted === "exact";
+}
+
+function readers(fact: Fact): string[] {
+  return (fact.reader ?? fact.source).split(" + ");
+}
+
+/** The same reading from two readers: exact wins; two grounded readers agree. */
+function pick(prior: Fact, fact: Fact): Fact {
+  if (isExact(prior) !== isExact(fact)) {
+    return isExact(prior) ? prior : withExactAcceptance(fact);
+  }
+  const winner = fact.confidence > prior.confidence ? fact : prior;
+  // An ambiguous date stays a question even when a second reader picked the
+  // same reading: both may have guessed the day and month the same wrong way.
+  if (
+    GROUNDED_READERS.has(prior.source) &&
+    GROUNDED_READERS.has(fact.source) &&
+    prior.source !== fact.source &&
+    !prior.ambiguous &&
+    !fact.ambiguous
+  ) {
+    const names = [...new Set([...readers(prior), ...readers(fact)])].sort();
+    return { ...winner, accepted: winner.accepted ?? "agreement", reader: names.join(" + ") };
+  }
+  return winner;
+}
+
+/** Settles each slot read more than one way, or marks the disagreement to ask about. */
+function resolveSlots(facts: Fact[]): Fact[] {
+  const ids = new Set(facts.map((fact) => fact.id));
+  let out = facts.map((fact) => {
+    if (fact.disputed && !ids.has(fact.disputed)) {
+      const { disputed: _gone, ...rest } = fact;
+      return rest;
+    }
+    return fact;
+  });
+  const slots = new Map<string, Fact[]>();
+  for (const fact of out) {
+    const slot = slotOf(fact);
+    if (slot && !fact.dismissed) {
+      slots.set(slot, [...(slots.get(slot) ?? []), fact]);
+    }
+  }
+  const drop = new Set<string>();
+  const marks = new Map<string, string>();
+  for (const group of slots.values()) {
+    if (new Set(group.map((fact) => fact.value)).size < 2) {
+      continue;
+    }
+    // The owner's answer settles the slot outright; an exact reading settles
+    // it against every softer one.
+    const confirmed = group.find((fact) => fact.confirmed);
+    const exact = group.find(isExact);
+    if (confirmed || exact) {
+      // The model's guesses give way to either; exact data gives way only to
+      // the owner's answer. A rule's reading of another date in the same slot
+      // may be a second real date (an installment, a visa beside the
+      // passport) and stays to be asked about.
+      const settler = (confirmed ?? exact)!;
+      for (const fact of group) {
+        const yields = fact.source === "model" || (confirmed !== undefined && isExact(fact));
+        if (yields && !ownerDecided(fact) && fact.value !== settler.value && comparable(fact, settler)) {
+          drop.add(fact.id);
+        }
+      }
+      continue;
+    }
+    const best = (source: FactSource) =>
+      group.filter((fact) => fact.source === source).sort((a, b) => b.confidence - a.confidence)[0];
+    const model = best("model");
+    const label = best("label");
+    if (model && label && model.value !== label.value && comparable(model, label)) {
+      marks.set(model.id, label.id);
+      marks.set(label.id, model.id);
+    }
+  }
+  // Booking data, an invite or a barcode that states an event on a date is
+  // the record of that day's booking in this file; the model's own reading
+  // of an event that day (its own label, often its own clock) is an echo.
+  const exactDays = new Set(out.filter((fact) => fact.kind === "event" && !fact.dismissed && isExact(fact)).map((fact) => fact.value));
+  for (const fact of out) {
+    if (fact.kind === "event" && fact.source === "model" && !ownerDecided(fact) && exactDays.has(fact.value)) {
+      drop.add(fact.id);
+    }
+  }
+  out = out.filter((fact) => !drop.has(fact.id));
+  return out.map((fact) => {
+    const other = marks.get(fact.id);
+    if (!other) {
+      return fact;
+    }
+    const { accepted: _none, ...rest } = fact;
+    return { ...rest, disputed: other };
+  });
+}
+
+/**
+ * The owner's answer to a disagreement: the confirmed reading stands, its
+ * partner is dismissed, and neither is marked disputed any more. Ignoring
+ * the question dismisses both: it was asked once.
+ */
+export function settleDisputes(facts: Fact[]): Fact[] {
+  const byId = new Map(facts.map((fact) => [fact.id, fact]));
+  const dismiss = new Set<string>();
+  const release = new Set<string>();
+  for (const fact of facts) {
+    if (!fact.disputed || !byId.has(fact.disputed)) {
+      continue;
+    }
+    if (fact.confirmed) {
+      dismiss.add(fact.disputed);
+      release.add(fact.id);
+      release.add(fact.disputed);
+    } else if (fact.dismissed) {
+      // "Ignore" answers the question, not one side of it.
+      dismiss.add(fact.disputed);
+      release.add(fact.id);
+      release.add(fact.disputed);
+    }
+  }
+  return facts.map((fact) => {
+    if (!release.has(fact.id)) {
+      return fact;
+    }
+    const { disputed: _settled, ...rest } = fact;
+    return dismiss.has(fact.id) ? { ...rest, dismissed: true } : rest;
+  });
 }

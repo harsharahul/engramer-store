@@ -13,7 +13,7 @@ import { decide, decided, DECISIONS_EVENT, decisionEvents } from "./decisions";
 import { daysUntil } from "./intel/dates";
 import { describeFact } from "./intel/describe";
 import { duplicatesByDigest } from "./intel/duplicates";
-import { DATED_KINDS, type Fact } from "./intel/facts";
+import { DATED_KINDS, isTracked, type Fact } from "./intel/facts";
 import { insightsFor, type Severity } from "./intel/insights";
 
 export interface NoticeFile {
@@ -58,7 +58,7 @@ export function upcomingFacts<F extends NoticeFile>(files: readonly F[], now: nu
     .filter((file) => !file.trashed)
     .flatMap((file) =>
       file.facts
-        .filter((fact) => fact.confirmed && !fact.dismissed && isDated(fact))
+        .filter((fact) => isTracked(fact) && isDated(fact))
         .map((fact) => ({ file, fact, days: daysUntil(fact.value, now) })),
     )
     .filter((entry) => entry.days > -RECENTLY_PAST_DAYS && entry.days < HORIZON_DAYS)

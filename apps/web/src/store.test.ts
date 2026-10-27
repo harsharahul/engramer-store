@@ -224,6 +224,23 @@ describe("metadataOf", () => {
     expect(metadataOf(entry({ facts })).facts).toEqual(facts);
   });
 
+  it("keeps a fact's acceptance and reader, which a patch would otherwise erase", () => {
+    const facts = [
+      {
+        id: "event:2027-03-04 check-in",
+        kind: "event" as const,
+        document: "hotel-booking" as const,
+        value: "2027-03-04",
+        label: "Check-in",
+        source: "jsonld" as const,
+        confidence: 1,
+        accepted: "exact" as const,
+        reader: "booking data",
+      },
+    ];
+    expect(metadataOf(entry({ facts })).facts).toEqual(facts);
+  });
+
   it("writes no facts field at all for a file that carries none", () => {
     expect(metadataOf(entry())).not.toHaveProperty("facts");
   });
@@ -231,6 +248,21 @@ describe("metadataOf", () => {
   it("keeps the embedding model version, which a patch would otherwise erase", () => {
     expect(metadataOf(entry({ hasClip: true, clipVersion: 3 })).clipVersion).toBe(3);
     expect(metadataOf(entry({}))).not.toHaveProperty("clipVersion");
+  });
+
+  it("keeps the reading stamp, which a patch would otherwise erase", () => {
+    const reading = {
+      reader: "apple",
+      rank: 2,
+      version: 1,
+      digest: "d1",
+      tasks: ["summary", "facts"] as ("summary" | "facts")[],
+      outcome: "found" as const,
+      tries: 1,
+      at: 5,
+    };
+    expect(metadataOf(entry({ reading, assistVersion: 1 }))).toMatchObject({ reading, assistVersion: 1 });
+    expect(metadataOf(entry())).not.toHaveProperty("reading");
   });
 
   it("keeps the backup source id, which a patch would otherwise erase", () => {
@@ -751,6 +783,28 @@ describe("embedding model version", () => {
     expect(pendingDerivatives(files, 1).tags).toBe(4);
   });
 
+  it("counts readings that failed for good, for the Retry in Profile", () => {
+    const reading = (outcome: "failed" | "found") => ({
+      reader: "apple",
+      rank: 2,
+      version: 1,
+      tasks: ["summary"] as ("summary" | "facts")[],
+      outcome,
+      tries: outcome === "failed" ? 3 : 1,
+      at: 1,
+    });
+    const files = new Map<string, FileEntry>(
+      [
+        entry({ id: "a", reading: reading("failed") }),
+        entry({ id: "b", reading: reading("found") }),
+        entry({ id: "c", reading: reading("failed"), trashed: true }),
+        // An older build's write dropped the stamp; the legacy pair still says it failed.
+        entry({ id: "d", assistVersion: 1, noSummary: "failed" }),
+      ].map((f) => [f.id, f]),
+    );
+    expect(pendingDerivatives(files, 1).failedReadings).toBe(2);
+  });
+
   /**
    * The automatic sweeps skip kinds whose preference is off, so a count
    * that includes them describes work nothing will ever take up. With
@@ -1077,6 +1131,92 @@ describe("importMail", () => {
     ]);
     expect(first.imported).toBe(1);
     expect(second).toMatchObject({ imported: 0, alreadyPresent: 1 });
+  });
+});
+
+/**
+ * Two readers that disagree are asked about once: the owner's answer must
+ * settle both readings in the same write, or the loser would be offered
+ * again on its own.
+ */
+describe("answering a disagreement", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  const rig = () => {
+    const masterKey = generateKey();
+    const key = generateKey();
+    const amount = (value: string, source: "label" | "model", confidence: number, other: string) => ({
+      id: `amount:${value}`,
+      kind: "amount" as const,
+      document: "invoice" as const,
+      value,
+      unit: "USD",
+      label: "Amount due",
+      source,
+      confidence,
+      disputed: `amount:${other}`,
+    });
+    const bill = entry({
+      id: "bill",
+      key,
+      facts: [amount("56.00", "label", 0.7, "65.00"), amount("65.00", "model", 0.45, "56.00")],
+    });
+    useStore.setState({
+      session: { email: "t@example.com", token: "t", masterKey, privateKey: new Uint8Array(32), publicKey: "" },
+      files: new Map([["bill", bill]]),
+    });
+    let writes = 0;
+    (api as unknown as Record<string, unknown>).patchFile = async (
+      id: string,
+      patch: { encryptedMeta: FileDto["encryptedMeta"] },
+    ): Promise<FileDto> => {
+      writes++;
+      return {
+        id,
+        folderId: null,
+        encryptedKey: secretBoxSeal(key, masterKey),
+        encryptedMeta: patch.encryptedMeta,
+        size: 1024,
+        thumbSize: 0,
+        indexSize: 0,
+        uploaded: true,
+        trashed: false,
+        deleted: false,
+        updateSeq: 2,
+        createdAt: 1,
+        updatedAt: 2,
+      };
+    };
+    return { writes: () => writes };
+  };
+
+  const settled = () => {
+    const facts = useStore.getState().files.get("bill")!.facts;
+    return {
+      kept: facts.find((f) => f.value === "65.00")!,
+      other: facts.find((f) => f.value === "56.00")!,
+    };
+  };
+
+  it("confirming one reading dismisses the other in the same write", async () => {
+    const { writes } = rig();
+    await useStore.getState().confirmFact("bill", "amount:65.00");
+    const { kept, other } = settled();
+    expect(kept).toMatchObject({ confirmed: true });
+    expect(other).toMatchObject({ dismissed: true });
+    expect(kept.disputed).toBeUndefined();
+    expect(other.disputed).toBeUndefined();
+    expect(writes()).toBe(1);
+  });
+
+  it("a batch answer settles a disagreement the same way", async () => {
+    rig();
+    await useStore.getState().resolveFacts("bill", { confirm: ["amount:65.00"] });
+    const { kept, other } = settled();
+    expect(kept.confirmed).toBe(true);
+    expect(other.dismissed).toBe(true);
   });
 });
 

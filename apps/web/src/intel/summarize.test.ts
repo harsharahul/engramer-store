@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { AssistantError } from "./assistant";
 import {
-  ASSIST_VERSION,
   cleanTags,
   headChunk,
-  needsSummary,
   outcomeFor,
   sanitizeSummary,
   readingSchema,
@@ -13,39 +11,6 @@ import {
   summaryWithFactsSchema,
   SUMMARY_MAX,
 } from "./summarize";
-
-const file = (over: Partial<Parameters<typeof needsSummary>[0]> = {}) => ({
-  trashed: false,
-  hasText: true,
-  inlineText: false,
-  mime: "application/pdf",
-  assistVersion: undefined as number | undefined,
-  noSummary: undefined as string | undefined,
-  ...over,
-});
-
-describe("needsSummary", () => {
-  it("wants a summary for a text-bearing file the current model has not seen", () => {
-    expect(needsSummary(file(), ASSIST_VERSION)).toBe(true);
-    expect(needsSummary(file({ assistVersion: ASSIST_VERSION }), ASSIST_VERSION)).toBe(false);
-  });
-
-  it("never asks again for a file the model declined, until the model changes", () => {
-    const declined = file({ assistVersion: ASSIST_VERSION, noSummary: "declined" });
-    expect(needsSummary(declined, ASSIST_VERSION)).toBe(false);
-    expect(needsSummary(declined, ASSIST_VERSION + 1)).toBe(true);
-    const removed = file({ assistVersion: ASSIST_VERSION, noSummary: "user" });
-    expect(needsSummary(removed, ASSIST_VERSION)).toBe(false);
-  });
-
-  it("leaves photos, videos, trashed files, and files with no text alone", () => {
-    expect(needsSummary(file({ mime: "image/jpeg" }), ASSIST_VERSION)).toBe(false);
-    expect(needsSummary(file({ mime: "video/mp4", hasText: true }), ASSIST_VERSION)).toBe(false);
-    expect(needsSummary(file({ trashed: true }), ASSIST_VERSION)).toBe(false);
-    expect(needsSummary(file({ hasText: false, inlineText: false }), ASSIST_VERSION)).toBe(false);
-    expect(needsSummary(file({ hasText: false, inlineText: true }), ASSIST_VERSION)).toBe(true);
-  });
-});
 
 describe("sanitizeSummary", () => {
   it("keeps one clean line under the cap, cut at a word", () => {
@@ -97,9 +62,13 @@ describe("outcomeFor", () => {
     expect(outcomeFor(new AssistantError("guardrail", ""))).toBe("declined");
     expect(outcomeFor(new AssistantError("language", ""))).toBe("language");
     expect(outcomeFor(new AssistantError("rate-limited", ""))).toBe("paused");
+    // About the file: a try is spent.
     expect(outcomeFor(new AssistantError("timeout", ""))).toBeNull();
-    expect(outcomeFor(new AssistantError("cancelled", ""))).toBeNull();
     expect(outcomeFor(new Error("boom"))).toBeNull();
+    // About this device's model, not the file: paused, no try spent.
+    for (const code of ["unavailable", "preempted", "cancelled", "bad-request"]) {
+      expect(outcomeFor(new AssistantError(code, ""))).toBe("paused");
+    }
   });
 });
 

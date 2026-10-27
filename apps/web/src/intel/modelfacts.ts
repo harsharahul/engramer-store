@@ -8,6 +8,7 @@
  * reading and offered for confirmation. Nothing here acts on anything.
  */
 
+import { isRealDate } from "./dates";
 import { factId, groundFacts, type DocumentKind, type Fact, type FactKind } from "./facts";
 import type { JsonSchemaProperty } from "./assistant";
 
@@ -29,6 +30,8 @@ export const DOCUMENT_KINDS: readonly DocumentKind[] = [
   "itinerary",
   "car-rental",
   "event-ticket",
+  "delivery",
+  "dining",
   "other",
 ];
 
@@ -73,15 +76,7 @@ const ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
 const AMOUNT = /^\d+(?:\.\d{1,2})?$/;
 const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-function validDate(value: string): boolean {
-  const match = ISO.exec(value);
-  if (!match) {
-    return false;
-  }
-  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  const probe = new Date(year, month - 1, day);
-  return probe.getFullYear() === year && probe.getMonth() === month - 1 && probe.getDate() === day;
-}
+const validDate = isRealDate;
 
 /**
  * Types the model's proposals and grounds them against the text. What

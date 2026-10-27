@@ -101,12 +101,30 @@ import {
 } from "./activity";
 import { isPdf } from "./intel/extract";
 import { CLIP_MODEL_VERSION, embedImage, semanticEnabled } from "./intel/semantic";
-import { asFacts, mergeFacts, reconcileFacts, type Fact, type FactEvidence } from "./intel/facts";
+import {
+  asFacts,
+  mergeFacts,
+  ownerDecided,
+  reconcileFacts,
+  settleDisputes,
+  type Fact,
+  type FactEvidence,
+} from "./intel/facts";
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import { assistantAvailableNow, assistantEnabled, lastAssistantState } from "./intel/assistant";
 import { CATEGORIES } from "./intel/categorize";
-import { ASSIST_VERSION, MIN_TEXT, cleanTags, needsSummary, outcomeFor, summarize } from "./intel/summarize";
-import { EXACT_SOURCES, tripTag, type TripSuggestion } from "./intel/trips";
+import { MIN_TEXT, cleanTags, outcomeFor, summarize } from "./intel/summarize";
+import {
+  MAX_TRIES,
+  MODEL_READER,
+  READER_RANK,
+  modelStamp,
+  needsReading,
+  stampInto,
+  stampOf,
+  type ReadingStamp,
+} from "./intel/reading";
+import { tripTag, type TripSuggestion } from "./intel/trips";
 import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
 import { blankDocument, DOCX_MIME, XLSX_MIME } from "./office/templates";
@@ -152,6 +170,8 @@ export interface FileEntry {
   assistVersion?: number;
   /** Why there is no summary at that version. */
   noSummary?: string;
+  /** The last model reading, synced; see intel/reading.ts. */
+  reading?: ReadingStamp;
   /** Legacy row still carrying text inside its metadata. */
   inlineText: boolean;
   category?: string;
@@ -424,6 +444,8 @@ interface StoreState {
   ensureFolderPath: (path: string[]) => Promise<string>;
   /** Imports .eml and .mbox files as email records and attachment files. */
   importMail: (sources: UploadSource[]) => Promise<ImportReport>;
+  /** The owner's Retry: readings that failed three times start their count again. Answers how many. */
+  retryFailedReadings: () => Promise<number>;
   /** Stores one new file in a folder, without an upload row; answers its id. */
   saveNewFile: (file: UploadSource, folderId: string | null) => Promise<string>;
   renameFolder: (id: string, name: string) => Promise<void>;
@@ -597,6 +619,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array, prior?: FileEntry): Fi
     summary: meta.summary,
     assistVersion: meta.assistVersion,
     noSummary: meta.noSummary,
+    ...(meta.reading ? { reading: meta.reading } : {}),
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -656,6 +679,7 @@ export function entryFromUpdate(
     summary: meta.summary,
     assistVersion: meta.assistVersion,
     noSummary: meta.noSummary,
+    ...(meta.reading ? { reading: meta.reading } : {}),
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -701,6 +725,7 @@ export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEnt
     summary: meta.summary,
     assistVersion: meta.assistVersion,
     noSummary: meta.noSummary,
+    ...(meta.reading ? { reading: meta.reading } : {}),
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -753,6 +778,8 @@ export function metadataOf(file: FileEntry): FileMetadata {
     ...(file.summary !== undefined ? { summary: file.summary } : {}),
     ...(file.assistVersion !== undefined ? { assistVersion: file.assistVersion } : {}),
     ...(file.noSummary !== undefined ? { noSummary: file.noSummary } : {}),
+    // The one record that keeps a read file from being read again.
+    ...(file.reading ? { reading: file.reading } : {}),
     category: file.category,
     tags: file.tags,
     ...(file.facts.length > 0 ? { facts: file.facts } : {}),
@@ -832,7 +859,9 @@ export function needsProcessing(file: FileEntry): boolean {
     (ocrEnabled() && needsText(file)) ||
     (semanticEnabled() &&
       (needsClip(file, CLIP_MODEL_VERSION) || needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION))) ||
-    (assistantEnabled() && assistantAvailableNow() && needsSummary(file, ASSIST_VERSION))
+    (assistantEnabled() &&
+      assistantAvailableNow() &&
+      needsReading(file, MODEL_READER, { factsWanted: factsEnabled(), now: Date.now() }))
   );
 }
 
@@ -872,20 +901,38 @@ export function needsScenes(file: FileEntry, clipVersion: number, scenesVersion:
 export function pendingDerivatives(
   files: Map<string, FileEntry>,
   clipVersion: number,
-  opts: { ocr?: boolean; semantic?: boolean; scenesVersion?: number; assistVersion?: number } = {},
-): { thumbs: number; text: number; meaning: number; tags: number; scenes: number; summaries: number } {
+  opts: {
+    ocr?: boolean;
+    semantic?: boolean;
+    scenesVersion?: number;
+    /** Count files the model still owes a reading, given whether dates are wanted. */
+    readings?: { factsWanted: boolean; now: number };
+  } = {},
+): {
+  thumbs: number;
+  text: number;
+  meaning: number;
+  tags: number;
+  scenes: number;
+  summaries: number;
+  /** Readings that failed three times and wait for the owner's Retry. */
+  failedReadings: number;
+} {
   const countText = opts.ocr !== false;
   const countMeaning = opts.semantic !== false;
   const scenesVersion = opts.scenesVersion ?? 0;
-  const assistVersion = opts.assistVersion ?? 0;
   let thumbs = 0;
   let text = 0;
   let meaning = 0;
   let tags = 0;
   let scenes = 0;
   let summaries = 0;
+  let failedReadings = 0;
   for (const file of files.values()) {
-    if (assistVersion > 0 && needsSummary(file, assistVersion)) {
+    if (!file.trashed && stampOf(file)?.outcome === "failed") {
+      failedReadings++;
+    }
+    if (opts.readings && needsReading(file, MODEL_READER, opts.readings)) {
       summaries++;
     }
     if (needsThumb(file)) {
@@ -904,7 +951,7 @@ export function pendingDerivatives(
       scenes++;
     }
   }
-  return { thumbs, text, meaning, tags, scenes, summaries };
+  return { thumbs, text, meaning, tags, scenes, summaries, failedReadings };
 }
 
 /**
@@ -1265,7 +1312,8 @@ export const useStore = create<StoreState>((set, get) => {
     if (!file) {
       return;
     }
-    const facts = file.facts.map((fact) => (fact.id === factId ? change(fact) : fact));
+    // An answer to a disagreement settles both readings in this one write.
+    const facts = settleDisputes(file.facts.map((fact) => (fact.id === factId ? change(fact) : fact)));
     await patchFileMeta(id, { facts });
   };
 
@@ -2635,6 +2683,31 @@ export const useStore = create<StoreState>((set, get) => {
 
     saveNewFile: async (file, folderId) => (await storeSource(file, folderId)).id,
 
+    retryFailedReadings: async () => {
+      // Through stampOf, so a failure an older build left as the legacy pair
+      // alone is counted and retried too.
+      const failed = [...get().files.values()].filter(
+        (file) => !file.trashed && stampOf(file)?.outcome === "failed",
+      );
+      if (failed.length === 0) {
+        return 0;
+      }
+      await get().patchFilesMeta(
+        failed.map((file) => file.id),
+        (file) => {
+          const stamp = stampOf(file);
+          if (!stamp) {
+            return null;
+          }
+          const { reason: _cleared, ...rest } = stamp;
+          const meta: Partial<FileMetadata> = {};
+          stampInto(meta, { ...rest, outcome: "retrying", tries: 0 });
+          return meta;
+        },
+      );
+      return failed.length;
+    },
+
     importMail: (sources) => {
       const run = mailImports.then(() => importMailNow(sources));
       mailImports = run.catch(() => {});
@@ -2711,14 +2784,16 @@ export const useStore = create<StoreState>((set, get) => {
       // file, not one per click.
       const confirm = new Set(decisions.confirm ?? []);
       const dismiss = new Set(decisions.dismiss ?? []);
-      const facts = file.facts.map((fact) => {
-        if (confirm.has(fact.id)) {
-          const done: Fact = { ...fact, confirmed: true };
-          delete done.ambiguous;
-          return done;
-        }
-        return dismiss.has(fact.id) ? { ...fact, dismissed: true } : fact;
-      });
+      const facts = settleDisputes(
+        file.facts.map((fact) => {
+          if (confirm.has(fact.id)) {
+            const done: Fact = { ...fact, confirmed: true };
+            delete done.ambiguous;
+            return done;
+          }
+          return dismiss.has(fact.id) ? { ...fact, dismissed: true } : fact;
+        }),
+      );
       await patchFileMeta(id, { facts });
     },
 
@@ -2730,16 +2805,12 @@ export const useStore = create<StoreState>((set, get) => {
           continue;
         }
         // Accepting the group is ratification: the exact events that formed
-        // it become confirmed in the same write, so the rules that speak
-        // only on confirmed facts may now speak about this trip. Soft
-        // unconfirmed facts never took part in the grouping and stay
-        // unconfirmed; nobody has looked at them yet.
+        // it become confirmed in the same write: they already counted on
+        // their evidence, and now they are the owner's word too. Soft
+        // facts never took part in the grouping and stay as they were;
+        // nobody has looked at them yet.
         const facts = file.facts.map((fact) =>
-          fact.kind === "event" &&
-          !fact.dismissed &&
-          !fact.confirmed &&
-          fact.confidence === 1 &&
-          EXACT_SOURCES.has(fact.source)
+          fact.kind === "event" && !ownerDecided(fact) && fact.accepted === "exact"
             ? { ...fact, confirmed: true }
             : fact,
         );
@@ -3012,7 +3083,9 @@ export const useStore = create<StoreState>((set, get) => {
           force.scenes ?? (semanticEnabled() && needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION)),
         summary:
           force.summary ??
-          (assistantEnabled() && assistantAvailableNow() && needsSummary(file, ASSIST_VERSION)),
+          (assistantEnabled() &&
+            assistantAvailableNow() &&
+            needsReading(file, MODEL_READER, { factsWanted: factsEnabled(), now: Date.now() })),
       };
       if (
         !needs.thumb &&
@@ -3047,9 +3120,29 @@ export const useStore = create<StoreState>((set, get) => {
         if (!needs.summary) {
           return;
         }
+        const factsWanted = factsEnabled();
+        const stamp = (outcome: ReadingStamp["outcome"]) =>
+          stampInto(meta, modelStamp({ digest: current.digest, factsWanted, outcome, now: Date.now() }));
+        // Whether another device finished these same contents while this one
+        // was reading: its stamp, at equal or stronger rank, stands, and this
+        // result is dropped instead of written over it.
+        const startedWith = stampOf(current)?.at;
+        const readElsewhere = () => {
+          const latest = get().files.get(current.id);
+          const theirs = latest ? stampOf(latest) : undefined;
+          return (
+            theirs !== undefined &&
+            theirs.at !== startedWith &&
+            // Only a finished reading stands; another device's failure never
+            // outweighs this device's answer.
+            theirs.outcome !== "retrying" &&
+            theirs.outcome !== "failed" &&
+            theirs.digest === current.digest &&
+            theirs.rank <= READER_RANK[MODEL_READER]!
+          );
+        };
         if (!text || text.length < MIN_TEXT) {
-          meta.assistVersion = ASSIST_VERSION;
-          meta.noSummary = "short";
+          stamp("short");
           return;
         }
         const state = lastAssistantState();
@@ -3061,16 +3154,18 @@ export const useStore = create<StoreState>((set, get) => {
             contextSize: state.state === "available" ? state.contextSize : 4096,
             // Date reading is its own switch; when it is on, the same
             // reading proposes the document's dates, grounded and offered.
-            withFacts: factsEnabled(),
+            withFacts: factsWanted,
             signal,
           });
-          meta.assistVersion = ASSIST_VERSION;
-          if (!reading) {
-            meta.noSummary = "unsupported";
+          if (readElsewhere()) {
             return;
           }
+          if (!reading) {
+            stamp("unsupported");
+            return;
+          }
+          stamp("found");
           meta.summary = reading.summary;
-          meta.noSummary = undefined;
           for (const tag of cleanTags(reading.tags, [...tags])) {
             tags.add(tag);
           }
@@ -3091,13 +3186,33 @@ export const useStore = create<StoreState>((set, get) => {
             throw error;
           }
           const verdict = outcomeFor(error);
+          if (readElsewhere()) {
+            return;
+          }
           if (verdict === "paused") {
             outcome.summaryPaused = 1;
           } else if (verdict) {
-            meta.assistVersion = ASSIST_VERSION;
-            meta.noSummary = verdict;
+            stamp(verdict);
+          } else {
+            // A passing failure (a deadline, a busy model): owed again, but the
+            // tries are counted in the synced stamp, so every device together
+            // gets three before the reading is final and says why.
+            const prior = stampOf(current);
+            const tries =
+              (prior?.outcome === "retrying" && prior.digest === current.digest ? prior.tries : 0) + 1;
+            const reason = (error instanceof Error ? error.message : String(error)).slice(0, 120);
+            stampInto(
+              meta,
+              modelStamp({
+                digest: current.digest,
+                factsWanted,
+                outcome: tries >= MAX_TRIES ? "failed" : "retrying",
+                tries,
+                reason,
+                now: Date.now(),
+              }),
+            );
           }
-          // Anything else is transient: the file stays owed.
         }
       };
 
@@ -3354,7 +3469,10 @@ export const useStore = create<StoreState>((set, get) => {
       if (!file) {
         return;
       }
-      await patchFileMeta(id, { summary: undefined, noSummary: "user", assistVersion: ASSIST_VERSION });
+      // The owner's removal is final: no reader reads this file for a summary again.
+      const meta: Partial<FileMetadata> = { summary: undefined };
+      stampInto(meta, modelStamp({ digest: file.digest, factsWanted: true, outcome: "user", now: Date.now() }));
+      await patchFileMeta(id, meta);
     },
 
     processLibrary: async (opts) => {
@@ -3465,7 +3583,7 @@ export const useStore = create<StoreState>((set, get) => {
           // file whose facts are all unanswered is fair game for a rescan,
           // which is what lets a reader improvement reach documents that
           // were read badly the first time.
-          file.facts.every((fact) => !fact.confirmed && !fact.dismissed) &&
+          file.facts.every((fact) => !ownerDecided(fact)) &&
           (file.hasText || file.text !== undefined),
       );
       let found = 0;
@@ -3515,6 +3633,16 @@ export const useStore = create<StoreState>((set, get) => {
             opts?.onOutcome?.(file.id, true);
             continue;
           }
+          const merged = mergeFacts(
+            current.facts,
+            scanned.facts.map((fact) => ({ ...fact, digest: current.digest })),
+          );
+          if (JSON.stringify(merged) === JSON.stringify(current.facts)) {
+            // Nothing new: writing the same facts again would only sync a
+            // change that is not one, and a sync is what schedules a pass.
+            opts?.onOutcome?.(file.id, true);
+            continue;
+          }
           await uploadBlob(
             file.id,
             "index",
@@ -3532,12 +3660,7 @@ export const useStore = create<StoreState>((set, get) => {
           // facts are all unanswered, and a rescan folding into what exists
           // is what lets a better reader supersede a worse reading without
           // duplicating what it merely re-found.
-          await patchFileMeta(file.id, {
-            facts: mergeFacts(
-              current.facts,
-              scanned.facts.map((fact) => ({ ...fact, digest: current.digest })),
-            ),
-          });
+          await patchFileMeta(file.id, { facts: merged });
           found++;
           opts?.onOutcome?.(file.id, true);
         } catch {

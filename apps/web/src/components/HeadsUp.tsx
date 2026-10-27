@@ -46,20 +46,30 @@ const BULK_ABOVE = 8;
 interface FileGroup {
   file: FileEntry;
   facts: Fact[];
+  /** For a reading another reader disagrees with: that other reading. */
+  alternatives: Map<string, Fact>;
 }
 
 function groupByFile(files: FileEntry[], now: number): FileGroup[] {
   const byId = new Map(files.map((file) => [file.id, file]));
   const groups: FileGroup[] = [];
-  for (const { fileId, fact } of offeredFacts(files, now)) {
-    const last = groups[groups.length - 1];
-    if (last && last.file.id === fileId) {
-      last.facts.push(fact);
-    } else {
-      groups.push({ file: byId.get(fileId)!, facts: [fact] });
+  for (const { fileId, fact, alternative } of offeredFacts(files, now)) {
+    let group = groups[groups.length - 1];
+    if (!group || group.file.id !== fileId) {
+      group = { file: byId.get(fileId)!, facts: [], alternatives: new Map() };
+      groups.push(group);
+    }
+    group.facts.push(fact);
+    if (alternative) {
+      group.alternatives.set(fact.id, alternative);
     }
   }
   return groups;
+}
+
+/** A value as the owner reads it: a date in words, an amount with its currency. */
+function valueText(fact: Fact): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(fact.value) ? shown(fact.value) : `${fact.unit ?? ""} ${fact.value}`.trim();
 }
 
 export function HeadsUp(props: {
@@ -321,12 +331,14 @@ function FileCard(props: {
   onConfirm: (factId: string, value?: string) => void;
   onDismiss: (factId: string) => void;
 }) {
-  const { file, facts } = props.group;
+  const { file, facts, alternatives } = props.group;
   const single = facts.length === 1;
   return (
     <div className="pending-card">
       <div className="pending-card-text">
-        {single ? (
+        {single && alternatives.has(facts[0]!.id) ? (
+          <>Two readings of this document disagree about {describeFact(facts[0]!).split(",")[0]}. </>
+        ) : single ? (
           facts[0]!.kind === "dated" || (facts[0]!.kind === "event" && facts[0]!.label) ? (
             // The system is repeating the document, not interpreting it,
             // and the sentence should sound like that.
@@ -346,7 +358,9 @@ function FileCard(props: {
           key={fact.id}
           fact={fact}
           named={!single}
+          alternative={alternatives.get(fact.id)}
           onConfirm={(value) => props.onConfirm(fact.id, value)}
+          onConfirmOther={(other) => props.onConfirm(other.id)}
           onDismiss={() => props.onDismiss(fact.id)}
         />
       ))}
@@ -365,12 +379,16 @@ function FactRow(props: {
   fact: Fact;
   /** Whether to restate the fact, for cards holding several. */
   named: boolean;
+  /** Another reader's reading of the same thing, when the two disagree. */
+  alternative?: Fact;
   onConfirm: (value?: string) => void;
+  onConfirmOther: (other: Fact) => void;
   onDismiss: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(props.fact.value);
   const other = props.fact.ambiguous ? swappedReading(props.fact.value) : null;
+  const alternative = props.alternative;
 
   return (
     <div className="pending-card-actions">
@@ -394,6 +412,17 @@ function FactRow(props: {
             Cancel
           </Button>
         </>
+      ) : alternative ? (
+        // Two readers disagree: the owner picks, and that settles both.
+        <>
+          <span className="pending-ask">Which one?</span>
+          <Button variant="secondary" size="xs" onClick={() => props.onConfirm()}>
+            {valueText(props.fact)}
+          </Button>
+          <Button variant="secondary" size="xs" onClick={() => props.onConfirmOther(alternative)}>
+            {valueText(alternative)}
+          </Button>
+        </>
       ) : other ? (
         <>
           <span className="pending-ask">Which one?</span>
@@ -409,7 +438,7 @@ function FactRow(props: {
           Track it
         </Button>
       )}
-      {!editing && (
+      {!editing && /^\d{4}-\d{2}-\d{2}$/.test(props.fact.value) && (
         <button
           className="linky quiet"
           onClick={() => setEditing(true)}

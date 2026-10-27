@@ -467,3 +467,14 @@ describe("email records and the reservation reader", () => {
     expect(scanForFacts).toHaveBeenCalledWith(expect.objectContaining({ raw: html }));
   });
 });
+
+describe("calendar invites and the scanner", () => {
+  it("hands an invite's own text to the scanner", async () => {
+    const { scanForFacts } = await import("./intel/scan");
+    const { analyzeFile } = await import("./transfer");
+    vi.mocked(scanForFacts).mockClear();
+    const ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Call\r\nDTSTART:20270512T080000Z\r\nEND:VEVENT\r\nEND:VCALENDAR";
+    await analyzeFile(new File([ics], "invite.ics", { type: "text/calendar" }));
+    expect(scanForFacts).toHaveBeenCalledWith(expect.objectContaining({ raw: ics }));
+  });
+});

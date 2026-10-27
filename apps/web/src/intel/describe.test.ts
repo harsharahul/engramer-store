@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeFact, shown, whenLabel, withArticle } from "./describe";
+import { basisLabel, describeFact, documentLabel, shown, sourceLabel, whenLabel, withArticle } from "./describe";
 import type { Fact } from "./facts";
 
 const NOW = Date.UTC(2026, 7, 5);
@@ -95,5 +95,31 @@ describe("events speak their labels", () => {
       time: "15:00",
     });
     expect(describeFact(checkin)).toBe("Check-in: The Larkspur Hotel, 4 March 2027 at 15:00");
+  });
+});
+
+describe("labels for sources and documents", () => {
+  it("names booking data and calendar invites in plain words", () => {
+    expect(sourceLabel("jsonld")).toBe("read from the booking data");
+    expect(sourceLabel("ics")).toBe("read from the calendar invite");
+  });
+
+  it("names deliveries and table bookings", () => {
+    expect(documentLabel("delivery")).toBe("delivery");
+    expect(documentLabel("dining")).toBe("table booking");
+  });
+});
+
+describe("basisLabel", () => {
+  it("says why a fact counts", () => {
+    expect(basisLabel(fact({ confirmed: true }))).toBe("confirmed by you");
+    expect(basisLabel(fact({ confirmed: true, source: "user" }))).toBe("entered by you");
+    expect(basisLabel(fact({ source: "jsonld", confidence: 1, accepted: "exact" }))).toBe("read from the booking data");
+    expect(basisLabel(fact({ accepted: "agreement", reader: "label + model" }))).toBe("two readers agree");
+    expect(basisLabel(fact({ source: "model", accepted: "grounded" }))).toBe("read by the on-device model, found in the text");
+  });
+
+  it("names the reader of a fact that waits for a yes", () => {
+    expect(basisLabel(fact())).toBe("labelled in the document");
   });
 });

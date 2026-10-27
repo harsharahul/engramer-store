@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { proposedFacts } from "./modelfacts";
+import { reservationFacts } from "./reservation";
 import {
   asFacts,
   groundFacts,
+  isTracked,
+  settleDisputes,
   maskTail,
   mergeFacts,
   offeredFacts,
@@ -22,6 +26,12 @@ const fact = (over: Partial<Fact> = {}): Fact => ({
 describe("groundFacts", () => {
   it("keeps a fact whose date appears in the source", () => {
     expect(groundFacts([fact()], "Expires 03/12/2029")).toHaveLength(1);
+  });
+
+  it("an ics fact is structured and never grounded away", () => {
+    // A calendar invite states its own times; there is no text to check them against.
+    const invite = fact({ kind: "event", document: "event-ticket", source: "ics", confidence: 1, label: "Concert" });
+    expect(groundFacts([invite], "")).toEqual([invite]);
   });
 
   it("discards a fact whose date appears nowhere in the source", () => {
@@ -244,5 +254,163 @@ describe("mergeFacts", () => {
     const merged = mergeFacts([], many);
     expect(merged.length).toBeLessThanOrEqual(12);
     expect(merged[0]!.confidence).toBe(1);
+  });
+});
+
+describe("isTracked", () => {
+  it("counts confirmed or accepted, never dismissed", () => {
+    expect(isTracked(fact({ confirmed: true }))).toBe(true);
+    expect(isTracked(fact({ accepted: "exact" }))).toBe(true);
+    expect(isTracked(fact({ accepted: "agreement" }))).toBe(true);
+    expect(isTracked(fact())).toBe(false);
+    expect(isTracked(fact({ accepted: "exact", dismissed: true }))).toBe(false);
+    expect(isTracked(fact({ confirmed: true, dismissed: true }))).toBe(false);
+  });
+
+  it("reads an exact fact stored before the marker existed as accepted", () => {
+    // Booking data read by an earlier version carries no marker but counted
+    // then; it must keep counting.
+    const [old] = asFacts([fact({ source: "jsonld", confidence: 1, kind: "event" })]);
+    expect(old!.accepted).toBe("exact");
+    const [soft] = asFacts([fact({ source: "label", confidence: 0.7 })]);
+    expect(soft!.accepted).toBeUndefined();
+    const [offered] = asFacts([fact({ source: "barcode", confidence: 0.6 })]);
+    expect(offered!.accepted).toBeUndefined();
+  });
+});
+
+describe("one order between readers", () => {
+  const NOW = Date.UTC(2027, 2, 1);
+  const checkin = (over: Partial<Fact>): Fact =>
+    fact({
+      id: "event:2027-03-04 check-in: the larkspur hotel",
+      kind: "event",
+      document: "hotel-booking",
+      value: "2027-03-04",
+      label: "Check-in: The Larkspur Hotel",
+      ...over,
+    });
+
+  it("booking data beats the model on a departure time", () => {
+    const exact = checkin({ time: "15:00", zone: "+01:00", source: "jsonld", confidence: 1, accepted: "exact" });
+    const model = checkin({ time: "14:00", source: "model", confidence: 0.45 });
+    for (const merged of [mergeFacts([model], [exact]), mergeFacts([exact], [model])]) {
+      expect(merged).toHaveLength(1);
+      expect(merged[0]).toMatchObject({ time: "15:00", source: "jsonld", accepted: "exact" });
+    }
+    expect(offeredFacts([{ id: "f", trashed: false, facts: mergeFacts([], [exact, model]) }], NOW)).toEqual([]);
+  });
+
+  it("a model date and a label date that agree are accepted together", () => {
+    const due = (source: Fact["source"], confidence: number) =>
+      fact({ id: "due:2027-04-10", kind: "due", document: "invoice", value: "2027-04-10", source, confidence });
+    const merged = mergeFacts([due("label", 0.7)], [due("model", 0.45)]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ accepted: "agreement", reader: "label + model" });
+    expect(isTracked(merged[0]!)).toBe(true);
+  });
+
+  it("two readers that disagree on an amount ask once", () => {
+    const amount = (value: string, source: Fact["source"], confidence: number) =>
+      fact({ id: `amount:${value}`, kind: "amount", document: "invoice", value, unit: "USD", label: "Amount due", source, confidence });
+    const merged = mergeFacts([amount("56.00", "label", 0.7)], [amount("65.00", "model", 0.45)]);
+    expect(merged).toHaveLength(2);
+    expect(merged.every((f) => f.disputed !== undefined && f.accepted === undefined)).toBe(true);
+    const offered = offeredFacts([{ id: "f", trashed: false, facts: merged }], NOW);
+    expect(offered).toHaveLength(1);
+    expect(offered[0]!.alternative?.value).toBe(offered[0]!.fact.value === "56.00" ? "65.00" : "56.00");
+
+    // The owner picks one: the other is dismissed, and nothing asks again.
+    const answered = settleDisputes(merged.map((f) => (f.value === "65.00" ? { ...f, confirmed: true } : f)));
+    expect(answered.find((f) => f.value === "56.00")!.dismissed).toBe(true);
+    expect(offeredFacts([{ id: "f", trashed: false, facts: answered }], NOW)).toEqual([]);
+    const rescanned = mergeFacts(answered, [amount("56.00", "label", 0.7), amount("65.00", "model", 0.45)]);
+    expect(rescanned).toEqual(answered);
+  });
+
+  it("a confirmed fact is never displaced by a later reading", () => {
+    const mine = fact({ id: "due:2027-04-10", kind: "due", document: "invoice", value: "2027-04-10", confirmed: true });
+    const exact = fact({
+      id: "due:2027-04-12",
+      kind: "due",
+      document: "invoice",
+      value: "2027-04-12",
+      source: "jsonld",
+      confidence: 1,
+      accepted: "exact",
+    });
+    expect(mergeFacts([mine], [exact])).toEqual([mine]);
+  });
+
+  it("an exact due date settles a softer reading of the same date slot", () => {
+    const model = fact({ id: "due:2027-04-01", kind: "due", document: "invoice", value: "2027-04-01", source: "model", confidence: 0.45 });
+    const exact = fact({
+      id: "due:2027-04-10",
+      kind: "due",
+      document: "invoice",
+      value: "2027-04-10",
+      source: "jsonld",
+      confidence: 1,
+      accepted: "exact",
+    });
+    expect(mergeFacts([model], [exact]).map((f) => f.value)).toEqual(["2027-04-10"]);
+  });
+});
+
+describe("readers as they really meet", () => {
+  const NOW = Date.UTC(2027, 2, 1);
+
+  it("booking data on a date settles the model's own reading of that date", () => {
+    // Real ids: the model's carries its own label and clock, so it never
+    // shares an id with the booking data's.
+    const exact = reservationFacts(
+      `<script type="application/ld+json">{"@type":"LodgingReservation","checkinTime":"2027-03-04T15:00:00+01:00","reservationFor":{"name":"Casa do Rio"}}</script>`,
+    ).map((f) => ({ ...f, accepted: "exact" as const }));
+    const text = "Check-in from 14:00 on 4 March 2027 at Casa do Rio.";
+    const model = proposedFacts({ document: "hotel-booking", facts: [{ kind: "event", label: "Check-in", value: "2027-03-04", time: "14:00" }] }, text);
+    expect(model).toHaveLength(1);
+    const merged = mergeFacts(exact, model);
+    expect(merged.filter((f) => f.kind === "event").map((f) => [f.time, f.source])).toEqual([["15:00", "jsonld"]]);
+    expect(offeredFacts([{ id: "f", trashed: false, facts: merged }], NOW)).toEqual([]);
+  });
+
+  it("an ambiguous date is never accepted by agreement", () => {
+    const due = (source: Fact["source"], confidence: number, ambiguous: boolean) =>
+      fact({ id: "due:2027-03-04", kind: "due", document: "invoice", value: "2027-03-04", source, confidence, ...(ambiguous ? { ambiguous: true } : {}) });
+    const merged = mergeFacts([due("label", 0.5, true)], [due("model", 0.45, false)]);
+    expect(merged[0]!.accepted).toBeUndefined();
+    expect(merged[0]!.ambiguous).toBe(true);
+  });
+
+  it("booking data's amount settles the model's amount even without a currency", () => {
+    const exact = fact({ id: "amount:65.00", kind: "amount", document: "invoice", value: "65.00", unit: "USD", label: "Amount due", source: "jsonld", confidence: 1, accepted: "exact" });
+    const model = fact({ id: "amount:56.00", kind: "amount", document: "invoice", value: "56.00", label: "Amount due", source: "model", confidence: 0.45 });
+    expect(mergeFacts([exact], [model]).map((f) => f.value)).toEqual(["65.00"]);
+  });
+
+  it("a confirmed date does not silently drop another reading a rule found", () => {
+    // Two installments: the owner confirmed one; the other is still worth asking about.
+    const first = fact({ id: "due:2027-04-10", kind: "due", document: "invoice", value: "2027-04-10", confirmed: true });
+    const second = fact({ id: "due:2027-05-10", kind: "due", document: "invoice", value: "2027-05-10", source: "label", confidence: 0.7 });
+    expect(mergeFacts([first], [second]).map((f) => f.value).sort()).toEqual(["2027-04-10", "2027-05-10"]);
+  });
+
+  it("ignoring a disagreement settles both readings", () => {
+    const pair = [
+      fact({ id: "due:2027-04-01", kind: "due", document: "invoice", value: "2027-04-01", source: "label", confidence: 0.7, disputed: "due:2027-04-10" }),
+      fact({ id: "due:2027-04-10", kind: "due", document: "invoice", value: "2027-04-10", source: "model", confidence: 0.45, disputed: "due:2027-04-01" }),
+    ];
+    const answered = settleDisputes(pair.map((f) => (f.source === "label" ? { ...f, dismissed: true } : f)));
+    expect(answered.every((f) => f.dismissed === true)).toBe(true);
+    expect(offeredFacts([{ id: "f", trashed: false, facts: answered }], NOW)).toEqual([]);
+  });
+
+  it("an answer an older build gave to one side is not asked again", () => {
+    // An older build confirms one side and knows nothing of the pair.
+    const facts = [
+      fact({ id: "due:2027-04-01", kind: "due", document: "invoice", value: "2027-04-01", source: "label", confidence: 0.7, disputed: "due:2027-04-10" }),
+      fact({ id: "due:2027-04-10", kind: "due", document: "invoice", value: "2027-04-10", source: "model", confidence: 0.45, disputed: "due:2027-04-01", confirmed: true }),
+    ];
+    expect(offeredFacts([{ id: "f", trashed: false, facts }], NOW)).toEqual([]);
   });
 });

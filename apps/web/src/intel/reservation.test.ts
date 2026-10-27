@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reservationFacts } from "./reservation";
+import { reservationFacts, structuredDataFacts } from "./reservation";
 
 // Synthetic throughout: invented airline, hotel, codes, dates.
 const FLIGHT_HTML = `<!doctype html><html><head>
@@ -87,5 +87,178 @@ describe("reservationFacts", () => {
     const graph = `<script type="application/ld+json">{"@graph":[{"@type":"LodgingReservation",
       "reservationFor":{"name":"Inn"},"checkinTime":"2027-04-01"}]}</script>`;
     expect(reservationFacts(graph)).toHaveLength(1);
+  });
+});
+
+const ld = (node: Record<string, unknown>) =>
+  `<html><script type="application/ld+json">${JSON.stringify(node)}</script></html>`;
+
+describe("more reservation types", () => {
+  it("reads an event ticket", () => {
+    const facts = reservationFacts(
+      ld({
+        "@type": "EventReservation",
+        reservationNumber: "EVT-5521",
+        reservationFor: {
+          "@type": "MusicEvent",
+          name: "Harbor Lights Concert",
+          startDate: "2027-05-12T19:30:00-07:00",
+          endDate: "2027-05-12T22:00:00-07:00",
+        },
+      }),
+    );
+    expect(facts.find((f) => f.label === "Harbor Lights Concert")).toMatchObject({
+      kind: "event",
+      document: "event-ticket",
+      value: "2027-05-12",
+      time: "19:30",
+      zone: "-07:00",
+      source: "jsonld",
+      confidence: 1,
+    });
+    expect(facts.find((f) => f.label === "Harbor Lights Concert ends")?.time).toBe("22:00");
+    expect(facts.find((f) => f.kind === "identifier")?.value).toBe("EVT-5521");
+  });
+
+  it("reads a dinner reservation", () => {
+    const facts = reservationFacts(
+      ld({
+        "@type": "FoodEstablishmentReservation",
+        startTime: "2027-05-13T20:00:00+01:00",
+        reservationFor: { "@type": "Restaurant", name: "Casa Verde" },
+      }),
+    );
+    expect(facts).toEqual([
+      expect.objectContaining({
+        kind: "event",
+        document: "dining",
+        value: "2027-05-13",
+        time: "20:00",
+        label: "Table at Casa Verde",
+      }),
+    ]);
+  });
+
+  it("reads a bus departure and arrival", () => {
+    const facts = reservationFacts(
+      ld({
+        "@type": "BusReservation",
+        reservationFor: {
+          "@type": "BusTrip",
+          provider: { name: "Coastline Coaches" },
+          departureBusStop: { name: "Central Station" },
+          arrivalBusStop: { name: "Seaside" },
+          departureTime: "2027-06-01T08:15:00+02:00",
+          arrivalTime: "2027-06-01T11:40:00+02:00",
+        },
+      }),
+    );
+    expect(facts.map((f) => [f.label, f.time, f.document])).toEqual([
+      ["Bus Coastline Coaches departs Central Station", "08:15", "itinerary"],
+      ["Bus Coastline Coaches arrives Seaside", "11:40", "itinerary"],
+    ]);
+  });
+
+  it("reads a boat departure", () => {
+    const facts = reservationFacts(
+      ld({
+        "@type": "BoatReservation",
+        reservationFor: {
+          "@type": "BoatTrip",
+          provider: { name: "Island Ferries" },
+          departureBoatTerminal: { name: "North Pier" },
+          departureTime: "2027-06-03T07:00:00+02:00",
+        },
+      }),
+    );
+    expect(facts.map((f) => f.label)).toEqual(["Boat Island Ferries departs North Pier"]);
+  });
+
+  it("keeps time zones as written", () => {
+    const facts = reservationFacts(
+      ld({
+        "@type": "FoodEstablishmentReservation",
+        startTime: "2027-05-13T20:00:00Z",
+        reservationFor: { name: "Casa Verde" },
+      }),
+    );
+    expect(facts[0]).toMatchObject({ time: "20:00", zone: "UTC" });
+  });
+
+  it("reads a type written with its schema.org address", () => {
+    const facts = reservationFacts(
+      ld({
+        "@type": "http://schema.org/LodgingReservation",
+        checkinTime: "2027-03-04T15:00:00-05:00",
+        reservationFor: { name: "The Larkspur Hotel" },
+      }),
+    );
+    expect(facts[0]).toMatchObject({ label: "Check-in: The Larkspur Hotel", document: "hotel-booking" });
+  });
+
+  it("a type name that only shares a prefix is not read", () => {
+    expect(
+      reservationFacts(ld({ "@type": "BusinessEvent", startDate: "2027-05-12T09:00:00Z", name: "Expo" })),
+    ).toEqual([]);
+  });
+});
+
+describe("invoices and deliveries", () => {
+  it("reads an invoice's due date and amount", () => {
+    const facts = structuredDataFacts(
+      ld({
+        "@type": "Invoice",
+        confirmationNumber: "INV-20270410",
+        paymentDueDate: "2027-04-10",
+        totalPaymentDue: { "@type": "PriceSpecification", price: "1,065.40", priceCurrency: "USD" },
+        provider: { name: "Example Power" },
+      }),
+    );
+    expect(facts.find((f) => f.kind === "due")).toMatchObject({
+      value: "2027-04-10",
+      document: "invoice",
+      label: "Payment due",
+      source: "jsonld",
+      confidence: 1,
+    });
+    expect(facts.find((f) => f.kind === "identifier")?.value).toBe("INV-20270410");
+  });
+
+  it("an invoice amount carries its currency", () => {
+    const facts = structuredDataFacts(
+      ld({ "@type": "Invoice", totalPaymentDue: { price: 65, priceCurrency: "EUR" } }),
+    );
+    expect(facts.find((f) => f.kind === "amount")).toMatchObject({
+      value: "65.00",
+      unit: "EUR",
+      label: "Amount due",
+      document: "invoice",
+    });
+  });
+
+  it("reads a delivery window", () => {
+    const facts = structuredDataFacts(
+      ld({
+        "@type": "ParcelDelivery",
+        trackingNumber: "TRK99887766",
+        expectedArrivalFrom: "2027-04-02T09:00:00-07:00",
+        expectedArrivalUntil: "2027-04-02T17:00:00-07:00",
+      }),
+    );
+    expect(facts.filter((f) => f.kind === "event").map((f) => [f.label, f.time, f.document])).toEqual([
+      ["Delivery window opens", "09:00", "delivery"],
+      ["Delivery expected by", "17:00", "delivery"],
+    ]);
+    expect(facts.find((f) => f.kind === "identifier")).toMatchObject({ value: "TRK99887766", label: "Tracking number" });
+  });
+
+  it("refuses a due date that does not exist", () => {
+    const facts = structuredDataFacts(ld({ "@type": "Invoice", paymentDueDate: "2027-02-31" }));
+    expect(facts.filter((f) => f.kind === "due")).toEqual([]);
+  });
+
+  it("still reads reservations, once each", () => {
+    const facts = structuredDataFacts(FLIGHT_HTML + FLIGHT_HTML);
+    expect(facts.filter((f) => f.kind === "event")).toHaveLength(2);
   });
 });

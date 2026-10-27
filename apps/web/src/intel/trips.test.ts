@@ -1,32 +1,35 @@
 import { describe, expect, it } from "vitest";
-import type { Fact } from "./facts";
+import { withExactAcceptance, type Fact } from "./facts";
 import { assembleItinerary, departureAdvice, suggestTrips, tripTag, tripTitle, type TripFile } from "./trips";
 
 const NOW = Date.UTC(2027, 1, 1); // 1 Feb 2027, ahead of the trips below.
 
 let seq = 0;
-const event = (value: string, label: string, over: Partial<Fact> = {}): Fact => ({
-  id: `event:${value} ${label.toLowerCase()} ${seq++}`,
-  kind: "event",
-  document: "itinerary",
-  value,
-  label,
-  source: "jsonld",
-  confidence: 1,
-  ...over,
-});
+// Through the same step stored facts take, so exact readings carry their mark.
+const event = (value: string, label: string, over: Partial<Fact> = {}): Fact =>
+  withExactAcceptance({
+    id: `event:${value} ${label.toLowerCase()} ${seq++}`,
+    kind: "event",
+    document: "itinerary",
+    value,
+    label,
+    source: "jsonld",
+    confidence: 1,
+    ...over,
+  });
 
-const ref = (masked: string, over: Partial<Fact> = {}): Fact => ({
-  id: `identifier:${masked}:${seq++}`,
-  kind: "identifier",
-  document: "itinerary",
-  value: masked,
-  masked,
-  label: "Confirmation number",
-  source: "jsonld",
-  confidence: 1,
-  ...over,
-});
+const ref = (masked: string, over: Partial<Fact> = {}): Fact =>
+  withExactAcceptance({
+    id: `identifier:${masked}:${seq++}`,
+    kind: "identifier",
+    document: "itinerary",
+    value: masked,
+    masked,
+    label: "Confirmation number",
+    source: "jsonld",
+    confidence: 1,
+    ...over,
+  });
 
 const flight = (): TripFile => ({
   id: "f-flight",
@@ -64,6 +67,18 @@ describe("suggestTrips", () => {
       destination: "New York",
     });
     expect([...trips[0]!.fileIds].sort()).toEqual(["f-flight", "f-hotel"]);
+  });
+
+  it("counts a calendar invite's times as exact evidence", async () => {
+    // The same stay, known only from the invite the hotel attached.
+    const invite: TripFile = {
+      ...hotel(),
+      id: "f-invite",
+      facts: hotel().facts.map((f) => ({ ...f, source: "ics" as const })),
+    };
+    const trips = await suggestTrips([flight(), invite], NOW);
+    expect(trips).toHaveLength(1);
+    expect([...trips[0]!.fileIds].sort()).toEqual(["f-flight", "f-invite"]);
   });
 
   it("leaves an unrelated document out, even in the same week", async () => {
@@ -121,8 +136,9 @@ describe("suggestTrips", () => {
       id: "f-stay",
       name: "brooklyn-inn.txt",
       facts: [
-        event("2027-03-20", "Check-in: Brooklyn Inn", { source: "user" }),
-        event("2027-03-24", "Check-out: Brooklyn Inn", { source: "user" }),
+        // Entered by hand, which is always also a confirmation.
+        event("2027-03-20", "Check-in: Brooklyn Inn", { source: "user", confirmed: true }),
+        event("2027-03-24", "Check-out: Brooklyn Inn", { source: "user", confirmed: true }),
       ],
     };
     // Sixteen days from the flight and no shared reference: apart on their own.
