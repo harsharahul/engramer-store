@@ -5,6 +5,7 @@ import {
   headChunk,
   outcomeFor,
   sanitizeSummary,
+  readingFingerprint,
   readingSchema,
   summarize,
   summarySchema,
@@ -97,6 +98,48 @@ describe("summarize", () => {
     expect(String(calls[0]!.prompt)).toContain("acme.pdf");
   });
 
+  it("an email's reading carries its kind", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const answer = await summarize(
+      { text: "Your water bill is USD 64.10.", name: "Your water bill.email", categories: vocab, contextSize: 4096, mail: true },
+      async (request) => {
+        calls.push(request as unknown as Record<string, unknown>);
+        return { summary: "A water bill.", tags: [], kind: "Receipts", mailKind: "bill" };
+      },
+    );
+    expect(answer?.mailKind).toBe("bill");
+    const schema = calls[0]!.schema as { properties: Record<string, { enum?: string[] }> };
+    expect(schema.properties.mailKind!.enum).toEqual(["booking", "bill", "delivery", "receipt", "newsletter", "personal", "other"]);
+    expect(String(calls[0]!.instructions)).toContain("email");
+  });
+
+  it("a newsletter's reading names its kind beside what it read", async () => {
+    // Whether a newsletter's dates are dropped is decided by the store, by
+    // how far the kind is trusted; the reading only reports.
+    const text = "Sale ends on 30 May 2027. Save 20%.";
+    const answer = await summarize(
+      { text, name: "Sale.email", categories: vocab, contextSize: 4096, mail: true, withFacts: true },
+      async () => ({
+        summary: "A store newsletter.",
+        tags: [],
+        kind: "Documents",
+        mailKind: "newsletter",
+        document: "other",
+        facts: [{ kind: "due", label: "Sale ends", value: "2027-05-30" }],
+      }),
+    );
+    expect(answer?.mailKind).toBe("newsletter");
+    expect(answer?.facts.map((f) => f.value)).toEqual(["2027-05-30"]);
+  });
+
+  it("a kind outside the list is dropped", async () => {
+    const answer = await summarize(
+      { text: "hello", name: "x.email", categories: vocab, contextSize: 4096, mail: true },
+      async () => ({ summary: "A note.", tags: [], kind: "Notes", mailKind: "spaceship" }),
+    );
+    expect(answer).not.toHaveProperty("mailKind");
+  });
+
   it("drops a kind outside the vocabulary and an empty summary", async () => {
     const answer = await summarize(
       { text: "x".repeat(400), name: "n", categories: vocab, contextSize: 4096 },
@@ -150,5 +193,14 @@ describe("summarize with facts", () => {
       ["expiry", "2026-10-05", "model"],
       ["due", "2025-09-30", "model"],
     ]);
+  });
+});
+
+describe("readingFingerprint", () => {
+  it("names the request the reader is sent, so measured scores can be tied to it", () => {
+    expect(readingFingerprint()).toMatch(/^[0-9a-f]{8}$/);
+    expect(readingFingerprint()).toBe(readingFingerprint());
+    // Another list of kinds is another prompt.
+    expect(readingFingerprint(["Receipts", "Travel"])).not.toBe(readingFingerprint());
   });
 });

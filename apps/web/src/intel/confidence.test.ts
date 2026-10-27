@@ -1,0 +1,139 @@
+import { describe, expect, it } from "vitest";
+import type { Fact } from "./facts";
+import { acceptance, MIN_SAMPLE, saneFact, stakesOf, trustedKind, trustedMailKind, type ReaderScores } from "./confidence";
+import { READER_VERSION } from "./reading";
+import { readingFingerprint } from "./summarize";
+
+const NOW = Date.UTC(2027, 2, 1);
+
+const fact = (over: Partial<Fact>): Fact => ({
+  id: "x",
+  kind: "due",
+  document: "invoice",
+  value: "2027-04-10",
+  label: "Payment due",
+  source: "model",
+  confidence: 0.45,
+  ...over,
+});
+
+const CURRENT = READER_VERSION.apple!;
+const PROMPT = readingFingerprint();
+
+const scores = (dates: { precision: number; offered: number }, version = CURRENT): ReaderScores => ({
+  reader: "apple",
+  version,
+  prompt: PROMPT,
+  tasks: { dates: { ...dates, recall: 0.5, expected: 40 }, amounts: { precision: 1, recall: 0.3, offered: 3, expected: 10 } },
+});
+
+const trusted = scores({ precision: 0.99, offered: MIN_SAMPLE + 10 });
+
+describe("acceptance", () => {
+  it("a grounded bill due date is accepted where the measured precision allows it", () => {
+    expect(acceptance(fact({}), { scores: trusted, siblings: [], now: NOW })).toBe("grounded");
+  });
+
+  it("the same date stays offered when the task measured below 98%", () => {
+    expect(acceptance(fact({}), { scores: scores({ precision: 0.69, offered: 40 }), siblings: [], now: NOW })).toBeNull();
+  });
+
+  it("a precision measured over too few readings is not trusted", () => {
+    // Amounts measured 100% over three readings.
+    const amount = fact({ id: "amount:65.00", kind: "amount", value: "65.00", unit: "USD", label: "Amount due" });
+    expect(acceptance(amount, { scores: trusted, siblings: [], now: NOW })).toBeNull();
+  });
+
+  it("scores measured for another version of the reader are not trusted", () => {
+    expect(acceptance(fact({}), { scores: scores({ precision: 0.99, offered: 80 }, 0), siblings: [], now: NOW })).toBeNull();
+  });
+
+  it("scores measured with another prompt are not trusted", () => {
+    expect(acceptance(fact({}), { scores: { ...trusted, prompt: "0000beef" }, siblings: [], now: NOW })).toBeNull();
+    const { prompt: _, ...unmarked } = trusted;
+    expect(acceptance(fact({}), { scores: unmarked, siblings: [], now: NOW })).toBeNull();
+  });
+
+  it("a departure time from the model alone is never accepted", () => {
+    const departure = fact({ kind: "event", document: "itinerary", label: "Flight AQ 214 departs SFO", time: "09:40" });
+    expect(stakesOf(departure)).toBe("high");
+    expect(acceptance(departure, { scores: trusted, siblings: [], now: NOW })).toBeNull();
+  });
+
+  it("a stay whose check-out precedes check-in is offered, not accepted", () => {
+    const checkin = fact({ id: "in", kind: "event", document: "hotel-booking", value: "2027-04-12", label: "Check-in: Casa do Rio" });
+    const checkout = fact({ id: "out", kind: "event", document: "hotel-booking", value: "2027-04-08", label: "Check-out: Casa do Rio" });
+    expect(saneFact(checkout, [checkin], NOW)).toBe(false);
+    expect(acceptance(checkout, { scores: trusted, siblings: [checkin], now: NOW })).toBeNull();
+  });
+
+  it("exact readings are accepted whatever the scores say", () => {
+    expect(acceptance(fact({ source: "jsonld", confidence: 1 }), { scores: undefined, siblings: [], now: NOW })).toBe("exact");
+  });
+});
+
+describe("stakesOf", () => {
+  it("weighs identity expiries and travel times high, bills normal, receipts and deliveries low", () => {
+    expect(stakesOf(fact({ kind: "expiry", document: "passport" }))).toBe("high");
+    expect(stakesOf(fact({ kind: "due" }))).toBe("normal");
+    expect(stakesOf(fact({ kind: "amount", label: "Total" }))).toBe("low");
+    expect(stakesOf(fact({ kind: "event", document: "delivery", label: "Delivery expected by" }))).toBe("low");
+  });
+});
+
+describe("saneFact", () => {
+  it("refuses a date that does not exist or lies far outside a lifetime of documents", () => {
+    expect(saneFact(fact({ value: "2027-02-31" }), [], NOW)).toBe(false);
+    expect(saneFact(fact({ value: "2091-01-01" }), [], NOW)).toBe(false);
+    expect(saneFact(fact({ kind: "amount", value: "65.00", label: "Amount due" }), [], NOW)).toBe(false);
+    expect(saneFact(fact({ kind: "amount", value: "65.00", unit: "USD", label: "Amount due" }), [], NOW)).toBe(true);
+  });
+});
+
+describe("trustedKind", () => {
+  const kindScores = (accuracy: number, cases: number, version = CURRENT): ReaderScores => ({
+    reader: "apple",
+    version,
+    prompt: PROMPT,
+    tasks: { mailKind: { accuracy, cases } },
+  });
+
+  it("a kind named right a third of the time is not used", () => {
+    expect(trustedKind(kindScores(0.33, 24))).toBe(false);
+  });
+
+  it("a kind named right nearly always, over enough cases, is used", () => {
+    expect(trustedKind(kindScores(0.95, 30))).toBe(true);
+    expect(trustedKind(kindScores(0.95, 5))).toBe(false);
+  });
+
+  it("kind scores from another version of the reader are not used", () => {
+    expect(trustedKind(kindScores(0.95, 30, 0))).toBe(false);
+  });
+
+  it("kind scores measured with another prompt are not used", () => {
+    expect(trustedKind({ ...kindScores(0.95, 30), prompt: "0000beef" })).toBe(false);
+  });
+});
+
+describe("trustedMailKind", () => {
+  const newsletterScores = (precision: number, offered: number, version = CURRENT): ReaderScores => ({
+    reader: "apple",
+    version,
+    prompt: PROMPT,
+    tasks: { mailKind: { accuracy: 0.95, cases: 40, byKind: { newsletter: { precision, offered } } } },
+  });
+
+  it("a kind trusted overall is not enough to set a newsletter's dates aside", () => {
+    expect(trustedKind(newsletterScores(0.9, 40))).toBe(true);
+    expect(trustedMailKind(newsletterScores(0.9, 40), "newsletter")).toBe(false);
+  });
+
+  it("the newsletter kind's own precision, over enough emails, sets its dates aside", () => {
+    expect(trustedMailKind(newsletterScores(1, MIN_SAMPLE), "newsletter")).toBe(true);
+    expect(trustedMailKind(newsletterScores(1, 2), "newsletter")).toBe(false);
+    expect(trustedMailKind(newsletterScores(1, MIN_SAMPLE, 0), "newsletter")).toBe(false);
+    expect(trustedMailKind(newsletterScores(1, MIN_SAMPLE), "bill")).toBe(false);
+    expect(trustedMailKind({ ...newsletterScores(1, MIN_SAMPLE), prompt: "0000beef" }, "newsletter")).toBe(false);
+  });
+});

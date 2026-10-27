@@ -9,7 +9,7 @@ import type { FileDto } from "./api";
  */
 
 const model = vi.hoisted(() => ({
-  summarize: vi.fn(async (): Promise<unknown> => ({ summary: "A synthetic note.", tags: [], kind: null, facts: [] })),
+  summarize: vi.fn(async (_input: unknown): Promise<unknown> => ({ summary: "A synthetic note.", tags: [], kind: null, facts: [] })),
   facts: false,
 }));
 
@@ -25,12 +25,31 @@ vi.mock("./intel/assistant", async (importOriginal) => ({
   lastAssistantState: () => ({ state: "available", contextSize: 4096 }),
 }));
 
+// The shipped scores by default; a test may stand in others.
+const scoreState = vi.hoisted(() => ({ value: undefined as unknown, shipped: undefined as unknown }));
+vi.mock("./intel/eval/scores.json", async (importOriginal) => {
+  const actual = (await importOriginal<{ default: unknown }>()).default;
+  scoreState.shipped = actual;
+  scoreState.value = actual;
+  return {
+    get default() {
+      return scoreState.value;
+    },
+  };
+});
+
 vi.mock("./intel/scan", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./intel/scan")>()),
   factsEnabled: () => model.facts,
 }));
 
 const writes = vi.hoisted(() => ({ count: 0, blobs: 0 }));
+
+const device = vi.hoisted(() => ({ handheld: false }));
+vi.mock("./analysisslot", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./analysisslot")>()),
+  isHandheld: () => device.handheld,
+}));
 
 
 vi.mock("./api", async (importOriginal) => {
@@ -46,7 +65,10 @@ vi.mock("./api", async (importOriginal) => {
 
 import { api, ApiError } from "./api";
 import { AssistantError } from "./intel/assistant";
+import { READER_VERSION } from "./intel/reading";
+import { readingFingerprint } from "./intel/summarize";
 import { useStore, type FileEntry } from "./store";
+import { spendModelReads, startOfOpen } from "./modelbudget";
 
 const masterKey = vi.hoisted(() => ({ value: new Uint8Array(32) as Uint8Array }));
 
@@ -87,6 +109,9 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  device.handheld = false;
+  startOfOpen();
+  scoreState.value = scoreState.shipped;
   model.summarize.mockReset();
   model.summarize.mockResolvedValue({ summary: "A synthetic note.", tags: [], kind: null, facts: [] });
   model.facts = false;
@@ -184,6 +209,166 @@ describe("a reading that keeps failing", () => {
     expect(stampOf("a")).toMatchObject({ outcome: "retrying", tries: 0 });
     expect(stampOf("a")).not.toHaveProperty("reason");
     expect(stampOf("b")).toMatchObject({ outcome: "found" });
+  });
+});
+
+describe("what a reading proposes", () => {
+  it("with today's measured scores a model date is named for its reader and waits for a yes", async () => {
+    model.facts = true;
+    model.summarize.mockResolvedValue({
+      summary: "A synthetic bill.",
+      tags: [],
+      kind: null,
+      facts: [{ id: "due:2027-04-10", kind: "due", document: "invoice", value: "2027-04-10", label: "Payment due", source: "model", confidence: 0.45 }],
+    });
+    library([note()]);
+    await useStore.getState().processFile("n1");
+    const due = useStore.getState().files.get("n1")!.facts.find((f) => f.kind === "due")!;
+    expect(due).toMatchObject({ reader: "apple", source: "model" });
+    expect(due.accepted).toBeUndefined();
+  });
+});
+
+describe("a budget for model readings", () => {
+  it("a pass reads at most its budget with the model, and the rest stay owed", async () => {
+    library(["a", "b", "c", "d", "e"].map((id) => note({ id })));
+    const counts = await useStore.getState().processLibrary({ modelBudget: 2 });
+    expect(model.summarize).toHaveBeenCalledTimes(2);
+    expect(counts.readingsDeferred).toBe(3);
+    expect(counts.readingsStarted).toBe(2);
+    const { needsProcessing } = await import("./store");
+    const owed = [...useStore.getState().files.values()].filter((f) => needsProcessing(f));
+    expect(owed).toHaveLength(3);
+    // A second pass with a fresh budget takes up exactly those.
+    model.summarize.mockClear();
+    await useStore.getState().processLibrary({ modelBudget: 10 });
+    expect(model.summarize).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("passes on a phone", () => {
+  it("a pass started by a button takes from the per-open budget", async () => {
+    device.handheld = true;
+    spendModelReads(39);
+    library(["a", "b", "c"].map((id) => note({ id })));
+    const counts = await useStore.getState().processLibrary();
+    expect(model.summarize).toHaveBeenCalledTimes(1);
+    expect(counts.readingsDeferred).toBe(2);
+  });
+
+  it("a file left for a later open is not skipped by the session", async () => {
+    library(["a", "b"].map((id) => note({ id })));
+    const skipped = new Set<string>();
+    const outcomes: string[] = [];
+    await useStore.getState().processLibrary({
+      modelBudget: 0,
+      skip: { has: (id) => skipped.has(id), add: (id) => void skipped.add(id) },
+      onOutcome: (id) => void outcomes.push(id),
+    });
+    expect(model.summarize).not.toHaveBeenCalled();
+    expect([...skipped]).toEqual([]);
+    expect(outcomes).toEqual([]);
+  });
+});
+
+describe("reading mail", () => {
+  const email = (over: Partial<FileEntry> = {}): FileEntry =>
+    note({
+      name: "Your water bill.email",
+      mime: "application/vnd.engram.email+json",
+      category: "Mail",
+      text: "Your water bill\nFrom: billing@example.com\n\nUSD 64.10, due 15 May 2027.",
+      ...over,
+    });
+
+  const trustedKinds = () => {
+    scoreState.value = {
+      reader: "apple",
+      version: READER_VERSION.apple,
+      prompt: readingFingerprint(),
+      tasks: { mailKind: { accuracy: 0.95, cases: 30 } },
+    };
+  };
+
+  it("an email's kind is not stored while its measured accuracy is low", async () => {
+    model.summarize.mockResolvedValue({ summary: "A water bill.", tags: [], kind: null, facts: [], mailKind: "bill" });
+    library([email({ tags: ["mail"] })]);
+    await useStore.getState().processFile("n1");
+    expect(useStore.getState().files.get("n1")!.tags).toEqual(["mail"]);
+  });
+
+  it("a trusted kind is stored as a tag, replacing the older one", async () => {
+    trustedKinds();
+    model.summarize.mockResolvedValue({ summary: "A water bill.", tags: [], kind: null, facts: [], mailKind: "bill" });
+    library([email({ tags: ["mail", "mail:other"] })]);
+    await useStore.getState().processFile("n1");
+    const tags = useStore.getState().files.get("n1")!.tags;
+    expect(tags).toContain("mail:bill");
+    expect(tags).not.toContain("mail:other");
+  });
+
+  it("a newsletter's dates are set aside only on the newsletter kind's own measured precision", async () => {
+    model.facts = true;
+    const sale = { summary: "A sale.", tags: [], kind: null, mailKind: "newsletter", facts: [{ id: "due:2027-05-30", kind: "due", document: "other", value: "2027-05-30", label: "Sale ends", source: "model", confidence: 0.45 }] };
+    model.summarize.mockResolvedValue(sale);
+    library([email({ id: "a" })]);
+    await useStore.getState().processFile("a");
+    expect(useStore.getState().files.get("a")!.facts.map((f) => f.value)).toEqual(["2027-05-30"]);
+    // Kinds named right 95% of the time could still call a bill a newsletter.
+    trustedKinds();
+    library([email({ id: "b" })]);
+    await useStore.getState().processFile("b");
+    expect(useStore.getState().files.get("b")!.facts.map((f) => f.value)).toEqual(["2027-05-30"]);
+    scoreState.value = {
+      reader: "apple",
+      version: READER_VERSION.apple,
+      prompt: readingFingerprint(),
+      tasks: { mailKind: { accuracy: 0.95, cases: 40, byKind: { newsletter: { precision: 1, offered: 40 } } } },
+    };
+    library([email({ id: "c" })]);
+    await useStore.getState().processFile("c");
+    expect(useStore.getState().files.get("c")!.facts).toEqual([]);
+  });
+
+  it("a short email is still read", async () => {
+    library([email()]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize).toHaveBeenCalledTimes(1);
+    expect(model.summarize.mock.calls[0]![0]).toMatchObject({ mail: true });
+  });
+
+  it("an email with booking data is summarized but not asked for dates", async () => {
+    model.facts = true;
+    const booked = {
+      id: "event:2027-04-08 check-in",
+      kind: "event" as const,
+      document: "hotel-booking" as const,
+      value: "2027-04-08",
+      label: "Check-in",
+      source: "jsonld" as const,
+      confidence: 1,
+      accepted: "exact" as const,
+    };
+    library([email({ facts: [booked] })]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize.mock.calls[0]![0]).toMatchObject({ withFacts: false });
+    // The dates were read exactly; the stamp says so, or the file would be read again for them.
+    expect(stampOf()?.tasks).toContain("facts");
+  });
+
+  it("email records are read newest first", async () => {
+    const day = 86_400_000;
+    library([
+      email({ id: "old", name: "Old.email", mail: { messageId: "<o>", from: "", fromAddress: "", to: [], date: Date.now() - 3 * day, subject: "Old", attachmentIds: [] } }),
+      email({ id: "new", name: "New.email", mail: { messageId: "<n>", from: "", fromAddress: "", to: [], date: Date.now() - 1 * day, subject: "New", attachmentIds: [] } }),
+      email({ id: "mid", name: "Mid.email", mail: { messageId: "<m>", from: "", fromAddress: "", to: [], date: Date.now() - 2 * day, subject: "Mid", attachmentIds: [] } }),
+    ]);
+    await useStore.getState().processLibrary();
+    expect(model.summarize.mock.calls.map((call) => (call[0] as { name: string }).name)).toEqual([
+      "New.email",
+      "Mid.email",
+      "Old.email",
+    ]);
   });
 });
 

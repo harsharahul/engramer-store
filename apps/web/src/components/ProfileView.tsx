@@ -60,6 +60,8 @@ import { publicKeyFingerprint } from "@engramer/crypto";
 import { api, type ConnectStatus, type PackName, type PackStatus } from "../api";
 import { changePassword } from "../changepassword";
 import { IDLE_LOCK_CHOICES, idleLockMinutes, setIdleLockMinutes } from "../idlelock";
+import { emailsOutsideWindow, readingWindowMonths, setReadingWindowMonths } from "../intel/reading";
+import { useSyncedSetting } from "../usesyncedsetting";
 import { revealRecoveryKey, rotateRecoveryKey } from "../recoverykey";
 import { RecoveryKeyModal } from "./RecoveryKeyModal";
 import { formatBytes } from "../format";
@@ -497,7 +499,7 @@ export function ProfileView(props: {
   // line answers for.
   const pending = pendingDerivatives(store.files, CLIP_MODEL_VERSION, {
     scenesVersion: SCENES_VERSION,
-    readings: { factsWanted: props.factsOn, now: Date.now() },
+    readings: { factsWanted: props.factsOn, now: Date.now(), windowMonths: readingWindowMonths() },
   });
   const autoPending = pendingDerivatives(store.files, CLIP_MODEL_VERSION, {
     ocr: props.ocrOn,
@@ -753,6 +755,7 @@ export function ProfileView(props: {
   };
 
   const [idleMinutes, setIdleMinutes] = useState(() => idleLockMinutes());
+  const [windowMonths, refreshWindowMonths] = useSyncedSetting(readingWindowMonths);
   useEffect(() => {
     // Another device's choice arrives through the synced settings.
     const refresh = () => setIdleMinutes(idleLockMinutes());
@@ -1159,8 +1162,9 @@ export function ProfileView(props: {
             </b>
             <div className="profile-row-sub">
               Finds expiry dates, amounts due and reference numbers in what you store, and tells
-              you before they matter. Everything is read on this device, nothing is acted on until
-              you confirm it, and reference numbers are kept as their last four digits.
+              you before they matter. Everything is read on this device. Dates stated as data
+              (booking emails, barcodes, invites, a passport's code lines) count at once; anything
+              else waits for your yes. Reference numbers are kept as their last four digits.
             </div>
           </div>
           <button
@@ -1171,6 +1175,37 @@ export function ProfileView(props: {
           >
             <span className={`switch${props.factsOn ? " on" : ""}`} />
           </button>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Mail the assistant reads</b>
+            <div className="profile-row-sub">
+              The on-device assistant reads email from the last {windowMonths} months for summaries
+              and dates. Older mail stays kept and searchable, and the booking data in it is still
+              read.
+              {(() => {
+                const outside = emailsOutsideWindow(store.files.values(), windowMonths, Date.now());
+                return outside > 0
+                  ? ` ${outside} older email${outside === 1 ? " is" : "s are"} kept, not read by the assistant.`
+                  : "";
+              })()}
+            </div>
+          </div>
+          <select
+            aria-label="Months of mail the assistant reads"
+            value={windowMonths}
+            onChange={(e) => {
+              const months = Number(e.target.value);
+              setReadingWindowMonths(months);
+              refreshWindowMonths();
+            }}
+          >
+            {[3, 6, 9, 12].map((months) => (
+              <option key={months} value={months}>
+                {months} months
+              </option>
+            ))}
+          </select>
         </div>
         <div className="profile-row">
           <div className="profile-row-main">

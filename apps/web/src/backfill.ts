@@ -167,6 +167,8 @@ export async function runBackfill(): Promise<BackfillResult | null> {
   };
 
   try {
+    // The model's readings are bounded by the per-open budget inside the
+    // pass itself (modelbudget.ts), whatever starts a pass.
     const cap = isHandheld() ? { maxBytes: HANDHELD_AUTO_MAX_BYTES } : {};
     const processed = await store.processLibrary({ ...pass("process", attemptedProcess), ...cap });
     const facts =

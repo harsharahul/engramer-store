@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { ReadingStamp } from "@engramer/crypto";
-import { legacyOf, needsReading, stampInto, stampOf, type ReadingCandidate } from "./reading";
+import {
+  emailsOutsideWindow,
+  legacyOf,
+  needsReading,
+  READER_VERSION,
+  readingWindowMonths,
+  setReadingWindowMonths,
+  stampInto,
+  stampOf,
+  type ReadingCandidate,
+} from "./reading";
 
 const NOW = Date.UTC(2027, 5, 1);
 const DAY = 86_400_000;
@@ -18,7 +28,7 @@ const file = (over: Partial<ReadingCandidate> = {}): ReadingCandidate => ({
 const stamp = (over: Partial<ReadingStamp> = {}): ReadingStamp => ({
   reader: "apple",
   rank: 2,
-  version: 1,
+  version: READER_VERSION.apple!,
   digest: "d1",
   tasks: ["summary", "facts"],
   outcome: "found",
@@ -87,6 +97,17 @@ describe("needsReading", () => {
     expect(needsReading(file({ createdAt: NOW - 10 * DAY, reading: older({ outcome: "found" }) }), "apple", wants)).toBe(true);
   });
 
+  it("the first mail reader re-reads emails the earlier one found too short", () => {
+    // Version 2 reads an email from 60 characters; version 1 needed more.
+    const email = { mime: "message/rfc822", mail: { date: NOW - 200 * DAY } };
+    expect(needsReading(file({ ...email, reading: stamp({ version: 1, outcome: "short" }) }), "apple", wants)).toBe(true);
+    expect(needsReading(file({ ...email, assistVersion: 1, noSummary: "short" }), "apple", wants)).toBe(true);
+    // Once read by this version, a short email stays read.
+    expect(needsReading(file({ ...email, reading: stamp({ outcome: "short" }) }), "apple", wants)).toBe(false);
+    // A short document is not mail: nothing about it changed.
+    expect(needsReading(file({ reading: stamp({ version: 1, outcome: "short" }) }), "apple", wants)).toBe(false);
+  });
+
   it("never reads media, a file with no text, or the trash", () => {
     expect(needsReading(file({ mime: "image/jpeg" }), "apple", wants)).toBe(false);
     expect(needsReading(file({ hasText: false }), "apple", wants)).toBe(false);
@@ -109,5 +130,49 @@ describe("stamps that older builds understand", () => {
     expect(meta.reading?.outcome).toBe("found");
     expect(meta.assistVersion).toBe(1);
     expect(meta).toHaveProperty("noSummary", undefined);
+  });
+});
+
+describe("the reading window", () => {
+  const MONTH = 30 * DAY;
+  const email = (ageMonths: number) =>
+    file({ mime: "application/vnd.engram.email+json", mail: { date: NOW - ageMonths * MONTH } });
+
+  it("an email older than the window is not read by the model", () => {
+    expect(needsReading(email(13), "apple", { ...wants, windowMonths: 12 })).toBe(false);
+    expect(needsReading(email(11), "apple", { ...wants, windowMonths: 12 })).toBe(true);
+    expect(needsReading(email(4), "apple", { ...wants, windowMonths: 3 })).toBe(false);
+  });
+
+  it("documents are read whatever their age", () => {
+    expect(needsReading(file({ createdAt: NOW - 40 * MONTH }), "apple", { ...wants, windowMonths: 3 })).toBe(true);
+  });
+
+  it("counts the kept mail the model will not read", () => {
+    expect(emailsOutsideWindow([email(2), email(14), email(20), file()], 12, NOW)).toBe(2);
+  });
+
+  it("the window is clamped to 3..12 and defaults to 12", () => {
+    const backing = new Map<string, string>();
+    const before = (globalThis as { localStorage?: Storage }).localStorage;
+    (globalThis as { localStorage?: Storage }).localStorage = {
+      getItem: (k: string) => backing.get(k) ?? null,
+      setItem: (k: string, v: string) => void backing.set(k, String(v)),
+      removeItem: (k: string) => void backing.delete(k),
+      clear: () => backing.clear(),
+      key: () => null,
+      length: 0,
+    } as Storage;
+    try {
+      expect(readingWindowMonths()).toBe(12);
+      setReadingWindowMonths(1);
+      expect(readingWindowMonths()).toBe(3);
+      setReadingWindowMonths(40);
+      expect(readingWindowMonths()).toBe(12);
+      setReadingWindowMonths(6);
+      expect(readingWindowMonths()).toBe(6);
+    } finally {
+      (globalThis as { localStorage?: Storage }).localStorage = before;
+    }
   });
 });

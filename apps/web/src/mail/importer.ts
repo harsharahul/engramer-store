@@ -11,6 +11,7 @@
  */
 
 import type { MailMeta } from "@engramer/crypto";
+import { DATED_KINDS, isTracked, type Fact } from "../intel/facts";
 import { describeImport, type ActivityJob } from "../activity";
 import { parseMessage, type ParsedMessage } from "../intel/mime";
 import type { UploadSource } from "../transfer";
@@ -31,12 +32,21 @@ export interface ImportReport {
   alreadyPresent: number;
   skipped: { name: string; reason: string }[];
   attachments: number;
+  /** Dates that count, found in what this import stored: one line, never a notice per date. */
+  dates: number;
 }
 
 /** What the importer needs from the store. */
 export interface ImportTarget {
   /** Every file the library holds, trashed and shared-in ones included. */
-  files(): Iterable<{ id: string; digest?: string; mail?: MailMeta; trashed?: boolean; shared?: boolean }>;
+  files(): Iterable<{
+    id: string;
+    digest?: string;
+    mail?: MailMeta;
+    trashed?: boolean;
+    shared?: boolean;
+    facts?: Fact[];
+  }>;
   ensureFolderPath(path: string[]): Promise<string>;
   /** Uploads one source into a folder through the normal upload path. */
   store(file: UploadSource, folderId: string): Promise<{ id: string; digest?: string }>;
@@ -87,7 +97,9 @@ function shortReason(error: unknown): string {
 
 export async function importMail(sources: UploadSource[], target: ImportTarget): Promise<ImportReport> {
   const parse = target.parse ?? parseMessage;
-  const report: ImportReport = { imported: 0, alreadyPresent: 0, skipped: [], attachments: 0 };
+  const report: ImportReport = { imported: 0, alreadyPresent: 0, skipped: [], attachments: 0, dates: 0 };
+  // What this run stored, to count the dates found in it at the end.
+  const stored = new Set<string>();
 
   // What this account already holds. Files other accounts share in do not
   // count: a share can be revoked, so imported mail keeps its own copies.
@@ -161,12 +173,13 @@ export async function importMail(sources: UploadSource[], target: ImportTarget):
           if (file.size !== attachment.bytes.length) {
             throw new Error("the attachment's size changed on the way to upload");
           }
-          const stored = await target.store(file, await folder([...ATTACHMENTS_FOLDER, year]));
-          if (stored.digest && stored.digest !== attachment.digest) {
+          const saved = await target.store(file, await folder([...ATTACHMENTS_FOLDER, year]));
+          if (saved.digest && saved.digest !== attachment.digest) {
             throw new Error("the stored bytes differ from the attachment");
           }
+          stored.add(saved.id);
           report.attachments++;
-          return stored.id;
+          return saved.id;
         })();
         const claimed = pending;
         claimed.catch(() => {
@@ -235,6 +248,7 @@ export async function importMail(sources: UploadSource[], target: ImportTarget):
         { mail: built.meta },
       );
       recordId = (await target.store(record, await folder(RECORDS_FOLDER))).id;
+      stored.add(recordId);
     } catch (error) {
       keys.delete(built.dedupeKey);
       report.skipped.push({ name: label, reason: `could not be stored: ${shortReason(error)}` });
@@ -294,6 +308,19 @@ export async function importMail(sources: UploadSource[], target: ImportTarget):
     }
   }
   await Promise.all(inFlight);
+
+  // A date the email and its attachment both state is one new date.
+  const dates = new Set<string>();
+  for (const file of target.files()) {
+    if (stored.has(file.id)) {
+      for (const fact of file.facts ?? []) {
+        if (isTracked(fact) && DATED_KINDS.has(fact.kind)) {
+          dates.add(`${fact.kind}|${fact.value}|${fact.time ?? ""}`);
+        }
+      }
+    }
+  }
+  report.dates = dates.size;
 
   const said = describeImport(report, controller.signal.aborted);
   target.finish(said.title, said.detail);

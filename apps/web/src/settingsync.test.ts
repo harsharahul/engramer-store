@@ -29,6 +29,7 @@ import {
 import { ocrEnabled, setOcrEnabled } from "./intel/ocr";
 import { semanticEnabled } from "./intel/semantic";
 import { assistantEnabled, setAssistantEnabled } from "./intel/assistant";
+import { readingWindowMonths, setReadingWindowMonths } from "./intel/reading";
 import { loadPolicy, savePolicy, DEFAULT_POLICY } from "./backuppolicy";
 
 // Prefs live in localStorage; give the node test env one.
@@ -76,6 +77,20 @@ describe("settings snapshot and apply", () => {
     setAssistantEnabled(true);
     applySettings(older as SyncedSettings);
     expect(assistantEnabled()).toBe(true);
+  });
+
+  it("the reading window follows the account, and an older blob leaves it alone", () => {
+    setReadingWindowMonths(6);
+    const snapshot = snapshotSettings();
+    expect(snapshot.readingWindowMonths).toBe(6);
+    localStorage.clear();
+    expect(readingWindowMonths()).toBe(12);
+    applySettings(snapshot);
+    expect(readingWindowMonths()).toBe(6);
+    const older = { ...snapshot } as Partial<SyncedSettings>;
+    delete older.readingWindowMonths;
+    applySettings(older as SyncedSettings);
+    expect(readingWindowMonths()).toBe(6);
   });
 
   it("round-trips every synced switch", () => {

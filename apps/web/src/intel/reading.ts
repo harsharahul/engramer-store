@@ -11,6 +11,7 @@
  */
 
 import type { ReadingStamp } from "@engramer/crypto";
+import { settingChanged } from "../settingsbus";
 
 export type { ReadingStamp };
 
@@ -21,13 +22,19 @@ export const MODEL_READER = "apple";
  * larger Mac model, Chrome's built-in model and a web model pack. */
 export const READER_RANK: Readonly<Record<string, number>> = { [MODEL_READER]: 2 };
 
-/** Raised when a reader's prompt or model changes, never for a storage change. */
-export const READER_VERSION: Readonly<Record<string, number>> = { [MODEL_READER]: 1 };
+/** Raised when a reader's prompt or model changes, never for a storage change.
+ * Version 2 reads mail: its kind, and emails from 60 characters. */
+export const READER_VERSION: Readonly<Record<string, number>> = { [MODEL_READER]: 2 };
 
 /** Tries per file per reader, counted across devices, before a reading is final. */
 export const MAX_TRIES = 3;
 
 const RECENT_DAYS = 90;
+const WINDOW_KEY = "engram-reading-window";
+const WINDOW_MIN = 3;
+const WINDOW_MAX = 12;
+/** A month, for the window: close enough, and the same on every device. */
+const MONTH = 30 * 86_400_000;
 const DAY = 86_400_000;
 const EMPTY_OUTCOMES = new Set<ReadingStamp["outcome"]>(["none", "declined", "unsupported", "language"]);
 const FINAL_OUTCOMES = new Set<ReadingStamp["outcome"]>(["failed", "user"]);
@@ -83,12 +90,57 @@ export function readable(file: ReadingCandidate): boolean {
   return !file.trashed && !/^(image|video|audio)\//.test(file.mime) && (file.hasText || file.inlineText);
 }
 
+/**
+ * How many months back the model reads mail: older emails stay kept and
+ * searchable and are read by the exact readers, but not by a model. Synced
+ * with the account; 3 to 12, 12 unless set.
+ */
+export function readingWindowMonths(): number {
+  try {
+    const stored = Number(localStorage.getItem(WINDOW_KEY));
+    return stored ? clampWindow(stored) : WINDOW_MAX;
+  } catch {
+    return WINDOW_MAX;
+  }
+}
+
+export function setReadingWindowMonths(months: number): void {
+  try {
+    localStorage.setItem(WINDOW_KEY, String(clampWindow(months)));
+    settingChanged();
+  } catch {
+    // Preference persistence is best-effort.
+  }
+}
+
+function clampWindow(months: number): number {
+  return Math.min(WINDOW_MAX, Math.max(WINDOW_MIN, Math.round(months)));
+}
+
+function outsideWindow(file: ReadingCandidate, months: number, now: number): boolean {
+  return file.mail !== undefined && now - file.mail.date > months * MONTH;
+}
+
+/** Email records the model will not read because they are older than the window. */
+export function emailsOutsideWindow(files: Iterable<ReadingCandidate>, months: number, now: number): number {
+  let count = 0;
+  for (const file of files) {
+    if (readable(file) && outsideWindow(file, months, now)) {
+      count++;
+    }
+  }
+  return count;
+}
+
 export function needsReading(
   file: ReadingCandidate,
   reader: string,
-  opts: { factsWanted: boolean; now: number },
+  opts: { factsWanted: boolean; now: number; windowMonths?: number },
 ): boolean {
   if (!readable(file)) {
+    return false;
+  }
+  if (opts.windowMonths !== undefined && outsideWindow(file, opts.windowMonths, opts.now)) {
     return false;
   }
   const stamp = stampOf(file);
@@ -124,7 +176,9 @@ export function needsReading(
   }
   if (stamp.reader === reader && (READER_VERSION[reader] ?? 0) > stamp.version) {
     const when = file.mail?.date || file.createdAt;
-    return EMPTY_OUTCOMES.has(stamp.outcome) || opts.now - when <= RECENT_DAYS * DAY;
+    // An email an earlier version found too short may be long enough now.
+    const shortMail = stamp.outcome === "short" && file.mail !== undefined;
+    return EMPTY_OUTCOMES.has(stamp.outcome) || shortMail || opts.now - when <= RECENT_DAYS * DAY;
   }
   return false;
 }

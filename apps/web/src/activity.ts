@@ -99,12 +99,20 @@ export interface ProcessingCounts {
   failed: string[];
   stopped: boolean;
   remaining: number;
+  /** Files left for a later open because this one's model readings were spent. */
+  readingsDeferred?: number;
+  /** Model readings this pass started, whatever came of them. */
+  readingsStarted?: number;
 }
 
 /** One sentence per outcome, in product words, counting only what landed. */
 export function describeProcessing(counts: ProcessingCounts): { title: string; detail?: string } {
+  const deferred =
+    (counts.readingsDeferred ?? 0) > 0
+      ? `${plural(counts.readingsDeferred!, "document")} wait for the next open to be read`
+      : null;
   if (counts.files === 0 && !counts.stopped) {
-    return { title: "Nothing to fill in" };
+    return deferred ? { title: "Reading continues next time the app is open", detail: deferred } : { title: "Nothing to fill in" };
   }
   const parts: string[] = [];
   if (counts.previews > 0) {
@@ -139,7 +147,7 @@ export function describeProcessing(counts: ProcessingCounts): { title: string; d
       ? `${plural(counts.summaryPaused, "summary", "summaries")} wait for the app to be in front`
       : null;
   const tail = counts.stopped ? "continues next time the app is open" : null;
-  const detail = [parts.join(" · "), failed, paused, tail].filter(Boolean).join(" · ");
+  const detail = [parts.join(" · "), failed, paused, deferred, tail].filter(Boolean).join(" · ");
   return detail ? { title, detail } : { title };
 }
 
@@ -150,6 +158,7 @@ export function describeImport(
     alreadyPresent: number;
     skipped: { name: string; reason: string }[];
     attachments: number;
+    dates?: number;
   },
   stopped: boolean,
 ): { title: string; detail?: string } {
@@ -162,6 +171,9 @@ export function describeImport(
         ? `Stored ${plural(report.attachments, "missing attachment")}`
         : "No new emails";
   const parts = [did];
+  if ((report.dates ?? 0) > 0) {
+    parts.push(plural(report.dates!, "new date"));
+  }
   if (report.alreadyPresent > 0) {
     parts.push(`${report.alreadyPresent} already present`);
   }

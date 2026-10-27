@@ -33,6 +33,7 @@ import { semanticEnabled, setSemanticEnabled } from "./intel/semantic";
 import { idleLockMinutes, setIdleLockMinutes } from "./idlelock";
 import { mergePins, pinnedKeys } from "./keypins";
 import { onSettingChanged } from "./settingsbus";
+import { readingWindowMonths, setReadingWindowMonths } from "./intel/reading";
 
 export interface SyncedSettings {
   version: 1;
@@ -52,6 +53,8 @@ export interface SyncedSettings {
   idleLockMinutes?: number;
   /** The on-device assistant's switch; absent means the blob predates it. */
   assistant?: boolean;
+  /** Months of mail the model reads; absent means the blob predates it. */
+  readingWindowMonths?: number;
   /** The account public key last released to, per email address. */
   contacts?: Record<string, string>;
   /** What the user decided about the library: dismissed notices and
@@ -108,6 +111,7 @@ export function snapshotSettings(account?: string): SyncedSettings {
     },
     idleLockMinutes: idleLockMinutes(),
     assistant: assistantEnabled(),
+    readingWindowMonths: readingWindowMonths(),
     contacts: pinnedKeys(),
   };
 }
@@ -161,6 +165,9 @@ function applyInner(values: SyncedSettings): void {
   }
   if (values.assistant !== undefined) {
     setAssistantEnabled(values.assistant);
+  }
+  if (values.readingWindowMonths !== undefined) {
+    setReadingWindowMonths(values.readingWindowMonths);
   }
   mergePins(values.contacts);
 }

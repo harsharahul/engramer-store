@@ -113,11 +113,15 @@ import {
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import { assistantAvailableNow, assistantEnabled, lastAssistantState } from "./intel/assistant";
 import { CATEGORIES } from "./intel/categorize";
-import { MIN_TEXT, cleanTags, outcomeFor, summarize } from "./intel/summarize";
+import { MIN_MAIL_TEXT, MIN_TEXT, cleanTags, outcomeFor, summarize } from "./intel/summarize";
+import { isEmailRecord } from "./mail/kind";
+import { remainingModelReads, spendModelReads } from "./modelbudget";
+import { acceptance, modelScores, trustedKind, trustedMailKind } from "./intel/confidence";
 import {
   MAX_TRIES,
   MODEL_READER,
   READER_RANK,
+  readingWindowMonths,
   modelStamp,
   needsReading,
   stampInto,
@@ -571,7 +575,13 @@ interface StoreState {
   /** The file's extracted text, fetched and decrypted on demand. */
   loadText: (id: string) => Promise<string | undefined>;
   /** The pass over every file that owes something, a few at a time. */
-  processLibrary: (opts?: SweepOptions & { maxBytes?: number }) => Promise<ProcessingCounts>;
+  processLibrary: (
+    opts?: SweepOptions & {
+      maxBytes?: number;
+      /** At most this many model readings in this pass; the rest stay owed. */
+      modelBudget?: number;
+    },
+  ) => Promise<ProcessingCounts>;
   /** Reads (or re-reads) the text of one stored image or scan. */
   recognizeFile: (id: string) => Promise<boolean>;
   /** Reads dates out of documents stored before this feature existed. */
@@ -859,9 +869,20 @@ export function needsProcessing(file: FileEntry): boolean {
     (ocrEnabled() && needsText(file)) ||
     (semanticEnabled() &&
       (needsClip(file, CLIP_MODEL_VERSION) || needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION))) ||
-    (assistantEnabled() &&
-      assistantAvailableNow() &&
-      needsReading(file, MODEL_READER, { factsWanted: factsEnabled(), now: Date.now() }))
+    owesModelReading(file)
+  );
+}
+
+/** Whether this device should read the file with the on-device model now. */
+export function owesModelReading(file: FileEntry): boolean {
+  return (
+    assistantEnabled() &&
+    assistantAvailableNow() &&
+    needsReading(file, MODEL_READER, {
+      factsWanted: factsEnabled(),
+      now: Date.now(),
+      windowMonths: readingWindowMonths(),
+    })
   );
 }
 
@@ -906,7 +927,7 @@ export function pendingDerivatives(
     semantic?: boolean;
     scenesVersion?: number;
     /** Count files the model still owes a reading, given whether dates are wanted. */
-    readings?: { factsWanted: boolean; now: number };
+    readings?: { factsWanted: boolean; now: number; windowMonths?: number };
   } = {},
 ): {
   thumbs: number;
@@ -1261,6 +1282,11 @@ export const useStore = create<StoreState>((set, get) => {
     }
     set({ files, indexWarm });
   };
+
+  /** Whether a pass changed a file's tags: by content, since one tag can
+   * replace another (an email's kind) without the count moving. */
+  const tagsChanged = (next: ReadonlySet<string>, before: readonly string[]): boolean =>
+    next.size !== before.length || before.some((tag) => !next.has(tag));
 
   const normalizeTags = (tags: readonly string[]): string[] => [
     ...new Set(tags.map((t) => t.trim().toLowerCase()).filter(Boolean)),
@@ -3082,10 +3108,7 @@ export const useStore = create<StoreState>((set, get) => {
         scenes:
           force.scenes ?? (semanticEnabled() && needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION)),
         summary:
-          force.summary ??
-          (assistantEnabled() &&
-            assistantAvailableNow() &&
-            needsReading(file, MODEL_READER, { factsWanted: factsEnabled(), now: Date.now() })),
+          force.summary ?? owesModelReading(file),
       };
       if (
         !needs.thumb &&
@@ -3141,10 +3164,14 @@ export const useStore = create<StoreState>((set, get) => {
             theirs.rank <= READER_RANK[MODEL_READER]!
           );
         };
-        if (!text || text.length < MIN_TEXT) {
+        const mail = isEmailRecord(current.name, current.mime);
+        if (!text || text.length < (mail ? MIN_MAIL_TEXT : MIN_TEXT)) {
           stamp("short");
           return;
         }
+        // An email whose dates came from its own booking data needs only the
+        // summary; its dates are read, exactly, and the stamp says so.
+        const askFacts = factsWanted && !(mail && current.facts.some((fact) => fact.accepted === "exact"));
         const state = lastAssistantState();
         try {
           const reading = await summarize({
@@ -3154,7 +3181,8 @@ export const useStore = create<StoreState>((set, get) => {
             contextSize: state.state === "available" ? state.contextSize : 4096,
             // Date reading is its own switch; when it is on, the same
             // reading proposes the document's dates, grounded and offered.
-            withFacts: factsWanted,
+            withFacts: askFacts,
+            mail,
             signal,
           });
           if (readElsewhere()) {
@@ -3169,14 +3197,36 @@ export const useStore = create<StoreState>((set, get) => {
           for (const tag of cleanTags(reading.tags, [...tags])) {
             tags.add(tag);
           }
+          const scores = modelScores();
+          if (reading.mailKind && trustedKind(scores)) {
+            // One kind per email: a newer reading replaces the older one.
+            for (const tag of [...tags]) {
+              if (tag.startsWith("mail:")) {
+                tags.delete(tag);
+              }
+            }
+            tags.add(`mail:${reading.mailKind}`);
+          }
           // The model's kind may sharpen a bare Documents or Other, never
           // override a category a stronger signal chose.
           const category = meta.category ?? current.category;
           if (reading.kind && (category === "Documents" || category === "Other") && reading.kind !== category) {
             meta.category = reading.kind;
           }
-          if (reading.facts.length > 0) {
-            const fresh = reading.facts.map((fact) => ({ ...fact, digest: current.digest }));
+          // A newsletter's dates are offers and sale ends, not the owner's
+          // dates; set aside only when the model's "newsletter" is itself
+          // measured right nearly always.
+          const newsletter = reading.mailKind === "newsletter" && trustedMailKind(scores, "newsletter");
+          const proposals = newsletter ? [] : reading.facts;
+          if (proposals.length > 0) {
+            // Named for the reader that proposed them, and counted without a
+            // yes only where that reader's measured accuracy allows (intel/confidence.ts).
+            const now = Date.now();
+            const fresh = proposals.map((fact) => {
+              const read: Fact = { ...fact, digest: current.digest, reader: MODEL_READER };
+              const basis = acceptance(read, { scores, siblings: proposals, now });
+              return basis === "grounded" ? { ...read, accepted: basis } : read;
+            });
             meta.facts = mergeFacts(meta.facts ? asFacts(meta.facts) : current.facts, fresh);
             outcome.facts += fresh.length;
           }
@@ -3351,7 +3401,7 @@ export const useStore = create<StoreState>((set, get) => {
           outcome.facts = facts.length;
         }
         await readSummary(current, readText ? prepared.text : await keptText(current));
-        if (tags.size !== current.tags.length) {
+        if (tagsChanged(tags, current.tags)) {
           meta.tags = normalizeTags([...tags]);
         }
         if (Object.keys(meta).length > 0) {
@@ -3394,7 +3444,7 @@ export const useStore = create<StoreState>((set, get) => {
           }
           outcome.tagged = 1;
         }
-        if (tags.size !== current.tags.length) {
+        if (tagsChanged(tags, current.tags)) {
           meta.tags = normalizeTags([...tags]);
         }
         await patchFileMeta(id, meta);
@@ -3432,7 +3482,7 @@ export const useStore = create<StoreState>((set, get) => {
         labelFrom(await readScenes(clip));
       }
       await readSummary(file, file.text ?? (await keptText(file)));
-      if (tags.size !== file.tags.length) {
+      if (tagsChanged(tags, file.tags)) {
         meta.tags = normalizeTags([...tags]);
       }
       if (Object.keys(meta).length > 0) {
@@ -3488,7 +3538,13 @@ export const useStore = create<StoreState>((set, get) => {
         failed: [],
         stopped: false,
         remaining: 0,
+        readingsDeferred: 0,
+        readingsStarted: 0,
       };
+      // Every pass takes from the per-open budget unless told otherwise, so a
+      // button that asks for previews or text cannot start thousands of model
+      // readings on a phone.
+      let modelBudget = opts?.modelBudget ?? remainingModelReads();
       const candidates = [...get().files.values()]
         .filter(
           (f) =>
@@ -3496,8 +3552,16 @@ export const useStore = create<StoreState>((set, get) => {
             needsProcessing(f) &&
             (opts?.maxBytes === undefined || !wantsOriginal(f) || f.size <= opts.maxBytes),
         )
-        // Smallest first: many quick wins before one large video.
-        .sort((a, b) => a.size - b.size);
+        // Smallest first: many quick wins before one large video. Mail comes
+        // after, newest first: this week's bill before last year's.
+        .sort((a, b) => {
+          const ma = a.mail?.date;
+          const mb = b.mail?.date;
+          if (ma !== undefined || mb !== undefined) {
+            return ma === undefined ? -1 : mb === undefined ? 1 : mb - ma;
+          }
+          return a.size - b.size;
+        });
       if (candidates.length === 0) {
         return counts;
       }
@@ -3523,9 +3587,28 @@ export const useStore = create<StoreState>((set, get) => {
           return;
         }
         get().updateActivity({ current: file.name });
-        opts?.skip?.add(file.id);
+        // A model reading spends the budget when it starts; once it is spent,
+        // a file still gets everything else and stays owed the reading. Such
+        // a file is not marked as tried, so a later pass, in this session or
+        // the next open, takes it up.
+        let deferred = false;
+        if (owesModelReading(file)) {
+          if (modelBudget > 0) {
+            modelBudget--;
+            counts.readingsStarted! += 1;
+          } else {
+            deferred = true;
+            counts.readingsDeferred! += 1;
+          }
+        }
+        if (!deferred) {
+          opts?.skip?.add(file.id);
+        }
         try {
-          const outcome = await get().processFile(file.id, { signal: abort.signal });
+          const outcome = await get().processFile(file.id, {
+            signal: abort.signal,
+            ...(deferred ? { force: { summary: false } } : {}),
+          });
           if (outcome) {
             counts.files++;
             counts.previews += outcome.previews;
@@ -3536,7 +3619,9 @@ export const useStore = create<StoreState>((set, get) => {
             counts.summaries += outcome.summaries;
             counts.summaryPaused += outcome.summaryPaused;
           }
-          opts?.onOutcome?.(file.id, true);
+          if (!deferred) {
+            opts?.onOutcome?.(file.id, true);
+          }
         } catch {
           if (abort.signal.aborted) {
             return;
@@ -3551,6 +3636,9 @@ export const useStore = create<StoreState>((set, get) => {
         }
       });
       counts.stopped = halted();
+      if (opts?.modelBudget === undefined) {
+        spendModelReads(counts.readingsStarted!);
+      }
       // Whatever did not finish, including files cut off mid-flight, is
       // still owed; the summary's total must match the running count.
       counts.remaining = candidates.length - counts.files - counts.failed.length;

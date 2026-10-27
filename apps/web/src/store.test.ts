@@ -1098,7 +1098,7 @@ describe("importMail", () => {
     rigImport();
     const report = await useStore.getState().importMail([ticketEml()]);
 
-    expect(report).toEqual({ imported: 1, alreadyPresent: 0, skipped: [], attachments: 1 });
+    expect(report).toEqual({ imported: 1, alreadyPresent: 0, skipped: [], attachments: 1, dates: 0 });
     const files = useStore.getState().files;
     const record = files.get("up-Your ticket.email")!;
     const ticket = files.get("up-ticket.pdf")!;

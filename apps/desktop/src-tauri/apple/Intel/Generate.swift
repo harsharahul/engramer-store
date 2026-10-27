@@ -126,14 +126,15 @@ enum IntelGenerate {
         } catch let error as LanguageModelSession.GenerationError {
             return IntelEnvelope.error(code(for: error), error.localizedDescription)
         } catch {
-            return IntelEnvelope.error("other", "\(error)")
+            return IntelEnvelope.error(code(forCurrent: error) ?? "other", "\(error)")
         }
     }
 
+    // macOS 26 and iOS 26 throw these; 27 deprecates them for the types below.
     @available(macOS 26, iOS 26, *)
     private static func code(for error: LanguageModelSession.GenerationError) -> String {
         switch error {
-        case .guardrailViolation:
+        case .guardrailViolation, .refusal:
             return "guardrail"
         case .exceededContextWindowSize:
             return "context-too-long"
@@ -141,9 +142,51 @@ enum IntelGenerate {
             return "rate-limited"
         case .unsupportedLanguageOrLocale:
             return "language"
+        case .assetsUnavailable:
+            return "unavailable"
+        case .concurrentRequests:
+            return "preempted"
+        case .unsupportedGuide:
+            return "bad-request"
         default:
             return "other"
         }
+    }
+
+    // macOS 27 and iOS 27 throw the errors split by where they come from. The
+    // code decides whether a reading is final (a refusal), paused (the model is
+    // busy, downloading or rate limited) or counted as a try, so an unmapped
+    // error must never stand in for one of these.
+    private static func code(forCurrent error: Error) -> String? {
+        #if compiler(>=6.4)
+        if #available(macOS 27, iOS 27, *) {
+            if let error = error as? LanguageModelError {
+                switch error {
+                case .guardrailViolation, .refusal:
+                    return "guardrail"
+                case .contextSizeExceeded:
+                    return "context-too-long"
+                case .rateLimited:
+                    return "rate-limited"
+                case .unsupportedLanguageOrLocale:
+                    return "language"
+                case .timeout:
+                    return "timeout"
+                case .unsupportedGenerationGuide, .unsupportedCapability, .unsupportedTranscriptContent:
+                    return "bad-request"
+                @unknown default:
+                    return nil
+                }
+            }
+            if error is SystemLanguageModel.Error {
+                return "unavailable"
+            }
+            if let error = error as? LanguageModelSession.Error, case .concurrentRequests = error {
+                return "preempted"
+            }
+        }
+        #endif
+        return nil
     }
     #endif
 }

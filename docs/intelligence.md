@@ -159,6 +159,36 @@ than tried again forever; Profile's Library index says how many documents
 are waiting, and for which device. "Summarize now" in a file's menu reads
 one file on request.
 
+**Trust is measured, not assumed.** A model reading counts without your yes
+only for a task where that reader's precision, measured on a synthetic eval
+set, is at least 98%, for the version and the exact prompt of the reader that
+ships, over at least 30 readings; never for a travel time, an identity document's
+expiry or a legal deadline, which need exact data or two readers agreeing;
+and only when the value passes sanity checks (the day exists, a stay ends
+after it begins, an amount names its currency). The eval set is forty
+invented emails and documents; the exact readers are scored against it in
+the test suite, and Apple's on-device model is scored on a Mac by a harness
+that runs the app's own reading code (`tools/eval/apple`). Today the model
+measures well below that bar for dates and for naming an email's kind, so
+its readings are offered for a yes. The bar never moves: a task earns trust
+only by measuring above it, and for amounts and for each kind of email the
+eval set must first grow, since forty cases hold too few of them to measure
+at all.
+
+**Mail is read newest first, within a window.** The model reads email from
+the last 12 months by default (3 to 12 in Profile, following your account);
+older mail stays kept and searchable, and the booking data in it is still
+read. Email is read from much less text than a document, since most mail is
+a few lines, and an email whose own booking data gave its dates is only
+summarized. The reading also names the kind of email (booking, bill,
+delivery, receipt, newsletter, personal); the kind is stored as a `mail:`
+tag once kinds are measured right 90% of the time. A newsletter's dates are
+set aside only once the model's "newsletter" is itself measured right 98%
+of the time, since a bill taken for a newsletter would lose its due date.
+On a phone, each time the app comes to the front the model starts at most
+40 readings, whatever started them; the rest wait for the next open, newest
+first.
+
 ## Ask your files
 
 On the same devices, a question typed into the search field ("what did I
