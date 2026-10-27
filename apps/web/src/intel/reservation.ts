@@ -18,7 +18,8 @@ import { factId, type DocumentKind, type Fact } from "./facts";
 
 const SCRIPT_BLOCK = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
 
-const RESERVATION_TYPE = /(?:Flight|Lodging|RentalCar|Train)Reservation$/;
+const RESERVATION_TYPE =
+  /(?:^|[^A-Za-z])(?:Flight|Lodging|RentalCar|Train|Bus|Boat|Event|FoodEstablishment)Reservation$/;
 
 type Node = Record<string, unknown>;
 
@@ -92,12 +93,17 @@ function when(stamp: unknown): { value: string; time?: string; zone?: string } |
 }
 
 function factsOf(res: Node): Fact[] {
-  const type = str(res["@type"]) ?? "";
+  // "http://schema.org/FlightReservation" and "FlightReservation" alike.
+  const type = (str(res["@type"]) ?? "").replace(/^.*[:/]/, "");
   const document: DocumentKind = type.startsWith("Lodging")
     ? "hotel-booking"
     : type.startsWith("RentalCar")
       ? "car-rental"
-      : "itinerary";
+      : type.startsWith("EventReservation")
+        ? "event-ticket"
+        : type.startsWith("FoodEstablishment")
+          ? "dining"
+          : "itinerary";
   const target = record(res["reservationFor"]);
   const facts: Fact[] = [];
 
@@ -145,6 +151,21 @@ function factsOf(res: Node): Fact[] {
     const train = ["Train", number].filter(Boolean).join(" ");
     event(target?.["departureTime"], `${train} departs ${station}`.trim());
     event(target?.["arrivalTime"], `${train} arrives`.trim());
+  } else if (type.startsWith("Bus") || type.startsWith("Boat")) {
+    const bus = type.startsWith("Bus");
+    const provider = str(record(target?.["provider"])?.["name"]) ?? "";
+    const from = str(record(target?.[bus ? "departureBusStop" : "departureBoatTerminal"])?.["name"]) ?? "";
+    const to = str(record(target?.[bus ? "arrivalBusStop" : "arrivalBoatTerminal"])?.["name"]) ?? "";
+    const trip = [bus ? "Bus" : "Boat", provider].filter(Boolean).join(" ");
+    event(target?.["departureTime"] ?? res["departureTime"], `${trip} departs ${from}`.trim());
+    event(target?.["arrivalTime"] ?? res["arrivalTime"], `${trip} arrives ${to}`.trim());
+  } else if (type.startsWith("EventReservation")) {
+    const name = str(target?.["name"]) ?? "the event";
+    event(target?.["startDate"] ?? res["startTime"], name);
+    event(target?.["endDate"] ?? res["endTime"], `${name} ends`);
+  } else if (type.startsWith("FoodEstablishment")) {
+    const name = str(target?.["name"]) ?? "the restaurant";
+    event(res["startTime"] ?? target?.["startDate"], `Table at ${name}`);
   }
 
   const reference = str(res["reservationNumber"]);

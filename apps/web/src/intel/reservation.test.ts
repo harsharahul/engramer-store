@@ -89,3 +89,116 @@ describe("reservationFacts", () => {
     expect(reservationFacts(graph)).toHaveLength(1);
   });
 });
+
+const ld = (node: Record<string, unknown>) =>
+  `<html><script type="application/ld+json">${JSON.stringify(node)}</script></html>`;
+
+describe("more reservation types", () => {
+  it("reads an event ticket", () => {
+    const facts = reservationFacts(
+      ld({
+        "@type": "EventReservation",
+        reservationNumber: "EVT-5521",
+        reservationFor: {
+          "@type": "MusicEvent",
+          name: "Harbor Lights Concert",
+          startDate: "2027-05-12T19:30:00-07:00",
+          endDate: "2027-05-12T22:00:00-07:00",
+        },
+      }),
+    );
+    expect(facts.find((f) => f.label === "Harbor Lights Concert")).toMatchObject({
+      kind: "event",
+      document: "event-ticket",
+      value: "2027-05-12",
+      time: "19:30",
+      zone: "-07:00",
+      source: "jsonld",
+      confidence: 1,
+    });
+    expect(facts.find((f) => f.label === "Harbor Lights Concert ends")?.time).toBe("22:00");
+    expect(facts.find((f) => f.kind === "identifier")?.value).toBe("EVT-5521");
+  });
+
+  it("reads a dinner reservation", () => {
+    const facts = reservationFacts(
+      ld({
+        "@type": "FoodEstablishmentReservation",
+        startTime: "2027-05-13T20:00:00+01:00",
+        reservationFor: { "@type": "Restaurant", name: "Casa Verde" },
+      }),
+    );
+    expect(facts).toEqual([
+      expect.objectContaining({
+        kind: "event",
+        document: "dining",
+        value: "2027-05-13",
+        time: "20:00",
+        label: "Table at Casa Verde",
+      }),
+    ]);
+  });
+
+  it("reads a bus departure and arrival", () => {
+    const facts = reservationFacts(
+      ld({
+        "@type": "BusReservation",
+        reservationFor: {
+          "@type": "BusTrip",
+          provider: { name: "Coastline Coaches" },
+          departureBusStop: { name: "Central Station" },
+          arrivalBusStop: { name: "Seaside" },
+          departureTime: "2027-06-01T08:15:00+02:00",
+          arrivalTime: "2027-06-01T11:40:00+02:00",
+        },
+      }),
+    );
+    expect(facts.map((f) => [f.label, f.time, f.document])).toEqual([
+      ["Bus Coastline Coaches departs Central Station", "08:15", "itinerary"],
+      ["Bus Coastline Coaches arrives Seaside", "11:40", "itinerary"],
+    ]);
+  });
+
+  it("reads a boat departure", () => {
+    const facts = reservationFacts(
+      ld({
+        "@type": "BoatReservation",
+        reservationFor: {
+          "@type": "BoatTrip",
+          provider: { name: "Island Ferries" },
+          departureBoatTerminal: { name: "North Pier" },
+          departureTime: "2027-06-03T07:00:00+02:00",
+        },
+      }),
+    );
+    expect(facts.map((f) => f.label)).toEqual(["Boat Island Ferries departs North Pier"]);
+  });
+
+  it("keeps time zones as written", () => {
+    const facts = reservationFacts(
+      ld({
+        "@type": "FoodEstablishmentReservation",
+        startTime: "2027-05-13T20:00:00Z",
+        reservationFor: { name: "Casa Verde" },
+      }),
+    );
+    expect(facts[0]).toMatchObject({ time: "20:00", zone: "UTC" });
+  });
+
+  it("reads a type written with its schema.org address", () => {
+    const facts = reservationFacts(
+      ld({
+        "@type": "http://schema.org/LodgingReservation",
+        checkinTime: "2027-03-04T15:00:00-05:00",
+        reservationFor: { name: "The Larkspur Hotel" },
+      }),
+    );
+    expect(facts[0]).toMatchObject({ label: "Check-in: The Larkspur Hotel", document: "hotel-booking" });
+  });
+
+  it("a type name that only shares a prefix is not read", () => {
+    expect(
+      reservationFacts(ld({ "@type": "BusinessEvent", startDate: "2027-05-12T09:00:00Z", name: "Expo" })),
+    ).toEqual([]);
+  });
+});
