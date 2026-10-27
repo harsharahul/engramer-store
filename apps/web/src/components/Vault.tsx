@@ -3559,6 +3559,7 @@ export function Vault() {
           file={previewFile}
           onClose={() => setPreviewId(null)}
           onToast={showToast}
+          onOpenFile={(id) => setPreviewId(id)}
           onFavorite={() => void store.toggleFavorite(previewFile.id)}
           onShare={() => {
             setShareId(previewFile.id);
