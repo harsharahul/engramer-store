@@ -224,6 +224,7 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         .route("/api/files", post(storage::create_file))
         .route("/api/files/batch", post(storage::batch))
         .route("/api/files/verify", post(content::verify))
+        .route("/api/files/index/batch", post(content::post_index_batch))
         .route(
             "/api/files/{id}",
             axum::routing::patch(storage::patch_file).delete(storage::trash_file),

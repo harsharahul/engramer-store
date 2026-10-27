@@ -494,6 +494,58 @@ pub async fn get_index(
     download(state, auth, id, HeaderMap::new(), BlobKind::Index).await
 }
 
+/// Files whose search index one batch download may name, as the server.
+const INDEX_BATCH_MAX: usize = 500;
+
+/// Many files' search index blobs in one answer, as the server sends them:
+/// frames of [u32 id length][id][u32 blob length][blob], big-endian, in the
+/// order asked, leaving out files that are not the caller's or have no
+/// index.
+pub async fn post_index_batch(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    JsonBody(body): JsonBody<Value>,
+) -> Result<Response, ApiError> {
+    let ids: Vec<String> = body
+        .get("ids")
+        .and_then(Value::as_array)
+        .filter(|ids| !ids.is_empty() && ids.len() <= INDEX_BATCH_MAX)
+        .and_then(|ids| {
+            ids.iter()
+                .map(|id| id.as_str().map(str::to_string))
+                .collect()
+        })
+        .ok_or_else(ApiError::invalid_request)?;
+    let readable = blocking(&state, move |store| {
+        let conn = store.conn();
+        let mut found = Vec::new();
+        for id in ids {
+            if own_file(&conn, &id, auth.uid)?.is_some_and(|file| file.index_size > 0) {
+                found.push(id);
+            }
+        }
+        Ok(found)
+    })
+    .await?;
+    let mut out = Vec::new();
+    for id in readable {
+        let body = state
+            .blobs
+            .get(&blob_key(&id, BlobKind::Index, 0), None)
+            .await
+            .map_err(io_error)?;
+        let blob = axum::body::to_bytes(body, usize::MAX)
+            .await
+            .map_err(|_| ApiError::internal())?;
+        out.extend_from_slice(&(id.len() as u32).to_be_bytes());
+        out.extend_from_slice(id.as_bytes());
+        out.extend_from_slice(&(blob.len() as u32).to_be_bytes());
+        out.extend_from_slice(&blob);
+    }
+    let length = out.len() as u64;
+    Ok(octet_stream(StatusCode::OK, length, Body::from(out)))
+}
+
 /// A single `bytes=` range against a known size, as the server reads it:
 /// an open end runs to the last byte, an overlong end is clamped, a
 /// suffix names the last N bytes, and a start past the end satisfies
@@ -1216,6 +1268,11 @@ mod tests {
                 .0
         }
 
+        fn save_index(&self, id: &str, text: &str) -> u16 {
+            self.call("PUT", &format!("/api/files/{id}/index"), Some(text))
+                .0
+        }
+
         fn content(&self, id: &str) -> (u16, String) {
             let (status, _, body) = self.call("GET", &format!("/api/files/{id}/data"), None);
             (status, body)
@@ -1241,6 +1298,94 @@ mod tests {
             names.sort();
             names
         }
+    }
+
+    /// Splits a batch answer into (id, blob) pairs in the order written.
+    /// Test blobs are short ASCII, so every length byte survives the text
+    /// read the helper does.
+    fn index_frames(body: &str) -> Vec<(String, String)> {
+        let bytes = body.as_bytes();
+        let mut out = Vec::new();
+        let mut at = 0;
+        let read_u32 =
+            |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+        while at < bytes.len() {
+            let id_len = read_u32(at);
+            let id = String::from_utf8(bytes[at + 4..at + 4 + id_len].to_vec()).unwrap();
+            at += 4 + id_len;
+            let size = read_u32(at);
+            let blob = String::from_utf8(bytes[at + 4..at + 4 + size].to_vec()).unwrap();
+            at += 4 + size;
+            out.push((id, blob));
+        }
+        out
+    }
+
+    #[test]
+    fn index_batch_returns_frames_in_request_order() {
+        let vault = Vault::new("batch@example.com");
+        let ids: Vec<String> = (0..3).map(|_| vault.create_file()).collect();
+        for (i, id) in ids.iter().enumerate() {
+            assert_eq!(vault.save_index(id, &format!("words {i}")), 200);
+        }
+        let body = format!(r#"{{"ids":["{}","{}","{}"]}}"#, ids[2], ids[0], ids[1]);
+        let (status, head, answer) = vault.call("POST", "/api/files/index/batch", Some(&body));
+        assert_eq!(status, 200);
+        assert!(head.contains("content-type: application/octet-stream"));
+        assert_eq!(
+            index_frames(&answer),
+            vec![
+                (ids[2].clone(), "words 2".to_string()),
+                (ids[0].clone(), "words 0".to_string()),
+                (ids[1].clone(), "words 1".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn index_batch_skips_missing_and_foreign() {
+        let vault = Vault::new("batch-owner@example.com");
+        let indexed = vault.create_file();
+        assert_eq!(vault.save_index(&indexed, "kept"), 200);
+        let plain = vault.create_file();
+        let other_token = signed_in(vault.server.port, "batch-other@example.com");
+        let other_auth = format!("Bearer {other_token}");
+        let create =
+            format!(r#"{{"folderId":null,"encryptedKey":{SEALED},"encryptedMeta":{SEALED}}}"#);
+        let (status, _, answer) = raw_with(
+            vault.server.port,
+            "POST",
+            "/api/files",
+            &vault.host,
+            Some(&create),
+            &[("Authorization", &other_auth)],
+        );
+        assert_eq!(status, 201);
+        let foreign = serde_json::from_str::<Value>(&answer).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        raw_with(
+            vault.server.port,
+            "PUT",
+            &format!("/api/files/{foreign}/index"),
+            &vault.host,
+            Some("not yours"),
+            &[("Authorization", &other_auth)],
+        );
+        let body = format!(r#"{{"ids":["{plain}","{foreign}","{indexed}"]}}"#);
+        let (status, _, answer) = vault.call("POST", "/api/files/index/batch", Some(&body));
+        assert_eq!(status, 200);
+        assert_eq!(index_frames(&answer), vec![(indexed, "kept".to_string())]);
+    }
+
+    #[test]
+    fn index_batch_refuses_over_500() {
+        let vault = Vault::new("batch-cap@example.com");
+        let ids: Vec<String> = (0..501).map(|_| format!("\"{}\"", uuid_v4())).collect();
+        let body = format!(r#"{{"ids":[{}]}}"#, ids.join(","));
+        let (status, _, _) = vault.call("POST", "/api/files/index/batch", Some(&body));
+        assert_eq!(status, 400);
     }
 
     #[test]
