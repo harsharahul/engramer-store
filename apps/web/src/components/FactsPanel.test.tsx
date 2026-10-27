@@ -72,4 +72,25 @@ describe("the Notices panel", () => {
     expect(container.textContent).toContain("Water bill.pdf");
     expect(container.textContent).not.toContain("Flyer.pdf");
   });
+
+  it("a trip shows one card, and its events are not repeated under Coming up", async () => {
+    const checkIn: Fact = {
+      id: `event:${isoIn(10)}`,
+      kind: "event",
+      document: "hotel-booking",
+      value: isoIn(10),
+      label: "Check-in: Casa do Rio",
+      source: "jsonld",
+      confidence: 1,
+      accepted: "exact",
+    };
+    render([
+      file("a", "Casa do Rio booking.pdf", [checkIn], ["trip:lisbon-2026-11"]),
+      file("b", "Boarding pass.pdf", [], ["trip:lisbon-2026-11"]),
+    ]);
+    await act(async () => {});
+    expect(container.querySelectorAll(".trip-card")).toHaveLength(1);
+    expect(container.querySelector(".trip-card h4")?.textContent).toContain("Lisbon, Nov 2026");
+    expect(container.textContent).not.toContain("Coming up");
+  });
 });

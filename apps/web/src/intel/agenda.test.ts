@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { itemsOf, type AgendaFile } from "./agenda";
+import { hasAgenda, itemsOf, tripsOf, type AgendaFile } from "./agenda";
 import { isDated, type Fact } from "./facts";
 
 const NOW = Date.UTC(2026, 8, 10, 12);
@@ -67,6 +67,62 @@ describe("itemsOf", () => {
 
   it("says how many days away each row is", () => {
     expect(itemsOf([file("a", [fact("x", iso(3))])], NOW, { name: "all" })[0]).toMatchObject({ days: 3 });
+  });
+});
+
+describe("tripsOf", () => {
+  const LISBON = "trip:lisbon-2026-11";
+  const ROME = "trip:rome-2026-12";
+  const event = (id: string, value: string) => fact(id, value, { kind: "event", document: "itinerary" });
+
+  it("gathers each tag's members and spans their events", () => {
+    const trips = tripsOf([
+      file("out", [event("dep", "2026-11-12")], { tags: [LISBON] }),
+      file("stay", [event("in", "2026-11-13"), event("outday", "2026-11-16")], { tags: [LISBON, "receipts"] }),
+      file("bill", [fact("due", "2026-11-30")], { tags: [LISBON] }),
+      file("other", [event("x", "2026-10-01")]),
+    ]);
+    expect(trips).toHaveLength(1);
+    expect(trips[0]).toMatchObject({ tag: LISBON, title: "Lisbon, Nov 2026", start: "2026-11-12", end: "2026-11-16" });
+    expect(trips[0]!.members.map((member) => member.id)).toEqual(["out", "stay", "bill"]);
+  });
+
+  it("a file in two trips extends both spans", () => {
+    const trips = tripsOf([
+      file("both", [event("e", "2026-11-20")], { tags: [ROME, LISBON] }),
+      file("lisbon", [event("l", "2026-11-12")], { tags: [LISBON] }),
+      file("rome", [event("r", "2026-12-02")], { tags: [ROME] }),
+    ]);
+    expect(trips.map(({ tag, start, end }) => ({ tag, start, end }))).toEqual([
+      { tag: LISBON, start: "2026-11-12", end: "2026-11-20" },
+      { tag: ROME, start: "2026-11-20", end: "2026-12-02" },
+    ]);
+  });
+
+  it("a trip without tracked events has no span", () => {
+    const [trip] = tripsOf([file("pass", [event("offered", "2026-11-12")].map((f) => ({ ...f, confirmed: undefined })), { tags: [LISBON] })]);
+    expect(trip).toMatchObject({ tag: LISBON });
+    expect(trip!.start).toBeUndefined();
+    expect(trip!.end).toBeUndefined();
+  });
+
+  it("a trashed member is not a member", () => {
+    const trips = tripsOf([
+      file("gone", [event("g", "2026-11-01")], { tags: [LISBON], trashed: true }),
+      file("kept", [event("k", "2026-11-12")], { tags: [LISBON] }),
+    ]);
+    expect(trips[0]!.members.map((member) => member.id)).toEqual(["kept"]);
+    expect(trips[0]!.start).toBe("2026-11-12");
+    expect(tripsOf([file("gone", [], { tags: [ROME], trashed: true })])).toEqual([]);
+  });
+});
+
+describe("hasAgenda", () => {
+  it("is true for a trip tag or a tracked date, false otherwise", () => {
+    expect(hasAgenda([file("a", [], { tags: ["trip:lisbon-2026-11"] })], NOW)).toBe(true);
+    expect(hasAgenda([file("a", [fact("x", iso(400))])], NOW)).toBe(true);
+    expect(hasAgenda([file("a", [fact("x", iso(1), { confirmed: undefined })]), file("b", [], { tags: ["receipts"] })], NOW)).toBe(false);
+    expect(hasAgenda([file("a", [fact("x", iso(1))], { trashed: true })], NOW)).toBe(false);
   });
 });
 

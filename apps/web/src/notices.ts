@@ -10,12 +10,11 @@
  */
 
 import { decide, decided, DECISIONS_EVENT, decisionEvents } from "./decisions";
-import { itemsOf } from "./intel/agenda";
+import { itemsOf, tripsOf } from "./intel/agenda";
 import { describeFact } from "./intel/describe";
 import { duplicatesByDigest } from "./intel/duplicates";
 import type { Fact } from "./intel/facts";
 import { insightsFor, type Severity } from "./intel/insights";
-import { isTripTag } from "./intel/trips";
 
 export interface NoticeFile {
   id: string;
@@ -40,26 +39,11 @@ export interface Notice {
   severity: Severity;
 }
 
-export function tripTags(files: readonly NoticeFile[]): string[] {
-  const tags = new Set<string>();
-  for (const file of files) {
-    if (file.trashed) {
-      continue;
-    }
-    for (const tag of file.tags) {
-      if (isTripTag(tag)) {
-        tags.add(tag);
-      }
-    }
-  }
-  return [...tags].sort();
-}
-
 /** One stable key per item the notice center shows. */
 export function noticeKeys(files: readonly NoticeFile[], now: number): string[] {
   const live = files.filter((file) => !file.trashed);
   const keys: string[] = [];
-  for (const tag of tripTags(live)) {
+  for (const { tag } of tripsOf(live)) {
     keys.push(`trip:${tag}`);
   }
   for (const { file, fact } of itemsOf(live, now, { name: "coming-up" })) {

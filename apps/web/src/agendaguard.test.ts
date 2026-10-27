@@ -39,6 +39,10 @@ describe("one model for dates and trips", () => {
     expect(offenders([/startsWith\(\s*["'`]trip:/, /["']trip:/], [join("intel", "trips.ts")])).toEqual([]);
   });
 
+  it("reads dated kinds only through the model", () => {
+    expect(offenders([/\bDATED_KINDS\b/], [join("intel", "facts.ts"), join("intel", "agenda.ts")])).toEqual([]);
+  });
+
   it("defines isDated once", () => {
     expect(offenders([/\b(?:function|const)\s+isDated\b/], [join("intel", "facts.ts")])).toEqual([]);
   });
