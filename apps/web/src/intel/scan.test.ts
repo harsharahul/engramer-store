@@ -101,6 +101,17 @@ describe("scanForFacts", () => {
     expect(out.evidence.find((e) => e.id === id!.id)!.full).toBe("LRK-449022");
   });
 
+  it("reads invoice data from an email record's HTML", async () => {
+    const raw = `<html><script type="application/ld+json">{
+      "@type": "Invoice",
+      "paymentDueDate": "2027-04-10",
+      "totalPaymentDue": { "price": "65.00", "priceCurrency": "USD" }
+    }</script><p>Your bill is ready.</p></html>`;
+    const out = await scanForFacts({ name: "Your bill.email", mime: "application/vnd.engram.email+json", raw });
+    expect(out.facts.find((f) => f.kind === "due")).toMatchObject({ value: "2027-04-10", source: "jsonld" });
+    expect(out.facts.find((f) => f.kind === "amount")).toMatchObject({ value: "65.00", unit: "USD" });
+  });
+
   it("grounds nothing away from a reservation, which is structured", async () => {
     const raw = `<html><script type="application/ld+json">{
       "@type": "LodgingReservation",

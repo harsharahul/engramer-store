@@ -28,7 +28,7 @@ import {
 } from "./facts";
 import { harvestFacts, labelledFacts, structuralDatedFacts } from "./labels";
 import { mrzFacts } from "./mrz";
-import { reservationFacts } from "./reservation";
+import { structuredDataFacts } from "./reservation";
 
 const PREF_KEY = "engram-facts";
 
@@ -94,7 +94,7 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
   // A reservation the document states about itself is the same tier: exact,
   // and exempt from prose grounding for the same reason barcodes are.
   if (input.raw) {
-    found.push(...reservationFacts(input.raw));
+    found.push(...structuredDataFacts(input.raw));
   }
 
   const text = input.text ?? "";

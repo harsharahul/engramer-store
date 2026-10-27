@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reservationFacts } from "./reservation";
+import { reservationFacts, structuredDataFacts } from "./reservation";
 
 // Synthetic throughout: invented airline, hotel, codes, dates.
 const FLIGHT_HTML = `<!doctype html><html><head>
@@ -200,5 +200,60 @@ describe("more reservation types", () => {
     expect(
       reservationFacts(ld({ "@type": "BusinessEvent", startDate: "2027-05-12T09:00:00Z", name: "Expo" })),
     ).toEqual([]);
+  });
+});
+
+describe("invoices and deliveries", () => {
+  it("reads an invoice's due date and amount", () => {
+    const facts = structuredDataFacts(
+      ld({
+        "@type": "Invoice",
+        confirmationNumber: "INV-20270410",
+        paymentDueDate: "2027-04-10",
+        totalPaymentDue: { "@type": "PriceSpecification", price: "1,065.40", priceCurrency: "USD" },
+        provider: { name: "Example Power" },
+      }),
+    );
+    expect(facts.find((f) => f.kind === "due")).toMatchObject({
+      value: "2027-04-10",
+      document: "invoice",
+      label: "Payment due",
+      source: "jsonld",
+      confidence: 1,
+    });
+    expect(facts.find((f) => f.kind === "identifier")?.value).toBe("INV-20270410");
+  });
+
+  it("an invoice amount carries its currency", () => {
+    const facts = structuredDataFacts(
+      ld({ "@type": "Invoice", totalPaymentDue: { price: 65, priceCurrency: "EUR" } }),
+    );
+    expect(facts.find((f) => f.kind === "amount")).toMatchObject({
+      value: "65.00",
+      unit: "EUR",
+      label: "Amount due",
+      document: "invoice",
+    });
+  });
+
+  it("reads a delivery window", () => {
+    const facts = structuredDataFacts(
+      ld({
+        "@type": "ParcelDelivery",
+        trackingNumber: "TRK99887766",
+        expectedArrivalFrom: "2027-04-02T09:00:00-07:00",
+        expectedArrivalUntil: "2027-04-02T17:00:00-07:00",
+      }),
+    );
+    expect(facts.filter((f) => f.kind === "event").map((f) => [f.label, f.time, f.document])).toEqual([
+      ["Delivery window opens", "09:00", "delivery"],
+      ["Delivery expected by", "17:00", "delivery"],
+    ]);
+    expect(facts.find((f) => f.kind === "identifier")).toMatchObject({ value: "TRK99887766", label: "Tracking number" });
+  });
+
+  it("still reads reservations, once each", () => {
+    const facts = structuredDataFacts(FLIGHT_HTML + FLIGHT_HTML);
+    expect(facts.filter((f) => f.kind === "event")).toHaveLength(2);
   });
 });

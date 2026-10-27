@@ -21,6 +21,9 @@ const SCRIPT_BLOCK = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S
 const RESERVATION_TYPE =
   /(?:^|[^A-Za-z])(?:Flight|Lodging|RentalCar|Train|Bus|Boat|Event|FoodEstablishment)Reservation$/;
 
+/** Structured data a bill or a shipping notice carries about itself. */
+const BILLING_TYPE = /(?:^|[^A-Za-z])(?:Invoice|ParcelDelivery)$/;
+
 type Node = Record<string, unknown>;
 
 function record(value: unknown): Node | undefined {
@@ -52,11 +55,11 @@ function jsonBlocks(raw: string): unknown[] {
   return blocks;
 }
 
-/** Every reservation object in a parsed block, arrays and graphs included. */
-function reservationsIn(node: unknown, out: Node[]): void {
+/** Every object of a matching type in a parsed block, arrays and graphs included. */
+function nodesIn(node: unknown, pattern: RegExp, out: Node[]): void {
   if (Array.isArray(node)) {
     for (const item of node) {
-      reservationsIn(item, out);
+      nodesIn(item, pattern, out);
     }
     return;
   }
@@ -65,11 +68,11 @@ function reservationsIn(node: unknown, out: Node[]): void {
     return;
   }
   const type = str(obj["@type"]);
-  if (type && RESERVATION_TYPE.test(type)) {
+  if (type && pattern.test(type)) {
     out.push(obj);
   }
   if (obj["@graph"]) {
-    reservationsIn(obj["@graph"], out);
+    nodesIn(obj["@graph"], pattern, out);
   }
 }
 
@@ -183,21 +186,98 @@ function factsOf(res: Node): Fact[] {
   return facts;
 }
 
+/** A bill's due date, amount and number, or a parcel's delivery window. */
+function billingFactsOf(node: Node): Fact[] {
+  const type = (str(node["@type"]) ?? "").replace(/^.*[:/]/, "");
+  const invoice = type === "Invoice";
+  const document: DocumentKind = invoice ? "invoice" : "delivery";
+  const facts: Fact[] = [];
+  const dated = (kind: "due" | "event", stamp: unknown, label: string) => {
+    const at = when(stamp);
+    if (!at) {
+      return;
+    }
+    facts.push({
+      id: factId(kind, kind === "event" ? `${at.value} ${label.toLowerCase()}` : at.value),
+      kind,
+      document,
+      value: at.value,
+      ...(at.time ? { time: at.time } : {}),
+      ...(at.zone ? { zone: at.zone } : {}),
+      label,
+      source: "jsonld",
+      confidence: 1,
+    });
+  };
+  const identifier = (value: string | undefined, label: string) => {
+    if (value) {
+      facts.push({
+        id: factId("identifier", value),
+        kind: "identifier",
+        document,
+        value,
+        label,
+        source: "jsonld",
+        confidence: 1,
+      });
+    }
+  };
+  if (invoice) {
+    dated("due", node["paymentDueDate"] ?? node["paymentDue"], "Payment due");
+    const total = record(node["totalPaymentDue"]);
+    const price = Number(String(total?.["price"] ?? total?.["value"] ?? "").replace(/,/g, ""));
+    const currency = str(total?.["priceCurrency"]) ?? str(total?.["currency"]);
+    if (Number.isFinite(price) && price > 0 && currency) {
+      const value = price.toFixed(2);
+      facts.push({
+        id: factId("amount", value),
+        kind: "amount",
+        document,
+        value,
+        unit: currency.toUpperCase(),
+        label: "Amount due",
+        source: "jsonld",
+        confidence: 1,
+      });
+    }
+    identifier(str(node["confirmationNumber"]) ?? str(node["identifier"]), "Invoice number");
+    identifier(str(node["accountId"]), "Account number");
+  } else {
+    dated("event", node["expectedArrivalFrom"], "Delivery window opens");
+    dated("event", node["expectedArrivalUntil"], "Delivery expected by");
+    identifier(str(node["trackingNumber"]), "Tracking number");
+  }
+  return facts;
+}
+
+/** The first statement of each fact wins: the same data often appears in
+ * both the html and text parts of a saved email. */
+function firstOfEach(facts: Iterable<Fact>): Fact[] {
+  const byId = new Map<string, Fact>();
+  for (const fact of facts) {
+    if (!byId.has(fact.id)) {
+      byId.set(fact.id, fact);
+    }
+  }
+  return [...byId.values()];
+}
+
 /** Everything the document's own reservation data states, or nothing. */
 export function reservationFacts(raw: string): Fact[] {
   const found: Node[] = [];
   for (const block of jsonBlocks(raw)) {
-    reservationsIn(block, found);
+    nodesIn(block, RESERVATION_TYPE, found);
   }
-  // The same reservation often appears in both the html and text parts of a
-  // saved email; the first statement of a fact wins.
-  const byId = new Map<string, Fact>();
-  for (const res of found) {
-    for (const fact of factsOf(res)) {
-      if (!byId.has(fact.id)) {
-        byId.set(fact.id, fact);
-      }
-    }
+  return firstOfEach(found.flatMap(factsOf));
+}
+
+/** Reservations, bills and deliveries a document states about itself. */
+export function structuredDataFacts(raw: string): Fact[] {
+  const reservations: Node[] = [];
+  const billing: Node[] = [];
+  for (const block of jsonBlocks(raw)) {
+    nodesIn(block, RESERVATION_TYPE, reservations);
+    nodesIn(block, BILLING_TYPE, billing);
   }
-  return [...byId.values()];
+  return firstOfEach([...reservations.flatMap(factsOf), ...billing.flatMap(billingFactsOf)]);
 }
