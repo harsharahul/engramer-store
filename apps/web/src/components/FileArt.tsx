@@ -1,3 +1,4 @@
+import { Mail } from "lucide-react";
 import type { FolderActivity } from "../folderactivity";
 import type { FileKind } from "../format";
 
@@ -55,6 +56,10 @@ function kindPictogram(kind: FileKind) {
       return <path d="M8.2 9h7.6M8.2 12h7.6M8.2 15h4.8" />;
     case "doc":
       return <path d="M8.2 8.4h7.6M8.2 10.9h7.6M8.2 13.4h7.6M8.2 15.9h5.2" />;
+    case "mail":
+      // The house envelope, placed on the sheet at the pictograms' size and
+      // stroke weight.
+      return <Mail x={7} y={7.5} size={10} strokeWidth={1.5} absoluteStrokeWidth />;
     case "archive":
       return (
         <>

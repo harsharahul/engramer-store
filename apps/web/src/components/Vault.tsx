@@ -188,6 +188,7 @@ import {
   FolderGlyph,
   GridGlyph,
   InboxGlyph,
+  MailGlyph,
   InfoGlyph,
   KeyGlyph,
   Keyhole,
@@ -251,6 +252,7 @@ const CATEGORY_ICONS: Record<string, (props: { size?: number }) => React.ReactNo
   Audio: AudioGlyph,
   Documents: DocGlyph,
   Receipts: ReceiptGlyph,
+  Mail: MailGlyph,
   Notes: NoteGlyph,
   Code: CodeGlyph,
   Spreadsheets: GridGlyph,
@@ -1996,7 +1998,7 @@ export function Vault() {
     {
       id: "import-mail",
       label: "Import mail…",
-      icon: <UploadGlyph size={15} />,
+      icon: <MailGlyph size={15} />,
       run: () => mailInput.current?.click(),
     },
     { id: "new-u", label: "", divider: true, run: () => {} },
@@ -2056,7 +2058,7 @@ export function Vault() {
           icon: <FolderGlyph size={15} />,
           run: () => folderInput.current?.click(),
         },
-        { id: "import-mail", label: "Import mail", icon: <UploadGlyph size={15} />, run: () => mailInput.current?.click() },
+        { id: "import-mail", label: "Import mail", icon: <MailGlyph size={15} />, run: () => mailInput.current?.click() },
         { id: "new-folder", label: "New folder", icon: <PlusGlyph size={15} />, run: () => setNewFolderOpen(true) },
         { id: "new-note", label: "New note", icon: <NoteGlyph size={15} />, run: () => setNewNoteOpen(true) },
         {
