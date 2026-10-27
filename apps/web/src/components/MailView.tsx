@@ -15,9 +15,28 @@ export function MailView(props: {
   record: EmailRecord;
   file: FileEntry;
   onOpen?: (id: string) => void;
+  /** Stores a PDF of this email; absent where nothing can be saved. */
+  onSavePdf?: (bytes: Uint8Array, name: string, replacedCharacters: boolean) => Promise<void>;
 }) {
   const { record } = props;
   const [allowRemote, setAllowRemote] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const savePdf = async () => {
+    setSaving(true);
+    setPdfError(null);
+    try {
+      // Loaded on first use: the PDF writer is not part of opening mail.
+      const { emailToPdf } = await import("../mail/pdf");
+      const { bytes, replacedCharacters } = await emailToPdf(record);
+      const base = props.file.name.replace(/\.email$/i, "") || "Email";
+      await props.onSavePdf!(bytes, `${base}.pdf`, replacedCharacters);
+    } catch {
+      setPdfError("The PDF could not be made.");
+    } finally {
+      setSaving(false);
+    }
+  };
   const doc = useMemo(() => prepareMailDocument(record, { allowRemote }), [record, allowRemote]);
   const remote = useMemo(() => hasRemoteImages(record), [record]);
   const ids = props.file.mail?.attachmentIds ?? [];
@@ -29,7 +48,15 @@ export function MailView(props: {
   return (
     <div className="mail-view">
       <header className="mail-head">
-        <h2 className="mail-subject">{record.subject || "(no subject)"}</h2>
+        <div className="mail-title-row">
+          <h2 className="mail-subject">{record.subject || "(no subject)"}</h2>
+          {props.onSavePdf && (
+            <Button variant="secondary" size="xs" disabled={saving} onClick={() => void savePdf()}>
+              {saving ? "Saving…" : "Save as PDF"}
+            </Button>
+          )}
+        </div>
+        {pdfError && <div className="mail-remote">{pdfError}</div>}
         <dl className="mail-fields">
           <dt>From</dt>
           <dd>{sender}</dd>

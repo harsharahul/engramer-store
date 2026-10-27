@@ -3560,6 +3560,21 @@ export function Vault() {
           onClose={() => setPreviewId(null)}
           onToast={showToast}
           onOpenFile={(id) => setPreviewId(id)}
+          onSaveMailPdf={async (bytes, name, replacedCharacters) => {
+            // Beside the email, linked back to it like an attachment.
+            const pdf = Object.assign(new File([bytes as BlobPart], name, { type: "application/pdf" }), {
+              meta: { mailParent: previewFile.id },
+            });
+            try {
+              const id = await store.saveNewFile(pdf, previewFile.shared ? null : previewFile.folderId);
+              showToast(
+                replacedCharacters ? `Saved ${name}; some characters show as ?` : `Saved ${name}`,
+                () => setPreviewId(id),
+              );
+            } catch (err) {
+              showToast(`Could not save ${name}: ${err instanceof Error ? err.message : "unknown error"}`);
+            }
+          }}
           onFavorite={() => void store.toggleFavorite(previewFile.id)}
           onShare={() => {
             setShareId(previewFile.id);

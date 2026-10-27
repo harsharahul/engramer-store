@@ -253,6 +253,8 @@ export function Preview(props: {
   onOpenElsewhere?: () => void;
   /** Opens another file of the vault in the preview, such as an email's attachment. */
   onOpenFile?: (id: string) => void;
+  /** Stores a PDF made from the email being shown. */
+  onSaveMailPdf?: (bytes: Uint8Array, name: string, replacedCharacters: boolean) => Promise<void>;
   /** Star toggle; double-tap now belongs to zoom, so the button is explicit. */
   onFavorite?: () => void;
   /** Move to the next or previous file in the view; null when at an end. */
@@ -877,7 +879,12 @@ export function Preview(props: {
         ) : kind === "archive" && loaded.archive ? (
           <ArchiveBody bytes={loaded.archive} name={file.name} onExtract={props.onExtract} />
         ) : kind === "mail" && loaded.mail ? (
-          <MailView record={loaded.mail} file={file} onOpen={props.onOpenFile} />
+          <MailView
+            record={loaded.mail}
+            file={file}
+            onOpen={props.onOpenFile}
+            onSavePdf={props.onSaveMailPdf}
+          />
         ) : loaded.text !== null ? (
           <pre>{loaded.text}</pre>
         ) : (

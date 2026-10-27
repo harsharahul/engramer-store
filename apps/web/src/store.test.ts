@@ -1058,6 +1058,17 @@ describe("importMail", () => {
     expect(useStore.getState().activity.log[0]!.title).toBe("Imported 1 email and 1 attachment");
   });
 
+  it("saveNewFile stores one file with its metadata and answers its id", async () => {
+    rigImport();
+    const pdf = Object.assign(new File([new Uint8Array(12)], "Your ticket.pdf", { type: "application/pdf" }), {
+      meta: { mailParent: "email-9" },
+    });
+    const id = await useStore.getState().saveNewFile(pdf, "dir-x");
+    const stored = useStore.getState().files.get(id)!;
+    expect(stored).toMatchObject({ name: "Your ticket.pdf", folderId: "dir-x", mailParent: "email-9" });
+    expect(useStore.getState().uploads).toEqual([]);
+  });
+
   it("a second import started meanwhile waits and stores nothing twice", async () => {
     rigImport();
     const [first, second] = await Promise.all([

@@ -424,6 +424,8 @@ interface StoreState {
   ensureFolderPath: (path: string[]) => Promise<string>;
   /** Imports .eml and .mbox files as email records and attachment files. */
   importMail: (sources: UploadSource[]) => Promise<ImportReport>;
+  /** Stores one new file in a folder, without an upload row; answers its id. */
+  saveNewFile: (file: UploadSource, folderId: string | null) => Promise<string>;
   renameFolder: (id: string, name: string) => Promise<void>;
   deleteFolder: (id: string) => Promise<void>;
   uploadFiles: (files: UploadSource[], folderId: string | null) => Promise<void>;
@@ -2630,6 +2632,8 @@ export const useStore = create<StoreState>((set, get) => {
       const stored = await storeSource(file, destination, { defer: true, meta: { sourceId } });
       return stored.id;
     },
+
+    saveNewFile: async (file, folderId) => (await storeSource(file, folderId)).id,
 
     importMail: (sources) => {
       const run = mailImports.then(() => importMailNow(sources));
