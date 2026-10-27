@@ -113,7 +113,8 @@ import {
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import { assistantAvailableNow, assistantEnabled, lastAssistantState } from "./intel/assistant";
 import { CATEGORIES } from "./intel/categorize";
-import { ASSIST_VERSION, MIN_TEXT, cleanTags, needsSummary, outcomeFor, summarize } from "./intel/summarize";
+import { MIN_TEXT, cleanTags, outcomeFor, summarize } from "./intel/summarize";
+import { MODEL_READER, modelStamp, needsReading, stampInto, type ReadingStamp } from "./intel/reading";
 import { tripTag, type TripSuggestion } from "./intel/trips";
 import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
@@ -160,6 +161,8 @@ export interface FileEntry {
   assistVersion?: number;
   /** Why there is no summary at that version. */
   noSummary?: string;
+  /** The last model reading, synced; see intel/reading.ts. */
+  reading?: ReadingStamp;
   /** Legacy row still carrying text inside its metadata. */
   inlineText: boolean;
   category?: string;
@@ -605,6 +608,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array, prior?: FileEntry): Fi
     summary: meta.summary,
     assistVersion: meta.assistVersion,
     noSummary: meta.noSummary,
+    ...(meta.reading ? { reading: meta.reading } : {}),
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -664,6 +668,7 @@ export function entryFromUpdate(
     summary: meta.summary,
     assistVersion: meta.assistVersion,
     noSummary: meta.noSummary,
+    ...(meta.reading ? { reading: meta.reading } : {}),
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -709,6 +714,7 @@ export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEnt
     summary: meta.summary,
     assistVersion: meta.assistVersion,
     noSummary: meta.noSummary,
+    ...(meta.reading ? { reading: meta.reading } : {}),
     inlineText: meta.text !== undefined,
     category: meta.category,
     tags: meta.tags ?? [],
@@ -761,6 +767,8 @@ export function metadataOf(file: FileEntry): FileMetadata {
     ...(file.summary !== undefined ? { summary: file.summary } : {}),
     ...(file.assistVersion !== undefined ? { assistVersion: file.assistVersion } : {}),
     ...(file.noSummary !== undefined ? { noSummary: file.noSummary } : {}),
+    // The one record that keeps a read file from being read again.
+    ...(file.reading ? { reading: file.reading } : {}),
     category: file.category,
     tags: file.tags,
     ...(file.facts.length > 0 ? { facts: file.facts } : {}),
@@ -840,7 +848,9 @@ export function needsProcessing(file: FileEntry): boolean {
     (ocrEnabled() && needsText(file)) ||
     (semanticEnabled() &&
       (needsClip(file, CLIP_MODEL_VERSION) || needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION))) ||
-    (assistantEnabled() && assistantAvailableNow() && needsSummary(file, ASSIST_VERSION))
+    (assistantEnabled() &&
+      assistantAvailableNow() &&
+      needsReading(file, MODEL_READER, { factsWanted: factsEnabled(), now: Date.now() }))
   );
 }
 
@@ -880,12 +890,17 @@ export function needsScenes(file: FileEntry, clipVersion: number, scenesVersion:
 export function pendingDerivatives(
   files: Map<string, FileEntry>,
   clipVersion: number,
-  opts: { ocr?: boolean; semantic?: boolean; scenesVersion?: number; assistVersion?: number } = {},
+  opts: {
+    ocr?: boolean;
+    semantic?: boolean;
+    scenesVersion?: number;
+    /** Count files the model still owes a reading, given whether dates are wanted. */
+    readings?: { factsWanted: boolean; now: number };
+  } = {},
 ): { thumbs: number; text: number; meaning: number; tags: number; scenes: number; summaries: number } {
   const countText = opts.ocr !== false;
   const countMeaning = opts.semantic !== false;
   const scenesVersion = opts.scenesVersion ?? 0;
-  const assistVersion = opts.assistVersion ?? 0;
   let thumbs = 0;
   let text = 0;
   let meaning = 0;
@@ -893,7 +908,7 @@ export function pendingDerivatives(
   let scenes = 0;
   let summaries = 0;
   for (const file of files.values()) {
-    if (assistVersion > 0 && needsSummary(file, assistVersion)) {
+    if (opts.readings && needsReading(file, MODEL_READER, opts.readings)) {
       summaries++;
     }
     if (needsThumb(file)) {
@@ -3019,7 +3034,9 @@ export const useStore = create<StoreState>((set, get) => {
           force.scenes ?? (semanticEnabled() && needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION)),
         summary:
           force.summary ??
-          (assistantEnabled() && assistantAvailableNow() && needsSummary(file, ASSIST_VERSION)),
+          (assistantEnabled() &&
+            assistantAvailableNow() &&
+            needsReading(file, MODEL_READER, { factsWanted: factsEnabled(), now: Date.now() })),
       };
       if (
         !needs.thumb &&
@@ -3054,9 +3071,11 @@ export const useStore = create<StoreState>((set, get) => {
         if (!needs.summary) {
           return;
         }
+        const factsWanted = factsEnabled();
+        const stamp = (outcome: ReadingStamp["outcome"]) =>
+          stampInto(meta, modelStamp({ digest: current.digest, factsWanted, outcome, now: Date.now() }));
         if (!text || text.length < MIN_TEXT) {
-          meta.assistVersion = ASSIST_VERSION;
-          meta.noSummary = "short";
+          stamp("short");
           return;
         }
         const state = lastAssistantState();
@@ -3068,16 +3087,15 @@ export const useStore = create<StoreState>((set, get) => {
             contextSize: state.state === "available" ? state.contextSize : 4096,
             // Date reading is its own switch; when it is on, the same
             // reading proposes the document's dates, grounded and offered.
-            withFacts: factsEnabled(),
+            withFacts: factsWanted,
             signal,
           });
-          meta.assistVersion = ASSIST_VERSION;
           if (!reading) {
-            meta.noSummary = "unsupported";
+            stamp("unsupported");
             return;
           }
+          stamp("found");
           meta.summary = reading.summary;
-          meta.noSummary = undefined;
           for (const tag of cleanTags(reading.tags, [...tags])) {
             tags.add(tag);
           }
@@ -3101,8 +3119,7 @@ export const useStore = create<StoreState>((set, get) => {
           if (verdict === "paused") {
             outcome.summaryPaused = 1;
           } else if (verdict) {
-            meta.assistVersion = ASSIST_VERSION;
-            meta.noSummary = verdict;
+            stamp(verdict);
           }
           // Anything else is transient: the file stays owed.
         }
@@ -3361,7 +3378,10 @@ export const useStore = create<StoreState>((set, get) => {
       if (!file) {
         return;
       }
-      await patchFileMeta(id, { summary: undefined, noSummary: "user", assistVersion: ASSIST_VERSION });
+      // The owner's removal is final: no reader reads this file for a summary again.
+      const meta: Partial<FileMetadata> = { summary: undefined };
+      stampInto(meta, modelStamp({ digest: file.digest, factsWanted: true, outcome: "user", now: Date.now() }));
+      await patchFileMeta(id, meta);
     },
 
     processLibrary: async (opts) => {

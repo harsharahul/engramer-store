@@ -53,7 +53,6 @@ import {
   stopBackfill,
 } from "../backfill";
 import { CLIP_MODEL_VERSION } from "../intel/semantic";
-import { ASSIST_VERSION } from "../intel/summarize";
 import { SCENES_VERSION } from "../intel/scenes";
 import { describeProcessing } from "../activity";
 import { SweepMemory, type SweepKind } from "../sweepmemory";
@@ -498,7 +497,7 @@ export function ProfileView(props: {
   // line answers for.
   const pending = pendingDerivatives(store.files, CLIP_MODEL_VERSION, {
     scenesVersion: SCENES_VERSION,
-    assistVersion: ASSIST_VERSION,
+    readings: { factsWanted: props.factsOn, now: Date.now() },
   });
   const autoPending = pendingDerivatives(store.files, CLIP_MODEL_VERSION, {
     ocr: props.ocrOn,

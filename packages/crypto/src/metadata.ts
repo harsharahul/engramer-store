@@ -130,6 +130,30 @@ export interface FileMetadata {
   mail?: MailMeta;
   /** Set on a file that came with an email: the id of that email's record. */
   mailParent?: string;
+  /** The last reading of this file by a model reader, and how it went. */
+  reading?: ReadingStamp;
+}
+
+/**
+ * One reading of a file, recorded once and synced, so no device reads what
+ * another already has. Which reader at what rank and version, of which
+ * contents, for which tasks, and what came of it. A failure counts its
+ * tries across devices; at three it is final until the owner asks again.
+ */
+export interface ReadingStamp {
+  reader: string;
+  /** 1 is the strongest. A weaker reader never reads after a stronger one. */
+  rank: number;
+  version: number;
+  /** The contents read; a new digest is new contents. */
+  digest?: string;
+  tasks: ("summary" | "facts")[];
+  outcome: "found" | "none" | "short" | "declined" | "language" | "unsupported" | "failed" | "user";
+  tries: number;
+  /** Why it failed, in words, when it did. */
+  reason?: string;
+  /** When, milliseconds since the epoch. */
+  at: number;
 }
 
 /** The headers an email record carries in its metadata. */

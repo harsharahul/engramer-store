@@ -250,6 +250,21 @@ describe("metadataOf", () => {
     expect(metadataOf(entry({}))).not.toHaveProperty("clipVersion");
   });
 
+  it("keeps the reading stamp, which a patch would otherwise erase", () => {
+    const reading = {
+      reader: "apple",
+      rank: 2,
+      version: 1,
+      digest: "d1",
+      tasks: ["summary", "facts"] as ("summary" | "facts")[],
+      outcome: "found" as const,
+      tries: 1,
+      at: 5,
+    };
+    expect(metadataOf(entry({ reading, assistVersion: 1 }))).toMatchObject({ reading, assistVersion: 1 });
+    expect(metadataOf(entry())).not.toHaveProperty("reading");
+  });
+
   it("keeps the backup source id, which a patch would otherwise erase", () => {
     expect(metadataOf(entry({ sourceId: "asset-99" })).sourceId).toBe("asset-99");
   });
