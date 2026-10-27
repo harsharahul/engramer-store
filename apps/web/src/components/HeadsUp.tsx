@@ -25,6 +25,7 @@ import { describeFact, shown, withArticle } from "../intel/describe";
 import {
   dismissedTrips,
   factsFingerprint,
+  isTripTag,
   rememberTripDismissal,
   suggestTrips,
   tripTag,
@@ -254,7 +255,7 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
   const loose = live.filter(
     (file) =>
       file.facts.some((fact) => fact.kind === "event" && !fact.dismissed) &&
-      !file.tags.some((tag) => tag.startsWith("trip:")),
+      !file.tags.some(isTripTag),
   );
   const canLink = entitiesEnabled() && linked === null && loose.length >= 2;
   if (open.length === 0 && !canLink) {

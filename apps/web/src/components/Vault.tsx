@@ -121,6 +121,7 @@ import {
   setAssistantEnabled,
 } from "../intel/assistant";
 import { DATED_KINDS, isTracked, soonestDated } from "../intel/facts";
+import { isTripTag } from "../intel/trips";
 import { extractText } from "../intel/extract";
 import { CalendarView } from "./CalendarView";
 import { HeadsUp, TripHeadsUp } from "./HeadsUp";
@@ -2438,7 +2439,7 @@ export function Vault() {
   // fact or a trip. Before that, the sidebar stays as short as it was.
   const calendarWorthy = liveFiles.some(
     (f) =>
-      f.tags.some((tag) => tag.startsWith("trip:")) ||
+      f.tags.some(isTripTag) ||
       f.facts.some((fact) => isTracked(fact) && DATED_KINDS.has(fact.kind)),
   );
 

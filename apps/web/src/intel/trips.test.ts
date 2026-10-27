@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { withExactAcceptance, type Fact } from "./facts";
-import { assembleItinerary, departureAdvice, suggestTrips, tripTag, tripTitle, type TripFile } from "./trips";
+import { assembleItinerary, departureAdvice, isTripTag, suggestTrips, tripTag, tripTitle, type TripFile } from "./trips";
+
+describe("isTripTag", () => {
+  it("knows a trip tag and nothing else", () => {
+    expect(isTripTag("trip:lisbon-2026-11")).toBe(true);
+    for (const tag of ["Trip:lisbon", "trips", "album:trip-photos", ""]) {
+      expect(isTripTag(tag)).toBe(false);
+    }
+  });
+});
 
 const NOW = Date.UTC(2027, 1, 1); // 1 Feb 2027, ahead of the trips below.
 

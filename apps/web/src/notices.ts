@@ -15,6 +15,7 @@ import { describeFact } from "./intel/describe";
 import { duplicatesByDigest } from "./intel/duplicates";
 import { DATED_KINDS, isTracked, type Fact } from "./intel/facts";
 import { insightsFor, type Severity } from "./intel/insights";
+import { isTripTag } from "./intel/trips";
 
 export interface NoticeFile {
   id: string;
@@ -72,7 +73,7 @@ export function tripTags(files: readonly NoticeFile[]): string[] {
       continue;
     }
     for (const tag of file.tags) {
-      if (tag.startsWith("trip:")) {
+      if (isTripTag(tag)) {
         tags.add(tag);
       }
     }

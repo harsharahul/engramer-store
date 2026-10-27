@@ -19,7 +19,7 @@ import { useMemo, useRef, useState } from "react";
 import type { FileEntry } from "../store";
 import { DATED_KINDS, isTracked, type Fact } from "../intel/facts";
 import { describeFact, shown } from "../intel/describe";
-import { factsFingerprint, tripTitle } from "../intel/trips";
+import { factsFingerprint, isTripTag, tripTitle } from "../intel/trips";
 import { Button } from "./ui/button";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -109,7 +109,7 @@ export function CalendarView(props: { files: FileEntry[]; onOpen: (id: string) =
     const byTag = new Map<string, string[]>();
     for (const file of live) {
       for (const tag of file.tags) {
-        if (!tag.startsWith("trip:")) {
+        if (!isTripTag(tag)) {
           continue;
         }
         const dates = file.facts
