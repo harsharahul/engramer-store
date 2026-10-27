@@ -1,0 +1,167 @@
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { generateKey, ready, secretBoxSeal, type FileMetadata } from "@engramer/crypto";
+import type { FileDto } from "./api";
+
+/**
+ * Readings through the store's own pass, with the model stubbed: what is
+ * stamped, how failures count, and what a second pass does. A real model is
+ * never called here; what matters is how often the store asks it.
+ */
+
+const model = vi.hoisted(() => ({
+  summarize: vi.fn(async (): Promise<unknown> => ({ summary: "A synthetic note.", tags: [], kind: null, facts: [] })),
+  facts: false,
+}));
+
+vi.mock("./intel/summarize", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./intel/summarize")>()),
+  summarize: model.summarize,
+}));
+
+vi.mock("./intel/assistant", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./intel/assistant")>()),
+  assistantEnabled: () => true,
+  assistantAvailableNow: () => true,
+  lastAssistantState: () => ({ state: "available", contextSize: 4096 }),
+}));
+
+vi.mock("./intel/scan", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./intel/scan")>()),
+  factsEnabled: () => model.facts,
+}));
+
+const writes = vi.hoisted(() => ({ count: 0 }));
+
+vi.mock("./api", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./api")>();
+  return { ...original, api: { ...original.api } };
+});
+
+import { api, ApiError } from "./api";
+import { useStore, type FileEntry } from "./store";
+
+const masterKey = vi.hoisted(() => ({ value: new Uint8Array(32) as Uint8Array }));
+
+const note = (over: Partial<FileEntry> = {}): FileEntry => ({
+  id: over.id ?? "n1",
+  folderId: null,
+  name: "note.txt",
+  mime: "text/plain",
+  size: 400,
+  mtime: 1,
+  text: "Synthetic words. ".repeat(30),
+  hasText: true,
+  hasClip: false,
+  inlineText: false,
+  category: "Notes",
+  tags: ["notes"],
+  facts: [],
+  favorite: false,
+  digest: "d1",
+  key: generateKey(),
+  hasThumb: true,
+  trashed: false,
+  createdAt: 1,
+  updatedAt: 1,
+  ...over,
+});
+
+function library(files: FileEntry[]) {
+  masterKey.value = generateKey();
+  useStore.setState({
+    session: { email: "t@example.com", token: "t", masterKey: masterKey.value, privateKey: new Uint8Array(32), publicKey: "" },
+    files: new Map(files.map((f) => [f.id, f])),
+  });
+}
+
+beforeAll(async () => {
+  await ready();
+});
+
+beforeEach(() => {
+  model.summarize.mockReset();
+  model.summarize.mockResolvedValue({ summary: "A synthetic note.", tags: [], kind: null, facts: [] });
+  model.facts = false;
+  writes.count = 0;
+  // An older server's answer, so bulk writes take the single route stubbed below.
+  (api as unknown as Record<string, unknown>).batchFiles = async () => {
+    throw new ApiError(404, "not found");
+  };
+  (api as unknown as Record<string, unknown>).patchFile = async (
+    id: string,
+    patch: { encryptedMeta: FileDto["encryptedMeta"] },
+  ): Promise<FileDto> => {
+    writes.count++;
+    const file = useStore.getState().files.get(id)!;
+    return {
+      id,
+      folderId: file.folderId,
+      encryptedKey: secretBoxSeal(file.key, masterKey.value),
+      encryptedMeta: patch.encryptedMeta,
+      size: file.size,
+      thumbSize: 1,
+      indexSize: 1,
+      uploaded: true,
+      trashed: false,
+      deleted: false,
+      updateSeq: 2,
+      createdAt: 1,
+      updatedAt: 2,
+    };
+  };
+});
+
+const stampOf = (id = "n1") => useStore.getState().files.get(id)!.reading;
+
+describe("a reading that keeps failing", () => {
+  it("a reader that always times out stops after 3 tries and says why", async () => {
+    library([note()]);
+    model.summarize.mockRejectedValue(new Error("the reading took too long"));
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toMatchObject({ outcome: "retrying", tries: 1 });
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toMatchObject({ outcome: "retrying", tries: 2 });
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toMatchObject({ outcome: "failed", tries: 3, reason: "the reading took too long" });
+    // Final: the pass has nothing left to do with it.
+    model.summarize.mockClear();
+    expect(await useStore.getState().processFile("n1")).toBeNull();
+    expect(model.summarize).not.toHaveBeenCalled();
+  });
+
+  it("tries count across devices", async () => {
+    // Another device already tried twice.
+    library([
+      note({
+        reading: { reader: "apple", rank: 2, version: 1, digest: "d1", tasks: ["summary"], outcome: "retrying", tries: 2, at: 1 },
+      }),
+    ]);
+    model.summarize.mockRejectedValue(new Error("the reading took too long"));
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toMatchObject({ outcome: "failed", tries: 3 });
+  });
+
+  it("Retry starts the count again for failed files only", async () => {
+    const failed = { reader: "apple", rank: 2, version: 1, digest: "d1", tasks: ["summary" as const], outcome: "failed" as const, tries: 3, reason: "x", at: 1 };
+    const found = { ...failed, outcome: "found" as const, tries: 1, reason: undefined };
+    library([note({ id: "a", reading: failed }), note({ id: "b", reading: found })]);
+    expect(await useStore.getState().retryFailedReadings()).toBe(1);
+    expect(stampOf("a")).toMatchObject({ outcome: "retrying", tries: 0 });
+    expect(stampOf("a")).not.toHaveProperty("reason");
+    expect(stampOf("b")).toMatchObject({ outcome: "found" });
+  });
+});
+
+describe("what a reading stamps", () => {
+  it("a summary written by the pass leaves a stamp older builds also read", async () => {
+    library([note()]);
+    await useStore.getState().processFile("n1");
+    const file = useStore.getState().files.get("n1")!;
+    expect(file.reading).toMatchObject({ reader: "apple", rank: 2, digest: "d1", outcome: "found", tasks: ["summary"] });
+    expect(file.assistVersion).toBe(1);
+    expect(file.summary).toBe("A synthetic note.");
+  });
+});
+
+// Keeps the FileMetadata import honest for readers of this file.
+export type { FileMetadata };

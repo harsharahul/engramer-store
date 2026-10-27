@@ -114,7 +114,15 @@ import { factsEnabled, scanForFacts } from "./intel/scan";
 import { assistantAvailableNow, assistantEnabled, lastAssistantState } from "./intel/assistant";
 import { CATEGORIES } from "./intel/categorize";
 import { MIN_TEXT, cleanTags, outcomeFor, summarize } from "./intel/summarize";
-import { MODEL_READER, modelStamp, needsReading, stampInto, type ReadingStamp } from "./intel/reading";
+import {
+  MAX_TRIES,
+  MODEL_READER,
+  modelStamp,
+  needsReading,
+  stampInto,
+  stampOf,
+  type ReadingStamp,
+} from "./intel/reading";
 import { tripTag, type TripSuggestion } from "./intel/trips";
 import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
@@ -435,6 +443,8 @@ interface StoreState {
   ensureFolderPath: (path: string[]) => Promise<string>;
   /** Imports .eml and .mbox files as email records and attachment files. */
   importMail: (sources: UploadSource[]) => Promise<ImportReport>;
+  /** The owner's Retry: readings that failed three times start their count again. Answers how many. */
+  retryFailedReadings: () => Promise<number>;
   /** Stores one new file in a folder, without an upload row; answers its id. */
   saveNewFile: (file: UploadSource, folderId: string | null) => Promise<string>;
   renameFolder: (id: string, name: string) => Promise<void>;
@@ -897,7 +907,16 @@ export function pendingDerivatives(
     /** Count files the model still owes a reading, given whether dates are wanted. */
     readings?: { factsWanted: boolean; now: number };
   } = {},
-): { thumbs: number; text: number; meaning: number; tags: number; scenes: number; summaries: number } {
+): {
+  thumbs: number;
+  text: number;
+  meaning: number;
+  tags: number;
+  scenes: number;
+  summaries: number;
+  /** Readings that failed three times and wait for the owner's Retry. */
+  failedReadings: number;
+} {
   const countText = opts.ocr !== false;
   const countMeaning = opts.semantic !== false;
   const scenesVersion = opts.scenesVersion ?? 0;
@@ -907,7 +926,11 @@ export function pendingDerivatives(
   let tags = 0;
   let scenes = 0;
   let summaries = 0;
+  let failedReadings = 0;
   for (const file of files.values()) {
+    if (!file.trashed && file.reading?.outcome === "failed") {
+      failedReadings++;
+    }
     if (opts.readings && needsReading(file, MODEL_READER, opts.readings)) {
       summaries++;
     }
@@ -927,7 +950,7 @@ export function pendingDerivatives(
       scenes++;
     }
   }
-  return { thumbs, text, meaning, tags, scenes, summaries };
+  return { thumbs, text, meaning, tags, scenes, summaries, failedReadings };
 }
 
 /**
@@ -2659,6 +2682,28 @@ export const useStore = create<StoreState>((set, get) => {
 
     saveNewFile: async (file, folderId) => (await storeSource(file, folderId)).id,
 
+    retryFailedReadings: async () => {
+      const failed = [...get().files.values()].filter(
+        (file) => !file.trashed && file.reading?.outcome === "failed",
+      );
+      if (failed.length === 0) {
+        return 0;
+      }
+      await get().patchFilesMeta(
+        failed.map((file) => file.id),
+        (file) => {
+          if (!file.reading) {
+            return null;
+          }
+          const { reason: _cleared, ...rest } = file.reading;
+          const meta: Partial<FileMetadata> = {};
+          stampInto(meta, { ...rest, outcome: "retrying", tries: 0 });
+          return meta;
+        },
+      );
+      return failed.length;
+    },
+
     importMail: (sources) => {
       const run = mailImports.then(() => importMailNow(sources));
       mailImports = run.catch(() => {});
@@ -3120,8 +3165,26 @@ export const useStore = create<StoreState>((set, get) => {
             outcome.summaryPaused = 1;
           } else if (verdict) {
             stamp(verdict);
+          } else {
+            // A passing failure (a deadline, a busy model): owed again, but the
+            // tries are counted in the synced stamp, so every device together
+            // gets three before the reading is final and says why.
+            const prior = stampOf(current);
+            const tries =
+              (prior?.outcome === "retrying" && prior.digest === current.digest ? prior.tries : 0) + 1;
+            const reason = (error instanceof Error ? error.message : String(error)).slice(0, 120);
+            stampInto(
+              meta,
+              modelStamp({
+                digest: current.digest,
+                factsWanted,
+                outcome: tries >= MAX_TRIES ? "failed" : "retrying",
+                tries,
+                reason,
+                now: Date.now(),
+              }),
+            );
           }
-          // Anything else is transient: the file stays owed.
         }
       };
 

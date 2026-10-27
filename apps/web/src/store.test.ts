@@ -783,6 +783,26 @@ describe("embedding model version", () => {
     expect(pendingDerivatives(files, 1).tags).toBe(4);
   });
 
+  it("counts readings that failed for good, for the Retry in Profile", () => {
+    const reading = (outcome: "failed" | "found") => ({
+      reader: "apple",
+      rank: 2,
+      version: 1,
+      tasks: ["summary"] as ("summary" | "facts")[],
+      outcome,
+      tries: outcome === "failed" ? 3 : 1,
+      at: 1,
+    });
+    const files = new Map<string, FileEntry>(
+      [
+        entry({ id: "a", reading: reading("failed") }),
+        entry({ id: "b", reading: reading("found") }),
+        entry({ id: "c", reading: reading("failed"), trashed: true }),
+      ].map((f) => [f.id, f]),
+    );
+    expect(pendingDerivatives(files, 1).failedReadings).toBe(1);
+  });
+
   /**
    * The automatic sweeps skip kinds whose preference is off, so a count
    * that includes them describes work nothing will ever take up. With

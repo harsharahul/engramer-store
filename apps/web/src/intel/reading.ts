@@ -24,6 +24,9 @@ export const READER_RANK: Readonly<Record<string, number>> = { [MODEL_READER]: 2
 /** Raised when a reader's prompt or model changes, never for a storage change. */
 export const READER_VERSION: Readonly<Record<string, number>> = { [MODEL_READER]: 1 };
 
+/** Tries per file per reader, counted across devices, before a reading is final. */
+export const MAX_TRIES = 3;
+
 const RECENT_DAYS = 90;
 const DAY = 86_400_000;
 const EMPTY_OUTCOMES = new Set<ReadingStamp["outcome"]>(["none", "declined", "unsupported", "language"]);
@@ -103,6 +106,10 @@ export function needsReading(
     // A weaker reader never reads after a stronger one, even one that found nothing.
     return false;
   }
+  if (stamp.outcome === "retrying") {
+    // Owed again: the last try failed for a passing reason.
+    return true;
+  }
   if (rank < stamp.rank) {
     return true;
   }
@@ -118,6 +125,8 @@ export function needsReading(
 
 /** The pair builds before the stamp read, so they see a stamped file as read. */
 export function legacyOf(stamp: ReadingStamp): { assistVersion: number; noSummary?: string } {
+  // A file still owed counts as read for older builds too, so they never
+  // add their own retries on top of the synced count.
   const noSummary = stamp.outcome === "found" ? undefined : stamp.outcome === "none" ? "unsupported" : stamp.outcome;
   return noSummary ? { assistVersion: 1, noSummary } : { assistVersion: 1 };
 }

@@ -148,7 +148,18 @@ export interface ReadingStamp {
   /** The contents read; a new digest is new contents. */
   digest?: string;
   tasks: ("summary" | "facts")[];
-  outcome: "found" | "none" | "short" | "declined" | "language" | "unsupported" | "failed" | "user";
+  /** "retrying": a reading failed for a passing reason and is owed again, up
+   * to three tries in all; "failed" is final until the owner asks again. */
+  outcome:
+    | "found"
+    | "none"
+    | "short"
+    | "declined"
+    | "language"
+    | "unsupported"
+    | "retrying"
+    | "failed"
+    | "user";
   tries: number;
   /** Why it failed, in words, when it did. */
   reason?: string;
