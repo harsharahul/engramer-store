@@ -266,8 +266,10 @@ readers (a labelled date and the assistant) stating the same value. Everything
 else arrives as a suggestion in a single line above your files and counts
 once you accept it. One fixed order decides between readings of the same
 thing: your answer, then exact data, then the rest. Where the assistant and a
-labelled date disagree about a due date, an expiry or an amount due, both are
-offered as one question ("Which one?"), and your answer settles both. A date
+labelled date disagree about a due date or an expiry, both are offered as one
+question ("Which one?"), and your answer (or Ignore) settles both. Booking
+data or an invite that states an event's day settles the assistant's reading
+of that day, and a bill's own amount settles the assistant's. A date
 that could be read two ways (`03/04/2028`) offers both readings as dates
 rather than picking one. A wrong expiry date is worse than no expiry date,
 because it gets relied on. Each fact in a file's details says why it counts:

@@ -8,9 +8,12 @@
  * states nothing worth tracking.
  */
 
+import { isRealDate } from "./dates";
 import { MAX_FACTS_PER_FILE, factId, type DocumentKind, type Fact } from "./facts";
 
 const LABEL_MAX = 60;
+/** A zone name longer than this is not one; it would only bloat synced metadata. */
+const ZONE_MAX = 64;
 const TICKETED = /\b(?:tickets?|concert|show|match|game|performance|admission|screening)\b/i;
 
 interface Property {
@@ -56,10 +59,16 @@ function stamp(property: Property): { value: string; time?: string; zone?: strin
     return undefined;
   }
   const value = `${match[1]}-${match[2]}-${match[3]}`;
+  if (!isRealDate(value)) {
+    return undefined;
+  }
   if (!match[4]) {
     return { value, allDay: true };
   }
-  const zone = match[6] ? "UTC" : property.params["TZID"];
+  if (Number(match[4]) > 23 || Number(match[5]) > 59) {
+    return undefined;
+  }
+  const zone = match[6] ? "UTC" : property.params["TZID"]?.slice(0, ZONE_MAX);
   return { value, time: `${match[4]}:${match[5]}`, ...(zone ? { zone } : {}), allDay: false };
 }
 

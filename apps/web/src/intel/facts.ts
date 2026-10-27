@@ -202,6 +202,11 @@ export function offeredFacts(
         continue;
       }
       const partner = fact.disputed ? byId.get(fact.disputed) : undefined;
+      if (partner && ownerDecided(partner)) {
+        // Answered on the other side, perhaps by an older build that never
+        // settled the pair: the question was asked once.
+        continue;
+      }
       if (!DATED_KINDS.has(fact.kind) && !partner) {
         continue;
       }
@@ -532,9 +537,15 @@ function slotOf(fact: Fact): string | undefined {
     return undefined;
   }
   if (fact.kind === "amount") {
-    return TOTAL_LABEL.test(fact.label ?? "") ? `amount|${fact.unit ?? ""}` : undefined;
+    return TOTAL_LABEL.test(fact.label ?? "") ? "amount" : undefined;
   }
   return fact.kind;
+}
+
+/** Whether two readings of a slot could be the same thing said two ways: an
+ * amount with no currency matches any; two named currencies must agree. */
+function comparable(a: Fact, b: Fact): boolean {
+  return a.kind !== "amount" || !a.unit || !b.unit || a.unit === b.unit;
 }
 
 function isExact(fact: Fact): boolean {
@@ -551,7 +562,15 @@ function pick(prior: Fact, fact: Fact): Fact {
     return isExact(prior) ? prior : withExactAcceptance(fact);
   }
   const winner = fact.confidence > prior.confidence ? fact : prior;
-  if (GROUNDED_READERS.has(prior.source) && GROUNDED_READERS.has(fact.source) && prior.source !== fact.source) {
+  // An ambiguous date stays a question even when a second reader picked the
+  // same reading: both may have guessed the day and month the same wrong way.
+  if (
+    GROUNDED_READERS.has(prior.source) &&
+    GROUNDED_READERS.has(fact.source) &&
+    prior.source !== fact.source &&
+    !prior.ambiguous &&
+    !fact.ambiguous
+  ) {
     const names = [...new Set([...readers(prior), ...readers(fact)])].sort();
     return { ...winner, accepted: winner.accepted ?? "agreement", reader: names.join(" + ") };
   }
@@ -586,9 +605,14 @@ function resolveSlots(facts: Fact[]): Fact[] {
     const confirmed = group.find((fact) => fact.confirmed);
     const exact = group.find(isExact);
     if (confirmed || exact) {
+      // The model's guesses give way to either; exact data gives way only to
+      // the owner's answer. A rule's reading of another date in the same slot
+      // may be a second real date (an installment, a visa beside the
+      // passport) and stays to be asked about.
+      const settler = (confirmed ?? exact)!;
       for (const fact of group) {
-        const outranked = confirmed ? !fact.confirmed : !isExact(fact);
-        if (fact.value !== (confirmed ?? exact)!.value && outranked) {
+        const yields = fact.source === "model" || (confirmed !== undefined && isExact(fact));
+        if (yields && !ownerDecided(fact) && fact.value !== settler.value && comparable(fact, settler)) {
           drop.add(fact.id);
         }
       }
@@ -598,9 +622,18 @@ function resolveSlots(facts: Fact[]): Fact[] {
       group.filter((fact) => fact.source === source).sort((a, b) => b.confidence - a.confidence)[0];
     const model = best("model");
     const label = best("label");
-    if (model && label && model.value !== label.value) {
+    if (model && label && model.value !== label.value && comparable(model, label)) {
       marks.set(model.id, label.id);
       marks.set(label.id, model.id);
+    }
+  }
+  // Booking data, an invite or a barcode that states an event on a date is
+  // the record of that day's booking in this file; the model's own reading
+  // of an event that day (its own label, often its own clock) is an echo.
+  const exactDays = new Set(out.filter((fact) => fact.kind === "event" && !fact.dismissed && isExact(fact)).map((fact) => fact.value));
+  for (const fact of out) {
+    if (fact.kind === "event" && fact.source === "model" && !ownerDecided(fact) && exactDays.has(fact.value)) {
+      drop.add(fact.id);
     }
   }
   out = out.filter((fact) => !drop.has(fact.id));
@@ -616,8 +649,8 @@ function resolveSlots(facts: Fact[]): Fact[] {
 
 /**
  * The owner's answer to a disagreement: the confirmed reading stands, its
- * partner is dismissed, and neither is marked disputed any more. A dismissed
- * reading leaves its partner to be asked about on its own.
+ * partner is dismissed, and neither is marked disputed any more. Ignoring
+ * the question dismisses both: it was asked once.
  */
 export function settleDisputes(facts: Fact[]): Fact[] {
   const byId = new Map(facts.map((fact) => [fact.id, fact]));
@@ -632,6 +665,8 @@ export function settleDisputes(facts: Fact[]): Fact[] {
       release.add(fact.id);
       release.add(fact.disputed);
     } else if (fact.dismissed) {
+      // "Ignore" answers the question, not one side of it.
+      dismiss.add(fact.disputed);
       release.add(fact.id);
       release.add(fact.disputed);
     }

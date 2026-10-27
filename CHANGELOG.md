@@ -19,8 +19,9 @@ All notable changes to Engram Store are documented here, following
   alike by two independent readers, counts for the bell, notifications, the
   calendar, Expiring soon and trips at once, marked with why it counts; facts
   stored earlier from such sources keep counting. Where the assistant and a
-  labelled date disagree about a due date, an expiry or an amount due, the
-  heads-up strip asks once ("Which one?") and the answer settles both.
+  labelled date disagree about a due date or an expiry, the heads-up strip
+  asks once ("Which one?") and the answer settles both; booking data settles
+  the assistant's reading of the same day or amount without asking.
 - **Mail import.** Saved messages (`.eml`) and mailbox exports (`.mbox`,
   including Google Takeout and Apple Mail export folders) import from the
   New menu, the command palette, or a drop. Each message becomes an email

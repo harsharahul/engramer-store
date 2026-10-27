@@ -14,6 +14,7 @@
  * here converts a time between zones.
  */
 
+import { isRealDate } from "./dates";
 import { factId, type DocumentKind, type Fact } from "./facts";
 
 const SCRIPT_BLOCK = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
@@ -85,7 +86,8 @@ function when(stamp: unknown): { value: string; time?: string; zone?: string } |
     return null;
   }
   const match = STAMP.exec(text);
-  if (!match) {
+  // A day that does not exist, or a clock past 23:59, is not a reading.
+  if (!match || !isRealDate(match[1]!) || (match[2] !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(match[2]))) {
     return null;
   }
   return {

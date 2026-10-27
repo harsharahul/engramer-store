@@ -252,6 +252,11 @@ describe("invoices and deliveries", () => {
     expect(facts.find((f) => f.kind === "identifier")).toMatchObject({ value: "TRK99887766", label: "Tracking number" });
   });
 
+  it("refuses a due date that does not exist", () => {
+    const facts = structuredDataFacts(ld({ "@type": "Invoice", paymentDueDate: "2027-02-31" }));
+    expect(facts.filter((f) => f.kind === "due")).toEqual([]);
+  });
+
   it("still reads reservations, once each", () => {
     const facts = structuredDataFacts(FLIGHT_HTML + FLIGHT_HTML);
     expect(facts.filter((f) => f.kind === "event")).toHaveLength(2);

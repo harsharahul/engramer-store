@@ -74,6 +74,14 @@ describe("icsFacts", () => {
     expect(facts[0]!.document).toBe("event-ticket");
   });
 
+  it("refuses a date that does not exist and caps a zone name", () => {
+    expect(icsFacts(calendar("BEGIN:VEVENT", "SUMMARY:Bad", "DTSTART:20261399T996000", "END:VEVENT"))).toEqual([]);
+    const long = icsFacts(
+      calendar("BEGIN:VEVENT", "SUMMARY:Call", `DTSTART;TZID=${"Z".repeat(500)}:20270512T080000`, "END:VEVENT"),
+    );
+    expect(long[0]!.zone!.length).toBeLessThanOrEqual(64);
+  });
+
   it("ignores text that is not a calendar", () => {
     expect(icsFacts("hello")).toEqual([]);
   });

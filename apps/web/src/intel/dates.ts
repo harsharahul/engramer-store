@@ -277,3 +277,14 @@ export function daysUntil(iso: string, now: number): number {
   const start = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
   return Math.round((target - start) / DAY_MS);
 }
+
+/** Whether an ISO YYYY-MM-DD names a day that exists (no 13th month, no 31 February). */
+export function isRealDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return false;
+  }
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const probe = new Date(year, month - 1, day);
+  return probe.getFullYear() === year && probe.getMonth() === month - 1 && probe.getDate() === day;
+}
