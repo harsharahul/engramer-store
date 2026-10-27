@@ -3625,7 +3625,8 @@ export const useStore = create<StoreState>((set, get) => {
         };
         // Batched downloads first: one request per INDEX_APPLY_BATCH files.
         // Files a batch could not cover (an older server without the route,
-        // or a failed request) fall through to per-file downloads.
+        // a failed request, or files the answer left out) fall through to
+        // per-file downloads.
         let perFile = candidates;
         if (get().indexBatch !== "unsupported") {
           const groups: FileEntry[][] = [];
@@ -3640,17 +3641,23 @@ export const useStore = create<StoreState>((set, get) => {
             }
             try {
               const blobs = await api.downloadIndexBatch(group.map((file) => file.id));
+              let answered = 0;
               for (const file of group) {
                 const bytes = blobs.get(file.id);
-                if (bytes) {
-                  try {
-                    read(file, bytes);
-                  } catch {
-                    // An unreadable index never blocks the rest.
-                  }
+                if (!bytes) {
+                  // Left out: no index there, or past the server's byte
+                  // budget for one answer. Its own download settles which.
+                  leftover.push(file);
+                  continue;
+                }
+                answered++;
+                try {
+                  read(file, bytes);
+                } catch {
+                  // An unreadable index never blocks the rest.
                 }
               }
-              done += group.length;
+              done += answered;
               const batch = pending;
               pending = [];
               applyIndexReadings(batch, { done, total });

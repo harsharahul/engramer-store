@@ -1144,26 +1144,50 @@ export function registerStorageRoutes(app: FastifyInstance): void {
    * frame is [u32 id length][id][u32 blob length][blob], big-endian, in the
    * order asked; a file the caller cannot read, or one with no index, is
    * left out rather than failing the batch.
+   *
+   * One answer gathers at most `indexBatchBytes`: the batch stops before the
+   * blob that would pass it, and a blob larger than the whole budget is never
+   * batched. The client downloads whatever was left out one file at a time,
+   * on the streaming route, so no request can make the server hold more.
    */
   app.post("/api/files/index/batch", auth, async (request, reply) => {
     const { ids } = indexBatchSchema.parse(request.body);
+    const budget = app.config.indexBatchBytes;
     const frames: Buffer[] = [];
-    for (const id of ids) {
+    let gathered = 0;
+    for (const id of new Set(ids)) {
       const file = (await getAccessibleFile(id, request.user.uid))?.file;
       if (!file || !file.index_size) {
         continue;
       }
+      const size = Number(file.index_size);
+      if (size > budget) {
+        continue;
+      }
+      if (gathered + size > budget) {
+        break;
+      }
       const chunks: Buffer[] = [];
+      let read = 0;
       for await (const chunk of await app.blobs.get(blobKey(id, "index", 0))) {
+        read += (chunk as Buffer).length;
+        if (read > size) {
+          // Bytes past what the row records: never let them pass the budget.
+          break;
+        }
         chunks.push(chunk as Buffer);
       }
+      if (read !== size) {
+        continue;
+      }
+      gathered += size;
       const blob = Buffer.concat(chunks);
       const idBytes = Buffer.from(id, "utf8");
       const head = Buffer.alloc(4);
       head.writeUInt32BE(idBytes.length);
-      const size = Buffer.alloc(4);
-      size.writeUInt32BE(blob.length);
-      frames.push(head, idBytes, size, blob);
+      const length = Buffer.alloc(4);
+      length.writeUInt32BE(blob.length);
+      frames.push(head, idBytes, length, blob);
     }
     reply.header("content-type", "application/octet-stream");
     return reply.send(Buffer.concat(frames));

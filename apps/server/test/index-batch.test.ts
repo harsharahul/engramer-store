@@ -138,4 +138,62 @@ describe("batch index download", () => {
     const response = await batch(alice, ids);
     expect(response.statusCode).toBe(400);
   });
+
+  it("answers an id asked for twice only once", async () => {
+    const once = await createFile(alice, "once.txt", "only once");
+    const response = await batch(alice, [once.id, once.id, once.id]);
+    expect(frames(response.rawPayload).map(([id]) => id)).toEqual([once.id]);
+  });
+});
+
+/**
+ * One answer holds a bounded number of bytes, whatever is asked: the
+ * server never gathers more than its budget for one request. What does not
+ * fit is left out, and the client downloads those files one by one.
+ */
+describe("batch index download budget", () => {
+  let small: FastifyInstance;
+  let smallDir: string;
+
+  beforeAll(async () => {
+    smallDir = mkdtempSync(join(tmpdir(), "engramer-index-budget-"));
+    small = await buildApp({ dataDir: smallDir, quotaBytes: 1024 * 1024, webDistDir: null, indexBatchBytes: 160 });
+  });
+
+  afterAll(async () => {
+    await small.close();
+    rmSync(smallDir, { recursive: true, force: true });
+  });
+
+  it("stops before the answer would pass its byte budget", async () => {
+    const outer = app;
+    app = small;
+    try {
+      const carol = await register("carol@example.com");
+      // About 60 bytes of ciphertext each: two fit in 160, the third does not.
+      const files = [];
+      for (const name of ["a.txt", "b.txt", "c.txt"]) {
+        files.push(await createFile(carol, name, "x".repeat(20)));
+      }
+      const response = await batch(carol, files.map((f) => f.id));
+      const got = frames(response.rawPayload).map(([id]) => id);
+      expect(got).toEqual([files[0]!.id, files[1]!.id]);
+    } finally {
+      app = outer;
+    }
+  });
+
+  it("never puts a blob larger than the budget in a batch", async () => {
+    const outer = app;
+    app = small;
+    try {
+      const dave = await register("dave@example.com");
+      const big = await createFile(dave, "big.txt", "y".repeat(400));
+      const tiny = await createFile(dave, "tiny.txt", "z");
+      const response = await batch(dave, [big.id, tiny.id]);
+      expect(frames(response.rawPayload).map(([id]) => id)).toEqual([tiny.id]);
+    } finally {
+      app = outer;
+    }
+  });
 });

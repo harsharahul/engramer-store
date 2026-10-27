@@ -497,6 +497,30 @@ pub async fn get_index(
 /// Files whose search index one batch download may name, as the server.
 const INDEX_BATCH_MAX: usize = 500;
 
+/// Most bytes one batch answer gathers, as on the server.
+const INDEX_BATCH_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Which files one batch answers: in the order asked, each once, stopping
+/// before the blob that would pass the budget. A blob larger than the whole
+/// budget is never batched; the client downloads what is left out one file
+/// at a time, so no request makes the vault hold more than the budget.
+fn plan_index_batch(found: Vec<(String, u64)>, budget: u64) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut gathered = 0;
+    let mut plan = Vec::new();
+    for (id, size) in found {
+        if !seen.insert(id.clone()) || size > budget {
+            continue;
+        }
+        if gathered + size > budget {
+            break;
+        }
+        gathered += size;
+        plan.push(id);
+    }
+    plan
+}
+
 /// Many files' search index blobs in one answer, as the server sends them:
 /// frames of [u32 id length][id][u32 blob length][blob], big-endian, in the
 /// order asked, leaving out files that are not the caller's or have no
@@ -520,11 +544,13 @@ pub async fn post_index_batch(
         let conn = store.conn();
         let mut found = Vec::new();
         for id in ids {
-            if own_file(&conn, &id, auth.uid)?.is_some_and(|file| file.index_size > 0) {
-                found.push(id);
+            if let Some(file) = own_file(&conn, &id, auth.uid)? {
+                if file.index_size > 0 {
+                    found.push((id, file.index_size as u64));
+                }
             }
         }
-        Ok(found)
+        Ok(plan_index_batch(found, INDEX_BATCH_BYTES))
     })
     .await?;
     let mut out = Vec::new();
@@ -534,9 +560,10 @@ pub async fn post_index_batch(
             .get(&blob_key(&id, BlobKind::Index, 0), None)
             .await
             .map_err(io_error)?;
-        let blob = axum::body::to_bytes(body, usize::MAX)
-            .await
-            .map_err(|_| ApiError::internal())?;
+        // Never read past the budget, even for a blob longer than its row says.
+        let Ok(blob) = axum::body::to_bytes(body, INDEX_BATCH_BYTES as usize).await else {
+            continue;
+        };
         out.extend_from_slice(&(id.len() as u32).to_be_bytes());
         out.extend_from_slice(id.as_bytes());
         out.extend_from_slice(&(blob.len() as u32).to_be_bytes());
@@ -1377,6 +1404,42 @@ mod tests {
         let (status, _, answer) = vault.call("POST", "/api/files/index/batch", Some(&body));
         assert_eq!(status, 200);
         assert_eq!(index_frames(&answer), vec![(indexed, "kept".to_string())]);
+    }
+
+    #[test]
+    fn index_batch_answers_a_repeated_id_once() {
+        let vault = Vault::new("batch-repeat@example.com");
+        let id = vault.create_file();
+        assert_eq!(vault.save_index(&id, "once"), 200);
+        let body = format!(r#"{{"ids":["{id}","{id}","{id}"]}}"#);
+        let (status, _, answer) = vault.call("POST", "/api/files/index/batch", Some(&body));
+        assert_eq!(status, 200);
+        assert_eq!(index_frames(&answer), vec![(id, "once".to_string())]);
+    }
+
+    #[test]
+    fn index_batch_plan_stops_at_the_budget() {
+        let found = |sizes: &[(&str, u64)]| -> Vec<(String, u64)> {
+            sizes
+                .iter()
+                .map(|(id, size)| (id.to_string(), *size))
+                .collect()
+        };
+        // Two fit in 100; the third would pass it, so the batch stops there.
+        assert_eq!(
+            plan_index_batch(found(&[("a", 40), ("b", 50), ("c", 30)]), 100),
+            vec!["a", "b"]
+        );
+        // A blob larger than the whole budget is never batched.
+        assert_eq!(
+            plan_index_batch(found(&[("big", 101), ("small", 10)]), 100),
+            vec!["small"]
+        );
+        // Each id once.
+        assert_eq!(
+            plan_index_batch(found(&[("a", 10), ("a", 10), ("b", 10)]), 100),
+            vec!["a", "b"]
+        );
     }
 
     #[test]

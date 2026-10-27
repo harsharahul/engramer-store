@@ -1597,8 +1597,12 @@ describe("search index warm-up", () => {
 
   /** Serves index blobs through both routes and counts the requests each
    * one receives. `batchRoute: false` answers the batch route with the 404
-   * an older server gives. */
-  const serve = (files: FileEntry[], opts: { unreadable?: string; batchRoute?: boolean } = {}) => {
+   * an older server gives; `budget` answers only that many ids per batch,
+   * as a server does once a batch reaches its byte budget. */
+  const serve = (
+    files: FileEntry[],
+    opts: { unreadable?: string; batchRoute?: boolean; budget?: number } = {},
+  ) => {
     const byId = new Map(files.map((f) => [f.id, f]));
     const blob = (id: string) => encryptBytes(encodeIndexPayload({ text: `words of ${id}` }), byId.get(id)!.key);
     const calls = { batch: 0, single: 0 };
@@ -1614,7 +1618,12 @@ describe("search index warm-up", () => {
       if (opts.batchRoute === false) {
         throw new ApiError(404, "not found");
       }
-      return new Map(ids.filter((id) => id !== opts.unreadable).map((id) => [id, blob(id)]));
+      return new Map(
+        ids
+          .slice(0, opts.budget ?? ids.length)
+          .filter((id) => id !== opts.unreadable)
+          .map((id) => [id, blob(id)]),
+      );
     };
     return calls;
   };
@@ -1660,6 +1669,16 @@ describe("search index warm-up", () => {
     expect(updates).toBeLessThanOrEqual(Math.ceil(1_000 / 200) + 2);
     expect([...useStore.getState().files.values()].every((f) => f.text === `words of ${f.id}`)).toBe(true);
     expect(useStore.getState().indexWarm).toBeNull();
+  });
+
+  it("downloads the files a batch left out one by one", async () => {
+    const files = library(10);
+    seedLibrary(files);
+    const calls = serve(files, { budget: 6 });
+    await useStore.getState().warmSearchIndex();
+    expect(calls.batch).toBe(1);
+    expect(calls.single).toBe(4);
+    expect([...useStore.getState().files.values()].every((f) => f.text === `words of ${f.id}`)).toBe(true);
   });
 
   it("leaves the rest searchable when one file's index cannot be read", async () => {
