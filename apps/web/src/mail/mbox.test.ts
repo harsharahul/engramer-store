@@ -112,6 +112,63 @@ describe("splitMbox", () => {
     await expect(splitMbox(source, async () => {})).rejects.toThrow(/not a mailbox/);
   });
 
+  it("hands over only the head of a message past the cap, holding no more", async () => {
+    // A message with no separator for 20 MiB, as in an export from a
+    // program whose separators this reader does not know.
+    const filler = utf8.encode("x".repeat(99) + "\n").length;
+    const lines = new Uint8Array(20 * 1024 * 1024).fill(0x78);
+    for (let i = filler - 1; i < lines.length; i += filler) {
+      lines[i] = 0x0a;
+    }
+    const parts: BlobPart[] = [
+      utf8.encode("From a@example.com Mon Jan  5 09:00:00 2026\nSubject: Small\n\nhi\n\n"),
+      utf8.encode("From b@example.com Mon Jan  5 09:00:00 2026\nSubject: Endless\n\n"),
+      lines,
+      utf8.encode("\nFrom c@example.com Mon Jan  5 09:00:00 2026\nSubject: After\n\nbye\n"),
+    ];
+    const blob = new Blob(parts);
+    const source: UploadSource = {
+      name: "odd.mbox",
+      type: "",
+      size: blob.size,
+      lastModified: 0,
+      slice: (start, end) => blob.slice(start, end),
+      arrayBuffer: () => Promise.reject(new Error("whole-file read")),
+      text: () => Promise.reject(new Error("whole-file read")),
+    };
+    const seen: string[] = [];
+    const oversized: Array<[string, number]> = [];
+    const max = 1024 * 1024;
+    const result = await splitMbox(source, async (raw) => void seen.push(text(raw).split("\n")[0]!), undefined, {
+      maxMessageBytes: max,
+      onOversized: async (head, index) => void oversized.push([text(head).split("\n")[0]!, index]),
+    });
+    expect(seen).toEqual(["Subject: Small", "Subject: After"]);
+    expect(oversized).toEqual([["Subject: Endless", 1]]);
+    expect(result.messages).toBe(3);
+    expect(result.peakBufferedBytes).toBeLessThanOrEqual(MBOX_CHUNK + 3 * max);
+  });
+
+  it("checks an .eml against the cap before reading it", async () => {
+    const big = new Blob([utf8.encode("Subject: Huge scan\r\n\r\n"), new Uint8Array(3 * 1024 * 1024)]);
+    const source: UploadSource = {
+      name: "Huge scan.eml",
+      type: "",
+      size: big.size,
+      lastModified: 0,
+      slice: (start, end) => big.slice(start, end),
+      arrayBuffer: () => Promise.reject(new Error("whole-file read")),
+      text: () => Promise.reject(new Error("whole-file read")),
+    };
+    const oversized: string[] = [];
+    const result = await splitMbox(source, async () => {}, undefined, {
+      maxMessageBytes: 1024 * 1024,
+      onOversized: async (head) => void oversized.push(text(head).split("\r\n")[0]!),
+    });
+    expect(oversized).toEqual(["Subject: Huge scan"]);
+    expect(result.messages).toBe(1);
+  });
+
   it("stops between messages when aborted", async () => {
     const mbox = ["a", "b", "c"]
       .map((who) => `From ${who}@example.com Mon Jan  5 09:00:00 2026\nSubject: ${who}\n\nbody\n\n`)

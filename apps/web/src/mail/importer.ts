@@ -190,10 +190,6 @@ export async function importMail(sources: UploadSource[], target: ImportTarget):
 
   const handle = async (raw: Uint8Array, sourceName: string, fallbackName: string) => {
     const label = subjectOf(raw) || fallbackName;
-    if (raw.length > MESSAGE_MAX) {
-      report.skipped.push({ name: label, reason: "larger than 50 MB" });
-      return;
-    }
     let parsed: ParsedMessage;
     try {
       parsed = await parse(raw);
@@ -281,6 +277,17 @@ export async function importMail(sources: UploadSource[], target: ImportTarget):
           inFlight.add(job);
         },
         controller.signal,
+        {
+          // Never held whole: the splitter hands over its head to name it.
+          maxMessageBytes: MESSAGE_MAX,
+          onOversized: async (head, index) => {
+            report.skipped.push({
+              name: subjectOf(head) || `Message ${index + 1} in ${source.name}`,
+              reason: "larger than 50 MB",
+            });
+            progress();
+          },
+        },
       );
     } catch (error) {
       report.skipped.push({ name: source.name, reason: shortReason(error) });
