@@ -24,6 +24,12 @@ describe("groundFacts", () => {
     expect(groundFacts([fact()], "Expires 03/12/2029")).toHaveLength(1);
   });
 
+  it("an ics fact is structured and never grounded away", () => {
+    // A calendar invite states its own times; there is no text to check them against.
+    const invite = fact({ kind: "event", document: "event-ticket", source: "ics", confidence: 1, label: "Concert" });
+    expect(groundFacts([invite], "")).toEqual([invite]);
+  });
+
   it("discards a fact whose date appears nowhere in the source", () => {
     expect(groundFacts([fact()], "Expires 04/01/2030")).toHaveLength(0);
   });

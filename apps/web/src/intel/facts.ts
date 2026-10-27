@@ -73,6 +73,10 @@ export type DocumentKind =
   | "itinerary"
   | "car-rental"
   | "event-ticket"
+  /** A parcel on its way: the delivery window from the carrier's data. */
+  | "delivery"
+  /** A table booked at a restaurant. */
+  | "dining"
   | "other";
 
 export type FactSource =
@@ -82,6 +86,8 @@ export type FactSource =
   | "mrz"
   /** schema.org reservation data a document carries about itself. */
   | "jsonld"
+  /** A calendar invite's own event times (RFC 5545). */
+  | "ics"
   /** A labelled date in extracted text. */
   | "label"
   /** Generic harvesting, the weakest signal. */
@@ -213,7 +219,7 @@ export function soonestDated(facts: Fact[]): string | undefined {
  * no free text to ground them against, and their own check digits or fixed
  * field positions already proved them.
  */
-const STRUCTURED: ReadonlySet<FactSource> = new Set(["barcode", "mrz", "jsonld", "user"]);
+const STRUCTURED: ReadonlySet<FactSource> = new Set(["barcode", "mrz", "jsonld", "ics", "user"]);
 
 const MONTHS = [
   "january",

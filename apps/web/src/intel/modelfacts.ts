@@ -29,6 +29,8 @@ export const DOCUMENT_KINDS: readonly DocumentKind[] = [
   "itinerary",
   "car-rental",
   "event-ticket",
+  "delivery",
+  "dining",
   "other",
 ];
 

@@ -56,6 +56,7 @@ export const EXACT_SOURCES: ReadonlySet<Fact["source"]> = new Set([
   "barcode",
   "mrz",
   "jsonld",
+  "ics",
   "user",
 ]);
 

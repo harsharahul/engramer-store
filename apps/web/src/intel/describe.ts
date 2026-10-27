@@ -28,6 +28,8 @@ const DOCUMENT_LABELS: Record<string, string> = {
   itinerary: "itinerary",
   "car-rental": "car rental",
   "event-ticket": "ticket",
+  delivery: "delivery",
+  dining: "table booking",
   other: "document",
 };
 
@@ -43,6 +45,8 @@ const KIND_VERBS: Record<string, string> = {
 const SOURCE_LABELS: Record<string, string> = {
   barcode: "read from the barcode",
   mrz: "read from the machine-readable zone",
+  jsonld: "read from the booking data",
+  ics: "read from the calendar invite",
   label: "labelled in the document",
   pattern: "found in the text",
   model: "proposed and checked against the document",

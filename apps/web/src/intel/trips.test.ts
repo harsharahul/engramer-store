@@ -66,6 +66,18 @@ describe("suggestTrips", () => {
     expect([...trips[0]!.fileIds].sort()).toEqual(["f-flight", "f-hotel"]);
   });
 
+  it("counts a calendar invite's times as exact evidence", async () => {
+    // The same stay, known only from the invite the hotel attached.
+    const invite: TripFile = {
+      ...hotel(),
+      id: "f-invite",
+      facts: hotel().facts.map((f) => ({ ...f, source: "ics" as const })),
+    };
+    const trips = await suggestTrips([flight(), invite], NOW);
+    expect(trips).toHaveLength(1);
+    expect([...trips[0]!.fileIds].sort()).toEqual(["f-flight", "f-invite"]);
+  });
+
   it("leaves an unrelated document out, even in the same week", async () => {
     const invoice: TripFile = {
       id: "f-invoice",
