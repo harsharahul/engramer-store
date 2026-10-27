@@ -309,11 +309,18 @@ export async function importMail(sources: UploadSource[], target: ImportTarget):
   }
   await Promise.all(inFlight);
 
+  // A date the email and its attachment both state is one new date.
+  const dates = new Set<string>();
   for (const file of target.files()) {
     if (stored.has(file.id)) {
-      report.dates += (file.facts ?? []).filter((fact) => isTracked(fact) && DATED_KINDS.has(fact.kind)).length;
+      for (const fact of file.facts ?? []) {
+        if (isTracked(fact) && DATED_KINDS.has(fact.kind)) {
+          dates.add(`${fact.kind}|${fact.value}|${fact.time ?? ""}`);
+        }
+      }
     }
   }
+  report.dates = dates.size;
 
   const said = describeImport(report, controller.signal.aborted);
   target.finish(said.title, said.detail);

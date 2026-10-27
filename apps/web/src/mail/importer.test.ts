@@ -374,28 +374,34 @@ describe("importMail", () => {
     expect(rig.seen.setMailCalls).toBe(1);
   });
 
-  it("the import summary counts new dates once", async () => {
-    const event = (id: string, accepted: boolean): Fact => ({
+  it("the import summary counts each new date once", async () => {
+    const event = (id: string, time: string, accepted: boolean): Fact => ({
       id,
       kind: "event",
       document: "itinerary",
       value: "2027-03-04",
+      time,
       label: id,
       source: accepted ? "jsonld" : "label",
       confidence: accepted ? 1 : 0.7,
       ...(accepted ? { accepted: "exact" as const } : {}),
     });
     const rig = fakeTarget({
-      // The booking's own data gives two counted dates; the ticket one more,
-      // and one reading that still waits for a yes, which is not counted.
+      // The booking's own data gives the departure and the arrival. The
+      // ticket states the same departure again, which is not a new date, and
+      // one reading that still waits for a yes, which is not counted.
       factsFor: (name) =>
-        name === "Your ticket.email" ? [event("departs", true), event("arrives", true)] : name === "ticket.pdf" ? [event("boarding", true), event("maybe", false)] : [],
+        name === "Your ticket.email"
+          ? [event("departs", "09:40", true), event("arrives", "13:05", true)]
+          : name === "ticket.pdf"
+            ? [event("boarding", "09:40", true), event("maybe", "18:00", false)]
+            : [],
     });
     const report = await importMail(
       [source(mbox(message("Your ticket", { parts: [{ name: "ticket.pdf", bytes: pdf("ticket") }] })))],
       rig.target,
     );
-    expect(report.dates).toBe(3);
-    expect(rig.seen.finished).toEqual([["Imported 1 email and 1 attachment; 3 new dates", ""]]);
+    expect(report.dates).toBe(2);
+    expect(rig.seen.finished).toEqual([["Imported 1 email and 1 attachment; 2 new dates", ""]]);
   });
 });
