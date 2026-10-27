@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { contentDigest, ready, type FileMetadata, type MailMeta } from "@engramer/crypto";
 import type { ActivityJob } from "../activity";
+import type { Fact } from "../intel/facts";
 import type { UploadSource } from "../transfer";
 import { importMail, type ImportTarget } from "./importer";
 import { EMAIL_MIME } from "./kind";
@@ -18,6 +19,7 @@ interface Stored {
   mailParent?: string;
   trashed?: boolean;
   shared?: boolean;
+  facts?: Fact[];
 }
 
 /** The store as the importer sees it: files, folders by path, uploads. */
@@ -27,6 +29,8 @@ function fakeTarget(
     /** Names whose next upload fails once, as a dropped connection would. */
     failOnce?: Set<string>;
     existing?: Stored[];
+    /** What the analysis of an upload would find, by file name. */
+    factsFor?: (name: string) => Fact[];
   } = {},
 ) {
   const files = new Map<string, Stored>((opts.existing ?? []).map((f) => [f.id, f]));
@@ -55,6 +59,7 @@ function fakeTarget(
         digest: contentDigest(bytes),
         ...(meta?.mail ? { mail: meta.mail } : {}),
         ...(meta?.mailParent ? { mailParent: meta.mailParent } : {}),
+        ...(opts.factsFor ? { facts: opts.factsFor(file.name) } : {}),
       };
       files.set(entry.id, entry);
       inFlight--;
@@ -155,7 +160,7 @@ describe("importMail", () => {
       ],
       rig.target,
     );
-    expect(report).toEqual({ imported: 2, alreadyPresent: 0, skipped: [], attachments: 1 });
+    expect(report).toEqual({ imported: 2, alreadyPresent: 0, skipped: [], attachments: 1, dates: 0 });
     const ticketMail = rig.record("Your ticket.email");
     const lastYear = rig.record("Last year.email");
     expect(ticketMail).toMatchObject({ name: "Your ticket.email", folderId: "folder:Mail/Imported" });
@@ -181,7 +186,7 @@ describe("importMail", () => {
     await importMail([source(text)], rig.target);
     const before = rig.files.size;
     const again = await importMail([source(text)], rig.target);
-    expect(again).toEqual({ imported: 0, alreadyPresent: 3, skipped: [], attachments: 0 });
+    expect(again).toEqual({ imported: 0, alreadyPresent: 3, skipped: [], attachments: 0, dates: 0 });
     expect(rig.files.size).toBe(before);
     expect(rig.seen.finished.at(-1)![0]).toBe("No new emails; 3 already present");
   });
@@ -309,7 +314,7 @@ describe("importMail", () => {
     });
     const report = await importMail([source(mbox(message("Lease", { parts: [{ name: "lease.pdf", bytes: lease }] })))], rig.target);
     // A share can be revoked: this account keeps its own copy of both.
-    expect(report).toEqual({ imported: 1, alreadyPresent: 0, skipped: [], attachments: 1 });
+    expect(report).toEqual({ imported: 1, alreadyPresent: 0, skipped: [], attachments: 1, dates: 0 });
     const mine = rig.records().find((r) => !r.shared)!;
     expect(mine.mail!.attachmentIds).not.toContain("theirs-pdf");
   });
@@ -323,7 +328,7 @@ describe("importMail", () => {
     expect(rig.record("One.email").mail!.attachmentIds).toEqual([]);
 
     const second = await importMail([source(text)], rig.target);
-    expect(second).toEqual({ imported: 0, alreadyPresent: 1, skipped: [], attachments: 1 });
+    expect(second).toEqual({ imported: 0, alreadyPresent: 1, skipped: [], attachments: 1, dates: 0 });
     const attachment = rig.attachments()[0]!;
     expect(attachment.mailParent).toBe(rig.record("One.email").id);
     expect(rig.record("One.email").mail!.attachmentIds).toEqual([attachment.id]);
@@ -333,7 +338,7 @@ describe("importMail", () => {
     const writes = rig.seen.setMailCalls;
     const size = rig.files.size;
     const third = await importMail([source(text)], rig.target);
-    expect(third).toEqual({ imported: 0, alreadyPresent: 1, skipped: [], attachments: 0 });
+    expect(third).toEqual({ imported: 0, alreadyPresent: 1, skipped: [], attachments: 0, dates: 0 });
     expect(rig.seen.setMailCalls).toBe(writes);
     expect(rig.files.size).toBe(size);
   });
@@ -363,9 +368,34 @@ describe("importMail", () => {
       ],
     });
     const report = await importMail([source(mbox(message("Cut", { parts: [{ name: "cut.pdf", bytes }] })))], rig.target);
-    expect(report).toEqual({ imported: 0, alreadyPresent: 1, skipped: [], attachments: 0 });
+    expect(report).toEqual({ imported: 0, alreadyPresent: 1, skipped: [], attachments: 0, dates: 0 });
     expect(rig.files.size).toBe(2);
     expect(rig.files.get("rec")!.mail!.attachmentIds).toEqual(["att"]);
     expect(rig.seen.setMailCalls).toBe(1);
+  });
+
+  it("the import summary counts new dates once", async () => {
+    const event = (id: string, accepted: boolean): Fact => ({
+      id,
+      kind: "event",
+      document: "itinerary",
+      value: "2027-03-04",
+      label: id,
+      source: accepted ? "jsonld" : "label",
+      confidence: accepted ? 1 : 0.7,
+      ...(accepted ? { accepted: "exact" as const } : {}),
+    });
+    const rig = fakeTarget({
+      // The booking's own data gives two counted dates; the ticket one more,
+      // and one reading that still waits for a yes, which is not counted.
+      factsFor: (name) =>
+        name === "Your ticket.email" ? [event("departs", true), event("arrives", true)] : name === "ticket.pdf" ? [event("boarding", true), event("maybe", false)] : [],
+    });
+    const report = await importMail(
+      [source(mbox(message("Your ticket", { parts: [{ name: "ticket.pdf", bytes: pdf("ticket") }] })))],
+      rig.target,
+    );
+    expect(report.dates).toBe(3);
+    expect(rig.seen.finished).toEqual([["Imported 1 email and 1 attachment; 3 new dates", ""]]);
   });
 });

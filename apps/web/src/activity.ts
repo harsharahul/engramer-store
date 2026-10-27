@@ -158,6 +158,7 @@ export function describeImport(
     alreadyPresent: number;
     skipped: { name: string; reason: string }[];
     attachments: number;
+    dates?: number;
   },
   stopped: boolean,
 ): { title: string; detail?: string } {
@@ -170,6 +171,9 @@ export function describeImport(
         ? `Stored ${plural(report.attachments, "missing attachment")}`
         : "No new emails";
   const parts = [did];
+  if ((report.dates ?? 0) > 0) {
+    parts.push(plural(report.dates!, "new date"));
+  }
   if (report.alreadyPresent > 0) {
     parts.push(`${report.alreadyPresent} already present`);
   }
