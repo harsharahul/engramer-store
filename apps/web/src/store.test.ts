@@ -161,7 +161,7 @@ vi.mock("./intel/ocr", async (importOriginal) => ({
   recognizeImage: async () => undefined,
 }));
 
-import { api } from "./api";
+import { api, ApiError } from "./api";
 import { encodeIndexPayload } from "./indexblob";
 import {
   clipComparable,
@@ -1298,19 +1298,61 @@ describe("search index warm-up", () => {
       entry({ id: `w${i}`, name: `note-${i}.txt`, mime: "text/plain", hasText: true, key: generateKey() }),
     );
 
-  const serve = (files: FileEntry[], unreadable?: string) => {
+  /** Serves index blobs through both routes and counts the requests each
+   * one receives. `batchRoute: false` answers the batch route with the 404
+   * an older server gives. */
+  const serve = (files: FileEntry[], opts: { unreadable?: string; batchRoute?: boolean } = {}) => {
     const byId = new Map(files.map((f) => [f.id, f]));
+    const blob = (id: string) => encryptBytes(encodeIndexPayload({ text: `words of ${id}` }), byId.get(id)!.key);
+    const calls = { batch: 0, single: 0 };
     (api as unknown as Record<string, unknown>).downloadBlob = async (id: string) => {
-      if (id === unreadable) {
+      calls.single++;
+      if (id === opts.unreadable) {
         throw new Error("index blob missing");
       }
-      return encryptBytes(encodeIndexPayload({ text: `words of ${id}` }), byId.get(id)!.key);
+      return blob(id);
     };
+    (api as unknown as Record<string, unknown>).downloadIndexBatch = async (ids: string[]) => {
+      calls.batch++;
+      if (opts.batchRoute === false) {
+        throw new ApiError(404, "not found");
+      }
+      return new Map(ids.filter((id) => id !== opts.unreadable).map((id) => [id, blob(id)]));
+    };
+    return calls;
   };
+
+  const seedLibrary = (files: FileEntry[]) =>
+    useStore.setState({ files: new Map(files.map((f) => [f.id, f])), indexWarm: null, indexBatch: "unknown" });
+
+  it("warms 1,000 files with at most 5 batch requests", async () => {
+    const files = library(1_000);
+    seedLibrary(files);
+    const calls = serve(files);
+    await useStore.getState().warmSearchIndex();
+    expect(calls.batch).toBeLessThanOrEqual(5);
+    expect(calls.single).toBe(0);
+    expect([...useStore.getState().files.values()].every((f) => f.text === `words of ${f.id}`)).toBe(true);
+  });
+
+  it("falls back to per-file downloads when the server has no batch route", async () => {
+    const files = library(10);
+    seedLibrary(files);
+    const calls = serve(files, { batchRoute: false });
+    await useStore.getState().warmSearchIndex();
+    expect([...useStore.getState().files.values()].every((f) => f.text === `words of ${f.id}`)).toBe(true);
+    expect(useStore.getState().indexBatch).toBe("unsupported");
+    // A second warm-up in the same session goes straight to per-file downloads.
+    useStore.setState({ files: new Map(files.map((f) => [f.id, f])), indexWarm: null });
+    const batchCallsBefore = calls.batch;
+    await useStore.getState().warmSearchIndex();
+    expect(calls.batch).toBe(batchCallsBefore);
+    expect([...useStore.getState().files.values()].every((f) => f.text === `words of ${f.id}`)).toBe(true);
+  });
 
   it("applies readings in batches, never one store update per file", async () => {
     const files = library(1_000);
-    useStore.setState({ files: new Map(files.map((f) => [f.id, f])), indexWarm: null });
+    seedLibrary(files);
     serve(files);
     let updates = 0;
     const stop = useStore.subscribe(() => {
@@ -1325,8 +1367,8 @@ describe("search index warm-up", () => {
 
   it("leaves the rest searchable when one file's index cannot be read", async () => {
     const files = library(5);
-    useStore.setState({ files: new Map(files.map((f) => [f.id, f])), indexWarm: null });
-    serve(files, "w2");
+    seedLibrary(files);
+    serve(files, { unreadable: "w2" });
     await useStore.getState().warmSearchIndex();
     const after = useStore.getState().files;
     expect(after.get("w2")?.text).toBeUndefined();

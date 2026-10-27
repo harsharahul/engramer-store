@@ -202,3 +202,52 @@ describe("retry-after reaches the caller", () => {
     }
   });
 });
+
+/**
+ * Warming the search index asks for many index blobs at once. The answer is
+ * a run of frames; reading one wrong would hand a file another file's
+ * ciphertext, which then fails to decrypt and silently leaves it unsearchable.
+ */
+describe("downloadIndexBatch", () => {
+  const frame = (id: string, blob: Uint8Array) => {
+    const idBytes = new TextEncoder().encode(id);
+    const out = new Uint8Array(8 + idBytes.length + blob.length);
+    const view = new DataView(out.buffer);
+    view.setUint32(0, idBytes.length);
+    out.set(idBytes, 4);
+    view.setUint32(4 + idBytes.length, blob.length);
+    out.set(blob, 8 + idBytes.length);
+    return out;
+  };
+
+  it("reads each frame's blob under its own id", async () => {
+    const a = frame("a1", new Uint8Array([1, 2, 3]));
+    const b = frame("b2", new Uint8Array([9]));
+    const body = new Uint8Array(a.length + b.length);
+    body.set(a);
+    body.set(b, a.length);
+    const fetchMock = vi.fn(async () => new Response(body, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const blobs = await api.downloadIndexBatch(["a1", "b2", "c3"]);
+      expect([...blobs.keys()]).toEqual(["a1", "b2"]);
+      expect([...blobs.get("a1")!]).toEqual([1, 2, 3]);
+      expect([...blobs.get("b2")!]).toEqual([9]);
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe("/api/files/index/batch");
+      expect(JSON.parse(String(init.body))).toEqual({ ids: ["a1", "b2", "c3"] });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("names the status when the server refuses", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("not found", { status: 404 })));
+    try {
+      await expect(api.downloadIndexBatch(["a1"])).rejects.toMatchObject({ status: 404 });
+      await expect(api.downloadIndexBatch(["a1"])).rejects.toBeInstanceOf(ApiError);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

@@ -385,6 +385,9 @@ interface StoreState {
   liveFeed: "off" | "connecting" | "live" | "unavailable";
   /** Search-index warm-up progress; null when idle or complete. */
   indexWarm: { done: number; total: number } | null;
+  /** Whether this session's server answers the batch index download; an
+   * older self-hosted server does not, and warm-up then fetches per file. */
+  indexBatch: "unknown" | "unsupported";
 
   startSession: (session: Session) => Promise<void>;
   /** Signs this device out. "expired" is the server's verdict rather
@@ -1354,6 +1357,7 @@ export const useStore = create<StoreState>((set, get) => {
     backupHold: null,
     liveFeed: "off",
     indexWarm: null,
+    indexBatch: "unknown",
 
     // A failed first sync must never strand the user on a spinner: the
     // session (and its keys) are kept, the error is surfaced, and the UI
@@ -1362,6 +1366,8 @@ export const useStore = create<StoreState>((set, get) => {
       moveCursor(0);
       set({
         session,
+        // A new session may be a different server, with different routes.
+        indexBatch: "unknown",
         synced: false,
         serverSynced: false,
         syncError: null,
@@ -3520,11 +3526,53 @@ export const useStore = create<StoreState>((set, get) => {
         set({ indexWarm: { done: 0, total } });
         let pending: IndexReading[] = [];
         let done = 0;
-        await boundedRun(candidates, 3, async (file) => {
+        const read = (file: FileEntry, bytes: Uint8Array) => {
+          const payload = decodeIndexPayload(decryptBytes(bytes, file.key));
+          pending.push({ id: file.id, text: payload.text, clip: payload.clip, clips: payload.clips });
+        };
+        // Batched downloads first: one request per INDEX_APPLY_BATCH files.
+        // Files a batch could not cover (an older server without the route,
+        // or a failed request) fall through to per-file downloads.
+        let perFile = candidates;
+        if (get().indexBatch !== "unsupported") {
+          const groups: FileEntry[][] = [];
+          for (let i = 0; i < candidates.length; i += INDEX_APPLY_BATCH) {
+            groups.push(candidates.slice(i, i + INDEX_APPLY_BATCH));
+          }
+          const leftover: FileEntry[] = [];
+          await boundedRun(groups, 3, async (group) => {
+            if (get().indexBatch === "unsupported") {
+              leftover.push(...group);
+              return;
+            }
+            try {
+              const blobs = await api.downloadIndexBatch(group.map((file) => file.id));
+              for (const file of group) {
+                const bytes = blobs.get(file.id);
+                if (bytes) {
+                  try {
+                    read(file, bytes);
+                  } catch {
+                    // An unreadable index never blocks the rest.
+                  }
+                }
+              }
+              done += group.length;
+              const batch = pending;
+              pending = [];
+              applyIndexReadings(batch, { done, total });
+            } catch (error) {
+              if (error instanceof ApiError && error.status === 404) {
+                set({ indexBatch: "unsupported" });
+              }
+              leftover.push(...group);
+            }
+          });
+          perFile = leftover;
+        }
+        await boundedRun(perFile, 3, async (file) => {
           try {
-            const bytes = await api.downloadBlob(file.id, "index");
-            const payload = decodeIndexPayload(decryptBytes(bytes, file.key));
-            pending.push({ id: file.id, text: payload.text, clip: payload.clip, clips: payload.clips });
+            read(file, await api.downloadBlob(file.id, "index"));
           } catch {
             // A missing index never blocks the rest; search simply skips it.
           }
