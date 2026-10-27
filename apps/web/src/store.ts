@@ -419,6 +419,8 @@ interface StoreState {
   resyncLibrary: () => Promise<void>;
   refreshUsage: () => Promise<void>;
   createFolder: (name: string, parentId: string | null) => Promise<void>;
+  /** Finds or creates a folder path from the root; returns the last folder's id. */
+  ensureFolderPath: (path: string[]) => Promise<string>;
   renameFolder: (id: string, name: string) => Promise<void>;
   deleteFolder: (id: string) => Promise<void>;
   uploadFiles: (files: UploadSource[], folderId: string | null) => Promise<void>;
@@ -1262,31 +1264,50 @@ export const useStore = create<StoreState>((set, get) => {
     await patchFileMeta(id, { facts });
   };
 
-  /** Find or create a root folder for a category. Deduplicates concurrent creates. */
-  const categoryFolderPromises = new Map<string, Promise<string>>();
-  const ensureCategoryFolder = (name: string): Promise<string> => {
-    for (const folder of get().folders.values()) {
-      if (folder.parentId === null && folder.name === name) {
-        return Promise.resolve(folder.id);
+  /**
+   * Find or create a folder path from the root, one name per level, and
+   * return the last folder's id. Creates in flight are shared by the path
+   * up to that level, so two callers racing for the same path create each
+   * folder once.
+   */
+  const folderPathPromises = new Map<string, Promise<string>>();
+  const ensureFolderPath = async (path: string[]): Promise<string> => {
+    let parentId: string | null = null;
+    for (let depth = 0; depth < path.length; depth++) {
+      const name = path[depth]!;
+      const existing = [...get().folders.values()].find(
+        (folder) => folder.parentId === parentId && folder.name === name,
+      );
+      if (existing) {
+        parentId = existing.id;
+        continue;
       }
+      const key = path.slice(0, depth + 1).join("\u0000");
+      let pending = folderPathPromises.get(key);
+      if (!pending) {
+        const parent = parentId;
+        pending = (async () => {
+          const folderKey = generateKey();
+          const dto = await api.createFolder(
+            parent,
+            secretBoxSeal(folderKey, masterKey()),
+            encryptFolderMetadata({ name }, folderKey),
+          );
+          applyFolder(dto);
+          return dto.id;
+        })().finally(() => folderPathPromises.delete(key));
+        folderPathPromises.set(key, pending);
+      }
+      parentId = await pending;
     }
-    let pending = categoryFolderPromises.get(name);
-    if (!pending) {
-      pending = (async () => {
-        const folderKey = generateKey();
-        const dto = await api.createFolder(
-          null,
-          secretBoxSeal(folderKey, masterKey()),
-          encryptFolderMetadata({ name }, folderKey),
-        );
-        applyFolder(dto);
-        categoryFolderPromises.delete(name);
-        return dto.id;
-      })();
-      categoryFolderPromises.set(name, pending);
+    if (parentId === null) {
+      throw new Error("A folder path needs at least one name");
     }
-    return pending;
+    return parentId;
   };
+
+  /** Find or create a root folder for a category. */
+  const ensureCategoryFolder = (name: string): Promise<string> => ensureFolderPath([name]);
 
   const state: StoreState = {
     session: null,
@@ -1723,6 +1744,7 @@ export const useStore = create<StoreState>((set, get) => {
       });
     },
 
+    ensureFolderPath,
     createFolder: async (name, parentId) => {
       const folderKey = generateKey();
       const dto = await api.createFolder(

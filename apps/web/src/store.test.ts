@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { encryptBytes, encryptFileMetadata, generateKey, ready, secretBoxSeal } from "@engramer/crypto";
 import type { PreparedFile } from "./transfer";
-import type { FileDto } from "./api";
+import type { FileDto, FolderDto } from "./api";
 
 const gauge = vi.hoisted(() => ({
   running: 0,
@@ -843,6 +843,96 @@ describe("backupAsset", () => {
     const photo = new File([new Uint8Array(64)], "roll.jpg", { type: "image/jpeg" });
     await useStore.getState().backupAsset(photo, "asset-1");
     expect(gauge.analyzeOpts).toEqual([{ defer: true }]);
+  });
+});
+
+/**
+ * Mail files itself under Mail/<account>/Attachments/<year>, and category
+ * filing wants one root folder: both ask one helper, so two imports in
+ * flight never create the same folder twice.
+ */
+describe("ensureFolderPath", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  const folder = (id: string, name: string, parentId: string | null) => ({
+    id,
+    parentId,
+    name,
+    key: generateKey(),
+    createdAt: 1,
+    updatedAt: 1,
+  });
+
+  const rigFolders = (existing: ReturnType<typeof folder>[]) => {
+    const created: Array<{ parentId: string | null }> = [];
+    useStore.setState({
+      session: {
+        email: "t@example.com",
+        token: "t",
+        masterKey: generateKey(),
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      folders: new Map(existing.map((f) => [f.id, f])),
+    });
+    (api as unknown as Record<string, unknown>).createFolder = async (
+      parentId: string | null,
+      encryptedKey: FolderDto["encryptedKey"],
+      encryptedMeta: FolderDto["encryptedMeta"],
+    ): Promise<FolderDto> => {
+      created.push({ parentId });
+      const id = `new-${created.length}`;
+      // A round trip, so concurrent callers really overlap.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return {
+        id,
+        parentId,
+        encryptedKey,
+        encryptedMeta,
+        deleted: false,
+        updateSeq: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+    };
+    return created;
+  };
+
+  it("ensureFolderPath reuses existing folders by name", async () => {
+    const created = rigFolders([
+      folder("mail", "Mail", null),
+      folder("acct", "me@example.com", "mail"),
+    ]);
+    const id = await useStore.getState().ensureFolderPath(["Mail", "me@example.com"]);
+    expect(id).toBe("acct");
+    expect(created).toEqual([]);
+  });
+
+  it("ensureFolderPath creates only the missing tail", async () => {
+    const created = rigFolders([folder("mail", "Mail", null)]);
+    const id = await useStore.getState().ensureFolderPath(["Mail", "me@example.com", "Attachments"]);
+    expect(created).toEqual([{ parentId: "mail" }, { parentId: "new-1" }]);
+    expect(id).toBe("new-2");
+    const folders = useStore.getState().folders;
+    expect(folders.get("new-1")!.name).toBe("me@example.com");
+    expect(folders.get("new-2")).toMatchObject({ name: "Attachments", parentId: "new-1" });
+  });
+
+  it("concurrent ensureFolderPath calls create each folder once", async () => {
+    const created = rigFolders([]);
+    const [a, b, c] = await Promise.all([
+      useStore.getState().ensureFolderPath(["Mail", "me@example.com", "2026"]),
+      useStore.getState().ensureFolderPath(["Mail", "me@example.com", "2026"]),
+      useStore.getState().ensureFolderPath(["Mail", "me@example.com", "2025"]),
+    ]);
+    expect(a).toBe(b);
+    expect(c).not.toBe(a);
+    // Mail, the account, 2026, 2025: four folders, never a second Mail.
+    expect(created).toHaveLength(4);
+    const names = [...useStore.getState().folders.values()].map((f) => f.name).sort();
+    expect(names).toEqual(["2025", "2026", "Mail", "me@example.com"]);
   });
 });
 
