@@ -929,7 +929,7 @@ export function pendingDerivatives(
   let summaries = 0;
   let failedReadings = 0;
   for (const file of files.values()) {
-    if (!file.trashed && file.reading?.outcome === "failed") {
+    if (!file.trashed && stampOf(file)?.outcome === "failed") {
       failedReadings++;
     }
     if (opts.readings && needsReading(file, MODEL_READER, opts.readings)) {
@@ -2684,8 +2684,10 @@ export const useStore = create<StoreState>((set, get) => {
     saveNewFile: async (file, folderId) => (await storeSource(file, folderId)).id,
 
     retryFailedReadings: async () => {
+      // Through stampOf, so a failure an older build left as the legacy pair
+      // alone is counted and retried too.
       const failed = [...get().files.values()].filter(
-        (file) => !file.trashed && file.reading?.outcome === "failed",
+        (file) => !file.trashed && stampOf(file)?.outcome === "failed",
       );
       if (failed.length === 0) {
         return 0;
@@ -2693,10 +2695,11 @@ export const useStore = create<StoreState>((set, get) => {
       await get().patchFilesMeta(
         failed.map((file) => file.id),
         (file) => {
-          if (!file.reading) {
+          const stamp = stampOf(file);
+          if (!stamp) {
             return null;
           }
-          const { reason: _cleared, ...rest } = file.reading;
+          const { reason: _cleared, ...rest } = stamp;
           const meta: Partial<FileMetadata> = {};
           stampInto(meta, { ...rest, outcome: "retrying", tries: 0 });
           return meta;
@@ -3130,7 +3133,10 @@ export const useStore = create<StoreState>((set, get) => {
           return (
             theirs !== undefined &&
             theirs.at !== startedWith &&
+            // Only a finished reading stands; another device's failure never
+            // outweighs this device's answer.
             theirs.outcome !== "retrying" &&
+            theirs.outcome !== "failed" &&
             theirs.digest === current.digest &&
             theirs.rank <= READER_RANK[MODEL_READER]!
           );

@@ -62,9 +62,13 @@ describe("outcomeFor", () => {
     expect(outcomeFor(new AssistantError("guardrail", ""))).toBe("declined");
     expect(outcomeFor(new AssistantError("language", ""))).toBe("language");
     expect(outcomeFor(new AssistantError("rate-limited", ""))).toBe("paused");
+    // About the file: a try is spent.
     expect(outcomeFor(new AssistantError("timeout", ""))).toBeNull();
-    expect(outcomeFor(new AssistantError("cancelled", ""))).toBeNull();
     expect(outcomeFor(new Error("boom"))).toBeNull();
+    // About this device's model, not the file: paused, no try spent.
+    for (const code of ["unavailable", "preempted", "cancelled", "bad-request"]) {
+      expect(outcomeFor(new AssistantError(code, ""))).toBe("paused");
+    }
   });
 });
 

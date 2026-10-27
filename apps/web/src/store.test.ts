@@ -798,9 +798,11 @@ describe("embedding model version", () => {
         entry({ id: "a", reading: reading("failed") }),
         entry({ id: "b", reading: reading("found") }),
         entry({ id: "c", reading: reading("failed"), trashed: true }),
+        // An older build's write dropped the stamp; the legacy pair still says it failed.
+        entry({ id: "d", assistVersion: 1, noSummary: "failed" }),
       ].map((f) => [f.id, f]),
     );
-    expect(pendingDerivatives(files, 1).failedReadings).toBe(1);
+    expect(pendingDerivatives(files, 1).failedReadings).toBe(2);
   });
 
   /**

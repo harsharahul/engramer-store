@@ -64,8 +64,19 @@ describe("needsReading", () => {
   });
 
   it("a failed or owner-removed reading is never re-read", () => {
-    expect(needsReading(file({ digest: "d2", reading: stamp({ outcome: "failed", tries: 3 }) }), "apple", wants)).toBe(false);
+    expect(needsReading(file({ reading: stamp({ outcome: "failed", tries: 3 }) }), "apple", wants)).toBe(false);
     expect(needsReading(file({ digest: "d2", reading: stamp({ outcome: "user" }) }), "apple", wants)).toBe(false);
+  });
+
+  it("new contents after a failure are a new item, read afresh", () => {
+    expect(needsReading(file({ digest: "d2", reading: stamp({ outcome: "failed", tries: 3 }) }), "apple", wants)).toBe(true);
+  });
+
+  it("a file an older build left marked as retrying is still owed", () => {
+    // An older build's write dropped the stamp; only the legacy pair is left.
+    expect(stampOf(file({ assistVersion: 1, noSummary: "retrying" }))?.outcome).toBe("retrying");
+    expect(needsReading(file({ assistVersion: 1, noSummary: "retrying" }), "apple", wants)).toBe(true);
+    expect(stampOf(file({ assistVersion: 1, noSummary: "failed" }))?.outcome).toBe("failed");
   });
 
   it("a new reader version re-reads only empty answers and recent files", () => {

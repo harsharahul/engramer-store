@@ -45,6 +45,7 @@ vi.mock("./api", async (importOriginal) => {
 });
 
 import { api, ApiError } from "./api";
+import { AssistantError } from "./intel/assistant";
 import { useStore, type FileEntry } from "./store";
 
 const masterKey = vi.hoisted(() => ({ value: new Uint8Array(32) as Uint8Array }));
@@ -135,6 +136,32 @@ describe("a reading that keeps failing", () => {
     model.summarize.mockClear();
     expect(await useStore.getState().processFile("n1")).toBeNull();
     expect(model.summarize).not.toHaveBeenCalled();
+  });
+
+  it("a model that is off, busy or cancelled on this device spends no tries", async () => {
+    library([note()]);
+    for (const code of ["unavailable", "preempted", "cancelled", "bad-request"]) {
+      model.summarize.mockRejectedValueOnce(new AssistantError(code, ""));
+      await useStore.getState().processFile("n1");
+      expect(stampOf()).toBeUndefined();
+    }
+    // The file is still owed to a device whose model works.
+    expect(await useStore.getState().processFile("n1")).not.toBeNull();
+    expect(stampOf()).toMatchObject({ outcome: "found" });
+  });
+
+  it("a timeout from the model counts as a try", async () => {
+    library([note()]);
+    model.summarize.mockRejectedValueOnce(new AssistantError("timeout", "the reading took too long"));
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toMatchObject({ outcome: "retrying", tries: 1 });
+  });
+
+  it("a reading that failed on an older build can still be retried", async () => {
+    // An older build's write dropped the stamp; only the legacy pair says it failed.
+    library([note({ id: "a", assistVersion: 1, noSummary: "failed" })]);
+    expect(await useStore.getState().retryFailedReadings()).toBe(1);
+    expect(stampOf("a")).toMatchObject({ outcome: "retrying", tries: 0 });
   });
 
   it("tries count across devices", async () => {
@@ -229,6 +256,28 @@ describe("no reading loops", () => {
     await useStore.getState().processFile("n1");
     expect(useStore.getState().files.get("n1")!.summary).toBe("Their summary.");
     expect(writes.count).toBe(0);
+  });
+
+  it("a success is kept when another device's last failure lands meanwhile", async () => {
+    library([note()]);
+    model.summarize.mockImplementation(async () => {
+      const file = useStore.getState().files.get("n1")!;
+      useStore.setState({
+        files: new Map([
+          [
+            "n1",
+            {
+              ...file,
+              reading: { reader: "apple", rank: 2, version: 1, digest: "d1", tasks: ["summary"], outcome: "failed", tries: 3, at: 2 },
+            },
+          ],
+        ]),
+      });
+      return { summary: "Our summary.", tags: [], kind: null, facts: [] };
+    });
+    await useStore.getState().processFile("n1");
+    expect(useStore.getState().files.get("n1")!.summary).toBe("Our summary.");
+    expect(stampOf()).toMatchObject({ outcome: "found" });
   });
 
   it("our own metadata write leaves nothing owed for the same file", async () => {

@@ -53,6 +53,7 @@ const LEGACY_OUTCOMES: Record<string, ReadingStamp["outcome"]> = {
   language: "language",
   user: "user",
   failed: "failed",
+  retrying: "retrying",
 };
 
 /** The reading a file carries, reading an older build's pair as the model's first version. */
@@ -94,12 +95,17 @@ export function needsReading(
   if (!stamp) {
     return true;
   }
-  if (FINAL_OUTCOMES.has(stamp.outcome)) {
+  if (stamp.outcome === "user") {
+    // The owner removed the reading: final, whatever the file holds later.
     return false;
   }
   if (file.digest && stamp.digest && file.digest !== stamp.digest) {
-    // New contents are a new item, whoever read the old ones.
+    // New contents are a new item, whoever read the old ones, even after a
+    // reading of the old ones failed.
     return true;
+  }
+  if (FINAL_OUTCOMES.has(stamp.outcome)) {
+    return false;
   }
   const rank = READER_RANK[reader] ?? Number.POSITIVE_INFINITY;
   if (rank > stamp.rank) {
