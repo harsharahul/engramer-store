@@ -1097,6 +1097,92 @@ describe("importMail", () => {
   });
 });
 
+/**
+ * Two readers that disagree are asked about once: the owner's answer must
+ * settle both readings in the same write, or the loser would be offered
+ * again on its own.
+ */
+describe("answering a disagreement", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  const rig = () => {
+    const masterKey = generateKey();
+    const key = generateKey();
+    const amount = (value: string, source: "label" | "model", confidence: number, other: string) => ({
+      id: `amount:${value}`,
+      kind: "amount" as const,
+      document: "invoice" as const,
+      value,
+      unit: "USD",
+      label: "Amount due",
+      source,
+      confidence,
+      disputed: `amount:${other}`,
+    });
+    const bill = entry({
+      id: "bill",
+      key,
+      facts: [amount("56.00", "label", 0.7, "65.00"), amount("65.00", "model", 0.45, "56.00")],
+    });
+    useStore.setState({
+      session: { email: "t@example.com", token: "t", masterKey, privateKey: new Uint8Array(32), publicKey: "" },
+      files: new Map([["bill", bill]]),
+    });
+    let writes = 0;
+    (api as unknown as Record<string, unknown>).patchFile = async (
+      id: string,
+      patch: { encryptedMeta: FileDto["encryptedMeta"] },
+    ): Promise<FileDto> => {
+      writes++;
+      return {
+        id,
+        folderId: null,
+        encryptedKey: secretBoxSeal(key, masterKey),
+        encryptedMeta: patch.encryptedMeta,
+        size: 1024,
+        thumbSize: 0,
+        indexSize: 0,
+        uploaded: true,
+        trashed: false,
+        deleted: false,
+        updateSeq: 2,
+        createdAt: 1,
+        updatedAt: 2,
+      };
+    };
+    return { writes: () => writes };
+  };
+
+  const settled = () => {
+    const facts = useStore.getState().files.get("bill")!.facts;
+    return {
+      kept: facts.find((f) => f.value === "65.00")!,
+      other: facts.find((f) => f.value === "56.00")!,
+    };
+  };
+
+  it("confirming one reading dismisses the other in the same write", async () => {
+    const { writes } = rig();
+    await useStore.getState().confirmFact("bill", "amount:65.00");
+    const { kept, other } = settled();
+    expect(kept).toMatchObject({ confirmed: true });
+    expect(other).toMatchObject({ dismissed: true });
+    expect(kept.disputed).toBeUndefined();
+    expect(other.disputed).toBeUndefined();
+    expect(writes()).toBe(1);
+  });
+
+  it("a batch answer settles a disagreement the same way", async () => {
+    rig();
+    await useStore.getState().resolveFacts("bill", { confirm: ["amount:65.00"] });
+    const { kept, other } = settled();
+    expect(kept.confirmed).toBe(true);
+    expect(other.dismissed).toBe(true);
+  });
+});
+
 describe("decryptSharedFile", () => {
   beforeAll(async () => {
     await ready();

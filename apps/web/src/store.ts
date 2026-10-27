@@ -101,7 +101,7 @@ import {
 } from "./activity";
 import { isPdf } from "./intel/extract";
 import { CLIP_MODEL_VERSION, embedImage, semanticEnabled } from "./intel/semantic";
-import { asFacts, mergeFacts, reconcileFacts, type Fact, type FactEvidence } from "./intel/facts";
+import { asFacts, mergeFacts, reconcileFacts, settleDisputes, type Fact, type FactEvidence } from "./intel/facts";
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import { assistantAvailableNow, assistantEnabled, lastAssistantState } from "./intel/assistant";
 import { CATEGORIES } from "./intel/categorize";
@@ -1265,7 +1265,8 @@ export const useStore = create<StoreState>((set, get) => {
     if (!file) {
       return;
     }
-    const facts = file.facts.map((fact) => (fact.id === factId ? change(fact) : fact));
+    // An answer to a disagreement settles both readings in this one write.
+    const facts = settleDisputes(file.facts.map((fact) => (fact.id === factId ? change(fact) : fact)));
     await patchFileMeta(id, { facts });
   };
 
@@ -2711,14 +2712,16 @@ export const useStore = create<StoreState>((set, get) => {
       // file, not one per click.
       const confirm = new Set(decisions.confirm ?? []);
       const dismiss = new Set(decisions.dismiss ?? []);
-      const facts = file.facts.map((fact) => {
-        if (confirm.has(fact.id)) {
-          const done: Fact = { ...fact, confirmed: true };
-          delete done.ambiguous;
-          return done;
-        }
-        return dismiss.has(fact.id) ? { ...fact, dismissed: true } : fact;
-      });
+      const facts = settleDisputes(
+        file.facts.map((fact) => {
+          if (confirm.has(fact.id)) {
+            const done: Fact = { ...fact, confirmed: true };
+            delete done.ambiguous;
+            return done;
+          }
+          return dismiss.has(fact.id) ? { ...fact, dismissed: true } : fact;
+        }),
+      );
       await patchFileMeta(id, { facts });
     },
 

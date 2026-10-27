@@ -3,6 +3,7 @@ import {
   asFacts,
   groundFacts,
   isTracked,
+  settleDisputes,
   maskTail,
   mergeFacts,
   offeredFacts,
@@ -273,5 +274,83 @@ describe("isTracked", () => {
     expect(soft!.accepted).toBeUndefined();
     const [offered] = asFacts([fact({ source: "barcode", confidence: 0.6 })]);
     expect(offered!.accepted).toBeUndefined();
+  });
+});
+
+describe("one order between readers", () => {
+  const NOW = Date.UTC(2027, 2, 1);
+  const checkin = (over: Partial<Fact>): Fact =>
+    fact({
+      id: "event:2027-03-04 check-in: the larkspur hotel",
+      kind: "event",
+      document: "hotel-booking",
+      value: "2027-03-04",
+      label: "Check-in: The Larkspur Hotel",
+      ...over,
+    });
+
+  it("booking data beats the model on a departure time", () => {
+    const exact = checkin({ time: "15:00", zone: "+01:00", source: "jsonld", confidence: 1, accepted: "exact" });
+    const model = checkin({ time: "14:00", source: "model", confidence: 0.45 });
+    for (const merged of [mergeFacts([model], [exact]), mergeFacts([exact], [model])]) {
+      expect(merged).toHaveLength(1);
+      expect(merged[0]).toMatchObject({ time: "15:00", source: "jsonld", accepted: "exact" });
+    }
+    expect(offeredFacts([{ id: "f", trashed: false, facts: mergeFacts([], [exact, model]) }], NOW)).toEqual([]);
+  });
+
+  it("a model date and a label date that agree are accepted together", () => {
+    const due = (source: Fact["source"], confidence: number) =>
+      fact({ id: "due:2027-04-10", kind: "due", document: "invoice", value: "2027-04-10", source, confidence });
+    const merged = mergeFacts([due("label", 0.7)], [due("model", 0.45)]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ accepted: "agreement", reader: "label + model" });
+    expect(isTracked(merged[0]!)).toBe(true);
+  });
+
+  it("two readers that disagree on an amount ask once", () => {
+    const amount = (value: string, source: Fact["source"], confidence: number) =>
+      fact({ id: `amount:${value}`, kind: "amount", document: "invoice", value, unit: "USD", label: "Amount due", source, confidence });
+    const merged = mergeFacts([amount("56.00", "label", 0.7)], [amount("65.00", "model", 0.45)]);
+    expect(merged).toHaveLength(2);
+    expect(merged.every((f) => f.disputed !== undefined && f.accepted === undefined)).toBe(true);
+    const offered = offeredFacts([{ id: "f", trashed: false, facts: merged }], NOW);
+    expect(offered).toHaveLength(1);
+    expect(offered[0]!.alternative?.value).toBe(offered[0]!.fact.value === "56.00" ? "65.00" : "56.00");
+
+    // The owner picks one: the other is dismissed, and nothing asks again.
+    const answered = settleDisputes(merged.map((f) => (f.value === "65.00" ? { ...f, confirmed: true } : f)));
+    expect(answered.find((f) => f.value === "56.00")!.dismissed).toBe(true);
+    expect(offeredFacts([{ id: "f", trashed: false, facts: answered }], NOW)).toEqual([]);
+    const rescanned = mergeFacts(answered, [amount("56.00", "label", 0.7), amount("65.00", "model", 0.45)]);
+    expect(rescanned).toEqual(answered);
+  });
+
+  it("a confirmed fact is never displaced by a later reading", () => {
+    const mine = fact({ id: "due:2027-04-10", kind: "due", document: "invoice", value: "2027-04-10", confirmed: true });
+    const exact = fact({
+      id: "due:2027-04-12",
+      kind: "due",
+      document: "invoice",
+      value: "2027-04-12",
+      source: "jsonld",
+      confidence: 1,
+      accepted: "exact",
+    });
+    expect(mergeFacts([mine], [exact])).toEqual([mine]);
+  });
+
+  it("an exact due date settles a softer reading of the same date slot", () => {
+    const model = fact({ id: "due:2027-04-01", kind: "due", document: "invoice", value: "2027-04-01", source: "model", confidence: 0.45 });
+    const exact = fact({
+      id: "due:2027-04-10",
+      kind: "due",
+      document: "invoice",
+      value: "2027-04-10",
+      source: "jsonld",
+      confidence: 1,
+      accepted: "exact",
+    });
+    expect(mergeFacts([model], [exact]).map((f) => f.value)).toEqual(["2027-04-10"]);
   });
 });

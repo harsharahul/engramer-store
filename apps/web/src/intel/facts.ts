@@ -142,6 +142,9 @@ export interface Fact {
   accepted?: "exact" | "agreement" | "grounded";
   /** Which reader or readers produced this, for the line that says so. */
   reader?: string;
+  /** Another reading of the same slot disagrees: the id of that fact. The
+   * pair is offered once; the owner's answer settles both. */
+  disputed?: string;
   dismissed?: boolean;
   /** The contents this was read from, so a change can be noticed. */
   digest?: string;
@@ -187,17 +190,30 @@ export const RECENT_PAST_OFFER_DAYS = 60;
 export function offeredFacts(
   files: { id: string; trashed: boolean; facts: Fact[] }[],
   now: number,
-): { fileId: string; fact: Fact }[] {
-  const offered: { fileId: string; fact: Fact }[] = [];
+): { fileId: string; fact: Fact; alternative?: Fact }[] {
+  const offered: { fileId: string; fact: Fact; alternative?: Fact }[] = [];
   for (const file of files) {
     if (file.trashed) {
       continue;
     }
+    const byId = new Map(file.facts.map((fact) => [fact.id, fact]));
     for (const fact of file.facts) {
-      if (fact.confirmed || fact.dismissed || !DATED_KINDS.has(fact.kind)) {
+      if (isTracked(fact) || fact.dismissed) {
         continue;
       }
-      if (daysUntil(fact.value, now) < -RECENT_PAST_OFFER_DAYS) {
+      const partner = fact.disputed ? byId.get(fact.disputed) : undefined;
+      if (!DATED_KINDS.has(fact.kind) && !partner) {
+        continue;
+      }
+      if (DATED_KINDS.has(fact.kind) && daysUntil(fact.value, now) < -RECENT_PAST_OFFER_DAYS) {
+        continue;
+      }
+      if (partner) {
+        // One question per disagreement, asked through the stronger reading.
+        if (partner.confidence > fact.confidence || (partner.confidence === fact.confidence && partner.id < fact.id)) {
+          continue;
+        }
+        offered.push({ fileId: file.id, fact, alternative: partner });
         continue;
       }
       offered.push({ fileId: file.id, fact });
@@ -449,12 +465,15 @@ function renderings(fact: Fact): string[] {
 }
 
 /**
- * Folds a rescan into what a file already carries.
+ * Folds a rescan into what a file already carries, in one fixed order.
  *
  * A decision the owner made outranks anything a later scan finds: a confirmed
  * fact survives a rescan that no longer sees it, and a dismissed one is not
- * quietly brought back. Otherwise the stronger source wins, so a barcode read
- * replaces the guess a labelled date made about the same value.
+ * quietly brought back. Then an exact reader outranks every softer one. Two
+ * independent readers that state the same value agree, and the fact counts.
+ * Where one slot (a due date, an expiry, an amount due) is read two ways:
+ * the owner's answer or an exact reading settles it; otherwise a model and a
+ * label rule that disagree are kept as a pair and asked about once.
  */
 export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
   const merged = new Map<string, Fact>();
@@ -479,12 +498,135 @@ export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
     if (prior.confirmed || prior.dismissed) {
       continue;
     }
-    if (fact.confidence > prior.confidence) {
-      merged.set(fact.id, fact);
-    }
+    merged.set(fact.id, pick(prior, fact));
   }
   // The cap has to drop the weakest rather than whichever arrived last.
-  return [...merged.values()]
+  return resolveSlots([...merged.values()])
     .sort((a, b) => b.confidence - a.confidence || a.value.localeCompare(b.value))
     .slice(0, MAX_FACTS_PER_FILE);
+}
+
+/** Kinds a document states once: two different readings of one disagree. */
+const SLOT_KINDS: ReadonlySet<FactKind> = new Set(["expiry", "due", "issued", "amount"]);
+/** Of all the amounts a document prints, the one it asks to be paid. */
+const TOTAL_LABEL = /due|total|balance|pay/i;
+/** Readers whose answers are grounded but not exact; two of them can agree or disagree. */
+const GROUNDED_READERS: ReadonlySet<FactSource> = new Set(["model", "label"]);
+
+function slotOf(fact: Fact): string | undefined {
+  if (!SLOT_KINDS.has(fact.kind)) {
+    return undefined;
+  }
+  if (fact.kind === "amount") {
+    return TOTAL_LABEL.test(fact.label ?? "") ? `amount|${fact.unit ?? ""}` : undefined;
+  }
+  return fact.kind;
+}
+
+function isExact(fact: Fact): boolean {
+  return withExactAcceptance(fact).accepted === "exact";
+}
+
+function readers(fact: Fact): string[] {
+  return (fact.reader ?? fact.source).split(" + ");
+}
+
+/** The same reading from two readers: exact wins; two grounded readers agree. */
+function pick(prior: Fact, fact: Fact): Fact {
+  if (isExact(prior) !== isExact(fact)) {
+    return isExact(prior) ? prior : withExactAcceptance(fact);
+  }
+  const winner = fact.confidence > prior.confidence ? fact : prior;
+  if (GROUNDED_READERS.has(prior.source) && GROUNDED_READERS.has(fact.source) && prior.source !== fact.source) {
+    const names = [...new Set([...readers(prior), ...readers(fact)])].sort();
+    return { ...winner, accepted: winner.accepted ?? "agreement", reader: names.join(" + ") };
+  }
+  return winner;
+}
+
+/** Settles each slot read more than one way, or marks the disagreement to ask about. */
+function resolveSlots(facts: Fact[]): Fact[] {
+  const ids = new Set(facts.map((fact) => fact.id));
+  let out = facts.map((fact) => {
+    if (fact.disputed && !ids.has(fact.disputed)) {
+      const { disputed: _gone, ...rest } = fact;
+      return rest;
+    }
+    return fact;
+  });
+  const slots = new Map<string, Fact[]>();
+  for (const fact of out) {
+    const slot = slotOf(fact);
+    if (slot && !fact.dismissed) {
+      slots.set(slot, [...(slots.get(slot) ?? []), fact]);
+    }
+  }
+  const drop = new Set<string>();
+  const marks = new Map<string, string>();
+  for (const group of slots.values()) {
+    if (new Set(group.map((fact) => fact.value)).size < 2) {
+      continue;
+    }
+    // The owner's answer settles the slot outright; an exact reading settles
+    // it against every softer one.
+    const confirmed = group.find((fact) => fact.confirmed);
+    const exact = group.find(isExact);
+    if (confirmed || exact) {
+      for (const fact of group) {
+        const outranked = confirmed ? !fact.confirmed : !isExact(fact);
+        if (fact.value !== (confirmed ?? exact)!.value && outranked) {
+          drop.add(fact.id);
+        }
+      }
+      continue;
+    }
+    const best = (source: FactSource) =>
+      group.filter((fact) => fact.source === source).sort((a, b) => b.confidence - a.confidence)[0];
+    const model = best("model");
+    const label = best("label");
+    if (model && label && model.value !== label.value) {
+      marks.set(model.id, label.id);
+      marks.set(label.id, model.id);
+    }
+  }
+  out = out.filter((fact) => !drop.has(fact.id));
+  return out.map((fact) => {
+    const other = marks.get(fact.id);
+    if (!other) {
+      return fact;
+    }
+    const { accepted: _none, ...rest } = fact;
+    return { ...rest, disputed: other };
+  });
+}
+
+/**
+ * The owner's answer to a disagreement: the confirmed reading stands, its
+ * partner is dismissed, and neither is marked disputed any more. A dismissed
+ * reading leaves its partner to be asked about on its own.
+ */
+export function settleDisputes(facts: Fact[]): Fact[] {
+  const byId = new Map(facts.map((fact) => [fact.id, fact]));
+  const dismiss = new Set<string>();
+  const release = new Set<string>();
+  for (const fact of facts) {
+    if (!fact.disputed || !byId.has(fact.disputed)) {
+      continue;
+    }
+    if (fact.confirmed) {
+      dismiss.add(fact.disputed);
+      release.add(fact.id);
+      release.add(fact.disputed);
+    } else if (fact.dismissed) {
+      release.add(fact.id);
+      release.add(fact.disputed);
+    }
+  }
+  return facts.map((fact) => {
+    if (!release.has(fact.id)) {
+      return fact;
+    }
+    const { disputed: _settled, ...rest } = fact;
+    return dismiss.has(fact.id) ? { ...rest, dismissed: true } : rest;
+  });
 }

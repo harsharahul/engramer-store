@@ -38,6 +38,8 @@ export interface StoredFact {
   accepted?: string;
   /** Which reader or readers produced it. */
   reader?: string;
+  /** The id of another reading of the same thing that disagrees. */
+  disputed?: string;
   dismissed?: boolean;
   /** The contents this was read from, so a change to them can be noticed. */
   digest?: string;
