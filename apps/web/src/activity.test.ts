@@ -128,6 +128,27 @@ describe("describeProcessing with the assistant", () => {
     expect(described.title).toBe("Processed 12 files");
     expect(described.detail).toBe("9 summarized · 3 summaries wait for the app to be in front");
   });
+
+  it("a pass that left every reading for the next open does not say there was nothing to do", () => {
+    const described = describeProcessing({
+      files: 0,
+      previews: 0,
+      text: 0,
+      meaning: 0,
+      tagged: 0,
+      facts: 0,
+      summaries: 0,
+      summaryPaused: 0,
+      failed: [],
+      stopped: false,
+      remaining: 0,
+      readingsDeferred: 5,
+    });
+    expect(described).toEqual({
+      title: "Reading continues next time the app is open",
+      detail: "5 documents wait for the next open to be read",
+    });
+  });
 });
 
 describe("progressLabel", () => {

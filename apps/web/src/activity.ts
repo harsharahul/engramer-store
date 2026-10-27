@@ -107,8 +107,12 @@ export interface ProcessingCounts {
 
 /** One sentence per outcome, in product words, counting only what landed. */
 export function describeProcessing(counts: ProcessingCounts): { title: string; detail?: string } {
+  const deferred =
+    (counts.readingsDeferred ?? 0) > 0
+      ? `${plural(counts.readingsDeferred!, "document")} wait for the next open to be read`
+      : null;
   if (counts.files === 0 && !counts.stopped) {
-    return { title: "Nothing to fill in" };
+    return deferred ? { title: "Reading continues next time the app is open", detail: deferred } : { title: "Nothing to fill in" };
   }
   const parts: string[] = [];
   if (counts.previews > 0) {
@@ -141,10 +145,6 @@ export function describeProcessing(counts: ProcessingCounts): { title: string; d
   const paused =
     counts.summaryPaused > 0
       ? `${plural(counts.summaryPaused, "summary", "summaries")} wait for the app to be in front`
-      : null;
-  const deferred =
-    (counts.readingsDeferred ?? 0) > 0
-      ? `${plural(counts.readingsDeferred!, "document")} wait for the next open to be read`
       : null;
   const tail = counts.stopped ? "continues next time the app is open" : null;
   const detail = [parts.join(" · "), failed, paused, deferred, tail].filter(Boolean).join(" · ");
