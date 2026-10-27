@@ -61,6 +61,7 @@ import { api, type ConnectStatus, type PackName, type PackStatus } from "../api"
 import { changePassword } from "../changepassword";
 import { IDLE_LOCK_CHOICES, idleLockMinutes, setIdleLockMinutes } from "../idlelock";
 import { emailsOutsideWindow, readingWindowMonths, setReadingWindowMonths } from "../intel/reading";
+import { useSyncedSetting } from "../usesyncedsetting";
 import { revealRecoveryKey, rotateRecoveryKey } from "../recoverykey";
 import { RecoveryKeyModal } from "./RecoveryKeyModal";
 import { formatBytes } from "../format";
@@ -754,7 +755,7 @@ export function ProfileView(props: {
   };
 
   const [idleMinutes, setIdleMinutes] = useState(() => idleLockMinutes());
-  const [windowMonths, setWindowMonths] = useState(() => readingWindowMonths());
+  const [windowMonths, refreshWindowMonths] = useSyncedSetting(readingWindowMonths);
   useEffect(() => {
     // Another device's choice arrives through the synced settings.
     const refresh = () => setIdleMinutes(idleLockMinutes());
@@ -1196,7 +1197,7 @@ export function ProfileView(props: {
             onChange={(e) => {
               const months = Number(e.target.value);
               setReadingWindowMonths(months);
-              setWindowMonths(readingWindowMonths());
+              refreshWindowMonths();
             }}
           >
             {[3, 6, 9, 12].map((months) => (
