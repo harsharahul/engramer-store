@@ -45,6 +45,12 @@ vi.mock("./intel/scan", async (importOriginal) => ({
 
 const writes = vi.hoisted(() => ({ count: 0, blobs: 0 }));
 
+const device = vi.hoisted(() => ({ handheld: false }));
+vi.mock("./analysisslot", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./analysisslot")>()),
+  isHandheld: () => device.handheld,
+}));
+
 
 vi.mock("./api", async (importOriginal) => {
   const original = await importOriginal<typeof import("./api")>();
@@ -60,6 +66,7 @@ vi.mock("./api", async (importOriginal) => {
 import { api, ApiError } from "./api";
 import { AssistantError } from "./intel/assistant";
 import { useStore, type FileEntry } from "./store";
+import { spendModelReads, startOfOpen } from "./modelbudget";
 
 const masterKey = vi.hoisted(() => ({ value: new Uint8Array(32) as Uint8Array }));
 
@@ -100,6 +107,8 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  device.handheld = false;
+  startOfOpen();
   scoreState.value = scoreState.shipped;
   model.summarize.mockReset();
   model.summarize.mockResolvedValue({ summary: "A synthetic note.", tags: [], kind: null, facts: [] });
@@ -232,6 +241,31 @@ describe("a budget for model readings", () => {
     model.summarize.mockClear();
     await useStore.getState().processLibrary({ modelBudget: 10 });
     expect(model.summarize).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("passes on a phone", () => {
+  it("a pass started by a button takes from the per-open budget", async () => {
+    device.handheld = true;
+    spendModelReads(39);
+    library(["a", "b", "c"].map((id) => note({ id })));
+    const counts = await useStore.getState().processLibrary();
+    expect(model.summarize).toHaveBeenCalledTimes(1);
+    expect(counts.readingsDeferred).toBe(2);
+  });
+
+  it("a file left for a later open is not skipped by the session", async () => {
+    library(["a", "b"].map((id) => note({ id })));
+    const skipped = new Set<string>();
+    const outcomes: string[] = [];
+    await useStore.getState().processLibrary({
+      modelBudget: 0,
+      skip: { has: (id) => skipped.has(id), add: (id) => void skipped.add(id) },
+      onOutcome: (id) => void outcomes.push(id),
+    });
+    expect(model.summarize).not.toHaveBeenCalled();
+    expect([...skipped]).toEqual([]);
+    expect(outcomes).toEqual([]);
   });
 });
 

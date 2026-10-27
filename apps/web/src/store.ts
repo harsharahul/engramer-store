@@ -115,6 +115,7 @@ import { assistantAvailableNow, assistantEnabled, lastAssistantState } from "./i
 import { CATEGORIES } from "./intel/categorize";
 import { MIN_MAIL_TEXT, MIN_TEXT, cleanTags, outcomeFor, summarize } from "./intel/summarize";
 import { isEmailRecord } from "./mail/kind";
+import { remainingModelReads, spendModelReads } from "./modelbudget";
 import { acceptance, modelScores, trustedKind } from "./intel/confidence";
 import {
   MAX_TRIES,
@@ -3539,7 +3540,10 @@ export const useStore = create<StoreState>((set, get) => {
         readingsDeferred: 0,
         readingsStarted: 0,
       };
-      let modelBudget = opts?.modelBudget ?? Number.POSITIVE_INFINITY;
+      // Every pass takes from the per-open budget unless told otherwise, so a
+      // button that asks for previews or text cannot start thousands of model
+      // readings on a phone.
+      let modelBudget = opts?.modelBudget ?? remainingModelReads();
       const candidates = [...get().files.values()]
         .filter(
           (f) =>
@@ -3582,22 +3586,28 @@ export const useStore = create<StoreState>((set, get) => {
           return;
         }
         get().updateActivity({ current: file.name });
-        opts?.skip?.add(file.id);
-        try {
-          // A model reading spends the budget when it starts; once it is
-          // spent, a file still gets everything else and stays owed the
-          // reading, for the next pass.
-          let force: { summary?: boolean } | undefined;
-          if (owesModelReading(file)) {
-            if (modelBudget > 0) {
-              modelBudget--;
-              counts.readingsStarted! += 1;
-            } else {
-              force = { summary: false };
-              counts.readingsDeferred! += 1;
-            }
+        // A model reading spends the budget when it starts; once it is spent,
+        // a file still gets everything else and stays owed the reading. Such
+        // a file is not marked as tried, so a later pass, in this session or
+        // the next open, takes it up.
+        let deferred = false;
+        if (owesModelReading(file)) {
+          if (modelBudget > 0) {
+            modelBudget--;
+            counts.readingsStarted! += 1;
+          } else {
+            deferred = true;
+            counts.readingsDeferred! += 1;
           }
-          const outcome = await get().processFile(file.id, { signal: abort.signal, ...(force ? { force } : {}) });
+        }
+        if (!deferred) {
+          opts?.skip?.add(file.id);
+        }
+        try {
+          const outcome = await get().processFile(file.id, {
+            signal: abort.signal,
+            ...(deferred ? { force: { summary: false } } : {}),
+          });
           if (outcome) {
             counts.files++;
             counts.previews += outcome.previews;
@@ -3608,7 +3618,9 @@ export const useStore = create<StoreState>((set, get) => {
             counts.summaries += outcome.summaries;
             counts.summaryPaused += outcome.summaryPaused;
           }
-          opts?.onOutcome?.(file.id, true);
+          if (!deferred) {
+            opts?.onOutcome?.(file.id, true);
+          }
         } catch {
           if (abort.signal.aborted) {
             return;
@@ -3623,6 +3635,9 @@ export const useStore = create<StoreState>((set, get) => {
         }
       });
       counts.stopped = halted();
+      if (opts?.modelBudget === undefined) {
+        spendModelReads(counts.readingsStarted!);
+      }
       // Whatever did not finish, including files cut off mid-flight, is
       // still owed; the summary's total must match the running count.
       counts.remaining = candidates.length - counts.files - counts.failed.length;
