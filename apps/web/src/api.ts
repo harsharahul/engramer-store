@@ -528,6 +528,37 @@ export const api = {
    * until the tab closed. Interactive downloads pass nothing and wait as
    * long as the person is willing to.
    */
+  /**
+   * Many files' search index blobs in one request. The answer is frames of
+   * [u32 id length][id][u32 blob length][blob], big-endian; a file the
+   * server left out (unreadable, or no index) is simply absent. Both the
+   * server and the local vault answer it; an older server answers 404.
+   */
+  downloadIndexBatch: async (ids: string[]): Promise<Map<string, Uint8Array>> => {
+    const response = await fetch("/api/files/index/batch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${authToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (!response.ok) {
+      throw new ApiError(response.status, `index batch failed (${response.status})`);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const decoder = new TextDecoder();
+    const blobs = new Map<string, Uint8Array>();
+    let at = 0;
+    while (at + 4 <= bytes.length) {
+      const idLength = view.getUint32(at);
+      const id = decoder.decode(bytes.subarray(at + 4, at + 4 + idLength));
+      at += 4 + idLength;
+      const size = view.getUint32(at);
+      blobs.set(id, bytes.slice(at + 4, at + 4 + size));
+      at += 4 + size;
+    }
+    return blobs;
+  },
+
   downloadBlobDetailed: async (
     id: string,
     kind: "data" | "thumbnail" | "index",

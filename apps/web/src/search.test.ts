@@ -243,3 +243,60 @@ describe("summaries", () => {
     expect(searchFiles([summarized], "mortgage")).toHaveLength(0);
   });
 });
+
+describe("mail operators", () => {
+  const mail = (
+    subject: string,
+    over: { from?: string; fromAddress?: string; to?: string[]; attachments?: string[]; text?: string } = {},
+  ): FileEntry => ({
+    ...file({
+      name: `${subject}.email`,
+      mime: "application/vnd.engram.email+json",
+      category: "Mail",
+      text: over.text ?? subject,
+    }),
+    mail: {
+      messageId: `<${subject}@example.com>`,
+      from: over.from ?? "Jane Example",
+      fromAddress: over.fromAddress ?? "jane@example.com",
+      to: over.to ?? ["owner@example.com"],
+      date: 0,
+      subject,
+      attachmentIds: over.attachments ?? [],
+    },
+  });
+  const lease = mail("Lease renewal", { attachments: ["att-1"], text: "Lease renewal for the flat" });
+  const bill = mail("Power bill", { from: "Example Power", fromAddress: "billing@power.example", to: ["owner@example.com", "partner@example.com"] });
+  const note = file({ name: "lease notes.txt", text: "lease" });
+  const all = [lease, bill, note];
+  const names = (query: string) => searchFiles(all, query).map((hit) => hit.file.name).sort();
+
+  it("type:email finds email records", () => {
+    expect(names("type:email")).toEqual(["Lease renewal.email", "Power bill.email"]);
+    expect(names("type:mail")).toEqual(["Lease renewal.email", "Power bill.email"]);
+    expect(parseQuery("type:message").types).toEqual(["mail"]);
+  });
+
+  it("from: matches the sender's name or address", () => {
+    expect(names("from:jane")).toEqual(["Lease renewal.email"]);
+    expect(names("from:power.example")).toEqual(["Power bill.email"]);
+    expect(names("from:POWER")).toEqual(["Power bill.email"]);
+  });
+
+  it("to: matches any recipient", () => {
+    expect(names("to:partner")).toEqual(["Power bill.email"]);
+    expect(names("to:owner@example.com")).toEqual(["Lease renewal.email", "Power bill.email"]);
+  });
+
+  it("has:attachment keeps only emails with attachments", () => {
+    expect(names("has:attachment")).toEqual(["Lease renewal.email"]);
+    expect(names("has:attachments")).toEqual(["Lease renewal.email"]);
+  });
+
+  it("operators compose with words", () => {
+    expect(names("lease from:jane")).toEqual(["Lease renewal.email"]);
+    expect(names("lease has:attachment")).toEqual(["Lease renewal.email"]);
+    expect(names("lease")).toEqual(["Lease renewal.email", "lease notes.txt"]);
+    expect(names("bill from:jane")).toEqual([]);
+  });
+});

@@ -4,6 +4,8 @@
  * The result is stored inside the encrypted metadata; the server never sees it.
  */
 
+import { isEmailRecord } from "../mail/kind";
+
 export type Category =
   | "Photos"
   | "Screenshots"
@@ -11,6 +13,7 @@ export type Category =
   | "Audio"
   | "Documents"
   | "Receipts"
+  | "Mail"
   | "Notes"
   | "Code"
   | "Spreadsheets"
@@ -28,6 +31,7 @@ export const CATEGORIES: readonly Category[] = [
   "Audio",
   "Documents",
   "Receipts",
+  "Mail",
   "Notes",
   "Code",
   "Spreadsheets",
@@ -110,6 +114,11 @@ export function categorize(input: AnalysisInput): Analysis {
 function pickCategory(input: AnalysisInput, ext: string, tags: Set<string>): Category {
   const { name, mime, text } = input;
 
+  // Before the text rules: a bill that arrived by mail is still an email;
+  // its attachments are the files that file themselves by what they say.
+  if (isEmailRecord(name, mime)) {
+    return "Mail";
+  }
   if (mime.startsWith("image/")) {
     if (SCREENSHOT_NAME.test(name)) {
       tags.add("screenshot");

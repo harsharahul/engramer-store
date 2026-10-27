@@ -13,7 +13,7 @@
 
 import { isReservedTag } from "../albums";
 import type { JsonSchema } from "../intel/assistant";
-import { TYPE_WORDS } from "../search";
+import { hasOperator, TYPE_WORDS } from "../search";
 
 /** The library's most-used tags, the part of the vocabulary that is the
  * user's own. Albums and trips are places, not tags, and stay out. */
@@ -103,9 +103,6 @@ function looksExact(token: string): boolean {
   return /^[A-Z0-9_]{3,}$/.test(token) && /[A-Z]/.test(token);
 }
 
-function hasOperator(query: string): boolean {
-  return /(^|\s)(tag|type|in|is|before|after):/i.test(query);
-}
 
 /**
  * Whether a query is worth a model round trip: the assistant is here and

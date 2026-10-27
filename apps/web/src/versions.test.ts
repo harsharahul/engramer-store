@@ -35,6 +35,24 @@ describe("mergeRestoredMeta", () => {
     expect(merged.text).toBe("original words");
   });
 
+  it("a version restore keeps mail fields", () => {
+    const mail = {
+      messageId: "<lease-2@example.com>",
+      from: "Example Lettings",
+      fromAddress: "office@example.com",
+      to: ["tenant@example.com"],
+      date: 1_760_000_000_000,
+      subject: "Lease renewal",
+      attachmentIds: ["att-4"],
+    };
+    // Which email a file came with is provenance, like its name: restoring
+    // older bytes does not change it. A version stored without the link must
+    // not erase it, or the next import would store the email a second time.
+    const merged = mergeRestoredMeta({ ...current, mail, mailParent: "email-2" }, version);
+    expect(merged.mail).toEqual(mail);
+    expect(merged.mailParent).toBe("email-2");
+  });
+
   it("restores the facts the older contents carried, not the current ones", () => {
     // A tag is something the owner chose about the file; a fact is something
     // the file said. Restoring older contents has to restore what those

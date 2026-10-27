@@ -103,6 +103,9 @@ PUT    /api/files/:id/data     stream ciphertext blob (octet-stream)
 PUT    /api/files/:id/thumbnail
 GET    /api/files/:id/data     stream ciphertext blob
 GET    /api/files/:id/thumbnail
+PUT    /api/files/:id/index    stream the encrypted search-index blob
+GET    /api/files/:id/index
+POST   /api/files/index/batch  up to 500 index blobs in one framed response
 PATCH  /api/files/:id          update metadata, move
 DELETE /api/files/:id          move to trash
 POST   /api/trash/:id/restore

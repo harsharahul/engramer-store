@@ -67,8 +67,43 @@ One engine serves the top bar and the command palette (Cmd+K or Ctrl+K):
   `type:photo` work), `in:<folder>`, `is:favorite`, `before:2026-03`,
   `after:2025`. Focusing the empty search box shows recent searches and
   clickable operator hints.
+- Mail has its own filters: `type:email`, `from:<name or address>`,
+  `to:<address>` and `has:attachment`. An email in the results shows who
+  sent it and when, with a chip for each attachment that opens it.
 
 Search never issues a network request; the index is the decrypted metadata already in memory.
+
+## Mail
+
+Mail comes into the vault as content: saved messages (`.eml`) and mailbox
+exports (`.mbox`, such as Google Takeout or an Apple Mail export folder)
+are imported from the New menu, the command palette, or by dropping them on
+the window.
+
+- **What is kept.** Each message becomes an email record: a small file
+  holding its headers, its text and HTML, and the images its body shows
+  inline, filed in Mail/Imported. Each real attachment becomes a file of its
+  own in Mail/Imported/Attachments/<year>, linked to its email both ways.
+  Tracking pixels are dropped. A message over 50 MB is skipped and named in
+  the summary.
+- **On the device.** The export is read in fixed chunks and each message is
+  parsed in a worker on the device; the server stores only ciphertext, like
+  every other file.
+- **Nothing twice.** A message already in the vault (same Message-ID, or for
+  a message without one, the same date, sender, subject and opening text) is
+  left alone, so importing the same file again, or after Stop, adds only what
+  is new. An attachment already in the vault is linked, not stored again.
+- **Understood like any file.** An email's search text starts with its
+  subject, sender and recipients; booking data in its HTML becomes dates and
+  reference numbers as it does for a saved confirmation page; and it files
+  under the Mail category.
+- **Reading safely.** The viewer shows the body in a sandboxed frame with a
+  policy that forbids scripts. Remote images and backgrounds stay off until
+  "Load remote images" is pressed for that email, so opening a message tells
+  no sender it was read; links open in a new tab and show their real address.
+- **Save as PDF.** The viewer turns an email into a plain PDF (headers, text,
+  attachment list) stored beside it. Characters the standard font cannot draw
+  appear as "?", and the PDF says so.
 
 ## Search in plain words
 

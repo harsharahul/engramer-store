@@ -1,0 +1,19 @@
+From: Example Sender <sender@example.com>
+To: Receiver One <receiver@example.com>
+Subject: Newsletter
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Message-ID: <px-1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="b5"
+
+--b5
+Content-Type: text/html; charset=utf-8
+
+<p>News</p><img src="cid:px@example" width=1 height=1>
+--b5
+Content-Type: image/gif
+Content-ID: <px@example>
+Content-Transfer-Encoding: base64
+
+R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7
+--b5--

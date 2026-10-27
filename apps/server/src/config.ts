@@ -44,6 +44,8 @@ export interface ServerConfig {
   quotaBytes: number;
   /** Hard cap for a single ciphertext blob in bytes. */
   maxBlobBytes: number;
+  /** Most bytes one batch index download gathers before answering. */
+  indexBatchBytes: number;
   /** Versions kept per file after a content replacement; 0 disables history. */
   maxVersions: number;
   /** Whether the live-collaboration relay accepts connections. */
@@ -133,6 +135,7 @@ export interface ConfigOverrides {
   databaseUrl?: string | null;
   quotaBytes?: number;
   maxBlobBytes?: number;
+  indexBatchBytes?: number;
   maxVersions?: number;
   collabRelay?: boolean;
   events?: boolean;
@@ -177,6 +180,7 @@ export function loadConfig(overrides: ConfigOverrides = {}): ServerConfig {
       overrides.quotaBytes ?? Number(process.env.ENGRAMER_QUOTA_BYTES ?? 10 * 1024 ** 3),
     maxBlobBytes:
       overrides.maxBlobBytes ?? Number(process.env.ENGRAMER_MAX_BLOB_BYTES ?? 20 * 1024 ** 3),
+    indexBatchBytes: overrides.indexBatchBytes ?? 32 * 1024 ** 2,
     maxVersions: Math.max(
       0,
       overrides.maxVersions ?? Number(process.env.ENGRAMER_MAX_VERSIONS ?? 10),

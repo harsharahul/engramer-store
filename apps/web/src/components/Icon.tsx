@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleUser,
+  Mail,
   PanelLeft,
   Plane,
   ShieldCheck,
@@ -95,6 +96,9 @@ export const CarGlyph = ({ size = 16 }: IconProps) => <CarFront size={size} {...
 export const TicketGlyph = ({ size = 16 }: IconProps) => <Ticket size={size} {...lucide} />;
 
 export const CalendarGlyph = ({ size = 16 }: IconProps) => <Calendar size={size} {...lucide} />;
+
+/** An email: the envelope, for the mail kind, the Mail category and importing mail. */
+export const MailGlyph = ({ size = 16 }: IconProps) => <Mail size={size} {...lucide} />;
 
 export const TrashGlyph = ({ size = 16 }: IconProps) => (
   <Svg size={size}>

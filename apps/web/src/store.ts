@@ -17,6 +17,7 @@ import {
   secretBoxSeal,
   utf8Encode,
   type FileMetadata,
+  type MailMeta,
   type SecretBox,
 } from "@engramer/crypto";
 import {
@@ -51,6 +52,7 @@ import {
 import { checkPin, KeyChangedError, pinKey, pinnedKey } from "./keypins";
 import { autoReleaseMatches, forgetAutoRelease } from "./autorelease";
 import { holdTransferLock, releaseTransferLock } from "./wakelock";
+import { importMail as runMailImport, type ImportReport } from "./mail/importer";
 import {
   analyzeFile,
   downloadAndDecrypt,
@@ -161,6 +163,10 @@ export interface FileEntry {
   digest?: string;
   /** The photo-library asset this file was backed up from, if any. */
   sourceId?: string;
+  /** Set on an email record: its headers and the files that came with it. */
+  mail?: MailMeta;
+  /** Set on a file that came with an email: that email's record id. */
+  mailParent?: string;
   /** Set once a read has found the contents disagreeing with that digest. */
   corrupt?: boolean;
   /** Set once a read in this session has matched it. Not remembered across
@@ -385,6 +391,9 @@ interface StoreState {
   liveFeed: "off" | "connecting" | "live" | "unavailable";
   /** Search-index warm-up progress; null when idle or complete. */
   indexWarm: { done: number; total: number } | null;
+  /** Whether this session's server answers the batch index download; an
+   * older self-hosted server does not, and warm-up then fetches per file. */
+  indexBatch: "unknown" | "unsupported";
 
   startSession: (session: Session) => Promise<void>;
   /** Signs this device out. "expired" is the server's verdict rather
@@ -411,6 +420,12 @@ interface StoreState {
   resyncLibrary: () => Promise<void>;
   refreshUsage: () => Promise<void>;
   createFolder: (name: string, parentId: string | null) => Promise<void>;
+  /** Finds or creates a folder path from the root; returns the last folder's id. */
+  ensureFolderPath: (path: string[]) => Promise<string>;
+  /** Imports .eml and .mbox files as email records and attachment files. */
+  importMail: (sources: UploadSource[]) => Promise<ImportReport>;
+  /** Stores one new file in a folder, without an upload row; answers its id. */
+  saveNewFile: (file: UploadSource, folderId: string | null) => Promise<string>;
   renameFolder: (id: string, name: string) => Promise<void>;
   deleteFolder: (id: string) => Promise<void>;
   uploadFiles: (files: UploadSource[], folderId: string | null) => Promise<void>;
@@ -588,6 +603,8 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array, prior?: FileEntry): Fi
     facts: asFacts(meta.facts),
     digest: meta.digest,
     sourceId: meta.sourceId,
+    ...(meta.mail ? { mail: meta.mail } : {}),
+    ...(meta.mailParent ? { mailParent: meta.mailParent } : {}),
     favorite: meta.favorite ?? false,
     key,
     hasThumb: dto.thumbSize > 0,
@@ -645,6 +662,8 @@ export function entryFromUpdate(
     facts: asFacts(meta.facts),
     digest: meta.digest,
     sourceId: meta.sourceId,
+    ...(meta.mail ? { mail: meta.mail } : {}),
+    ...(meta.mailParent ? { mailParent: meta.mailParent } : {}),
     favorite: meta.favorite ?? false,
     hasThumb: dto.thumbSize > 0,
     // The owner's tree and wrapping stay the owner's business.
@@ -688,6 +707,8 @@ export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEnt
     facts: asFacts(meta.facts),
     digest: meta.digest,
     sourceId: meta.sourceId,
+    ...(meta.mail ? { mail: meta.mail } : {}),
+    ...(meta.mailParent ? { mailParent: meta.mailParent } : {}),
     favorite: meta.favorite ?? false,
     key,
     hasThumb: dto.thumbSize > 0,
@@ -744,6 +765,10 @@ export function metadataOf(file: FileEntry): FileMetadata {
     // Same hazard for the backup link: dropping it would make a later
     // pass re-upload every already-backed-up photo.
     ...(file.sourceId ? { sourceId: file.sourceId } : {}),
+    // The duplicate check reads the Message-ID, and an attachment's link
+    // back to its email lives only here: a rename must keep both.
+    ...(file.mail ? { mail: file.mail } : {}),
+    ...(file.mailParent ? { mailParent: file.mailParent } : {}),
   };
 }
 
@@ -1244,30 +1269,109 @@ export const useStore = create<StoreState>((set, get) => {
     await patchFileMeta(id, { facts });
   };
 
-  /** Find or create a root folder for a category. Deduplicates concurrent creates. */
-  const categoryFolderPromises = new Map<string, Promise<string>>();
-  const ensureCategoryFolder = (name: string): Promise<string> => {
-    for (const folder of get().folders.values()) {
-      if (folder.parentId === null && folder.name === name) {
-        return Promise.resolve(folder.id);
+  /**
+   * Find or create a folder path from the root, one name per level, and
+   * return the last folder's id. Creates in flight are shared by the path
+   * up to that level, so two callers racing for the same path create each
+   * folder once.
+   */
+  const folderPathPromises = new Map<string, Promise<string>>();
+  const ensureFolderPath = async (path: string[]): Promise<string> => {
+    let parentId: string | null = null;
+    for (let depth = 0; depth < path.length; depth++) {
+      const name = path[depth]!;
+      const existing = [...get().folders.values()].find(
+        (folder) => folder.parentId === parentId && folder.name === name,
+      );
+      if (existing) {
+        parentId = existing.id;
+        continue;
       }
+      const key = path.slice(0, depth + 1).join("\u0000");
+      let pending = folderPathPromises.get(key);
+      if (!pending) {
+        const parent = parentId;
+        pending = (async () => {
+          const folderKey = generateKey();
+          const dto = await api.createFolder(
+            parent,
+            secretBoxSeal(folderKey, masterKey()),
+            encryptFolderMetadata({ name }, folderKey),
+          );
+          applyFolder(dto);
+          return dto.id;
+        })().finally(() => folderPathPromises.delete(key));
+        folderPathPromises.set(key, pending);
+      }
+      parentId = await pending;
     }
-    let pending = categoryFolderPromises.get(name);
-    if (!pending) {
-      pending = (async () => {
-        const folderKey = generateKey();
-        const dto = await api.createFolder(
-          null,
-          secretBoxSeal(folderKey, masterKey()),
-          encryptFolderMetadata({ name }, folderKey),
-        );
-        applyFolder(dto);
-        categoryFolderPromises.delete(name);
-        return dto.id;
-      })();
-      categoryFolderPromises.set(name, pending);
+    if (parentId === null) {
+      throw new Error("A folder path needs at least one name");
     }
-    return pending;
+    return parentId;
+  };
+
+  /** Find or create a root folder for a category. */
+  const ensureCategoryFolder = (name: string): Promise<string> => ensureFolderPath([name]);
+
+  /** Mail imports run one after another: each checks for duplicates
+   * against what the last one stored. */
+  let mailImports: Promise<unknown> = Promise.resolve();
+  const importMailNow = async (sources: UploadSource[]): Promise<ImportReport> => {
+    holdTransferLock();
+    try {
+      return await runMailImport(sources, {
+        files: () => get().files.values(),
+        ensureFolderPath,
+        store: (file, folderId) => storeSource(file, folderId),
+        setMail: (id, mail) => patchFileMeta(id, { mail }),
+        begin: (job) => get().beginActivity(job),
+        update: (patch) => get().updateActivity(patch),
+        finish: (title, detail) => get().finishActivity("importing", title, detail),
+      });
+    } finally {
+      releaseTransferLock();
+    }
+  };
+
+  /**
+   * Stores one source in a folder through the same analysis and upload
+   * steps as a picked file, but without an upload row: background jobs
+   * (photo backup, mail import) narrate through the bell instead. Answers
+   * the stored file's id and the digest taken on the way up.
+   */
+  const storeSource = async (
+    file: UploadSource,
+    folderId: string | null,
+    opts?: { defer?: boolean; meta?: Partial<FileMetadata> },
+  ): Promise<{ id: string; digest?: string }> => {
+    const key = masterKey();
+    let local: UploadSource = file;
+    try {
+      // Native image sources become real bytes inside the slot, which
+      // bounds how many are held at once; videos stay streamed handles.
+      const prepared = await withAnalysisSlot(async () => {
+        local = await materializeForAnalysis(file);
+        return opts?.defer
+          ? analyzeFile(local, undefined, undefined, { defer: true })
+          : analyzeFile(local);
+      });
+      Object.assign(prepared.meta, file.meta, opts?.meta);
+      const journal = journalFor(local, folderId);
+      const result = await encryptAndUpload(
+        local,
+        folderId,
+        key,
+        prepared,
+        () => {},
+        undefined,
+        journal ? { journal } : undefined,
+      );
+      applyFile(result.dto);
+      return { id: result.dto.id, digest: get().files.get(result.dto.id)?.digest };
+    } finally {
+      void local.dispose?.();
+    }
   };
 
   const state: StoreState = {
@@ -1354,6 +1458,7 @@ export const useStore = create<StoreState>((set, get) => {
     backupHold: null,
     liveFeed: "off",
     indexWarm: null,
+    indexBatch: "unknown",
 
     // A failed first sync must never strand the user on a spinner: the
     // session (and its keys) are kept, the error is surfaced, and the UI
@@ -1362,6 +1467,8 @@ export const useStore = create<StoreState>((set, get) => {
       moveCursor(0);
       set({
         session,
+        // A new session may be a different server, with different routes.
+        indexBatch: "unknown",
         synced: false,
         serverSynced: false,
         syncError: null,
@@ -1702,6 +1809,7 @@ export const useStore = create<StoreState>((set, get) => {
       });
     },
 
+    ensureFolderPath,
     createFolder: async (name, parentId) => {
       const folderKey = generateKey();
       const dto = await api.createFolder(
@@ -1771,6 +1879,9 @@ export const useStore = create<StoreState>((set, get) => {
             // The picker said which library asset this is; the stamp is
             // what keeps the automatic backup from uploading it again.
             prepared.meta.sourceId = file.sourceId;
+          }
+          if (file.meta) {
+            Object.assign(prepared.meta, file.meta);
           }
           // Root uploads are auto-filed into a category folder; uploads into a
           // folder the user picked stay where the user put them.
@@ -1888,6 +1999,9 @@ export const useStore = create<StoreState>((set, get) => {
                 },
               }
             : analyzed;
+          if (item.file.meta) {
+            Object.assign(prepared.meta, item.file.meta);
+          }
           const destination =
             item.path.length > 0
               ? (folderIds.get(pathKey(item.path)) ?? baseFolderId)
@@ -2510,36 +2624,21 @@ export const useStore = create<StoreState>((set, get) => {
     },
 
     backupAsset: async (file, sourceId) => {
-      const key = masterKey();
-      let local: UploadSource = file;
-      try {
-        // Deferred: the heavy scanners leave their flags unset and the
-        // backfill sweeps finish the job from whichever device is open.
-        // Native image sources become real bytes inside the slot, which
-        // bounds how many are held at once; videos stay streamed handles.
-        const prepared = await withAnalysisSlot(async () => {
-          local = await materializeForAnalysis(file);
-          return analyzeFile(local, undefined, undefined, { defer: true });
-        });
-        // The library id rides inside the encrypted metadata, so a
-        // reinstall rebuilds its ledger from the synced library alone.
-        prepared.meta.sourceId = sourceId;
-        const destination = await ensureCategoryFolder("Camera Roll");
-        const journal = journalFor(local, destination);
-        const result = await encryptAndUpload(
-          local,
-          destination,
-          key,
-          prepared,
-          () => {},
-          undefined,
-          journal ? { journal } : undefined,
-        );
-        applyFile(result.dto);
-        return result.dto.id;
-      } finally {
-        void local.dispose?.();
-      }
+      const destination = await ensureCategoryFolder("Camera Roll");
+      // Deferred: the heavy scanners leave their flags unset and the
+      // backfill sweeps finish the job from whichever device is open. The
+      // library id rides inside the encrypted metadata, so a reinstall
+      // rebuilds its ledger from the synced library alone.
+      const stored = await storeSource(file, destination, { defer: true, meta: { sourceId } });
+      return stored.id;
+    },
+
+    saveNewFile: async (file, folderId) => (await storeSource(file, folderId)).id,
+
+    importMail: (sources) => {
+      const run = mailImports.then(() => importMailNow(sources));
+      mailImports = run.catch(() => {});
+      return run;
     },
 
     // Album edits are metadata rewrites, one sealed write per file in one
@@ -3520,11 +3619,60 @@ export const useStore = create<StoreState>((set, get) => {
         set({ indexWarm: { done: 0, total } });
         let pending: IndexReading[] = [];
         let done = 0;
-        await boundedRun(candidates, 3, async (file) => {
+        const read = (file: FileEntry, bytes: Uint8Array) => {
+          const payload = decodeIndexPayload(decryptBytes(bytes, file.key));
+          pending.push({ id: file.id, text: payload.text, clip: payload.clip, clips: payload.clips });
+        };
+        // Batched downloads first: one request per INDEX_APPLY_BATCH files.
+        // Files a batch could not cover (an older server without the route,
+        // a failed request, or files the answer left out) fall through to
+        // per-file downloads.
+        let perFile = candidates;
+        if (get().indexBatch !== "unsupported") {
+          const groups: FileEntry[][] = [];
+          for (let i = 0; i < candidates.length; i += INDEX_APPLY_BATCH) {
+            groups.push(candidates.slice(i, i + INDEX_APPLY_BATCH));
+          }
+          const leftover: FileEntry[] = [];
+          await boundedRun(groups, 3, async (group) => {
+            if (get().indexBatch === "unsupported") {
+              leftover.push(...group);
+              return;
+            }
+            try {
+              const blobs = await api.downloadIndexBatch(group.map((file) => file.id));
+              let answered = 0;
+              for (const file of group) {
+                const bytes = blobs.get(file.id);
+                if (!bytes) {
+                  // Left out: no index there, or past the server's byte
+                  // budget for one answer. Its own download settles which.
+                  leftover.push(file);
+                  continue;
+                }
+                answered++;
+                try {
+                  read(file, bytes);
+                } catch {
+                  // An unreadable index never blocks the rest.
+                }
+              }
+              done += answered;
+              const batch = pending;
+              pending = [];
+              applyIndexReadings(batch, { done, total });
+            } catch (error) {
+              if (error instanceof ApiError && error.status === 404) {
+                set({ indexBatch: "unsupported" });
+              }
+              leftover.push(...group);
+            }
+          });
+          perFile = leftover;
+        }
+        await boundedRun(perFile, 3, async (file) => {
           try {
-            const bytes = await api.downloadBlob(file.id, "index");
-            const payload = decodeIndexPayload(decryptBytes(bytes, file.key));
-            pending.push({ id: file.id, text: payload.text, clip: payload.clip, clips: payload.clips });
+            read(file, await api.downloadBlob(file.id, "index"));
           } catch {
             // A missing index never blocks the rest; search simply skips it.
           }

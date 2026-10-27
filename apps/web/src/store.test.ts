@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { encryptBytes, encryptFileMetadata, generateKey, ready, secretBoxSeal } from "@engramer/crypto";
 import type { PreparedFile } from "./transfer";
-import type { FileDto } from "./api";
+import type { FileDto, FolderDto } from "./api";
 
 const gauge = vi.hoisted(() => ({
   running: 0,
@@ -161,7 +161,7 @@ vi.mock("./intel/ocr", async (importOriginal) => ({
   recognizeImage: async () => undefined,
 }));
 
-import { api } from "./api";
+import { api, ApiError } from "./api";
 import { encodeIndexPayload } from "./indexblob";
 import {
   clipComparable,
@@ -241,6 +241,25 @@ describe("metadataOf", () => {
     expect(metadataOf(entry())).not.toHaveProperty("sourceId");
   });
 
+  it("metadataOf keeps an email's mail fields", () => {
+    const mail = {
+      messageId: "<booking-1@example.com>",
+      from: "Example Air",
+      fromAddress: "bookings@example.com",
+      to: ["traveller@example.com"],
+      date: 1_760_000_000_000,
+      subject: "Your booking",
+      attachmentIds: ["att-1", "att-2"],
+    };
+    expect(metadataOf(entry({ mail })).mail).toEqual(mail);
+    expect(metadataOf(entry())).not.toHaveProperty("mail");
+  });
+
+  it("metadataOf keeps an attachment's mailParent", () => {
+    expect(metadataOf(entry({ mailParent: "email-7" })).mailParent).toBe("email-7");
+    expect(metadataOf(entry())).not.toHaveProperty("mailParent");
+  });
+
   it("still carries the fields it always did", () => {
     const meta = metadataOf(entry({ category: "Documents", favorite: true }));
     expect(meta).toMatchObject({
@@ -311,6 +330,29 @@ describe("uploadFiles", () => {
     await useStore.getState().uploadFiles([picked, plain], "folder-1");
     expect(rig.stampedSourceIds).toContain("asset-77");
     expect(rig.stampedSourceIds).toContain(undefined);
+  });
+
+  it("uploadFiles writes a source's extra metadata into the file", async () => {
+    useStore.setState({
+      session: {
+        email: "t@example.com",
+        token: "t",
+        masterKey: generateKey(),
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      refreshUsage: async () => {},
+    });
+    // An attachment knows which email it came with; analysis, which would
+    // call it "Other", must not overwrite what the caller set.
+    const attachment = Object.assign(
+      new File([new Uint8Array(8)], "ticket.pdf", { type: "application/pdf" }),
+      { meta: { mailParent: "e1", category: "Receipts" } },
+    );
+    await useStore.getState().uploadFiles([attachment], "folder-1");
+    const stored = useStore.getState().files.get("up-ticket.pdf")!;
+    expect(stored.mailParent).toBe("e1");
+    expect(stored.category).toBe("Receipts");
   });
 });
 
@@ -827,6 +869,217 @@ describe("backupAsset", () => {
   });
 });
 
+/**
+ * Mail files itself under Mail/<account>/Attachments/<year>, and category
+ * filing wants one root folder: both ask one helper, so two imports in
+ * flight never create the same folder twice.
+ */
+describe("ensureFolderPath", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  const folder = (id: string, name: string, parentId: string | null) => ({
+    id,
+    parentId,
+    name,
+    key: generateKey(),
+    createdAt: 1,
+    updatedAt: 1,
+  });
+
+  const rigFolders = (existing: ReturnType<typeof folder>[]) => {
+    const created: Array<{ parentId: string | null }> = [];
+    useStore.setState({
+      session: {
+        email: "t@example.com",
+        token: "t",
+        masterKey: generateKey(),
+        privateKey: new Uint8Array(32),
+        publicKey: "",
+      },
+      folders: new Map(existing.map((f) => [f.id, f])),
+    });
+    (api as unknown as Record<string, unknown>).createFolder = async (
+      parentId: string | null,
+      encryptedKey: FolderDto["encryptedKey"],
+      encryptedMeta: FolderDto["encryptedMeta"],
+    ): Promise<FolderDto> => {
+      created.push({ parentId });
+      const id = `new-${created.length}`;
+      // A round trip, so concurrent callers really overlap.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return {
+        id,
+        parentId,
+        encryptedKey,
+        encryptedMeta,
+        deleted: false,
+        updateSeq: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+    };
+    return created;
+  };
+
+  it("ensureFolderPath reuses existing folders by name", async () => {
+    const created = rigFolders([
+      folder("mail", "Mail", null),
+      folder("acct", "me@example.com", "mail"),
+    ]);
+    const id = await useStore.getState().ensureFolderPath(["Mail", "me@example.com"]);
+    expect(id).toBe("acct");
+    expect(created).toEqual([]);
+  });
+
+  it("ensureFolderPath creates only the missing tail", async () => {
+    const created = rigFolders([folder("mail", "Mail", null)]);
+    const id = await useStore.getState().ensureFolderPath(["Mail", "me@example.com", "Attachments"]);
+    expect(created).toEqual([{ parentId: "mail" }, { parentId: "new-1" }]);
+    expect(id).toBe("new-2");
+    const folders = useStore.getState().folders;
+    expect(folders.get("new-1")!.name).toBe("me@example.com");
+    expect(folders.get("new-2")).toMatchObject({ name: "Attachments", parentId: "new-1" });
+  });
+
+  it("concurrent ensureFolderPath calls create each folder once", async () => {
+    const created = rigFolders([]);
+    const [a, b, c] = await Promise.all([
+      useStore.getState().ensureFolderPath(["Mail", "me@example.com", "2026"]),
+      useStore.getState().ensureFolderPath(["Mail", "me@example.com", "2026"]),
+      useStore.getState().ensureFolderPath(["Mail", "me@example.com", "2025"]),
+    ]);
+    expect(a).toBe(b);
+    expect(c).not.toBe(a);
+    // Mail, the account, 2026, 2025: four folders, never a second Mail.
+    expect(created).toHaveLength(4);
+    const names = [...useStore.getState().folders.values()].map((f) => f.name).sort();
+    expect(names).toEqual(["2025", "2026", "Mail", "me@example.com"]);
+  });
+});
+
+/**
+ * The importer is a store job: it files records and attachments through the
+ * same upload path as any file, links them both ways, and narrates through
+ * the bell rather than adding an upload row per email.
+ */
+describe("importMail", () => {
+  beforeAll(async () => {
+    await ready();
+  });
+
+  const rigImport = () => {
+    const masterKey = generateKey();
+    useStore.setState({
+      session: { email: "t@example.com", token: "t", masterKey, privateKey: new Uint8Array(32), publicKey: "" },
+      refreshUsage: async () => {},
+      folders: new Map(),
+      files: new Map(),
+      uploads: [],
+    });
+    let folderCount = 0;
+    (api as unknown as Record<string, unknown>).createFolder = async (
+      parentId: string | null,
+      encryptedKey: FolderDto["encryptedKey"],
+      encryptedMeta: FolderDto["encryptedMeta"],
+    ): Promise<FolderDto> => ({
+      id: `dir-${++folderCount}`,
+      parentId,
+      encryptedKey,
+      encryptedMeta,
+      deleted: false,
+      updateSeq: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    (api as unknown as Record<string, unknown>).patchFile = async (
+      id: string,
+      patch: { encryptedMeta: FileDto["encryptedMeta"] },
+    ): Promise<FileDto> => {
+      const file = useStore.getState().files.get(id)!;
+      return {
+        id,
+        folderId: file.folderId,
+        encryptedKey: secretBoxSeal(file.key, masterKey),
+        encryptedMeta: patch.encryptedMeta,
+        size: file.size,
+        thumbSize: 0,
+        indexSize: 0,
+        uploaded: true,
+        trashed: false,
+        deleted: false,
+        updateSeq: 2,
+        createdAt: 1,
+        updatedAt: 2,
+      };
+    };
+  };
+
+  const ticketEml = () => {
+    const eml = [
+      "From: Example Air <bookings@example.com>",
+      "Subject: Your ticket",
+      "Date: Mon, 15 Jun 2026 12:00:00 +0000",
+      "Message-ID: <ticket-1@example.com>",
+      'Content-Type: multipart/mixed; boundary="m"',
+      "",
+      "--m",
+      "Content-Type: text/plain",
+      "",
+      "Attached.",
+      "--m",
+      'Content-Type: application/pdf; name="ticket.pdf"',
+      'Content-Disposition: attachment; filename="ticket.pdf"',
+      "Content-Transfer-Encoding: base64",
+      "",
+      "JVBERi0xLjQK",
+      "--m--",
+      "",
+    ].join("\r\n");
+    return new File([eml], "ticket.eml", { type: "message/rfc822" });
+  };
+
+  it("stores an email and its attachment through the upload path, linked both ways", async () => {
+    rigImport();
+    const report = await useStore.getState().importMail([ticketEml()]);
+
+    expect(report).toEqual({ imported: 1, alreadyPresent: 0, skipped: [], attachments: 1 });
+    const files = useStore.getState().files;
+    const record = files.get("up-Your ticket.email")!;
+    const ticket = files.get("up-ticket.pdf")!;
+    expect(record.mail).toMatchObject({ messageId: "<ticket-1@example.com>", attachmentIds: [ticket.id] });
+    expect(ticket.mailParent).toBe(record.id);
+    const folders = useStore.getState().folders;
+    expect(folders.get(record.folderId!)!.name).toBe("Imported");
+    expect(folders.get(ticket.folderId!)!.name).toBe("2026");
+    // One bell job, no upload rows.
+    expect(useStore.getState().uploads).toEqual([]);
+    expect(useStore.getState().activity.log[0]!.title).toBe("Imported 1 email and 1 attachment");
+  });
+
+  it("saveNewFile stores one file with its metadata and answers its id", async () => {
+    rigImport();
+    const pdf = Object.assign(new File([new Uint8Array(12)], "Your ticket.pdf", { type: "application/pdf" }), {
+      meta: { mailParent: "email-9" },
+    });
+    const id = await useStore.getState().saveNewFile(pdf, "dir-x");
+    const stored = useStore.getState().files.get(id)!;
+    expect(stored).toMatchObject({ name: "Your ticket.pdf", folderId: "dir-x", mailParent: "email-9" });
+    expect(useStore.getState().uploads).toEqual([]);
+  });
+
+  it("a second import started meanwhile waits and stores nothing twice", async () => {
+    rigImport();
+    const [first, second] = await Promise.all([
+      useStore.getState().importMail([ticketEml()]),
+      useStore.getState().importMail([ticketEml()]),
+    ]);
+    expect(first.imported).toBe(1);
+    expect(second).toMatchObject({ imported: 0, alreadyPresent: 1 });
+  });
+});
+
 describe("decryptSharedFile", () => {
   beforeAll(async () => {
     await ready();
@@ -941,6 +1194,50 @@ describe("entryFromUpdate", () => {
     expect(updated.ownerEmail).toBe("owner@example.com");
     // The owner's tree is not this account's business.
     expect(updated.folderId).toBeNull();
+  });
+
+  it("entryFromUpdate keeps mail fields on a shared file", async () => {
+    const { entryFromUpdate } = await import("./store");
+    const { encryptFileMetadata: encMeta, secretBoxSeal: seal } = await import("@engramer/crypto");
+    const fileKey = generateKey();
+    const mail = {
+      messageId: "<bill-3@example.com>",
+      from: "Example Power",
+      fromAddress: "billing@example.com",
+      to: ["owner@example.com"],
+      date: 1_760_000_000_000,
+      subject: "Your bill",
+      attachmentIds: ["att-9"],
+    };
+    const prior = entry({ id: "shared-2", key: fileKey, shared: true, role: "viewer" });
+    const dto = {
+      id: "shared-2",
+      folderId: "owners-folder",
+      encryptedKey: seal(fileKey, generateKey()),
+      encryptedMeta: encMeta(
+        {
+          name: "Your bill.email",
+          mime: "application/vnd.engram.email+json",
+          size: 12,
+          mtime: 9,
+          mail,
+          mailParent: "email-1",
+        },
+        fileKey,
+      ),
+      size: 12,
+      thumbSize: 0,
+      indexSize: 0,
+      uploaded: true,
+      trashed: false,
+      deleted: false,
+      updateSeq: 6,
+      createdAt: 1,
+      updatedAt: 9,
+    };
+    const updated = entryFromUpdate(prior, dto, generateKey());
+    expect(updated.mail).toEqual(mail);
+    expect(updated.mailParent).toBe("email-1");
   });
 
   it("still unwraps an owned file with the master key", async () => {
@@ -1298,19 +1595,70 @@ describe("search index warm-up", () => {
       entry({ id: `w${i}`, name: `note-${i}.txt`, mime: "text/plain", hasText: true, key: generateKey() }),
     );
 
-  const serve = (files: FileEntry[], unreadable?: string) => {
+  /** Serves index blobs through both routes and counts the requests each
+   * one receives. `batchRoute: false` answers the batch route with the 404
+   * an older server gives; `budget` answers only that many ids per batch,
+   * as a server does once a batch reaches its byte budget. */
+  const serve = (
+    files: FileEntry[],
+    opts: { unreadable?: string; batchRoute?: boolean; budget?: number } = {},
+  ) => {
     const byId = new Map(files.map((f) => [f.id, f]));
+    const blob = (id: string) => encryptBytes(encodeIndexPayload({ text: `words of ${id}` }), byId.get(id)!.key);
+    const calls = { batch: 0, single: 0 };
     (api as unknown as Record<string, unknown>).downloadBlob = async (id: string) => {
-      if (id === unreadable) {
+      calls.single++;
+      if (id === opts.unreadable) {
         throw new Error("index blob missing");
       }
-      return encryptBytes(encodeIndexPayload({ text: `words of ${id}` }), byId.get(id)!.key);
+      return blob(id);
     };
+    (api as unknown as Record<string, unknown>).downloadIndexBatch = async (ids: string[]) => {
+      calls.batch++;
+      if (opts.batchRoute === false) {
+        throw new ApiError(404, "not found");
+      }
+      return new Map(
+        ids
+          .slice(0, opts.budget ?? ids.length)
+          .filter((id) => id !== opts.unreadable)
+          .map((id) => [id, blob(id)]),
+      );
+    };
+    return calls;
   };
+
+  const seedLibrary = (files: FileEntry[]) =>
+    useStore.setState({ files: new Map(files.map((f) => [f.id, f])), indexWarm: null, indexBatch: "unknown" });
+
+  it("warms 1,000 files with at most 5 batch requests", async () => {
+    const files = library(1_000);
+    seedLibrary(files);
+    const calls = serve(files);
+    await useStore.getState().warmSearchIndex();
+    expect(calls.batch).toBeLessThanOrEqual(5);
+    expect(calls.single).toBe(0);
+    expect([...useStore.getState().files.values()].every((f) => f.text === `words of ${f.id}`)).toBe(true);
+  });
+
+  it("falls back to per-file downloads when the server has no batch route", async () => {
+    const files = library(10);
+    seedLibrary(files);
+    const calls = serve(files, { batchRoute: false });
+    await useStore.getState().warmSearchIndex();
+    expect([...useStore.getState().files.values()].every((f) => f.text === `words of ${f.id}`)).toBe(true);
+    expect(useStore.getState().indexBatch).toBe("unsupported");
+    // A second warm-up in the same session goes straight to per-file downloads.
+    useStore.setState({ files: new Map(files.map((f) => [f.id, f])), indexWarm: null });
+    const batchCallsBefore = calls.batch;
+    await useStore.getState().warmSearchIndex();
+    expect(calls.batch).toBe(batchCallsBefore);
+    expect([...useStore.getState().files.values()].every((f) => f.text === `words of ${f.id}`)).toBe(true);
+  });
 
   it("applies readings in batches, never one store update per file", async () => {
     const files = library(1_000);
-    useStore.setState({ files: new Map(files.map((f) => [f.id, f])), indexWarm: null });
+    seedLibrary(files);
     serve(files);
     let updates = 0;
     const stop = useStore.subscribe(() => {
@@ -1323,10 +1671,20 @@ describe("search index warm-up", () => {
     expect(useStore.getState().indexWarm).toBeNull();
   });
 
+  it("downloads the files a batch left out one by one", async () => {
+    const files = library(10);
+    seedLibrary(files);
+    const calls = serve(files, { budget: 6 });
+    await useStore.getState().warmSearchIndex();
+    expect(calls.batch).toBe(1);
+    expect(calls.single).toBe(4);
+    expect([...useStore.getState().files.values()].every((f) => f.text === `words of ${f.id}`)).toBe(true);
+  });
+
   it("leaves the rest searchable when one file's index cannot be read", async () => {
     const files = library(5);
-    useStore.setState({ files: new Map(files.map((f) => [f.id, f])), indexWarm: null });
-    serve(files, "w2");
+    seedLibrary(files);
+    serve(files, { unreadable: "w2" });
     await useStore.getState().warmSearchIndex();
     const after = useStore.getState().files;
     expect(after.get("w2")?.text).toBeUndefined();

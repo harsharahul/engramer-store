@@ -105,3 +105,68 @@ describe("a search result row", () => {
     expect(row.dataset.fileId).toBe("f1");
   });
 });
+
+describe("an email in the results", () => {
+  const email = {
+    ...file,
+    id: "e1",
+    name: "Lease renewal.email",
+    mime: "application/vnd.engram.email+json",
+    mail: {
+      messageId: "<lease@example.com>",
+      from: "Jane Example",
+      fromAddress: "jane@example.com",
+      to: ["owner@example.com"],
+      date: Date.UTC(2026, 2, 3, 12),
+      subject: "Lease renewal",
+      attachmentIds: ["a1"],
+    },
+  } as unknown as FileEntry;
+  const attachment = { ...file, id: "a1", name: "lease-2026.pdf" } as unknown as FileEntry;
+
+  function mountEmail(onOpen: () => void, onOpenFile: (id: string) => void) {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root.render(
+        <ResultRow
+          hit={{ ...hit, file: email }}
+          path="Mail / Imported"
+          index={0}
+          cursor={false}
+          selected={false}
+          onSelect={() => {}}
+          onOpen={onOpen}
+          onMenu={() => {}}
+          files={new Map([["a1", attachment]])}
+          onOpenFile={onOpenFile}
+        />,
+      );
+    });
+    return container.querySelector<HTMLElement>(".row.result")!;
+  }
+
+  it("shows the sender and the date it was sent under the subject", () => {
+    const row = mountEmail(() => {}, () => {});
+    expect(row.querySelector(".result-sender")!.textContent).toContain("Jane Example");
+    expect(row.querySelector(".result-date")!.textContent).toBe(
+      new Date(Date.UTC(2026, 2, 3, 12)).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      }),
+    );
+  });
+
+  it("opens an attachment from its chip without opening the email", () => {
+    const onOpen = vi.fn();
+    const onOpenFile = vi.fn();
+    const row = mountEmail(onOpen, onOpenFile);
+    const chip = row.querySelector<HTMLElement>(".result-attachment")!;
+    expect(chip.textContent).toBe("lease-2026.pdf");
+    click(chip);
+    expect(onOpenFile).toHaveBeenCalledWith("a1");
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+});

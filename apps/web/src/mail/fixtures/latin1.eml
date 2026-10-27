@@ -1,0 +1,10 @@
+From: Example Sender <sender@example.com>
+To: Receiver One <receiver@example.com>
+Subject: Accents
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Message-ID: <lat-1@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=ISO-8859-1
+Content-Transfer-Encoding: quoted-printable
+
+Caf=E9 cr=E8me at the corner.

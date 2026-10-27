@@ -9,6 +9,9 @@ import { swipeStep } from "../neighbors";
 import { extension, fileKind, formatBytes } from "../format";
 import type { ExtractedEntry } from "../archive";
 import { ArchiveBody } from "./ArchiveBody";
+import { MailView } from "./MailView";
+import { parseEmailRecord } from "../mail/kind";
+import type { EmailRecord } from "../mail/record";
 import { displayableImage } from "../intel/heic";
 import { saveDecryptedFile } from "../download";
 import { offlineExcuse } from "../offlinefiles";
@@ -44,6 +47,7 @@ interface Loaded {
   sheet: Uint8Array | null;
   pdf: Uint8Array | null;
   archive: Uint8Array | null;
+  mail: EmailRecord | null;
 }
 
 /**
@@ -247,6 +251,10 @@ export function Preview(props: {
   onExtract?: (entries: ExtractedEntry[]) => Promise<void>;
   /** Opens the decrypted file in another app on this Mac. */
   onOpenElsewhere?: () => void;
+  /** Opens another file of the vault in the preview, such as an email's attachment. */
+  onOpenFile?: (id: string) => void;
+  /** Stores a PDF made from the email being shown. */
+  onSaveMailPdf?: (bytes: Uint8Array, name: string, replacedCharacters: boolean) => Promise<void>;
   /** Star toggle; double-tap now belongs to zoom, so the button is explicit. */
   onFavorite?: () => void;
   /** Move to the next or previous file in the view; null when at an end. */
@@ -405,7 +413,15 @@ export function Preview(props: {
     // native path on exactly the platform that needed it most.
     if ((kind === "video" || kind === "audio") && (nativeShell() || mediaBridgeAvailable())) {
       registerMediaKey(file.id);
-      setLoaded({ url: mediaUrl(file.id), text: null, docx: null, sheet: null, pdf: null, archive: null });
+      setLoaded({
+        url: mediaUrl(file.id),
+        text: null,
+        docx: null,
+        sheet: null,
+        pdf: null,
+        archive: null,
+        mail: null,
+      });
       const stopProgress = onMediaProgress(file.id, (done, total) =>
         setProgress(done < total ? { loaded: done, total } : null),
       );
@@ -459,7 +475,14 @@ export function Preview(props: {
         setProgress(null);
         // Reading it through was the check; record that it passed.
         useStore.getState().markVerified(file.id);
-        const empty = { url: null, text: null, docx: null, sheet: null, pdf: null, archive: null };
+        const empty = { url: null, text: null, docx: null, sheet: null, pdf: null, archive: null, mail: null };
+        if (kind === "mail") {
+          // A record this version cannot read still shows as its text.
+          const json = new TextDecoder().decode(bytes);
+          const record = parseEmailRecord(json);
+          setLoaded(record ? { ...empty, mail: record } : { ...empty, text: json });
+          return;
+        }
         if (kind === "text" || kind === "link") {
           setLoaded({ ...empty, text: new TextDecoder().decode(bytes) });
           return;
@@ -855,6 +878,13 @@ export function Preview(props: {
           <LinkBody body={loaded.text} name={file.name} />
         ) : kind === "archive" && loaded.archive ? (
           <ArchiveBody bytes={loaded.archive} name={file.name} onExtract={props.onExtract} />
+        ) : kind === "mail" && loaded.mail ? (
+          <MailView
+            record={loaded.mail}
+            file={file}
+            onOpen={props.onOpenFile}
+            onSavePdf={props.onSaveMailPdf}
+          />
         ) : loaded.text !== null ? (
           <pre>{loaded.text}</pre>
         ) : (

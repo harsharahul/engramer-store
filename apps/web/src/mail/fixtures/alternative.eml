@@ -1,0 +1,17 @@
+From: Example Sender <sender@example.com>
+To: Receiver One <receiver@example.com>
+Subject: Plain and rich
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Message-ID: <alt-1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset=utf-8
+
+The plain words.
+--b1
+Content-Type: text/html; charset=utf-8
+
+<p>The <i>rich</i> words.</p>
+--b1--

@@ -55,6 +55,9 @@ const patchFileSchema = z.object({
 /** Rows one batch request may touch; a client chunks anything larger. */
 const BATCH_MAX = 500;
 
+/** Files whose search index one batch download may name. */
+const indexBatchSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(BATCH_MAX) });
+
 const batchSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("patch"),
@@ -1134,6 +1137,61 @@ export function registerStorageRoutes(app: FastifyInstance): void {
   app.get("/api/files/:id/data", auth, (request, reply) => downloadBlob(request, reply, "data"));
   app.get("/api/files/:id/thumbnail", auth, (request, reply) => downloadBlob(request, reply, "thumb"));
   app.get("/api/files/:id/index", auth, (request, reply) => downloadBlob(request, reply, "index"));
+
+  /**
+   * Many files' search index blobs in one answer, so a device warming the
+   * search index makes one request per batch instead of one per file. Each
+   * frame is [u32 id length][id][u32 blob length][blob], big-endian, in the
+   * order asked; a file the caller cannot read, or one with no index, is
+   * left out rather than failing the batch.
+   *
+   * One answer gathers at most `indexBatchBytes`: the batch stops before the
+   * blob that would pass it, and a blob larger than the whole budget is never
+   * batched. The client downloads whatever was left out one file at a time,
+   * on the streaming route, so no request can make the server hold more.
+   */
+  app.post("/api/files/index/batch", auth, async (request, reply) => {
+    const { ids } = indexBatchSchema.parse(request.body);
+    const budget = app.config.indexBatchBytes;
+    const frames: Buffer[] = [];
+    let gathered = 0;
+    for (const id of new Set(ids)) {
+      const file = (await getAccessibleFile(id, request.user.uid))?.file;
+      if (!file || !file.index_size) {
+        continue;
+      }
+      const size = Number(file.index_size);
+      if (size > budget) {
+        continue;
+      }
+      if (gathered + size > budget) {
+        break;
+      }
+      const chunks: Buffer[] = [];
+      let read = 0;
+      for await (const chunk of await app.blobs.get(blobKey(id, "index", 0))) {
+        read += (chunk as Buffer).length;
+        if (read > size) {
+          // Bytes past what the row records: never let them pass the budget.
+          break;
+        }
+        chunks.push(chunk as Buffer);
+      }
+      if (read !== size) {
+        continue;
+      }
+      gathered += size;
+      const blob = Buffer.concat(chunks);
+      const idBytes = Buffer.from(id, "utf8");
+      const head = Buffer.alloc(4);
+      head.writeUInt32BE(idBytes.length);
+      const length = Buffer.alloc(4);
+      length.writeUInt32BE(blob.length);
+      frames.push(head, idBytes, length, blob);
+    }
+    reply.header("content-type", "application/octet-stream");
+    return reply.send(Buffer.concat(frames));
+  });
 
   app.patch("/api/files/:id", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
