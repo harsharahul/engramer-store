@@ -126,7 +126,11 @@ export interface FileMetadata {
 
 /** The headers an email record carries in its metadata. */
 export interface MailMeta {
-  /** The Message-ID header, angle brackets included; the duplicate key. */
+  /**
+   * The duplicate key: the Message-ID header, angle brackets included, or
+   * "nomid:" and a digest of the date, sender, subject and opening text for
+   * a message that has none.
+   */
   messageId: string;
   /** The sender's display name, or the address when there is none. */
   from: string;

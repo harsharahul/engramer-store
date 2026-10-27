@@ -1,0 +1,19 @@
+From: Example Sender <sender@example.com>
+To: Receiver One <receiver@example.com>
+Subject: Encoded name
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Message-ID: <enc-1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b3"
+
+--b3
+Content-Type: text/plain; charset=utf-8
+
+See attached.
+--b3
+Content-Type: application/pdf
+Content-Disposition: attachment; filename*=UTF-8''r%C3%A9sum%C3%A9%202026.pdf
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJSBzeW50aGV0aWMK
+--b3--

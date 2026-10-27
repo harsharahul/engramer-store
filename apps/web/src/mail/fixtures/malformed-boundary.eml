@@ -1,0 +1,17 @@
+From: Example Sender <sender@example.com>
+To: Receiver One <receiver@example.com>
+Subject: Cut short
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Message-ID: <bad-1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b4"
+
+--b4
+Content-Type: text/plain; charset=utf-8
+
+The part that arrived.
+--b4
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+
+JVBERi0x

@@ -1,0 +1,39 @@
+From: Example Sender <sender@example.com>
+To: Receiver One <receiver@example.com>
+Subject: Logo inside
+Date: Mon, 05 Jan 2026 09:00:00 +0000
+Message-ID: <rel-1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="b2"
+
+--b2
+Content-Type: text/html; charset=utf-8
+
+<p>Hello</p><img src="cid:logo1@example">
+--b2
+Content-Type: image/png
+Content-ID: <logo1@example>
+Content-Disposition: inline
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAEG0lEQVR4nAEQBO/7AFLyJmWmDBLS
+iRhdlQ7ogTYJFm9rET0XjWwP05Af8jmhoJXyD5OVZQz5OAuO2yJKaySKHpJOj9CuLhqUkqMwXxgA
+jLYQkA+eNH+uiG3GUHeV7HRcTD/LLrLHPhSTTIZ+4Fe6ckmb+hIeg2sqwVcm7n1rCvarE8OOksrg
+0VBXsVmYfwCUzHQR1xfxRXmyqhAPu7NPpZP+rtJySLdi46tYBfB2WiucHX4PN8RJIb0/ZWTq338U
+KnJmjEfiI9Fu3YxHtGr8AFuu4mH1OyYVLSY7qDsDfNSWLkNIASVriF6ckFHzILDbg/Oep629DXTm
+3sfz367Mj2RlZmQae6JmDzAR/DVwKRwAV5kNGgCRJokZ8l2dBhLfNZ1gJqJA9FiaXXkfHdl8/vp3
+entPFSQav1e9Q3rUsSmEBTTz84dcJbCL6gbCh0z6pADdF7LYQoRd6CpbxTmIiseAVKI5nM/J/MLa
+Mc490Wa9zTozhH5buwf9B8pHeEIxsZr0WHLO77n8WfT5XRQ4Gjp4ADJWNHuf/Oac1wB66KdYzKQV
+1ake6GPItsAzeuMtb8qiVRbN8vi4ZXZmvvIVuSgr/iAHJpfnd86nJZzTmPp5qO8AWSeMjCEFA8z4
+uaYahr/vI2/83zHT3zYHQDZKgD3DllNCi2vVIQ/ovVrldamV0OeEa9Pq4IAhiCaGggTfcMYumwAB
+xswmLCR5nrkejg9TroSHjnvIxhvijw4/MEYKxRmBc48HwuTpEHFTnPmBm4MzsUZzgojOeoHxP7KF
+4ODx7ULsAI/k8TPXciNqH2RxUBKrPW0SNqtNyB/lxifwt6SpXSRA4iP3dzi/8xhl4nwp/arVOSm0
+bv6DZ1ZrMltRF7hdBFYAjXVwtARiVISfS4P1EBz868k6+OAaFUNFCufHLkXBIdFs2emt0fJCZyaJ
+64OSfrNTFkcOzLAubOUSRPAEohbNQgAVm9s4EUPcH3QCVv6Nau3qRJ8hC4a1PfAc+ClDDC4z7k+g
+TofCNEpygKwtRVjNBP5ACQMEu4GN+jCDeT7vchuoANGmbqh+i9XjZPiBTrA3+zpXMtXhtLqiI2f9
+WPsN1iEDEqC94UFuKQ4Vqtdh3oGr+EiZPrFLC3UvKERyAENd9lQA+PyMUj4I9+FPN1suAFVhFXlH
+gKczP4HGARdD0RYkZpYKZAVMTaE7FZX1h9rAJ6jkt8jhmGPDU7j8fiZIuZ6kJQAL09W35IOgbbuz
+z4Ej6IbAgZHV0M0E06+VzOS2rvSxpDoVBwoio1z1GmDVc44MoASgiK4+fUMAdMwRv+6A5YkXAKiG
+EL68eUDPE9hDPLrBNDu9pvl1fthhE3rpr0nEC52hpDITmSVUQaa+sU2fkSIDew98RPisGbE3rH1K
+tYRJdnebb/E7ZGe5PQAAAABJRU5ErkJggg==
+--b2--
