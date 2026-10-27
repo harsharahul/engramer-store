@@ -6332,3 +6332,20 @@ button.link {
   white-space: nowrap;
   cursor: pointer;
 }
+
+/* A details value that opens the file it names: an email's attachment,
+   or the email an attachment came with. */
+.details-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.details-link:hover {
+  text-decoration: underline;
+}

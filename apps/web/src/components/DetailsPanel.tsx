@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { decryptContent, decryptFileMetadata } from "@engramer/crypto";
 import { api, type FileVersionInfo } from "../api";
 import { FileFacts } from "./FactsPanel";
 import { useStore, type FileEntry } from "../store";
+import { mailRows } from "../mail/details";
 import { albumTitle, isAlbumTag, isReservedTag } from "../albums";
 import { useSheetDrag } from "../sheetdrag";
 import { MOBILE_QUERY, useMediaQuery } from "../media";
@@ -50,6 +51,7 @@ export function DetailsPanel(props: {
 }) {
   const { file } = props;
   const folders = useStore((s) => s.folders);
+  const files = useStore((s) => s.files);
   const offline = useStore((s) =>
     file ? s.offline.find((entry) => entry.fileId === file.id) : undefined,
   );
@@ -236,6 +238,20 @@ export function DetailsPanel(props: {
             </dd>
           </>
         )}
+        {mailRows(file, files).map((row, i) => (
+          <Fragment key={`${row.label}-${i}`}>
+            <dt>{row.label}</dt>
+            <dd>
+              {row.openId ? (
+                <button type="button" className="details-link" onClick={() => props.onOpen(row.openId!)}>
+                  {row.value}
+                </button>
+              ) : (
+                row.value
+              )}
+            </dd>
+          </Fragment>
+        ))}
         <dt>Where</dt>
         <dd>{file.shared ? "Shared with me" : folderName}</dd>
         <dt>Category</dt>
