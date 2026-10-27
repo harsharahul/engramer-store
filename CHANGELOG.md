@@ -10,8 +10,8 @@ All notable changes to Engram Store are documented here, following
   from far shorter text than documents, inside a window of the last 12
   months (3 to 12 in Profile, following the account); older mail stays
   searchable and its booking data is still read. An import's summary says
-  how many dates it found. On a phone, at most 40 readings start per app
-  open; the rest wait for the next open.
+  how many new dates it found. On a phone, at most 40 readings start each
+  time the app comes to the front; the rest wait for the next open.
 - **More bookings, bills, deliveries and invites read exactly.** Event
   tickets, restaurant tables, bus and boat trips join flights, stays, car
   rentals and trains in the booking data read from confirmation emails and
@@ -90,11 +90,13 @@ All notable changes to Engram Store are documented here, following
 ### Changed
 - **A model's reading counts without a yes only where its accuracy is
   measured.** Precision per task is measured on a synthetic eval set for the
-  version of the reader that ships; a model reading counts on its own only
-  above 98% over enough readings, never for travel times, identity document
-  expiries or legal deadlines, and only when the value passes sanity checks.
-  The kind of an email is used the same way. Today's measurements are below
-  the bar, so model readings keep waiting for a yes.
+  version and prompt of the reader that ships; a model reading counts on its
+  own only above 98% over at least 30 readings, never for travel times,
+  identity document expiries or legal deadlines, and only when the value
+  passes sanity checks. An email's kind is stored as a tag above 90%
+  accuracy, and a newsletter's dates are set aside only when the newsletter
+  kind itself measures above 98%. Today's measurements are below the bar,
+  so model readings keep waiting for a yes.
 - **Each file is read once, and failures stop.** Every reading by the
   on-device model leaves one synced stamp (reader, rank, version, contents,
   tasks, outcome), so no device reads what another already has; a file is
