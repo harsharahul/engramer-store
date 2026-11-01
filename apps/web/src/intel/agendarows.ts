@@ -110,6 +110,25 @@ async function placeName(place: string): Promise<string> {
   return place;
 }
 
+/**
+ * The trips a document matched only by its date may be asked to join: a
+ * booked journey that exists as a trip (some file carries its tag), is
+ * recent, and was not refused.
+ */
+export function joinablePlans(
+  plans: readonly TripPlan[],
+  dismissed: ReadonlySet<string>,
+  carries: (fileId: string, tag: string) => boolean,
+): TripPlan[] {
+  return plans.filter(
+    (plan) =>
+      plan.anchorId !== undefined &&
+      plan.recent &&
+      !isPlanDismissed(plan, dismissed) &&
+      [...plan.exact.keys()].some((id) => carries(id, plan.tag)),
+  );
+}
+
 /** "18-21 Dec", or "30 Nov-2 Dec" across months. */
 function range(start: string, end: string): string {
   const [, sm, sd] = start.split("-").map(Number) as [number, number, number];
@@ -134,14 +153,7 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
     const tag = file.tags.find(isTripTag);
     return tag ? { tag, title: tripTitle(tag), name: nameOf(tag), evidence: "exact" } : undefined;
   };
-  // A date alone asks to join only a trip that exists, is recent, and was not refused.
-  const anchored = ctx.plans.filter(
-    (plan) =>
-      plan.anchorId !== undefined &&
-      plan.recent &&
-      !isPlanDismissed(plan, ctx.dismissed) &&
-      [...plan.exact.keys()].some((id) => byId.get(id)?.tags.includes(plan.tag)),
-  );
+  const anchored = joinablePlans(ctx.plans, ctx.dismissed, (id, tag) => byId.get(id)?.tags.includes(tag) ?? false);
   const suggested = (file: RowFile, day?: string): RowTrip | undefined => {
     if (file.tags.some(isTripTag)) {
       return undefined;

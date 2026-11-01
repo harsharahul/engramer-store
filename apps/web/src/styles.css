@@ -5656,6 +5656,40 @@ span.item-menu {
   color: var(--paper-faint);
 }
 
+/* ----- a file's trip, in the details pane ----- */
+
+.details-trip {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+.details-trip-body {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  font-size: 13px;
+}
+.details-trip-why {
+  font-size: 12px;
+  color: var(--paper-faint);
+}
+.tln-evb {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font: 700 9.5px var(--font-mono);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+.tln-evb-exact {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+}
+.tln-evb-weak {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+
 /* ----- the Timeline's Month view ----- */
 
 .mon {
