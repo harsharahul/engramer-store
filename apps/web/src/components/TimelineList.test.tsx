@@ -83,7 +83,7 @@ const click = (label: RegExp) => {
 };
 
 describe("the timeline list", () => {
-  it("days, the now line and the trip band read as the prototype's", () => {
+  it("days, the now line and the trip band read as designed", () => {
     const now = new Date("2026-11-14T15:42:00").getTime();
     render({
       now,
@@ -159,7 +159,7 @@ describe("the timeline list", () => {
     expect(text()).not.toContain("Show earlier");
   });
 
-  it("filters keep what the prototype keeps", () => {
+  it("filters keep trips, bills or dates", () => {
     const now = new Date("2026-09-08T08:40:00").getTime();
     const rows = [
       row("bill", "bill", "2026-09-09", "09:00", { amount: { currency: "USD", value: "10.00" } }),
@@ -205,6 +205,28 @@ describe("the timeline list", () => {
     click(/Confirm date/);
     expect(resolveFacts).toHaveBeenCalledWith("f-dmv", { confirm: ["due:dmv"] });
     expect(onToast).toHaveBeenCalledWith("Date confirmed. A notice comes a week before.");
+  });
+
+  it("a day asked for long ago is brought into the list", () => {
+    const now = new Date("2026-09-08T08:40:00").getTime();
+    const spy = vi.fn();
+    Element.prototype.scrollIntoView = function (this: Element) {
+      spy(this);
+    };
+    render({ now, rows: [row("spring", "bill", "2026-04-02", "09:00", { past: true }), row("today", "event", "2026-09-08", "19:30")], scrollTo: { day: "2026-04-02", nonce: 1 } });
+    expect(container.querySelector('[data-id="spring"]')).not.toBeNull();
+    expect((spy.mock.calls.at(-1)?.[0] as Element | undefined)?.textContent).toContain("Thu 2 Apr");
+  });
+
+  it("Enter on a button inside a row does only that button's work", () => {
+    const now = new Date("2026-09-08T08:40:00").getTime();
+    render({ now, rows: [row("taxi", "bill", "2026-09-07", "14:48", { trip: { ...exactTrip, evidence: "weak" } })] });
+    const no = [...container.querySelectorAll("button")].find((b) => b.textContent === "No")!;
+    act(() => no.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(onInspect).not.toHaveBeenCalled();
+    const card = container.querySelector<HTMLElement>('[data-id="taxi"] .tln-ev')!;
+    act(() => card.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true })));
+    expect(onInspect).toHaveBeenCalledWith("f-taxi");
   });
 
   it("a click on a row is a click on something, and the inspected row is marked", () => {

@@ -1,4 +1,4 @@
-// The prototype's Everyday is a Tuesday morning in San Francisco.
+// An ordinary day: a Tuesday morning in San Francisco.
 process.env.TZ = "America/Los_Angeles";
 
 import { describe, expect, it } from "vitest";
@@ -38,7 +38,7 @@ const september = (): AgendaRow[] => [
 ];
 
 describe("everydayOf", () => {
-  it("the Everyday cards read the prototype's September", () => {
+  it("the Everyday cards read an ordinary September", () => {
     const day = everydayOf(september(), [], NOW);
     expect(day.today.map((r) => r.id)).toEqual(["dinner"]);
     expect(day.laterToday).toBe(1);
@@ -99,7 +99,7 @@ describe("the cards from the library", () => {
 });
 
 describe("the words the cards use", () => {
-  it("durations, money and day labels read as the prototype's", () => {
+  it("durations, money and day labels read as designed", () => {
     expect(durationLabel(39_000_000)).toBe("10 h 50 m");
     expect(durationLabel(115_200_000)).toBe("1 d 8 h");
     expect(durationLabel(240_000)).toBe("4 min");

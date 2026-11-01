@@ -18,6 +18,8 @@ const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Frida
 const MEMORY_TILES = 6;
 
 const instantOf = (row: AgendaRow) => new Date(`${row.day}T${row.time ?? "00:00"}:00`).getTime();
+/** "1 receipt", "2 receipts". */
+const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 /** Countries the poster names by their short form, as people say them. */
 const SHORT_COUNTRIES: Record<string, string> = { US: "USA", GB: "UK", AE: "UAE" };
 
@@ -242,14 +244,14 @@ export function TimelineHero(props: {
               <Amounts sums={everyday.month.due} />
             </div>
             <div className="tln-faint">
-              Read from {everyday.month.receipts} receipts and {everyday.month.bills} bills · never converted
+              Read from {count(everyday.month.receipts, "receipt")} and {count(everyday.month.bills, "bill")} · never converted
             </div>
           </Card>
 
           {everyday.nextTrip ? (
             <Card title="Trips">
               <div className="tln-muted">
-                {everyday.nextTrip.title} · in {everyday.nextTrip.days} days
+                {everyday.nextTrip.title} · in {count(everyday.nextTrip.days, "day")}
               </div>
             </Card>
           ) : (

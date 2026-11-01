@@ -123,7 +123,15 @@ export function TimelineList(props: {
 
   const today = localDay(props.now);
   const clock = localTime(props.now);
-  const from = daysAfter(today, -(PAST_DAYS + MORE_DAYS * earlier));
+  // A day asked for further back than the window widens the window to it,
+  // and the window stays that wide.
+  const reach = useRef<string | undefined>(undefined);
+  const asked = props.scrollTo?.day;
+  if (asked && (reach.current === undefined || asked < reach.current)) {
+    reach.current = asked;
+  }
+  const shownFrom = daysAfter(today, -(PAST_DAYS + MORE_DAYS * earlier));
+  const from = reach.current && reach.current < shownFrom ? reach.current : shownFrom;
   const filtered = props.rows.filter((row) => kept(row, props.filter));
   const hidden = filtered.filter((row) => row.day < from).length;
   const visible = filtered.filter((row) => row.day >= from);
@@ -357,7 +365,9 @@ function TimelineRow(props: {
         aria-pressed={props.selected}
         onClick={props.onInspect}
         onKeyDown={(event) => {
-          if (event.key === "Enter") {
+          // Keys pressed on a button inside the card belong to that button.
+          if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
             props.onInspect();
           }
         }}

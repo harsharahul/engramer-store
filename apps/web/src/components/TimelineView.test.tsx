@@ -71,13 +71,21 @@ async function settle() {
   });
 }
 
-async function render() {
+async function render(focus?: { day?: string; now?: boolean; nonce: number }) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() =>
     root.render(
-      <TimelineView files={files} factsOn onInspect={() => {}} onOpen={() => {}} onToast={() => {}} onTurnOnDates={() => {}} />,
+      <TimelineView
+        files={files}
+        factsOn
+        {...(focus ? { focus } : {})}
+        onInspect={() => {}}
+        onOpen={() => {}}
+        onToast={() => {}}
+        onTurnOnDates={() => {}}
+      />,
     ),
   );
   await settle();
@@ -112,6 +120,21 @@ describe("the Timeline view", () => {
     scroller.scrollTop = 300;
     await press(/^Month$/);
     expect(scroller.scrollTop).toBe(0);
+  });
+
+  it("a day asked for from elsewhere opens there, not at now", async () => {
+    await render({ day: "2026-09-20", nonce: 1 });
+    const last = scrolled.mock.calls.map(([el]) => el as Element).at(-1);
+    expect(last?.textContent).toContain("Sun 20 Sep");
+  });
+
+  it("a day picked in the Month view opens on the list, with every row shown", async () => {
+    await render();
+    await press(/^Bills$/);
+    await press(/^Month$/);
+    act(() => container.querySelector('[data-day="2026-09-20"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await settle();
+    expect(button(/^All$/).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("a day picked in the Month view opens on the list", async () => {

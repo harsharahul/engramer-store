@@ -1,4 +1,4 @@
-// Rows read local days and times; pin the zone the prototype's Everyday is in.
+// Rows read local days and times; pin the zone of the ordinary day below.
 process.env.TZ = "America/Los_Angeles";
 
 import { describe, expect, it } from "vitest";

@@ -63,6 +63,10 @@ export function TimelineView(props: {
   const [scrollTo, setScrollTo] = useState<{ day?: string; now?: boolean; nonce: number }>({ now: true, nonce: 0 });
   const go = (target: { day?: string; now?: boolean }) => {
     setMode("timeline");
+    // A day asked for shows everything on it, whatever the filter was.
+    if (target.day) {
+      setFilter("all");
+    }
     setScrollTo((held) => ({ ...target, nonce: held.nonce + 1 }));
   };
 
@@ -93,11 +97,15 @@ export function TimelineView(props: {
     };
   }, [props.files, plans, dismissed, excluded, assembling, now]);
 
-  // Once the rows first arrive, the list opens at now.
+  // Once the rows first arrive, the list opens where it was asked to (a
+  // date from Notices), or at now.
   useEffect(() => {
     if (loaded) {
-      setScrollTo((held) => ({ now: true, nonce: held.nonce + 1 }));
+      const asked = props.focus?.day ? { day: props.focus.day } : { now: true };
+      setScrollTo((held) => ({ ...asked, nonce: held.nonce + 1 }));
     }
+    // Only the first arrival of rows; later requests come through go().
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
   const trips = useMemo(() => tripsOf(props.files), [props.files]);

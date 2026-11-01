@@ -5087,6 +5087,11 @@ span.item-menu {
   overflow: auto;
 }
 @media (max-width: 760px) {
+  /* One column: the content area scrolls hero and list together, clear of the tab bar. */
+  .content.content-timeline {
+    overflow-y: auto;
+    padding-bottom: calc(104px + env(safe-area-inset-bottom));
+  }
   .tln-view {
     display: block;
     height: auto;
@@ -5807,6 +5812,9 @@ span.item-menu {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 6px;
+}
+.mon-row {
+  display: contents;
 }
 .mon-dow {
   padding-bottom: 2px;

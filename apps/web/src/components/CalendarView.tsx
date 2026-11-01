@@ -136,19 +136,27 @@ export function CalendarView(props: {
   };
 
   const title = `${MONTHS[m]} ${y}`;
+  const weeks: string[][] = [];
+  for (let i = 0; i < days.length; i += 7) {
+    weeks.push(days.slice(i, i + 7));
+  }
   return (
-    <div className="mon" aria-label="Month">
+    <section className="mon" aria-label="Month">
       <div className="mon-head">
         <h3>{title}</h3>
         <span>Trips, bookings, bills and dates. Click a day to open it on the timeline.</span>
       </div>
       <div className="mon-grid" role="grid" aria-label={title}>
-        {WEEKDAYS.map((day) => (
-          <div key={day} className="mon-dow" role="columnheader">
-            {day}
-          </div>
-        ))}
-        {days.map((iso) => {
+        <div className="mon-row" role="row">
+          {WEEKDAYS.map((day) => (
+            <div key={day} className="mon-dow" role="columnheader">
+              {day}
+            </div>
+          ))}
+        </div>
+        {weeks.map((week) => (
+          <div key={week[0]} className="mon-row" role="row">
+            {week.map((iso) => {
           const rows = byDay.get(iso) ?? [];
           const covering = trips.filter((trip) => iso >= trip.start && iso <= trip.end && trip.lane < LANES_MAX);
           const opens = (trip: LanedTrip) => iso === trip.start || weekday(iso) === 0;
@@ -201,8 +209,10 @@ export function CalendarView(props: {
               </div>
             </div>
           );
-        })}
+            })}
+          </div>
+        ))}
       </div>
-    </div>
+    </section>
   );
 }

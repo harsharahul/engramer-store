@@ -68,6 +68,14 @@ describe("the Month view", () => {
     expect(cell("2026-12-01").classList.contains("mon-out")).toBe(true);
   });
 
+  it("the grid reads as rows of seven days to assistive technology", () => {
+    render();
+    const rowsOfGrid = [...container.querySelectorAll('[role="grid"] > [role="row"]')];
+    expect(rowsOfGrid.length).toBeGreaterThan(4);
+    expect(rowsOfGrid[0]!.querySelectorAll('[role="columnheader"]')).toHaveLength(7);
+    expect(rowsOfGrid.slice(1).every((week) => week.querySelectorAll('[role="gridcell"]').length === 7)).toBe(true);
+  });
+
   it("clicking or pressing Enter on a day opens it", () => {
     const onDay = render();
     act(() => cell("2026-11-20").dispatchEvent(new MouseEvent("click", { bubbles: true })));

@@ -163,7 +163,7 @@ describe("isDated", () => {
   });
 });
 
-// The prototype's Lisbon trip, as stored facts.
+// A trip to Lisbon, as stored facts.
 let seq = 0;
 const exact = (kind: Fact["kind"], value: string, label: string, extra: Partial<Fact> = {}): Fact =>
   withExactAcceptance({

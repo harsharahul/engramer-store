@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgendaRow } from "../intel/agendarows";
-import { everydayOf } from "../intel/everyday";
+import { everydayOf, type Everyday } from "../intel/everyday";
 import { useStore } from "../store";
 import { TimelineHero } from "./TimelineHero";
 
@@ -63,14 +63,14 @@ const september = () =>
     NOW,
   );
 
-function render(factsOn = true, homeCity = "San Francisco") {
+function render(factsOn = true, homeCity = "San Francisco", everyday: Everyday = september()) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() =>
     root.render(
       <TimelineHero
-        everyday={september()}
+        everyday={everyday}
         homeCity={homeCity}
         now={NOW}
         factsOn={factsOn}
@@ -109,7 +109,7 @@ describe("the Everyday hero", () => {
     expect(container.querySelector(".tln-sky")!.classList.contains("tln-sky-day")).toBe(true);
   });
 
-  it("the poster names the country briefly, as the prototype does", async () => {
+  it("the poster names the country briefly", async () => {
     render();
     await settle();
     expect(container.querySelector(".tln-pmeta")!.textContent).toBe("USA · Tue 8 Sep · 08:40 in San Francisco");
@@ -123,7 +123,7 @@ describe("the Everyday hero", () => {
     expect(container.querySelector(".tln-sky")!.classList.contains("tln-sky-day")).toBe(true);
   });
 
-  it("the cards read the prototype's September", () => {
+  it("the cards read an ordinary September", () => {
     render();
     expect(text()).toContain("Today · Tue 8 Sep");
     expect(text()).toContain("in 10 h 50 m");
@@ -135,8 +135,20 @@ describe("the Everyday hero", () => {
     expect(text()).toContain("Registration renewal notice. Nothing is tracked until you say yes.");
     expect(text()).toContain("September so far");
     expect(text()).toContain("2,486.40");
-    expect(text()).toContain("Read from 2 receipts and 1 bills · never converted");
+    expect(text()).toContain("Read from 2 receipts and 1 bill · never converted");
     expect(text()).toContain("No trips planned. When a booking lands in your mail, the trip appears here on its own.");
+  });
+
+  it("one of a thing reads as one", () => {
+    render(true, "San Francisco", {
+      today: [],
+      laterToday: 0,
+      week: [],
+      month: { name: "September", paid: [usd("10.00")], due: [usd("20.00")], receipts: 1, bills: 1 },
+      nextTrip: { title: "Lisbon, Nov 2026", days: 1 },
+    });
+    expect(text()).toContain("Read from 1 receipt and 1 bill · never converted");
+    expect(text()).toContain("Lisbon, Nov 2026 · in 1 day");
   });
 
   it("Needs a yes confirms and dismisses", () => {
