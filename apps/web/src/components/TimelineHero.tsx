@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { localDay } from "../intel/agendarows";
+import { localDay, localTime, zonedDay, zonedTime } from "../intel/agendarows";
 import { airportForCity } from "../intel/airports";
 import { dayLabel, money, skyOf, type Everyday, type Money } from "../intel/everyday";
 import type { AgendaRow } from "../intel/agendarows";
@@ -18,6 +18,20 @@ const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Frida
 const MEMORY_TILES = 6;
 
 const instantOf = (row: AgendaRow) => new Date(`${row.day}T${row.time ?? "00:00"}:00`).getTime();
+/** Countries the poster names by their short form, as people say them. */
+const SHORT_COUNTRIES: Record<string, string> = { US: "USA", GB: "UK", AE: "UAE" };
+
+function countryOf(code: string): { country?: string } {
+  if (SHORT_COUNTRIES[code]) {
+    return { country: SHORT_COUNTRIES[code] };
+  }
+  try {
+    const name = new Intl.DisplayNames(["en"], { type: "region" }).of(code);
+    return name ? { country: name } : {};
+  } catch {
+    return {};
+  }
+}
 const shortDay = (iso: string) => dayLabel(iso).split(" ").slice(0, 2).join(" ");
 
 function Amounts(props: { sums: Money[] }) {
@@ -57,20 +71,15 @@ export function TimelineHero(props: {
   fileOf?(id: string): FileEntry | undefined;
 }) {
   const resolveFacts = useStore((s) => s.resolveFacts);
-  const [place, setPlace] = useState<{ code: string; country?: string } | null>(null);
+  const [place, setPlace] = useState<{ code: string; zone: string; country?: string } | null>(null);
   useEffect(() => {
     let stale = false;
+    setPlace(null);
     void airportForCity(props.homeCity).then((airport) => {
       if (stale || !airport) {
         return;
       }
-      let country: string | undefined;
-      try {
-        country = new Intl.DisplayNames(["en"], { type: "region" }).of(airport.country) ?? undefined;
-      } catch {
-        country = undefined;
-      }
-      setPlace({ code: airport.code, ...(country ? { country } : {}) });
+      setPlace({ code: airport.code, zone: airport.zone, ...countryOf(airport.country) });
     });
     return () => {
       stale = true;
@@ -78,8 +87,11 @@ export function TimelineHero(props: {
   }, [props.homeCity]);
 
   const { everyday } = props;
-  const at = new Date(props.now);
-  const sky = skyOf(at.getHours());
+  // The poster is home: its date, time and sky are home's, even away.
+  const home = place?.zone;
+  const posterDay = home ? zonedDay(props.now, home) : localDay(props.now);
+  const posterHour = Number((home ? zonedTime(props.now, home) : localTime(props.now)).slice(0, 2));
+  const sky = skyOf(posterHour);
   const today = localDay(props.now);
   const yes = everyday.needsYes;
 
@@ -91,7 +103,7 @@ export function TimelineHero(props: {
         <div className="tln-pin">
           <div className="tln-ptop">Today</div>
           <div className="tln-pstate">
-            <div className="tln-big">{WEEKDAYS[at.getDay()]}</div>
+            <div className="tln-big">{WEEKDAYS[new Date(`${posterDay}T00:00:00Z`).getUTCDay()]}</div>
             <div className="tln-cap">
               {everyday.laterToday} later today · {everyday.week.length} this week
             </div>
@@ -99,7 +111,7 @@ export function TimelineHero(props: {
           <div className={`tln-city${props.homeCity.length > 8 ? " tln-long" : ""}`}>{props.homeCity}</div>
           <div className="tln-pmeta">
             {place?.country ? `${place.country} · ` : ""}
-            {dayLabel(today)} · <Clock /> in {props.homeCity}
+            {dayLabel(posterDay)} · <Clock {...(home ? { zone: home } : {})} /> in {props.homeCity}
           </div>
         </div>
       </div>

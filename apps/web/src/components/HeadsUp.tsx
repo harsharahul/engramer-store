@@ -157,7 +157,7 @@ export function TripMirror(props: { onOpenTimeline(): void }) {
   const { plans, dismissed, excluded } = useTripPlans();
   const { proposals, joins } = offeredTrips(plans, { dismissed, excluded, assembling: assembleTripsEnabled() }, (id) => {
     const file = files.get(id);
-    return file && !file.trashed ? file.tags : undefined;
+    return file && !file.trashed ? file : undefined;
   });
   const total = proposals.length + joins;
   if (total === 0) {

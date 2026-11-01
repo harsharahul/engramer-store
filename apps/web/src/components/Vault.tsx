@@ -422,7 +422,8 @@ export function Vault() {
     sidebarWidth,
     detailsWidth,
     sidebarCollapsed,
-    detailsOpen,
+    // On the Timeline the pane opens for a row asked about, never on its own.
+    detailsOpen: detailsOpen && (view.kind !== "timeline" || detailsFileId !== null),
   });
   const frameRef = useRef<HTMLDivElement>(null);
 
@@ -2522,7 +2523,8 @@ export function Vault() {
     !similarActive &&
     view.kind !== "trash" &&
     view.kind !== "shared" &&
-    view.kind !== "profile";
+    view.kind !== "profile" &&
+    view.kind !== "timeline";
 
   // The sidebar's contents as data; AppSidebar draws them (shadcn/ui).
   const place = (
@@ -3085,7 +3087,7 @@ export function Vault() {
 
         <div
           ref={contentRef}
-          className="content"
+          className={`content${view.kind === "timeline" && !searching ? " content-timeline" : ""}`}
           onClick={(e) => isEmptySpace(e.target) && clearSelection()}
           {...(isMobile ? pullToRefresh.containerProps : {})}
         >
@@ -3159,6 +3161,7 @@ export function Vault() {
               files={liveFiles}
               factsOn={factsOn}
               {...(view.nonce !== undefined ? { focus: { ...(view.day ? { day: view.day } : { now: true }), nonce: view.nonce } } : {})}
+              {...(detailsFile && plan.details !== "hidden" ? { selectedFileId: detailsFile.id } : {})}
               onInspect={inspect}
               onOpen={openFile}
               onToast={showToast}

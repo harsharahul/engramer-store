@@ -70,6 +70,8 @@ export function TimelineList(props: {
   onOpen(fileId: string): void;
   onToast(text: string): void;
   fileOf?(id: string): FileEntry | undefined;
+  /** The file open in the details pane, whose row is marked. */
+  selectedFileId?: string;
 }) {
   const account = useStore((s) => s.session?.email ?? "");
   const addToTrip = useStore((s) => s.addToTrip);
@@ -225,6 +227,7 @@ export function TimelineList(props: {
         end={ends.has(row.id)}
         kept={keptTrips.has(row.id)}
         refused={refused.has(row.id)}
+        selected={props.selectedFileId !== undefined && row.fileIds[0] === props.selectedFileId}
         fileOf={props.fileOf}
         onInspect={() => (row.kind === "photos" ? props.onOpen(row.fileIds[0]!) : props.onInspect(row.fileIds[0]!))}
         onOpenFile={props.onOpen}
@@ -295,6 +298,7 @@ function TimelineRow(props: {
   end: boolean;
   kept: boolean;
   refused: boolean;
+  selected: boolean;
   fileOf?(id: string): FileEntry | undefined;
   onInspect(): void;
   onOpenFile(id: string): void;
@@ -346,10 +350,11 @@ function TimelineRow(props: {
         <span className={`tln-node${props.start || props.end ? " tln-dia" : ""}`} />
       </div>
       <div
-        className="tln-ev"
+        className={`tln-ev${props.selected ? " tln-sel" : ""}`}
         role="button"
         tabIndex={0}
         aria-label={row.title}
+        aria-pressed={props.selected}
         onClick={props.onInspect}
         onKeyDown={(event) => {
           if (event.key === "Enter") {

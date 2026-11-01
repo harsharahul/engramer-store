@@ -4,7 +4,7 @@
  * Timeline's rows, worked out once here and read by both columns.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { homeCityGuess, tripsOf } from "../intel/agenda";
 import { localDay, rowsOf, type AgendaRow } from "../intel/agendarows";
 import { everydayOf } from "../intel/everyday";
@@ -46,8 +46,11 @@ export function TimelineView(props: {
   onOpen(fileId: string): void;
   onToast(text: string): void;
   onTurnOnDates(): void;
+  /** The file open in the details pane, marked on the list. */
+  selectedFileId?: string;
 }) {
   const storeFiles = useStore((s) => s.files);
+  const scroller = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), MINUTE_MS);
@@ -115,6 +118,13 @@ export function TimelineView(props: {
   }, [props.files]);
   const home = setHome ?? guess ?? zoneCity();
 
+  // The Month view opens at its top, wherever the list was scrolled.
+  useEffect(() => {
+    if (mode === "month" && scroller.current) {
+      scroller.current.scrollTop = 0;
+    }
+  }, [mode]);
+
   const turn = (delta: number) =>
     setMonth((held) => {
       const at = new Date(Date.UTC(held.y, held.m + delta, 1));
@@ -157,10 +167,10 @@ export function TimelineView(props: {
             </div>
           ) : (
             <div className="tln-filters">
-              <Button size="xs" variant="ghost" onClick={() => turn(-1)}>
+              <Button size="xs" variant="secondary" onClick={() => turn(-1)}>
                 Previous
               </Button>
-              <Button size="xs" variant="ghost" onClick={() => turn(1)}>
+              <Button size="xs" variant="secondary" onClick={() => turn(1)}>
                 Next
               </Button>
             </div>
@@ -176,7 +186,7 @@ export function TimelineView(props: {
             </Button>
           </div>
         </div>
-        <div className="tln-scroll">
+        <div ref={scroller} className="tln-scroll">
           {mode === "timeline" ? (
             <TimelineList
               rows={rows}
@@ -189,6 +199,7 @@ export function TimelineView(props: {
               onOpen={props.onOpen}
               onToast={props.onToast}
               fileOf={(id) => storeFiles.get(id)}
+              {...(props.selectedFileId ? { selectedFileId: props.selectedFileId } : {})}
             />
           ) : (
             <CalendarView rows={rows} trips={trips} month={month} today={today} onDay={(iso) => go({ day: iso })} onMonth={turn} />

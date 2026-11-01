@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { localTime } from "../intel/agendarows";
+import { localTime, zonedTime } from "../intel/agendarows";
 import { durationLabel } from "../intel/everyday";
 
 function useNow(): number {
@@ -17,9 +17,10 @@ function useNow(): number {
   return now;
 }
 
-/** The device's local time, HH:MM. */
-export function Clock() {
-  return <span className="tln-tick">{localTime(useNow())}</span>;
+/** The time, HH:MM: in a named zone when given, else the device's. */
+export function Clock(props: { zone?: string }) {
+  const now = useNow();
+  return <span className="tln-tick">{props.zone ? zonedTime(now, props.zone) : localTime(now)}</span>;
 }
 
 /** How long until an instant: "1 d 8 h", "10 h 50 m", "4 min". */

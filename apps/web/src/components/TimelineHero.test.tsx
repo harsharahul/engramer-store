@@ -63,7 +63,7 @@ const september = () =>
     NOW,
   );
 
-function render(factsOn = true) {
+function render(factsOn = true, homeCity = "San Francisco") {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -71,7 +71,7 @@ function render(factsOn = true) {
     root.render(
       <TimelineHero
         everyday={september()}
-        homeCity="San Francisco"
+        homeCity={homeCity}
         now={NOW}
         factsOn={factsOn}
         onInspect={() => {}}
@@ -84,6 +84,12 @@ function render(factsOn = true) {
 }
 
 const text = () => container.textContent ?? "";
+async function settle() {
+  await act(async () => {
+    await import("../intel/tables/airports.json");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+}
 const click = (label: RegExp) => {
   const button = [...container.querySelectorAll("button")].find((b) => label.test(b.textContent ?? ""));
   act(() => {
@@ -100,6 +106,20 @@ describe("the Everyday hero", () => {
     expect(poster.textContent).toContain("1 later today · 3 this week");
     expect(poster.textContent).toContain("San Francisco");
     expect(poster.textContent).toContain("Tue 8 Sep · 08:40 in San Francisco");
+    expect(container.querySelector(".tln-sky")!.classList.contains("tln-sky-day")).toBe(true);
+  });
+
+  it("the poster names the country briefly, as the prototype does", async () => {
+    render();
+    await settle();
+    expect(container.querySelector(".tln-pmeta")!.textContent).toBe("USA · Tue 8 Sep · 08:40 in San Francisco");
+  });
+
+  it("the poster tells home's own time when the device is elsewhere", async () => {
+    // The device is in San Francisco; home is Lisbon, where it is 16:40.
+    render(true, "Lisbon");
+    await settle();
+    expect(container.querySelector(".tln-pmeta")!.textContent).toBe("Portugal · Tue 8 Sep · 16:40 in Lisbon");
     expect(container.querySelector(".tln-sky")!.classList.contains("tln-sky-day")).toBe(true);
   });
 

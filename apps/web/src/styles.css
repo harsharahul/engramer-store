@@ -5020,6 +5020,12 @@ span.item-menu {
 
 /* ----- the Timeline place ----- */
 
+/* The Timeline scrolls its own two columns, edge to edge. */
+.content.content-timeline {
+  padding: 0;
+  overflow: hidden;
+}
+
 .tln-view {
   display: grid;
   grid-template-columns: minmax(320px, 452px) 1fr;
@@ -5223,6 +5229,14 @@ span.item-menu {
 .tln-ev:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+.tln-ev.tln-sel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.tln-past .tln-ev.tln-sel {
+  opacity: 1;
+  filter: none;
 }
 .tln-past .tln-ev {
   opacity: 0.56;

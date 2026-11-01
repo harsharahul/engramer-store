@@ -106,6 +106,14 @@ describe("the Timeline view", () => {
     expect(scrolled.mock.calls.some(([el]) => (el as Element).classList.contains("tln-now"))).toBe(true);
   });
 
+  it("the Month view opens at its top, wherever the list was scrolled", async () => {
+    await render();
+    const scroller = container.querySelector<HTMLElement>(".tln-scroll")!;
+    scroller.scrollTop = 300;
+    await press(/^Month$/);
+    expect(scroller.scrollTop).toBe(0);
+  });
+
   it("a day picked in the Month view opens on the list", async () => {
     await render();
     await press(/^Month$/);

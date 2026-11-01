@@ -8,6 +8,7 @@ import { decided } from "../decisions";
 import type { Trip } from "../intel/agenda";
 import type { AgendaRow } from "../intel/agendarows";
 import type { TripPlan } from "../intel/agenda";
+import { isEmptySpace } from "../marquee";
 import { useStore } from "../store";
 import { TimelineList } from "./TimelineList";
 
@@ -204,6 +205,15 @@ describe("the timeline list", () => {
     click(/Confirm date/);
     expect(resolveFacts).toHaveBeenCalledWith("f-dmv", { confirm: ["due:dmv"] });
     expect(onToast).toHaveBeenCalledWith("Date confirmed. A notice comes a week before.");
+  });
+
+  it("a click on a row is a click on something, and the inspected row is marked", () => {
+    const now = new Date("2026-09-08T08:40:00").getTime();
+    render({ now, rows: [row("dinner", "event", "2026-09-08", "19:30"), row("parcel", "parcel", "2026-09-09", "10:00")], selectedFileId: "f-dinner" });
+    const card = container.querySelector('[data-id="dinner"] .tln-ev')!;
+    expect(isEmptySpace(card.querySelector(".tln-evt"))).toBe(false);
+    expect(card.classList.contains("tln-sel")).toBe(true);
+    expect(container.querySelector('[data-id="parcel"] .tln-ev')!.classList.contains("tln-sel")).toBe(false);
   });
 
   it("Keep trip keeps, Not a trip waits for Undo before it is remembered", () => {
