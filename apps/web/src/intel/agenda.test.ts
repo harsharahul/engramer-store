@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasAgenda, isPlanDismissed, isTripCurrent, itemsOf, planTrips, tripsOf, type AgendaFile, type PlanFile, type TripPlan } from "./agenda";
+import { hasAgenda, homeCityGuess, isPlanDismissed, isTripCurrent, itemsOf, planTrips, tripsOf, type AgendaFile, type PlanFile, type TripPlan } from "./agenda";
 import { isDated, withExactAcceptance, type Fact } from "./facts";
 import { suggestTrips } from "./trips";
 
@@ -339,6 +339,18 @@ const roundTrip = (id: string, out: string, back: string, from: string, to: stri
     ],
     extra,
   );
+
+describe("homeCityGuess", () => {
+  it("home is where most journeys start", async () => {
+    const files = [
+      roundTrip("a", "2026-03-02", "2026-03-06", "SFO", "JFK"),
+      roundTrip("b", "2026-05-02", "2026-05-06", "SFO", "LIS"),
+      roundTrip("c", "2026-07-02", "2026-07-06", "BOS", "FCO"),
+    ];
+    expect(await homeCityGuess(files)).toBe("San Francisco");
+    expect(await homeCityGuess([])).toBeUndefined();
+  });
+});
 
 describe("planTrips keeps journeys apart", () => {
   it("two journeys three weeks apart with a parcel between are two trips", async () => {

@@ -487,6 +487,26 @@ function finishPlans(drafts: readonly Draft[], byId: ReadonlyMap<string, PlanFil
 }
 
 /**
+ * Where the owner most likely lives: the city most of their exact
+ * journeys set out from, ties settled alphabetically. Undefined when no
+ * journey says.
+ */
+export async function homeCityGuess(files: readonly PlanFile[]): Promise<string | undefined> {
+  const counts = new Map<string, number>();
+  for (const file of files) {
+    if (file.trashed) {
+      continue;
+    }
+    const legs = file.facts.filter(travelLeg);
+    const from = legs.length > 0 ? (await legPlaces(legs)).from : undefined;
+    if (from) {
+      counts.set(from, (counts.get(from) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0];
+}
+
+/**
  * Whether the owner refused this trip: by its tag or anchor, by the id a
  * refusal was kept under before plans, or, refused while it was dates
  * only, by a file still in it (any member of a date-only plan; one that

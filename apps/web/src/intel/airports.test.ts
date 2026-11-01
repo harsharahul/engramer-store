@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lookupAirport } from "./airports";
+import { airportForCity, lookupAirport } from "./airports";
 import rows from "./tables/airports.json";
 
 describe("lookupAirport", () => {
@@ -30,5 +30,13 @@ describe("lookupAirport", () => {
       expect(city.length).toBeGreaterThan(0);
       expect(zone).toMatch(/^[A-Za-z_+-]+(?:\/[A-Za-z_+-]+){1,2}$/);
     }
+  });
+});
+
+describe("airportForCity", () => {
+  it("finds a city's airport, or none", async () => {
+    expect((await airportForCity("Lisbon"))?.code).toBe("LIS");
+    expect((await airportForCity("lisbon"))?.code).toBe("LIS");
+    expect(await airportForCity("Nowhere at all")).toBeNull();
   });
 });
