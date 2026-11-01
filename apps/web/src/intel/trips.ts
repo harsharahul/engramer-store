@@ -261,20 +261,38 @@ function commonest(all: string[]): string | undefined {
 }
 
 /**
- * Where a cluster sets out from: the city of the first departure its
- * events name. A round trip arrives home as often as it arrives away, and
- * home is never the destination.
+ * Where a run of legs sets out from, where it ends, and where it goes:
+ * cities from the airport codes its labels name. The destination is the
+ * commonest arrival other than the origin, because a round trip arrives
+ * home as often as it arrives away, and home is never the destination.
  */
-async function originOf(members: Member[]): Promise<string | undefined> {
-  const departures = members.flatMap((member) =>
-    member.events.flatMap((fact) => {
-      const code = DEPARTURE.exec(fact.label ?? "")?.[1];
-      return code ? [{ code, at: `${fact.value} ${fact.time ?? ""}`, id: member.file.id }] : [];
-    }),
+export async function legPlaces(
+  legs: readonly Fact[],
+): Promise<{ from?: string; to?: string; destination?: string }> {
+  const ordered = [...legs].sort(
+    (a, b) => `${a.value} ${a.time ?? ""}`.localeCompare(`${b.value} ${b.time ?? ""}`) || a.id.localeCompare(b.id),
   );
-  departures.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
-  const first = departures[0];
-  return first ? (await lookupAirport(first.code))?.city : undefined;
+  const city = async (pattern: RegExp, fact: Fact) => {
+    const code = pattern.exec(fact.label ?? "")?.[1];
+    return code ? (await lookupAirport(code))?.city : undefined;
+  };
+  let from: string | undefined;
+  let to: string | undefined;
+  const arrivals: string[] = [];
+  for (const fact of ordered) {
+    from ??= await city(DEPARTURE, fact);
+    const arrived = await city(ARRIVAL, fact);
+    if (arrived) {
+      arrivals.push(arrived);
+      to = arrived;
+    }
+  }
+  const destination = commonest(arrivals.filter((place) => place !== from));
+  return {
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+    ...(destination ? { destination } : {}),
+  };
 }
 
 /**
@@ -329,7 +347,7 @@ export async function suggestTrips(
       continue;
     }
     const fileIds = cluster.members.map((member) => member.file.id).sort();
-    const origin = await originOf(cluster.members);
+    const { from: origin } = await legPlaces(cluster.members.flatMap((member) => member.events));
     const away = (city: string) => city !== origin;
     const destination =
       commonest(cluster.members.flatMap((m) => [...m.reach]).filter(away)) ??

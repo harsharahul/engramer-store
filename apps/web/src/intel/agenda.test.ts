@@ -320,4 +320,107 @@ describe("isPlanDismissed", () => {
     expect(isPlanDismissed(plan, new Set(["anchor:hotel"]))).toBe(true);
     expect(isPlanDismissed(plan, new Set(["anchor:elsewhere", "trip:rome-2027-05"]))).toBe(false);
   });
+
+  it("refusing date-only documents does not refuse a journey that later takes them in as date-only", async () => {
+    const plan = only(await planTrips(lisbon(), NOW));
+    expect(plan.weak).toEqual(["taxi"]);
+    expect(isPlanDismissed(plan, new Set(["anchor:taxi"]))).toBe(false);
+  });
+});
+
+const roundTrip = (id: string, out: string, back: string, from: string, to: string, extra: Partial<PlanFile> = {}) =>
+  doc(
+    id,
+    [
+      exact("event", out, `Flight AQ 1 departs ${from}`),
+      exact("event", out, `Flight AQ 1 arrives ${to}`),
+      exact("event", back, `Flight AQ 2 departs ${to}`),
+      exact("event", back, `Flight AQ 2 arrives ${from}`),
+    ],
+    extra,
+  );
+
+describe("planTrips keeps journeys apart", () => {
+  it("two journeys three weeks apart with a parcel between are two trips", async () => {
+    const files = [
+      roundTrip("lis", "2026-11-12", "2026-11-16", "SFO", "LIS"),
+      doc("parcel", [exact("event", "2026-11-25", "Delivery window", { document: "delivery" })]),
+      doc("concert", [exact("event", "2026-11-28", "Concert at the Fillmore", { document: "event-ticket" })]),
+      roundTrip("nyc", "2026-12-04", "2026-12-07", "SFO", "JFK"),
+    ];
+    const plans = await planTrips(files, NOW);
+    expect(plans.map((plan) => [plan.tag, [...plan.exact.keys()]])).toEqual([
+      ["trip:lisbon-2026-11", ["lis"]],
+      ["trip:new-york-2026-12", ["nyc"]],
+    ]);
+    expect(plans.flatMap((plan) => plan.weak)).toEqual([]);
+  });
+
+  it("a commuter's round trips stay separate trips", async () => {
+    const files = [
+      roundTrip("w1", "2027-01-05", "2027-01-05", "SFO", "LAX"),
+      roundTrip("w2", "2027-01-19", "2027-01-19", "SFO", "LAX"),
+      roundTrip("w3", "2027-02-02", "2027-02-02", "SFO", "LAX"),
+    ];
+    const plans = await planTrips(files, NOW);
+    expect(plans.map((plan) => plan.anchorId)).toEqual(["w1", "w2", "w3"]);
+    expect(new Set(plans.map((plan) => plan.tag)).size).toBe(3);
+    expect(plans.every((plan) => plan.exact.size === 1)).toBe(true);
+  });
+
+  it("a model-read date between two journeys joins nothing", async () => {
+    const files = [
+      roundTrip("lis", "2026-11-12", "2026-11-16", "SFO", "LIS"),
+      doc("note", [{ id: "event:note", kind: "event", document: "other", value: "2026-11-28", label: "Dentist", source: "model", confidence: 0.8, accepted: "grounded" }]),
+      roundTrip("nyc", "2026-12-10", "2026-12-12", "SFO", "JFK"),
+    ];
+    const plans = await planTrips(files, NOW);
+    expect(plans.map((plan) => [...plan.exact.keys()])).toEqual([["lis"], ["nyc"]]);
+    expect(plans.flatMap((plan) => plan.weak)).toEqual([]);
+  });
+
+  it("legs booked separately are one journey when the way home leaves from where the way out arrived", async () => {
+    const files = [
+      doc("out", [exact("event", "2026-11-12", "Flight TP 236 departs SFO"), exact("event", "2026-11-13", "Flight TP 236 arrives LIS")]),
+      doc("home", [exact("event", "2026-11-16", "Flight TP 237 departs LIS"), exact("event", "2026-11-16", "Flight TP 237 arrives SFO")]),
+      lisbon().find((file) => file.id === "hotel")!,
+    ];
+    const plan = only(await planTrips(files, NOW));
+    expect(Object.fromEntries(plan.exact)).toEqual({ home: "booking", hotel: "away", out: "booking" });
+    expect(plan.tag).toBe("trip:lisbon-2026-11");
+  });
+});
+
+describe("planTrips reaches only near the journey", () => {
+  it("a reference from another year does not join, and cannot rename the trip", async () => {
+    const files = [
+      ...lisbon().map((file) =>
+        file.id === "hotel" ? { ...file, facts: [...file.facts, reference("0174", "Confirmation number", { document: "hotel-booking" })] } : file,
+      ),
+      doc(
+        "dinner2023",
+        [exact("event", "2023-03-10", "Dinner: Le Bistrot", { document: "dining" }), reference("0174", "Reservation number", { document: "dining" })],
+        { tags: ["trip:paris-2023-03"] },
+      ),
+      doc("note2023", [], { mailParent: "dinner2023", tags: ["trip:paris-2023-03"] }),
+    ];
+    const plan = (await planTrips(files, NOW)).find((candidate) => candidate.anchorId === "flight")!;
+    expect(plan.tag).toBe("trip:lisbon-2026-11");
+    expect(plan.exact.has("dinner2023")).toBe(false);
+    expect(plan.exact.has("note2023")).toBe(false);
+  });
+
+  it("a document pulled in by its reference does not name the trip", async () => {
+    const files = lisbon().map((file) => (file.id === "pass" ? { ...file, tags: ["trip:somewhere-2026-11"] } : file));
+    const plan = only(await planTrips(files, NOW));
+    expect(plan.exact.get("pass")).toBe("reference");
+    expect(plan.tag).toBe("trip:lisbon-2026-11");
+  });
+
+  it("a document with no date joins only through its email", async () => {
+    const files = [...lisbon(), doc("invoice", [reference("4F2K", "Booking reference", { document: "invoice" })])];
+    const plan = only(await planTrips(files, NOW));
+    expect(plan.exact.has("invoice")).toBe(false);
+    expect(plan.exact.get("eticket")).toBe("email");
+  });
 });

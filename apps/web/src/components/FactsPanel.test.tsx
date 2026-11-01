@@ -113,6 +113,16 @@ describe("the Notices panel", () => {
     expect(container.textContent).toContain("Dismissed. It will not come back.");
   });
 
+  it("a trip grouped by hand before still reads as the owner's when the assembler adds to it", async () => {
+    const tag = "trip:lisbon-2026-11";
+    // Grouped before ownership was recorded; the assembler later added b.
+    decide("a@example.com", "assembledTrips", [`${tag}|b`]);
+    render([file("a", "Flights.pdf", [], [tag]), file("b", "Casa do Rio.pdf", [], [tag])]);
+    await act(async () => {});
+    expect(container.textContent).not.toContain("came together on its own");
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Not a trip")).toBe(false);
+  });
+
   it("a trip the owner kept shows neither", async () => {
     const tag = "trip:lisbon-2026-11";
     decide("a@example.com", "assembledTrips", [`${tag}|a`]);

@@ -301,7 +301,7 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
           </div>
         )}
         {open.map(({ plan, missing, joining }) => (
-          <div key={plan.legacyId} className="pending-card">
+          <div key={plan.dismissKeys.join("|")} className="pending-card">
             <div className="pending-card-text">
               <PlaneGlyph size={13} />{" "}
               {joining ? (
@@ -335,9 +335,9 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
             <div className="pending-card-actions">
               <Button
                 size="xs"
-                disabled={busy === plan.legacyId}
+                disabled={busy === plan.dismissKeys.join("|")}
                 onClick={() => {
-                  setBusy(plan.legacyId);
+                  setBusy(plan.dismissKeys.join("|"));
                   void confirmTrip(plan).finally(() => setBusy(null));
                 }}
               >

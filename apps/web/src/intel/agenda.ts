@@ -7,8 +7,17 @@
  */
 
 import { daysUntil } from "./dates";
+import { shown } from "./describe";
 import { basisOf, DATED_KINDS, isTracked, type DocumentKind, type Fact } from "./facts";
-import { isTripTag, RECENT_PAST_DAYS, suggestTrips, tripTag, tripTitle } from "./trips";
+import {
+  isTripTag,
+  legPlaces,
+  RECENT_PAST_DAYS,
+  suggestTrips,
+  tripTag,
+  tripTitle,
+  type TripSuggestion,
+} from "./trips";
 
 export interface AgendaFile {
   id: string;
@@ -239,92 +248,257 @@ export async function planTrips(
     }
   }
   const candidates = await suggestTrips(live, now, opts?.extraPlaces, { recentPastDays: Infinity });
-  const plans: TripPlan[] = [];
+  const drafts: Draft[] = [];
   for (const candidate of candidates) {
     const members = candidate.fileIds.flatMap((id) => byId.get(id) ?? []);
-    const exact = new Map<string, TripEvidence>();
-    let anchor: { id: string; at: string } | undefined;
-    let first: string | undefined;
-    let last: string | undefined;
-    for (const file of members) {
-      const legs = file.facts.filter(travelLeg).map((fact) => fact.value).sort();
-      if (legs.length === 0) {
-        continue;
-      }
-      exact.set(file.id, "booking");
-      const earliest = legs[0]!;
-      const latest = legs[legs.length - 1]!;
-      if (!anchor || earliest < anchor.at || (earliest === anchor.at && file.id < anchor.id)) {
-        anchor = { id: file.id, at: earliest };
-      }
-      first = first === undefined || earliest < first ? earliest : first;
-      last = last === undefined || latest > last ? latest : last;
+    const journeys = await journeysOf(members, tailsOf);
+    if (journeys.length === 0) {
+      // Nothing booked exactly: the candidate is offered whole, by date.
+      drafts.push({
+        candidate,
+        own: members.map((file) => file.id),
+        minted: tripTag(candidate),
+        start: candidate.start,
+        end: candidate.end,
+        ...(candidate.destination ? { destination: candidate.destination } : {}),
+        exact: new Map(),
+        weak: members.map((file) => file.id).sort(),
+        why: candidate.why,
+      });
+      continue;
     }
-    if (first !== undefined && last !== undefined) {
+    // A cluster of dates can hold several journeys; each is its own trip,
+    // and what falls between them belongs to none.
+    const booked = new Set(journeys.flatMap((journey) => journey.map((booking) => booking.file.id)));
+    for (const journey of journeys) {
+      const first = journey.reduce((at, booking) => (booking.start < at ? booking.start : at), journey[0]!.start);
+      const last = journey.reduce((at, booking) => (booking.end > at ? booking.end : at), journey[0]!.end);
+      const exact = new Map<string, TripEvidence>(journey.map((booking) => [booking.file.id, "booking"]));
+      const weak: string[] = [];
       for (const file of members) {
-        if (!exact.has(file.id) && bookedWhileAway(file, first, last)) {
+        if (booked.has(file.id)) {
+          continue;
+        }
+        if (bookedWhileAway(file, first, last)) {
           exact.set(file.id, "away");
+        } else if (
+          file.facts
+            .filter((fact) => fact.kind === "event" && isTracked(fact))
+            .every((fact) => fact.value >= first && fact.value <= last)
+        ) {
+          weak.push(file.id);
         }
       }
+      const own = [...exact.keys(), ...weak];
+      walkExactLinks(exact, { byId, tailsOf, byTail, children }, first, last);
+      const destination = (await legPlaces(journey.flatMap((booking) => booking.legs))).destination;
+      drafts.push({
+        candidate,
+        own,
+        minted: tripTag({ id: candidate.id, fileIds: [], start: first, end: last, why: [], ...(destination ? { destination } : {}) }),
+        start: first,
+        end: last,
+        ...(destination ? { destination } : {}),
+        anchorId: journey[0]!.file.id,
+        exact,
+        weak: weak.sort(),
+        why: [`dates fall together, ${shown(first)} to ${shown(last)}`, ...(destination ? [`both point at ${destination}`] : [])],
+      });
     }
-    // A shared booking reference or a shared email pulls a document in from
-    // anywhere in the library, and what it pulls in can pull in more.
-    const queue = [...exact.keys()].sort();
-    const join = (id: string | undefined, evidence: TripEvidence) => {
-      if (id !== undefined && byId.has(id) && !exact.has(id)) {
-        exact.set(id, evidence);
-        queue.push(id);
-      }
-    };
-    for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-      for (const tail of tailsOf.get(next) ?? []) {
-        for (const id of byTail.get(tail) ?? []) {
-          join(id, "reference");
-        }
-      }
-      join(byId.get(next)!.mailParent, "email");
-      for (const id of children.get(next) ?? []) {
-        join(id, "email");
-      }
+  }
+  return finishPlans(drafts, byId, now);
+}
+
+/** A booking reference or a shared email reaches this far either side of a journey. */
+const JOIN_REACH_DAYS = 45;
+
+const dayNumber = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / 86_400_000;
+
+/** One file's exact travel legs, when they run and where they start and end. */
+interface Booking {
+  file: PlanFile;
+  legs: Fact[];
+  start: string;
+  end: string;
+  from?: string;
+  to?: string;
+  tails: string[];
+}
+
+/**
+ * The journeys among a candidate's files: bookings whose legs overlap,
+ * that share a booking reference, or where one sets out from the city a
+ * one-way booking arrived in. A round trip home ends its journey, so a
+ * commuter's weekly flights stay separate trips.
+ */
+async function journeysOf(members: readonly PlanFile[], tailsOf: ReadonlyMap<string, string[]>): Promise<Booking[][]> {
+  const bookings: Booking[] = [];
+  for (const file of members) {
+    const legs = file.facts.filter(travelLeg);
+    if (legs.length === 0) {
+      continue;
     }
-    const weak = members.map((file) => file.id).filter((id) => !exact.has(id)).sort();
-    const counts = new Map<string, number>();
-    for (const id of [...exact.keys(), ...weak]) {
-      for (const tag of byId.get(id)!.tags) {
-        if (isTripTag(tag)) {
-          counts.set(tag, (counts.get(tag) ?? 0) + 1);
-        }
-      }
-    }
-    const tag =
-      [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? tripTag(candidate);
-    plans.push({
-      tag,
-      title: tripTitle(tag),
-      start: candidate.start,
-      end: candidate.end,
-      ...(candidate.destination ? { destination: candidate.destination } : {}),
-      ...(anchor ? { anchorId: anchor.id } : {}),
-      exact: new Map([...exact].sort((a, b) => a[0].localeCompare(b[0]))),
-      weak,
-      why: candidate.why,
-      dismissKeys: anchor ? [tag, `anchor:${anchor.id}`] : [`anchor:${weak[0]}`],
-      legacyId: candidate.id,
-      recent: daysUntil(candidate.end, now) >= -RECENT_PAST_DAYS,
+    const dates = legs.map((fact) => fact.value).sort();
+    const { from, to } = await legPlaces(legs);
+    bookings.push({
+      file,
+      legs,
+      start: dates[0]!,
+      end: dates[dates.length - 1]!,
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+      tails: tailsOf.get(file.id) ?? [],
     });
   }
-  return plans;
+  bookings.sort((a, b) => a.start.localeCompare(b.start) || a.file.id.localeCompare(b.file.id));
+  const parent = bookings.map((_, i) => i);
+  const root = (i: number): number => (parent[i] === i ? i : (parent[i] = root(parent[i]!)));
+  for (let i = 0; i < bookings.length; i++) {
+    for (let j = i + 1; j < bookings.length; j++) {
+      const a = bookings[i]!;
+      const b = bookings[j]!;
+      const overlaps = b.start <= a.end;
+      const shared = a.tails.some((tail) => b.tails.includes(tail));
+      const continues =
+        a.to !== undefined &&
+        a.to !== a.from &&
+        b.from === a.to &&
+        dayNumber(b.start) - dayNumber(a.end) <= JOIN_REACH_DAYS;
+      if (overlaps || shared || continues) {
+        parent[root(j)] = root(i);
+      }
+    }
+  }
+  const groups = new Map<number, Booking[]>();
+  bookings.forEach((booking, i) => groups.set(root(i), [...(groups.get(root(i)) ?? []), booking]));
+  return [...groups.values()];
+}
+
+/**
+ * Adds what links to a journey exactly: a document sharing a booking
+ * reference with it, and the email a member came in or the files that
+ * came with it, transitively. Only near the journey: a dated document
+ * joins when one of its dates falls within the reach, and an undated one
+ * only through its email, because a four-character tail recurs over years.
+ */
+function walkExactLinks(
+  exact: Map<string, TripEvidence>,
+  index: {
+    byId: ReadonlyMap<string, PlanFile>;
+    tailsOf: ReadonlyMap<string, string[]>;
+    byTail: ReadonlyMap<string, string[]>;
+    children: ReadonlyMap<string, string[]>;
+  },
+  first: string,
+  last: string,
+): void {
+  const low = dayNumber(first) - JOIN_REACH_DAYS;
+  const high = dayNumber(last) + JOIN_REACH_DAYS;
+  const near = (file: PlanFile, evidence: TripEvidence) => {
+    const dates = file.facts.filter((fact) => DATED_KINDS.has(fact.kind) && !fact.dismissed).map((fact) => dayNumber(fact.value));
+    return dates.length === 0 ? evidence === "email" : dates.some((day) => day >= low && day <= high);
+  };
+  const queue = [...exact.keys()].sort();
+  const join = (id: string | undefined, evidence: TripEvidence) => {
+    const file = id === undefined ? undefined : index.byId.get(id);
+    if (file && !exact.has(file.id) && near(file, evidence)) {
+      exact.set(file.id, evidence);
+      queue.push(file.id);
+    }
+  };
+  for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+    for (const tail of index.tailsOf.get(next) ?? []) {
+      for (const id of index.byTail.get(tail) ?? []) {
+        join(id, "reference");
+      }
+    }
+    join(index.byId.get(next)!.mailParent, "email");
+    for (const id of index.children.get(next) ?? []) {
+      join(id, "email");
+    }
+  }
+}
+
+/** A plan before its tag is settled. */
+interface Draft {
+  candidate: TripSuggestion;
+  /** Its own members, whose tags name it; files pulled in by a link never do. */
+  own: string[];
+  minted: string;
+  start: string;
+  end: string;
+  destination?: string;
+  anchorId?: string;
+  exact: Map<string, TripEvidence>;
+  weak: string[];
+  why: string[];
+}
+
+/**
+ * Settles each plan's tag: the trip tag its own members carry most, else
+ * a new one, made distinct from every other trip so two journeys never
+ * share a name (a second Lisbon trip that month reads "Lisbon 2").
+ */
+function finishPlans(drafts: readonly Draft[], byId: ReadonlyMap<string, PlanFile>, now: number): TripPlan[] {
+  const holders = new Map<string, Set<string>>();
+  for (const file of byId.values()) {
+    for (const tag of file.tags.filter(isTripTag)) {
+      const held = holders.get(tag) ?? new Set<string>();
+      held.add(file.id);
+      holders.set(tag, held);
+    }
+  }
+  const ordered = [...drafts].sort(
+    (a, b) => a.start.localeCompare(b.start) || (a.anchorId ?? a.weak[0] ?? "").localeCompare(b.anchorId ?? b.weak[0] ?? ""),
+  );
+  const taken = new Set<string>();
+  return ordered.map((draft) => {
+    const counts = new Map<string, number>();
+    for (const id of draft.own) {
+      for (const tag of byId.get(id)?.tags.filter(isTripTag) ?? []) {
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      }
+    }
+    let tag = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0];
+    if (tag === undefined) {
+      const own = new Set(draft.own);
+      const free = (name: string) => !taken.has(name) && [...(holders.get(name) ?? [])].every((id) => own.has(id));
+      tag = draft.minted;
+      for (let n = 2; !free(tag); n++) {
+        tag = draft.minted.replace(/-(\d{4}-\d{2})$/, `-${n}-$1`);
+      }
+    }
+    taken.add(tag);
+    return {
+      tag,
+      title: tripTitle(tag),
+      start: draft.start,
+      end: draft.end,
+      ...(draft.destination ? { destination: draft.destination } : {}),
+      ...(draft.anchorId ? { anchorId: draft.anchorId } : {}),
+      exact: new Map([...draft.exact].sort((a, b) => a[0].localeCompare(b[0]))),
+      weak: draft.weak,
+      why: draft.why,
+      dismissKeys: draft.anchorId ? [tag, `anchor:${draft.anchorId}`] : [`anchor:${draft.weak[0]}`],
+      legacyId: draft.candidate.id,
+      recent: daysUntil(draft.end, now) >= -RECENT_PAST_DAYS,
+    };
+  });
 }
 
 /**
  * Whether the owner refused this trip: by its tag or anchor, by the id a
- * refusal was kept under before plans, or while it was dates only, by any
- * file still in it. A new receipt or a new booking never brings it back.
+ * refusal was kept under before plans, or, refused while it was dates
+ * only, by a file still in it (any member of a date-only plan; one that
+ * links exactly to a journey). A new receipt never brings it back, and
+ * refusing a few local documents never hides a journey that later lists
+ * them as date-only.
  */
 export function isPlanDismissed(plan: TripPlan, dismissed: ReadonlySet<string>): boolean {
+  const keyed = plan.anchorId !== undefined ? [...plan.exact.keys()] : plan.weak;
   return (
     plan.dismissKeys.some((key) => dismissed.has(key)) ||
     dismissed.has(plan.legacyId) ||
-    [...plan.exact.keys(), ...plan.weak].some((id) => dismissed.has(`anchor:${id}`))
+    keyed.some((id) => dismissed.has(`anchor:${id}`))
   );
 }

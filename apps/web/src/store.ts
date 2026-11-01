@@ -1280,6 +1280,43 @@ export const useStore = create<StoreState>((set, get) => {
     return done;
   };
 
+  /** The trip assembly in flight, shared by whoever asks meanwhile. */
+  let assemblyRun: Promise<number> | null = null;
+
+  /** One assembly pass; see `assembleTrips`. */
+  const assemble = async (): Promise<number> => {
+    const account = get().session?.email;
+    if (!account || !assembleTripsEnabled() || !factsEnabled()) {
+      return 0;
+    }
+    const live = [...get().files.values()].filter((file) => !file.trashed);
+    const plans = await planTrips(live, Date.now());
+    const grown: { title: string; documents: number }[] = [];
+    let written = 0;
+    for (const plan of plans) {
+      // Only a journey booked exactly assembles; the rest is offered. The
+      // owner's refusals are read again before each trip, so a Not a trip
+      // said while this run is under way holds.
+      if (plan.anchorId === undefined || isPlanDismissed(plan, decided(account, "dismissedTrips"))) {
+        continue;
+      }
+      const excluded = decided(account, "tripExclusions");
+      const ids = [...plan.exact.keys()].filter((id) => !excluded.has(`${plan.tag}|${id}`));
+      const done = await tagTrip(plan.tag, ids, "assembler");
+      if (done.length > 0) {
+        grown.push({ title: plan.title, documents: ids.length });
+        written += done.length;
+      }
+    }
+    // One line for the run, however many trips years of mail held.
+    if (grown.length === 1) {
+      get().finishActivity("processing", `Assembled ${grown[0]!.title} from ${grown[0]!.documents} documents`);
+    } else if (grown.length > 1) {
+      get().finishActivity("processing", `Assembled ${grown.length} trips from your bookings`);
+    }
+    return written;
+  };
+
   /** One cancel scope shared by every transfer in flight; a scope that has
    * been cancelled is spent, so the next batch opens a fresh one. */
   const transferScope = (): AbortController => {
@@ -2895,7 +2932,8 @@ export const useStore = create<StoreState>((set, get) => {
       }
       const live = [...get().files.values()].filter((file) => !file.trashed);
       // The refusal is keyed by the trip as planned now, with its tags
-      // still on, and recorded first, so nothing reassembles it meanwhile.
+      // still on, and recorded first: an assembly run under way reads it
+      // before it reaches this trip, and skips it.
       const plan = (await planTrips(live, Date.now())).find((candidate) => candidate.tag === tag);
       decide(account, "dismissedTrips", plan ? plan.dismissKeys : [tag]);
       if (decided(account, "ownedTrips").has(tag)) {
@@ -2924,36 +2962,12 @@ export const useStore = create<StoreState>((set, get) => {
       await get().removeFromAlbum(fileIds, tag);
     },
 
-    assembleTrips: async () => {
-      const account = get().session?.email;
-      if (!account || !assembleTripsEnabled() || !factsEnabled()) {
-        return 0;
-      }
-      const live = [...get().files.values()].filter((file) => !file.trashed);
-      const plans = await planTrips(live, Date.now());
-      const dismissed = decided(account, "dismissedTrips");
-      const excluded = decided(account, "tripExclusions");
-      const grown: { title: string; documents: number }[] = [];
-      let written = 0;
-      for (const plan of plans) {
-        // Only a journey booked exactly assembles; the rest is offered.
-        if (plan.anchorId === undefined || isPlanDismissed(plan, dismissed)) {
-          continue;
-        }
-        const ids = [...plan.exact.keys()].filter((id) => !excluded.has(`${plan.tag}|${id}`));
-        const done = await tagTrip(plan.tag, ids, "assembler");
-        if (done.length > 0) {
-          grown.push({ title: plan.title, documents: ids.length });
-          written += done.length;
-        }
-      }
-      // One line for the run, however many trips years of mail held.
-      if (grown.length === 1) {
-        get().finishActivity("processing", `Assembled ${grown[0]!.title} from ${grown[0]!.documents} documents`);
-      } else if (grown.length > 1) {
-        get().finishActivity("processing", `Assembled ${grown.length} trips from your bookings`);
-      }
-      return written;
+    assembleTrips: () => {
+      // One run at a time: a second caller shares the run in flight.
+      assemblyRun ??= assemble().finally(() => {
+        assemblyRun = null;
+      });
+      return assemblyRun;
     },
 
     factEvidence: async (id) => {

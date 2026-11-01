@@ -381,8 +381,10 @@ booking-reference tail, or point at the same destination are candidates for
 one trip. When booking data states the journey itself (a flight, train, bus
 or boat, on the owner's word or from a structured source), the trip is
 grouped on every device without asking, together with what links to it
-exactly: a document sharing its booking reference, a file that came in the
-same email, and an exact booking for a day the traveller is away. The trip
+exactly: a document dated near the journey that shares its booking
+reference, a file that came in the same email, and an exact booking for a
+day the traveller is away. Each journey is its own trip, so two trips a few
+weeks apart, or a commuter's weekly flights, never merge into one. The trip
 card says so and offers Not a trip, which takes back only what was grouped
 automatically and is remembered by the account, so the trip never comes
 back; a document taken out of a trip is never put back. A document that

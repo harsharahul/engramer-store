@@ -9,6 +9,8 @@ import type { FileDto } from "./api";
  */
 
 const writes = vi.hoisted(() => ({ patches: 0, batches: 0 }));
+/** Something the owner does while a write is on its way, once. */
+const during = vi.hoisted(() => ({ hook: null as null | (() => Promise<unknown>) }));
 const knobs = vi.hoisted(() => ({ facts: true }));
 
 vi.mock("./api", async (importOriginal) => {
@@ -111,6 +113,20 @@ const lisbon = (): FileEntry[] => [
 ];
 const EXACT = ["dinner", "eticket", "flight", "hotel", "museum", "pass"];
 
+/** A trip two years over: a round trip to Rome and its stay. */
+const rome2024 = (): FileEntry[] => [
+  entry("rome-flight", [
+    exact("2024-05-02", "Flight AQ 5 departs BOS"),
+    exact("2024-05-02", "Flight AQ 5 arrives FCO"),
+    exact("2024-05-09", "Flight AQ 6 departs FCO"),
+    exact("2024-05-09", "Flight AQ 6 arrives BOS"),
+  ]),
+  entry("rome-stay", [
+    exact("2024-05-03", "Check-in: Albergo", { document: "hotel-booking" }),
+    exact("2024-05-08", "Check-out: Albergo", { document: "hotel-booking" }),
+  ]),
+];
+
 function library(files: FileEntry[]) {
   masterKey.value = generateKey();
   useStore.setState({
@@ -153,6 +169,7 @@ beforeAll(async () => {
 beforeEach(() => {
   localStorage.clear();
   knobs.facts = true;
+  during.hook = null;
   writes.patches = 0;
   writes.batches = 0;
   // An older server's answer, so writes take the single route stubbed below.
@@ -165,6 +182,9 @@ beforeEach(() => {
     patch: { encryptedMeta: FileDto["encryptedMeta"] },
   ): Promise<FileDto> => {
     writes.patches++;
+    const hook = during.hook;
+    during.hook = null;
+    await hook?.();
     const held = useStore.getState().files.get(id)!;
     return {
       id,
@@ -275,8 +295,10 @@ describe("trips assemble themselves", () => {
     await useStore.getState().assembleTrips();
     await useStore.getState().undoTrip(TAG);
     expect(tagged(TAG)).toEqual([]);
+    // Dated near the journey, so its reference would join it.
     const receipt = entry("seat", [
       exact("4F2K", "Booking reference", { kind: "identifier", masked: "4F2K", document: "invoice" }),
+      { id: "dated:seat", kind: "dated", document: "invoice", value: "2026-11-02", label: "Paid", source: "label", confidence: 0.7 },
     ]);
     useStore.setState({ files: new Map([...useStore.getState().files, ["seat", receipt]]) });
     expect(await useStore.getState().assembleTrips()).toBe(0);
@@ -309,6 +331,23 @@ describe("trips assemble themselves", () => {
     expect(await useStore.getState().assembleTrips()).toBe(0);
     expect(writes.patches).toBe(0);
     expect(tagged(TAG)).toEqual([]);
+  });
+
+  it("Not a trip while a run is under way is not undone by that run", async () => {
+    library([...lisbon().map((f) => (EXACT.includes(f.id) ? { ...f, tags: [TAG] } : f)), ...rome2024()]);
+    decide(ACCOUNT, "assembledTrips", EXACT.map((id) => `${TAG}|${id}`));
+    // The run writes Rome first; the owner refuses Lisbon meanwhile.
+    during.hook = () => useStore.getState().undoTrip(TAG);
+    await useStore.getState().assembleTrips();
+    expect(tagged("trip:rome-2024-05")).toEqual(["rome-flight", "rome-stay"]);
+    expect(tagged(TAG)).toEqual([]);
+  });
+
+  it("two runs started at once write once", async () => {
+    library(lisbon());
+    await Promise.all([useStore.getState().assembleTrips(), useStore.getState().assembleTrips()]);
+    expect(writes.patches).toBe(6);
+    expect(lines()).toHaveLength(1);
   });
 
   it("a trip that ended two years ago assembles quietly", async () => {

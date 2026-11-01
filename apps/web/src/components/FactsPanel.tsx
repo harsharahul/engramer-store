@@ -101,8 +101,11 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
           tag={trip.tag}
           members={trip.members}
           onOpen={props.onOpen}
+          // Only a trip the assembler wrote whole came together on its own; a
+          // member tagged any other way (by hand, or before ownership was
+          // recorded) makes it the owner's.
           assembled={
-            !authored.owned.has(trip.tag) && trip.members.some((file) => authored.assembled.has(`${trip.tag}|${file.id}`))
+            !authored.owned.has(trip.tag) && trip.members.every((file) => authored.assembled.has(`${trip.tag}|${file.id}`))
           }
           onUndo={() => void undoTrip(trip.tag).then(() => setSaid("Dismissed. It will not come back."))}
         />
