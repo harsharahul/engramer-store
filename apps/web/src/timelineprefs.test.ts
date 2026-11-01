@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { homeCity, openOn, setHomeCity, setOpenOn } from "./timelineprefs";
+import { homeCity, openOn, setHomeCity, setOpenOn, shouldOpenOnTimeline } from "./timelineprefs";
 
 beforeAll(() => {
   const backing = new Map<string, string>();
@@ -26,6 +26,13 @@ describe("the Timeline's settings", () => {
     expect(homeCity()).toHaveLength(80);
     setHomeCity("   ");
     expect(homeCity()).toBeUndefined();
+  });
+
+  it("the app opens on the Timeline once it holds anything, unless Files is chosen or the owner already moved", () => {
+    expect(shouldOpenOnTimeline("timeline", true, false)).toBe(true);
+    expect(shouldOpenOnTimeline("timeline", false, false)).toBe(false);
+    expect(shouldOpenOnTimeline("files", true, false)).toBe(false);
+    expect(shouldOpenOnTimeline("timeline", true, true)).toBe(false);
   });
 
   it("open on defaults to the timeline", () => {

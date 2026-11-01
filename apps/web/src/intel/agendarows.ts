@@ -129,6 +129,33 @@ export function joinablePlans(
   );
 }
 
+/**
+ * What the library asks about trips: whole trips to keep or refuse (a
+ * date-only plan, or a booked journey while trips do not group
+ * themselves), and documents a date suggests for an existing trip.
+ */
+export function offeredTrips(
+  plans: readonly TripPlan[],
+  ctx: Pick<RowContext, "dismissed" | "excluded" | "assembling">,
+  tagsOf: (fileId: string) => readonly string[] | undefined,
+): { proposals: TripPlan[]; joins: number } {
+  const carries = (id: string, tag: string) => tagsOf(id)?.includes(tag) ?? false;
+  const proposals = plans.filter(
+    (plan) =>
+      !(plan.anchorId !== undefined && ctx.assembling) &&
+      plan.recent &&
+      !isPlanDismissed(plan, ctx.dismissed) &&
+      ![...plan.exact.keys(), ...plan.weak].some((id) => carries(id, plan.tag)),
+  );
+  const joins = joinablePlans(plans, ctx.dismissed, carries).reduce(
+    (count, plan) =>
+      count +
+      plan.weak.filter((id) => tagsOf(id) !== undefined && !tagsOf(id)!.some(isTripTag) && !ctx.excluded.has(`${plan.tag}|${id}`)).length,
+    0,
+  );
+  return { proposals, joins };
+}
+
 /** "18-21 Dec", or "30 Nov-2 Dec" across months. */
 function range(start: string, end: string): string {
   const [, sm, sd] = start.split("-").map(Number) as [number, number, number];
@@ -373,15 +400,9 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
 
   // A trip only dates link is asked about once, as one row; so is a booked
   // journey while trips do not group themselves.
-  for (const plan of ctx.plans) {
+  for (const plan of offeredTrips(ctx.plans, ctx, (id) => byId.get(id)?.tags).proposals) {
     const booked = plan.anchorId !== undefined;
-    if ((booked && ctx.assembling) || !plan.recent || isPlanDismissed(plan, ctx.dismissed)) {
-      continue;
-    }
     const members = [...plan.exact.keys(), ...plan.weak].flatMap((id) => byId.get(id) ?? []);
-    if (members.some((file) => file.tags.includes(plan.tag))) {
-      continue;
-    }
     rows.push({
       id: `trip:${plan.dismissKeys[0]}`,
       kind: "trip",

@@ -289,7 +289,7 @@ metadata and index blob like every other derived signal.
   the document", and confirmed by you or not at all.
 
 **What counts without asking, and what waits for a yes.** A fact counts
-(for the bell, notifications, the calendar, Expiring soon and trips) when you
+(for the bell, notifications, the Timeline and trips) when you
 confirmed it, or when the evidence settles it on its own: a reading from a
 barcode, a passport's zone, booking data or an invite, or two independent
 readers (a labelled date and the assistant) stating the same value. Everything
@@ -325,8 +325,8 @@ These appear behind the bell in the toolbar, on the Mac and the phone alike,
 with the reasoning behind each one a click away; the badge counts what you
 have not seen yet. A date close enough to matter also reaches you as a system
 notification when the app is not in front, once per document, with a switch
-in Profile under This device. An **Expiring soon** view lists everything
-being tracked.
+in Profile under This device. The **Timeline** lists everything being
+tracked, in order.
 Facts read out of a file also appear on the file itself, each naming where it
 came from, since how far to trust a date depends on whether a check digit stood
 behind it.
@@ -408,9 +408,21 @@ every trip's return date, a permit that expires mid-trip, the night between
 landing and check-in that nothing covers, and check-in opening the day
 before a flight.
 
-**The calendar** shows the month with tracked dates as dots and trips as
-named spans. Clicking a day lists what it holds, and the entries open their
-files. It appears in the sidebar once something is on it.
+**The Timeline** is the place for time. It lists every dated thing in
+order, one row each: a flight's two legs as one row with its codes and
+times, a stay's check-in and check-out, a delivery window, a ticket or a
+table, a due date with its amount, a bill on its email's date (once its
+total is tracked; an invoice still owed is never counted as paid), and a
+day of photos. The now line sits where the device's clock falls, trips run
+as a band along the rail, and the questions still open are asked in place:
+"Part of Lisbon? Only the date matches." with Add and No, a date to
+confirm, a trip to keep. Its Month view shows each trip as a strip and each
+day's first row and dots; choosing a day opens it on the list. Beside the
+list, an ordinary day's cards: what is left today, this week, the one date
+waiting for a yes, the photos from this day in earlier years, and what the
+month has paid and still owes per currency, never converted. The poster
+shows the home city (set in Profile, otherwise the city most journeys start
+from) with its local time and a sky for the hour.
 
 **Finding connections without a shared reference** is the one place a model
 enters, and only on request. A small zero-shot entity extractor (GLiNER,

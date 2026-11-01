@@ -15,14 +15,15 @@ has one home and mirrors elsewhere, never two homes that drift.
 
 | Surface | Job | What it holds | What it never holds |
 |---|---|---|---|
-| **Sidebar** | Places: where can I go | Fixed places (Files, Recent, Photos, Favorites, Shared, Trash). Attention places that exist only while they have something in them (Expiring soon, Calendar, Shared with me). Collections, user-made first (Albums, Trips), then derived (the Library categories). | Settings, switches, appearance, progress. |
+| **Sidebar** | Places: where can I go | Fixed places (Timeline first, then Files, Recent, Photos, Favorites, Shared, Trash). Attention places that exist only while they have something in them (Shared with me). Collections, user-made first (Albums, Trips), then derived (the Library categories). | Settings, switches, appearance, progress. |
 | **Content area** | Things in the current place | The items of the place. For a place that owns collections, a shelf of those collections at the top, so the collections are content as well as navigation. Empty states with one next action. | Global controls. |
+| **Timeline** | Time: what is happening, what is next, what happened | Every dated thing in one list (bills, bookings, deliveries, trips, photo days) with the now line, its Month view, and an ordinary day's cards (today, this week, the one date waiting for a yes, this month's money). Calendar and Expiring soon are part of it: the Month view and the Dates filter. The app opens here once the library holds anything dated; Profile can say Files instead. | Settings, job progress (the notice center keeps it). |
 | **Search field and panel** | Find: one box for words, operators, sentences, and questions | When focused and empty: recent searches, chips that narrow a search, and one sentence saying what search reads. While typing: one merged list, with an "Interpreted as" line whenever the query was rewritten. For a question: an answer above the same list, with the files it came from as rows. | A second search anywhere in the app. |
 | **Result lists** (search results, Ask sources, palette rows, notices) | Answers: open what was found | One click or Enter opens the item; a modifier click selects it for a batch action; right click or long press opens its menu. A result is an answer, not an icon on a desk, so the item grid's click-selects and double-click-opens convention does not apply here. | A click that only highlights. |
 | **Command palette** | Do and jump, by keyboard | Actions and files. Every action is a mirror of a control that has a visible home somewhere else. | The only home of any capability. |
 | **Toolbar and view bar** | This view: act on the current place and its display | New, Upload, Select, sort, layout, the details and sidebar toggles, the Activity button. | Account or device settings. |
 | **Details pane** | About one thing | Every signal derived about the item, each in its own section with a line saying where it came from and a way to correct or remove it in place. Actions on the item. With nothing selected, a short invitation to select something; never a digest. | Library-wide controls, notices. |
-| **Heads-up strip** | Decisions: things waiting for a yes or no, where waiting has a cost | Dates read from documents awaiting confirmation, proposed trips. Collapses to one line; dismissing is one click. | Information, progress, tips. |
+| **Heads-up strip** | Decisions: things waiting for a yes or no, where waiting has a cost | Dates read from documents awaiting confirmation. Trips waiting for a yes as one line that opens the Timeline, where they are kept or refused. Collapses to one line; dismissing is one click. | Information, progress, tips. |
 | **Notice center** (the bell) | What the app wants to tell you: what needs attention, and what it is doing | Two sections. Needs attention: dates coming up, what the rules noticed, files stored twice, trips, each opening its file, each dismissable. Activity: every background pass with progress, a Stop button, and a log entry saying what it did. The badge counts unread notices and a running job. The same bell on the Mac and the phone. | Settings. Nothing else in the app shows a progress indicator or a digest. |
 | **System notifications** | Reaching you when the app is not in front | Time-sensitive notices only: a date approaching or past, a trip proposed. One notification per fact, never repeated, opening the app on that notice. Permission is asked the first time there is something to say, never at launch. A Profile switch turns them off. | Information, progress, anything without a date. |
 | **Profile** | Capabilities and settings | Preferences that follow the account to every device (the switches), as every decision does (principle 7). Per-device state with its honest reason when a capability is absent. What remains, as counts computed by the same predicates the passes run. Retry. | Places, items. |
@@ -158,8 +159,9 @@ Two examples of the rules at work:
   decision, so it appears in the heads-up strip with confirm and dismiss,
   and on the file in the details pane with its source named. Once
   confirmed it becomes a notice in the bell as it approaches, a system
-  notification when the app is not in front, and a place: Expiring soon
-  and Calendar appear in the sidebar only while they hold something.
+  notification when the app is not in front, and a row on the Timeline
+  and its Month view; a dated notice in the bell opens the Timeline at
+  that day.
 - **Albums.** An album is a user-made collection, so it sits in the
   first sidebar group, opens and reveals itself when created, orders by
   recency, and is also a shelf in Photos. Adding to an album shows a toast

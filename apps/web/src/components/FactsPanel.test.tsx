@@ -134,6 +134,18 @@ describe("the Notices panel", () => {
     expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Not a trip")).toBe(false);
   });
 
+  it("a Coming up row opens its day", () => {
+    const onOpenDay = vi.fn();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const day = isoIn(10);
+    act(() => root.render(<LibraryIntel files={[file("a", "Water bill.pdf", [due(day, true)])]} onOpen={() => {}} onOpenDay={onOpenDay} />));
+    const rowButton = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("Water bill.pdf"))!;
+    act(() => rowButton.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(onOpenDay).toHaveBeenCalledWith(day);
+  });
+
   it("a trip long over shows no card", async () => {
     const back: Fact = {
       id: `event:${isoIn(-400)}`,

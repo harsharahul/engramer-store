@@ -42,7 +42,7 @@ describe("one model for dates and trips", () => {
   });
 
   it("reads dated kinds only through the model", () => {
-    // facts.ts keeps soonestDated for the Expiring view until the Timeline replaces it.
+    // facts.ts defines them and asks with them (offeredFacts); agenda.ts is the model.
     expect(offenders([/\bDATED_KINDS\b/], [join("intel", "facts.ts"), join("intel", "agenda.ts")])).toEqual([]);
   });
 
@@ -61,6 +61,17 @@ describe("one model for dates and trips", () => {
       .filter((path) => /^components\/(?:Timeline[^/]*|CalendarView)\.tsx$/.test(path));
     const others = sources(join(__dirname)).map((file) => relative(join(__dirname), file)).filter((path) => !timeline.includes(path));
     expect(offenders([/\bitemsOf\(/, /\bofferedFacts\(/], others)).toEqual([]);
+  });
+
+  it("the Timeline is the only home for time", () => {
+    // The old places are gone, and so is the sort that fed one of them.
+    expect(offenders([/kind:\s*"calendar"/, /kind:\s*"expiring"/, /\bsoonestDated\b/], [])).toEqual([]);
+    // The Month view lives inside the Timeline.
+    expect(offenders([/<CalendarView\b/], [join("components", "TimelineView.tsx")])).toEqual([]);
+    // The Timeline is the first place in the sidebar.
+    const vault = readFileSync(join(__dirname, "components", "Vault.tsx"), "utf8");
+    expect(vault.indexOf('place("timeline"')).toBeGreaterThan(-1);
+    expect(vault.indexOf('place("timeline"')).toBeLessThan(vault.indexOf('place("files"'));
   });
 
   it("plans trips in one place", () => {

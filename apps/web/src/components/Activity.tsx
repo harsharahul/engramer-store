@@ -75,6 +75,8 @@ export function ActivityPanel(props: {
   sheet: boolean;
   onClose: () => void;
   onOpen: (fileId: string) => void;
+  /** Opens a date on the Timeline. */
+  onOpenDay: (iso: string) => void;
   onOpenProfile: () => void;
 }) {
   const activity = useStore((s) => s.activity);
@@ -161,7 +163,7 @@ export function ActivityPanel(props: {
       <div className="activity-body">
       <section className="activity-notices">
         <div className="activity-section-label">Needs attention</div>
-        <LibraryIntel files={live} onOpen={props.onOpen} />
+        <LibraryIntel files={live} onOpen={props.onOpen} onOpenDay={props.onOpenDay} />
       </section>
       <div className="activity-section-label">Activity</div>
       {jobs.length > 0 && (

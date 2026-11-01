@@ -62,6 +62,8 @@ import { changePassword } from "../changepassword";
 import { IDLE_LOCK_CHOICES, idleLockMinutes, setIdleLockMinutes } from "../idlelock";
 import { emailsOutsideWindow, readingWindowMonths, setReadingWindowMonths } from "../intel/reading";
 import { useSyncedSetting } from "../usesyncedsetting";
+import { homeCity, openOn, setHomeCity, setOpenOn } from "../timelineprefs";
+import { homeCityGuess } from "../intel/agenda";
 import { revealRecoveryKey, rotateRecoveryKey } from "../recoverykey";
 import { RecoveryKeyModal } from "./RecoveryKeyModal";
 import { formatBytes } from "../format";
@@ -759,6 +761,21 @@ export function ProfileView(props: {
 
   const [idleMinutes, setIdleMinutes] = useState(() => idleLockMinutes());
   const [windowMonths, refreshWindowMonths] = useSyncedSetting(readingWindowMonths);
+  const [home, refreshHome] = useSyncedSetting(homeCity);
+  const [opensOn, refreshOpensOn] = useSyncedSetting(openOn);
+  // What the Timeline uses when no home city is set, shown as the field's hint.
+  const [homeGuess, setHomeGuess] = useState<string | undefined>();
+  useEffect(() => {
+    let stale = false;
+    void homeCityGuess([...store.files.values()]).then((city) => {
+      if (!stale) {
+        setHomeGuess(city);
+      }
+    });
+    return () => {
+      stale = true;
+    };
+  }, [store.files]);
   useEffect(() => {
     // Another device's choice arrives through the synced settings.
     const refresh = () => setIdleMinutes(idleLockMinutes());
@@ -1198,6 +1215,42 @@ export function ProfileView(props: {
           >
             <span className={`switch${props.assembleTripsOn ? " on" : ""}`} />
           </button>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Home city</b>
+            <div className="profile-row-sub">
+              Used for the Timeline's sky, the time on the poster and the now line. Read from your
+              flights unless you set it.
+            </div>
+          </div>
+          <input
+            key={home ?? ""}
+            aria-label="Home city"
+            defaultValue={home ?? ""}
+            placeholder={homeGuess ?? ""}
+            onBlur={(e) => {
+              setHomeCity(e.target.value);
+              refreshHome();
+            }}
+          />
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>Open on</b>
+            <div className="profile-row-sub">Where the app opens.</div>
+          </div>
+          <select
+            aria-label="Where the app opens"
+            value={opensOn}
+            onChange={(e) => {
+              setOpenOn(e.target.value === "files" ? "files" : "timeline");
+              refreshOpensOn();
+            }}
+          >
+            <option value="timeline">Timeline</option>
+            <option value="files">Files</option>
+          </select>
         </div>
         <div className="profile-row">
           <div className="profile-row-main">
