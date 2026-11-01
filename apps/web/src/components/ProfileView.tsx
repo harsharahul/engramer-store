@@ -100,6 +100,7 @@ import {
   KeyGlyph,
   LockGlyph,
   MoonGlyph,
+  PlaneGlyph,
   ScanTextGlyph,
   SparkGlyph,
   SunGlyph,
@@ -119,6 +120,8 @@ export function ProfileView(props: {
   onToggleSemantic: () => void;
   factsOn: boolean;
   onToggleFacts: () => void;
+  assembleTripsOn: boolean;
+  onToggleAssembleTrips: () => void;
   entitiesOn: boolean;
   onToggleEntities: () => void;
   assistantOn: boolean;
@@ -1174,6 +1177,26 @@ export function ProfileView(props: {
             onClick={props.onToggleFacts}
           >
             <span className={`switch${props.factsOn ? " on" : ""}`} />
+          </button>
+        </div>
+        <div className="profile-row">
+          <div className="profile-row-main">
+            <b>
+              <PlaneGlyph size={13} /> Assemble trips automatically
+            </b>
+            <div className="profile-row-sub">
+              When booking data shows a journey, its flights, stays and bookings are grouped as a
+              trip on their own. Anything less certain is offered for a yes, and every trip can be
+              undone with Not a trip.
+            </div>
+          </div>
+          <button
+            className="profile-switch"
+            role="switch"
+            aria-checked={props.assembleTripsOn}
+            onClick={props.onToggleAssembleTrips}
+          >
+            <span className={`switch${props.assembleTripsOn ? " on" : ""}`} />
           </button>
         </div>
         <div className="profile-row">

@@ -219,6 +219,14 @@ describe("tagging a trip", () => {
     expect(writes.patches).toBe(0);
   });
 
+  it("Group as never puts back a file the owner took out", async () => {
+    library(lisbon());
+    await useStore.getState().assembleTrips();
+    await useStore.getState().leaveTrip(["museum"], TAG);
+    await useStore.getState().confirmTrip(await planFor(TAG));
+    expect(tagged(TAG)).toEqual(["dinner", "eticket", "flight", "hotel", "pass", "taxi"]);
+  });
+
   it("taking a file out of a trip remembers it", async () => {
     library([flight({ tags: [TAG] }), hotel({ tags: [TAG] })]);
     await useStore.getState().leaveTrip(["hotel"], TAG);

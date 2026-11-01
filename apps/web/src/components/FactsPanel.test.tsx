@@ -2,13 +2,16 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { decide } from "../decisions";
 import type { Fact } from "../intel/facts";
 import type { FileEntry } from "../store";
 import { LibraryIntel } from "./FactsPanel";
 
+const undoTrip = vi.hoisted(() => vi.fn(async (_tag: string) => 1));
+
 vi.mock("../store", () => ({
   useStore: (select: (state: unknown) => unknown) =>
-    select({ session: { email: "a@example.com" }, dismissFact: vi.fn() }),
+    select({ session: { email: "a@example.com" }, dismissFact: vi.fn(), undoTrip }),
 }));
 
 let container: HTMLDivElement;
@@ -21,6 +24,8 @@ beforeAll(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  localStorage.clear();
+  undoTrip.mockClear();
 });
 
 const DAY = 86_400_000;
@@ -92,6 +97,31 @@ describe("the Notices panel", () => {
     expect(container.querySelectorAll(".trip-card")).toHaveLength(1);
     expect(container.querySelector(".trip-card h4")?.textContent).toContain("Lisbon, Nov 2026");
     expect(container.textContent).not.toContain("Coming up");
+  });
+
+  it("an assembled trip says how it came together and can be undone", async () => {
+    const tag = "trip:lisbon-2026-11";
+    decide("a@example.com", "assembledTrips", [`${tag}|a`, `${tag}|b`]);
+    render([file("a", "Flights.pdf", [], [tag]), file("b", "Casa do Rio.pdf", [], [tag])]);
+    await act(async () => {});
+    expect(container.textContent).toContain("Exact evidence, so this trip came together on its own.");
+    const undo = [...container.querySelectorAll("button")].find((b) => b.textContent === "Not a trip")!;
+    await act(async () => {
+      undo.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(undoTrip).toHaveBeenCalledWith(tag);
+    expect(container.textContent).toContain("Dismissed. It will not come back.");
+  });
+
+  it("a trip the owner kept shows neither", async () => {
+    const tag = "trip:lisbon-2026-11";
+    decide("a@example.com", "assembledTrips", [`${tag}|a`]);
+    decide("a@example.com", "ownedTrips", [tag]);
+    render([file("a", "Flights.pdf", [], [tag]), file("b", "Casa do Rio.pdf", [], [tag])]);
+    await act(async () => {});
+    expect(container.querySelectorAll(".trip-card")).toHaveLength(1);
+    expect(container.textContent).not.toContain("came together on its own");
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Not a trip")).toBe(false);
   });
 
   it("a trip long over shows no card", async () => {

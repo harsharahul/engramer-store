@@ -559,6 +559,15 @@ export function dismissedTrips(account: string): Set<string> {
   return decided(account, "dismissedTrips");
 }
 
-export function rememberTripDismissal(account: string, id: string): void {
-  decide(account, "dismissedTrips", [id]);
+export function rememberTripDismissal(account: string, keys: readonly string[]): void {
+  decide(account, "dismissedTrips", keys);
+}
+
+/** Documents the owner said do not belong to a trip: never offered for it, never added to it. */
+export function keepOutOfTrip(account: string, tag: string, fileIds: readonly string[]): void {
+  decide(
+    account,
+    "tripExclusions",
+    fileIds.map((id) => `${tag}|${id}`),
+  );
 }

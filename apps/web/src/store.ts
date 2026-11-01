@@ -1243,9 +1243,12 @@ export const useStore = create<StoreState>((set, get) => {
    * take back exactly what it wrote. Answers the files written.
    */
   const tagTrip = async (tag: string, fileIds: readonly string[], by: "owner" | "assembler"): Promise<string[]> => {
+    const account = get().session?.email;
+    // A file the owner took out of this trip stays out, whoever writes.
+    const excluded = account ? decided(account, "tripExclusions") : new Set<string>();
     const ids = fileIds.filter((id) => {
       const file = get().files.get(id);
-      return file !== undefined && !file.trashed && !file.tags.includes(tag);
+      return file !== undefined && !file.trashed && !file.tags.includes(tag) && !excluded.has(`${tag}|${id}`);
     });
     const { done } = await get().patchFilesMeta(ids, (file) => {
       if (file.tags.includes(tag)) {
@@ -1263,7 +1266,6 @@ export const useStore = create<StoreState>((set, get) => {
       );
       return { tags, facts };
     });
-    const account = get().session?.email;
     if (account) {
       if (by === "owner") {
         decide(account, "ownedTrips", [tag]);
