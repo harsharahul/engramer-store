@@ -93,4 +93,21 @@ describe("the Notices panel", () => {
     expect(container.querySelector(".trip-card h4")?.textContent).toContain("Lisbon, Nov 2026");
     expect(container.textContent).not.toContain("Coming up");
   });
+
+  it("a trip long over shows no card", async () => {
+    const back: Fact = {
+      id: `event:${isoIn(-400)}`,
+      kind: "event",
+      document: "itinerary",
+      value: isoIn(-400),
+      label: "Flight AQ 6 arrives BOS",
+      source: "jsonld",
+      confidence: 1,
+      accepted: "exact",
+    };
+    render([file("a", "Rome flights.pdf", [back], ["trip:rome-2024-05"])]);
+    await act(async () => {});
+    expect(container.querySelectorAll(".trip-card")).toHaveLength(0);
+    expect(container.textContent).toContain("Nothing needs your attention.");
+  });
 });

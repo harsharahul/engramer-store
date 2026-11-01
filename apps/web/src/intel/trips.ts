@@ -17,6 +17,7 @@
  */
 
 import { decide, decided } from "../decisions";
+import { settingChanged } from "../settingsbus";
 import { lookupAirport } from "./airports";
 import { isTracked, type Fact } from "./facts";
 
@@ -528,6 +529,26 @@ export function tripTitle(tag: string): string {
     .map((word) => (word ? word[0]!.toUpperCase() + word.slice(1) : word))
     .join(" ");
   return `${words}, ${MONTHS[Number(match[3]) - 1]} ${match[2]}`;
+}
+
+const ASSEMBLE_KEY = "engram-assemble-trips";
+
+/** Whether journeys in booking data group themselves as trips; on unless turned off. */
+export function assembleTripsEnabled(): boolean {
+  try {
+    return localStorage.getItem(ASSEMBLE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setAssembleTripsEnabled(on: boolean): void {
+  try {
+    localStorage.setItem(ASSEMBLE_KEY, on ? "1" : "0");
+    settingChanged();
+  } catch {
+    // Preference persistence is best-effort.
+  }
 }
 
 /**

@@ -128,7 +128,8 @@ import {
   stampOf,
   type ReadingStamp,
 } from "./intel/reading";
-import { planTrips, type TripPlan } from "./intel/agenda";
+import { isPlanDismissed, planTrips, type TripPlan } from "./intel/agenda";
+import { assembleTripsEnabled } from "./intel/trips";
 import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
 import { blankDocument, DOCX_MIME, XLSX_MIME } from "./office/templates";
@@ -525,6 +526,13 @@ interface StoreState {
   undoTrip: (tag: string) => Promise<number>;
   /** Takes files out of a trip for good: the assembler never puts them back. */
   leaveTrip: (fileIds: string[], tag: string) => Promise<void>;
+  /**
+   * Groups every journey that booking data states exactly as a trip, with
+   * the documents that link to it exactly, across all of time. Refused
+   * trips and files taken out stay out; a second run writes nothing.
+   * Answers the files tagged.
+   */
+  assembleTrips: () => Promise<number>;
   /**
    * The evidence behind a file's facts: the complete reference numbers and
    * the passages they came from. Fetched on request rather than held, which
@@ -2912,6 +2920,38 @@ export const useStore = create<StoreState>((set, get) => {
         decide(account, "ownedTrips", [tag]);
       }
       await get().removeFromAlbum(fileIds, tag);
+    },
+
+    assembleTrips: async () => {
+      const account = get().session?.email;
+      if (!account || !assembleTripsEnabled() || !factsEnabled()) {
+        return 0;
+      }
+      const live = [...get().files.values()].filter((file) => !file.trashed);
+      const plans = await planTrips(live, Date.now());
+      const dismissed = decided(account, "dismissedTrips");
+      const excluded = decided(account, "tripExclusions");
+      const grown: { title: string; documents: number }[] = [];
+      let written = 0;
+      for (const plan of plans) {
+        // Only a journey booked exactly assembles; the rest is offered.
+        if (plan.anchorId === undefined || isPlanDismissed(plan, dismissed)) {
+          continue;
+        }
+        const ids = [...plan.exact.keys()].filter((id) => !excluded.has(`${plan.tag}|${id}`));
+        const done = await tagTrip(plan.tag, ids, "assembler");
+        if (done.length > 0) {
+          grown.push({ title: plan.title, documents: ids.length });
+          written += done.length;
+        }
+      }
+      // One line for the run, however many trips years of mail held.
+      if (grown.length === 1) {
+        get().finishActivity("processing", `Assembled ${grown[0]!.title} from ${grown[0]!.documents} documents`);
+      } else if (grown.length > 1) {
+        get().finishActivity("processing", `Assembled ${grown.length} trips from your bookings`);
+      }
+      return written;
     },
 
     factEvidence: async (id) => {

@@ -69,6 +69,20 @@ describe("noticeKeys", () => {
     expect(keys).not.toContain("fact:f5:e");
     expect(noticeKeys(files, now)).toEqual(keys);
   });
+
+  it("a trip long over raises no notice", () => {
+    const trip = (id: string, tag: string, days: number): NoticeFile => ({
+      id,
+      name: `${id}.pdf`,
+      tags: [tag],
+      facts: [fact(`${id}-out`, "event", iso(days - 4)), fact(`${id}-back`, "event", iso(days))],
+      trashed: false,
+      createdAt: 1,
+    });
+    const keys = noticeKeys([trip("old", "trip:lisbon-2024-11", -700), trip("recent", "trip:porto-2026-08", -10)], now);
+    expect(keys).not.toContain("trip:trip:lisbon-2024-11");
+    expect(keys).toContain("trip:trip:porto-2026-08");
+  });
 });
 
 describe("seen", () => {

@@ -34,6 +34,7 @@ import { idleLockMinutes, setIdleLockMinutes } from "./idlelock";
 import { mergePins, pinnedKeys } from "./keypins";
 import { onSettingChanged } from "./settingsbus";
 import { readingWindowMonths, setReadingWindowMonths } from "./intel/reading";
+import { assembleTripsEnabled, setAssembleTripsEnabled } from "./intel/trips";
 
 export interface SyncedSettings {
   version: 1;
@@ -55,6 +56,8 @@ export interface SyncedSettings {
   assistant?: boolean;
   /** Months of mail the model reads; absent means the blob predates it. */
   readingWindowMonths?: number;
+  /** Whether trips in booking data assemble themselves; absent means the blob predates it. */
+  assembleTrips?: boolean;
   /** The account public key last released to, per email address. */
   contacts?: Record<string, string>;
   /** What the user decided about the library: dismissed notices and
@@ -112,6 +115,7 @@ export function snapshotSettings(account?: string): SyncedSettings {
     idleLockMinutes: idleLockMinutes(),
     assistant: assistantEnabled(),
     readingWindowMonths: readingWindowMonths(),
+    assembleTrips: assembleTripsEnabled(),
     contacts: pinnedKeys(),
   };
 }
@@ -168,6 +172,9 @@ function applyInner(values: SyncedSettings): void {
   }
   if (values.readingWindowMonths !== undefined) {
     setReadingWindowMonths(values.readingWindowMonths);
+  }
+  if (values.assembleTrips !== undefined) {
+    setAssembleTripsEnabled(values.assembleTrips);
   }
   mergePins(values.contacts);
 }

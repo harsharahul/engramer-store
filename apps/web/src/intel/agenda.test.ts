@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasAgenda, isPlanDismissed, itemsOf, planTrips, tripsOf, type AgendaFile, type PlanFile, type TripPlan } from "./agenda";
+import { hasAgenda, isPlanDismissed, isTripCurrent, itemsOf, planTrips, tripsOf, type AgendaFile, type PlanFile, type TripPlan } from "./agenda";
 import { isDated, withExactAcceptance, type Fact } from "./facts";
 import { suggestTrips } from "./trips";
 
@@ -115,6 +115,16 @@ describe("tripsOf", () => {
     expect(trips[0]!.members.map((member) => member.id)).toEqual(["kept"]);
     expect(trips[0]!.start).toBe("2026-11-12");
     expect(tripsOf([file("gone", [], { tags: [ROME], trashed: true })])).toEqual([]);
+  });
+});
+
+describe("isTripCurrent", () => {
+  it("a trip is current until a month after it ends, and while it has no dates", () => {
+    const trip = (end?: string) => ({ tag: "trip:x", title: "x", members: [], ...(end ? { start: end, end } : {}) });
+    expect(isTripCurrent(trip(iso(-29)), NOW)).toBe(true);
+    expect(isTripCurrent(trip(iso(-30)), NOW)).toBe(false);
+    expect(isTripCurrent(trip(iso(40)), NOW)).toBe(true);
+    expect(isTripCurrent(trip(), NOW)).toBe(true);
   });
 });
 

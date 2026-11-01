@@ -106,6 +106,15 @@ export function tripsOf<F extends AgendaFile>(files: readonly F[]): Trip<F>[] {
 }
 
 /**
+ * Whether a trip is still worth saying: not yet a month over, the same
+ * reach back as Coming up. Years of imported mail hold many past trips,
+ * and none of them is news.
+ */
+export function isTripCurrent(trip: Trip<AgendaFile>, now: number): boolean {
+  return trip.end === undefined || daysUntil(trip.end, now) > -COMING_UP.past;
+}
+
+/**
  * Whether the library holds anything dated: a trip, or a date that counts.
  * Asked on every render, so it stops at the first one rather than building
  * the lists; the predicates are the ones the lists use.

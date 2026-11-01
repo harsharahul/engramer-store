@@ -30,6 +30,7 @@ import { ocrEnabled, setOcrEnabled } from "./intel/ocr";
 import { semanticEnabled } from "./intel/semantic";
 import { assistantEnabled, setAssistantEnabled } from "./intel/assistant";
 import { readingWindowMonths, setReadingWindowMonths } from "./intel/reading";
+import { assembleTripsEnabled, setAssembleTripsEnabled } from "./intel/trips";
 import { loadPolicy, savePolicy, DEFAULT_POLICY } from "./backuppolicy";
 
 // Prefs live in localStorage; give the node test env one.
@@ -91,6 +92,21 @@ describe("settings snapshot and apply", () => {
     delete older.readingWindowMonths;
     applySettings(older as SyncedSettings);
     expect(readingWindowMonths()).toBe(6);
+  });
+
+  it("the assemble switch follows the account, and an older blob leaves it alone", () => {
+    expect(assembleTripsEnabled()).toBe(true);
+    setAssembleTripsEnabled(false);
+    const snapshot = snapshotSettings();
+    expect(snapshot.assembleTrips).toBe(false);
+    localStorage.clear();
+    expect(assembleTripsEnabled()).toBe(true);
+    applySettings(snapshot);
+    expect(assembleTripsEnabled()).toBe(false);
+    const older = { ...snapshot } as Partial<SyncedSettings>;
+    delete older.assembleTrips;
+    applySettings(older as SyncedSettings);
+    expect(assembleTripsEnabled()).toBe(false);
   });
 
   it("round-trips every synced switch", () => {

@@ -100,13 +100,16 @@ export interface BackfillResult {
   /** Files the main pass finished: previews, text, meaning, tags in one go. */
   files: number;
   facts: number;
+  /** Files the trip assembly tagged. */
+  trips: number;
 }
 
 /**
  * One automatic pass over everything missing: every file that owes a
  * preview, a text reading, a meaning vector, a category or scene labels
  * gets all of it in one visit, its original fetched once. The dates pass
- * follows, over text the library already holds, so it downloads nothing.
+ * follows, over text the library already holds, so it downloads nothing,
+ * and trips assemble from the dates last.
  * Each scanner runs only when its preference is on, exactly the gate its
  * inline counterpart honors at upload.
  */
@@ -175,7 +178,9 @@ export async function runBackfill(): Promise<BackfillResult | null> {
       !stop() && factsEnabled()
         ? await useStore.getState().scanLibraryForFacts(pass("facts", attemptedFacts))
         : 0;
-    return { files: processed.files, facts };
+    // Trips last, over the dates just read; it gates itself on its switch.
+    const trips = !stop() ? await useStore.getState().assembleTrips() : 0;
+    return { files: processed.files, facts, trips };
   } finally {
     running = false;
   }

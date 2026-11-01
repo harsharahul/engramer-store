@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { decide, decided, DECISIONS_EVENT, decisionEvents } from "../decisions";
 import { useStore, type FileEntry } from "../store";
 import { isDated, isTracked, type FactEvidence } from "../intel/facts";
-import { itemsOf, tripsOf } from "../intel/agenda";
+import { isTripCurrent, itemsOf, tripsOf } from "../intel/agenda";
 import { basisLabel, describeFact, shown, whenLabel } from "../intel/describe";
 import { insightsFor, type Insight } from "../intel/insights";
 import { duplicatesByDigest } from "../intel/duplicates";
@@ -51,7 +51,8 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
   const spokenFor = new Set(insights.map((insight) => insight.fileId).filter(Boolean));
 
   // Confirmed trips are shared tags; the members' events are the itinerary.
-  const trips = tripsOf(live);
+  // A trip long over is history, not something that needs attention.
+  const trips = tripsOf(live).filter((trip) => isTripCurrent(trip, now));
   const inTrip = new Set(trips.flatMap((trip) => trip.members.map((file) => file.id)));
 
   // The same computation the bell counts and the notifications read.
