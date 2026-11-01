@@ -2940,7 +2940,8 @@ export function Vault() {
           />
         </div>
 
-        <div className={cn("viewbar", phoneSearch && !searching && "tw:hidden")}>
+        {/* The Timeline carries its own heading and view bar. */}
+        <div className={cn("viewbar", ((phoneSearch && !searching) || (view.kind === "timeline" && !searching)) && "tw:hidden")}>
           <div className="crumbs">
             {view.kind === "folder" && !searching && !similarActive ? (
               (!isMobile || breadcrumbs.length > 0) && (
