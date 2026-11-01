@@ -59,6 +59,7 @@ export function DetailsPanel(props: {
   const setTags = useStore((s) => s.setTags);
   const removeSummary = useStore((s) => s.removeSummary);
   const removeFromAlbum = useStore((s) => s.removeFromAlbum);
+  const leaveTrip = useStore((s) => s.leaveTrip);
   const panelRef = useRef<HTMLElement>(null);
   const isSheet = useMediaQuery(MOBILE_QUERY);
   const drag = useSheetDrag(panelRef, props.onClose);
@@ -328,10 +329,10 @@ export function DetailsPanel(props: {
               <button
                 title="Remove"
                 onClick={() =>
-                  // setTags protects reserved namespaces, so a trip chip's
-                  // remove goes through the direct membership path instead.
-                  void (isReservedTag(tag)
-                    ? removeFromAlbum([file.id], tag)
+                  // setTags protects reserved namespaces; a trip chip's
+                  // remove takes the file out of the trip for good.
+                  void (isTripTag(tag)
+                    ? leaveTrip([file.id], tag)
                     : setTags(file.id, file.tags.filter((t) => t !== tag)))
                 }
               >

@@ -35,6 +35,7 @@ import {
 import { entitiesEnabled, extractEntities } from "../intel/entities";
 import { lookupAirport } from "../intel/airports";
 import { DECISIONS_EVENT, decisionEvents } from "../decisions";
+import type { TripPlan } from "../intel/agenda";
 import { PlaneGlyph, SparkGlyph, XGlyph } from "./Icon";
 import { Button } from "./ui/button";
 
@@ -155,6 +156,23 @@ export function HeadsUp(props: {
       )}
     </section>
   );
+}
+
+/** A suggestion as a plan whose members all link by date. */
+function asPlan(trip: TripSuggestion): TripPlan {
+  const tag = tripTag(trip);
+  return {
+    tag,
+    title: tripTitle(tag),
+    start: trip.start,
+    end: trip.end,
+    exact: new Map(),
+    weak: trip.fileIds,
+    why: trip.why,
+    dismissKeys: [trip.id],
+    legacyId: trip.id,
+    recent: true,
+  };
 }
 
 /**
@@ -305,7 +323,7 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
                 disabled={busy === trip.id}
                 onClick={() => {
                   setBusy(trip.id);
-                  void confirmTrip(trip).finally(() => setBusy(null));
+                  void confirmTrip(asPlan(trip)).finally(() => setBusy(null));
                 }}
               >
                 Group as {tripTitle(tripTag(trip))}

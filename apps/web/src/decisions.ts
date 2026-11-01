@@ -15,7 +15,13 @@ import { settingChanged } from "./settingsbus";
  * plaintext fragments of the library.
  */
 
-export type DecisionSet = "dismissedInsights" | "dismissedTrips" | "noticesSeen";
+export type DecisionSet =
+  | "dismissedInsights"
+  | "dismissedTrips"
+  | "noticesSeen"
+  | "assembledTrips"
+  | "ownedTrips"
+  | "tripExclusions";
 
 export interface RecentSearch {
   q: string;
@@ -33,6 +39,12 @@ export interface Decisions {
   dismissedInsights: string[];
   dismissedTrips: string[];
   noticesSeen: string[];
+  /** `${tag}|${fileId}`: trip tags the assembler wrote, so Not a trip removes only those. */
+  assembledTrips: string[];
+  /** Trip tags the owner grouped or edited: the trip is theirs, and Not a trip leaves it. */
+  ownedTrips: string[];
+  /** `${tag}|${fileId}`: files the owner took out of a trip, never put back. */
+  tripExclusions: string[];
   recentSearches: RecentSearch[];
   /** Pinned collections by tag; absent in blobs from before pins travelled. */
   pins?: Record<string, PinState>;
@@ -43,6 +55,9 @@ const SET_LIMITS: Record<DecisionSet, number> = {
   dismissedInsights: 1_000,
   dismissedTrips: 1_000,
   noticesSeen: 500,
+  assembledTrips: 5_000,
+  ownedTrips: 1_000,
+  tripExclusions: 5_000,
 };
 const RECENT_SEARCH_LIMIT = 6;
 
@@ -58,7 +73,16 @@ const LEGACY_TRIPS = "engram-trips-dismissed";
 const LEGACY_RECENTS = "engram-recent-searches";
 
 function empty(): Decisions {
-  return { dismissedInsights: [], dismissedTrips: [], noticesSeen: [], recentSearches: [], pins: {} };
+  return {
+    dismissedInsights: [],
+    dismissedTrips: [],
+    noticesSeen: [],
+    assembledTrips: [],
+    ownedTrips: [],
+    tripExclusions: [],
+    recentSearches: [],
+    pins: {},
+  };
 }
 
 function pinsOf(value: unknown): Record<string, PinState> {
@@ -124,6 +148,9 @@ function normalize(value: unknown): Decisions {
     dismissedInsights: strings(record.dismissedInsights),
     dismissedTrips: strings(record.dismissedTrips),
     noticesSeen: strings(record.noticesSeen),
+    assembledTrips: strings(record.assembledTrips),
+    ownedTrips: strings(record.ownedTrips),
+    tripExclusions: strings(record.tripExclusions),
     recentSearches: searches(record.recentSearches),
     pins: pinsOf(record.pins),
   };
@@ -302,6 +329,9 @@ function hasAny(decisions: Decisions): boolean {
     decisions.dismissedInsights.length > 0 ||
     decisions.dismissedTrips.length > 0 ||
     decisions.noticesSeen.length > 0 ||
+    decisions.assembledTrips.length > 0 ||
+    decisions.ownedTrips.length > 0 ||
+    decisions.tripExclusions.length > 0 ||
     decisions.recentSearches.length > 0 ||
     Object.keys(decisions.pins ?? {}).length > 0
   );

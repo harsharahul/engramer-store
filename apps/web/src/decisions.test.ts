@@ -57,16 +57,19 @@ describe("account decisions", () => {
   });
 
   it("merges by union and reports whether this device knew more", () => {
+    const trips = { assembledTrips: [], ownedTrips: [], tripExclusions: [] };
     const local: Decisions = {
       dismissedInsights: ["a", "b"],
       dismissedTrips: [],
       noticesSeen: ["n1"],
+      ...trips,
       recentSearches: [{ q: "tax", at: 10 }],
     };
     const remote: Decisions = {
       dismissedInsights: ["b", "c"],
       dismissedTrips: ["t1"],
       noticesSeen: ["n1"],
+      ...trips,
       recentSearches: [{ q: "tax", at: 5 }, { q: "lease", at: 8 }],
     };
     const { merged, localKnewMore } = mergeDecisions(local, remote);
@@ -79,12 +82,40 @@ describe("account decisions", () => {
     expect(mergeDecisions(remote, merged).localKnewMore).toBe(false);
   });
 
+  it("the trip sets merge by union and survive an older blob", () => {
+    decide(account, "assembledTrips", ["trip:lisbon-2026-11|f1"]);
+    decide(account, "ownedTrips", ["trip:rome-2027-05"]);
+    decide(account, "tripExclusions", ["trip:lisbon-2026-11|f9"]);
+    const knewMore = applyDecisions(account, {
+      dismissedInsights: [],
+      dismissedTrips: [],
+      noticesSeen: [],
+      assembledTrips: ["trip:lisbon-2026-11|f2"],
+      ownedTrips: [],
+      tripExclusions: [],
+      recentSearches: [],
+    });
+    expect([...decided(account, "assembledTrips")].sort()).toEqual(["trip:lisbon-2026-11|f1", "trip:lisbon-2026-11|f2"]);
+    expect(decided(account, "ownedTrips").has("trip:rome-2027-05")).toBe(true);
+    expect(decided(account, "tripExclusions").has("trip:lisbon-2026-11|f9")).toBe(true);
+    expect(knewMore).toBe(true);
+    // A blob from before these sets existed takes nothing away, and the
+    // device says it knows more so the account converges on the union.
+    const older = { dismissedInsights: [], dismissedTrips: [], noticesSeen: [], recentSearches: [] } as unknown as Decisions;
+    expect(applyDecisions(account, older)).toBe(true);
+    expect(decided(account, "assembledTrips").size).toBe(2);
+    expect(decided(account, "tripExclusions").size).toBe(1);
+  });
+
   it("applies a remote blob as a union, never as an overwrite", () => {
     decide(account, "dismissedTrips", ["trip:paris-2026-05"]);
     const knewMore = applyDecisions(account, {
       dismissedInsights: ["dup:zzz"],
       dismissedTrips: [],
       noticesSeen: [],
+      assembledTrips: [],
+      ownedTrips: [],
+      tripExclusions: [],
       recentSearches: [],
     });
     expect(decided(account, "dismissedTrips").has("trip:paris-2026-05")).toBe(true);
@@ -136,6 +167,9 @@ describe("account decisions", () => {
       dismissedInsights: [],
       dismissedTrips: [],
       noticesSeen: [],
+      assembledTrips: [],
+      ownedTrips: [],
+      tripExclusions: [],
       recentSearches: [],
       pins: { "album:alps": { on: true, at: 30 }, "album:coast": { on: true, at: 5 } },
     });
@@ -148,6 +182,9 @@ describe("account decisions", () => {
         dismissedInsights: [],
         dismissedTrips: [],
         noticesSeen: [],
+        assembledTrips: [],
+        ownedTrips: [],
+        tripExclusions: [],
         recentSearches: [],
         pins: { "album:alps": { on: true, at: 30 } },
       }),
