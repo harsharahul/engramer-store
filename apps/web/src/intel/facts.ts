@@ -233,25 +233,6 @@ export function offeredFacts(
 }
 
 /**
- * The nearest date a file is actually tracking, or nothing if it tracks none.
- * Only tracked facts count (confirmed, or accepted on evidence): a reading
- * waiting for a yes has not been agreed to, and listing a file by it would be
- * acting on a guess.
- */
-export function soonestDated(facts: Fact[]): string | undefined {
-  let soonest: string | undefined;
-  for (const fact of facts) {
-    if (!isTracked(fact) || !DATED_KINDS.has(fact.kind)) {
-      continue;
-    }
-    if (soonest === undefined || fact.value < soonest) {
-      soonest = fact.value;
-    }
-  }
-  return soonest;
-}
-
-/**
  * Sources that read a structured field rather than surrounding prose. There is
  * no free text to ground them against, and their own check digits or fixed
  * field positions already proved them.

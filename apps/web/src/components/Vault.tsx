@@ -121,11 +121,11 @@ import {
   generate as assistantGenerate,
   setAssistantEnabled,
 } from "../intel/assistant";
-import { soonestDated } from "../intel/facts";
 import { hasAgenda } from "../intel/agenda";
 import { extractText } from "../intel/extract";
-import { CalendarView } from "./CalendarView";
-import { HeadsUp, TripHeadsUp } from "./HeadsUp";
+import { HeadsUp, TripMirror } from "./HeadsUp";
+import { TimelineView } from "./TimelineView";
+import { openOn, shouldOpenOnTimeline } from "../timelineprefs";
 import { extension, fileKind, formatBytes } from "../format";
 import { albumTitle, albumsFrom, type Album } from "../albums";
 import { orderCollections } from "../sidebar";
@@ -236,8 +236,8 @@ type View =
   | { kind: "shared" }
   | { kind: "shared-with-me" }
   | { kind: "profile" }
-  | { kind: "expiring" }
-  | { kind: "calendar" }
+  /** The place for time; `day` opens a date, a new `nonce` asks for it again. */
+  | { kind: "timeline"; day?: string; now?: boolean; nonce?: number }
   | { kind: "category"; name: string }
   | { kind: "photos" }
   | { kind: "album"; tag: string };
@@ -422,7 +422,8 @@ export function Vault() {
     sidebarWidth,
     detailsWidth,
     sidebarCollapsed,
-    detailsOpen,
+    // On the Timeline the pane opens for a row asked about, never on its own.
+    detailsOpen: detailsOpen && (view.kind !== "timeline" || detailsFileId !== null),
   });
   const frameRef = useRef<HTMLDivElement>(null);
 
@@ -768,17 +769,8 @@ export function Vault() {
       case "favorites":
         files = liveFiles.filter((f) => f.favorite);
         break;
-      case "expiring": {
-        // Sorted by the date itself rather than by the usual sort, because
-        // the whole point of this view is what happens next.
-        const dated = liveFiles
-          .map((file) => ({ file, at: soonestDated(file.facts) }))
-          .filter((entry): entry is { file: FileEntry; at: string } => entry.at !== undefined);
-        dated.sort((a, b) => a.at.localeCompare(b.at));
-        return dated.map((entry) => entry.file);
-      }
-      case "calendar":
-        // The calendar renders itself; the grid under it shows nothing.
+      case "timeline":
+        // The Timeline renders itself; the grid under it shows nothing.
         return [];
       case "category":
         files = liveFiles.filter((f) => !f.shared && (f.category ?? "Other") === view.name);
@@ -1872,6 +1864,29 @@ export function Vault() {
     }
   }, [store.synced]);
 
+  // Once the library is in hand, the app opens on the Timeline when it
+  // holds anything dated, unless the owner chose Files or already moved.
+  const navigated = useRef(false);
+  const firstView = useRef(true);
+  useEffect(() => {
+    if (firstView.current) {
+      firstView.current = false;
+      return;
+    }
+    navigated.current = true;
+  }, [view]);
+  const opened = useRef(false);
+  useEffect(() => {
+    if (store.synced && !opened.current) {
+      opened.current = true;
+      if (shouldOpenOnTimeline(openOn(), hasAgenda(liveFiles), navigated.current)) {
+        setView({ kind: "timeline" });
+      }
+    }
+    // Decided once, when the first sync lands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.synced]);
+
   // Photo backup runs itself when the app opens or comes back to the
   // foreground (iOS shell only; a no-op everywhere else). Waiting for a
   // SERVER sync keeps the already-backed-up ledger honest: `synced` is
@@ -2230,6 +2245,8 @@ export function Vault() {
             .catch(() => showToast("Could not resync. Check your connection."));
         },
       },
+      { id: "go-timeline", label: "Go to Timeline", run: () => setView({ kind: "timeline" }) },
+      { id: "go-now", label: "Go to now", run: () => setView({ kind: "timeline", now: true, nonce: Date.now() }) },
       { id: "go-files", label: "Go to All files", run: () => setView({ kind: "folder", id: null }) },
       {
         id: "go-shared-with-me",
@@ -2435,13 +2452,6 @@ export function Vault() {
   };
 
 
-  // The entry appears only once something is being tracked, so a vault that
-  // has never used this never sees a view that would always be empty.
-  const expiringCount = liveFiles.filter((f) => soonestDated(f.facts) !== undefined).length;
-  // The calendar earns its place once anything is on it: a confirmed dated
-  // fact or a trip. Before that, the sidebar stays as short as it was.
-  const calendarWorthy = hasAgenda(liveFiles);
-
   const searchSuggestions = (
     <>
                 {recentSearches.length > 0 && (
@@ -2493,10 +2503,8 @@ export function Vault() {
           ? "Recent"
           : view.kind === "favorites"
             ? "Favorites"
-            : view.kind === "expiring"
-              ? "Expiring soon"
-            : view.kind === "calendar"
-              ? "Calendar"
+            : view.kind === "timeline"
+              ? "Timeline"
             : view.kind === "shared"
               ? "Shared"
               : view.kind === "shared-with-me"
@@ -2515,7 +2523,8 @@ export function Vault() {
     !similarActive &&
     view.kind !== "trash" &&
     view.kind !== "shared" &&
-    view.kind !== "profile";
+    view.kind !== "profile" &&
+    view.kind !== "timeline";
 
   // The sidebar's contents as data; AppSidebar draws them (shadcn/ui).
   const place = (
@@ -2541,6 +2550,7 @@ export function Vault() {
   });
 
   const sidebarPlaces: SidebarPlace[] = [
+    place("timeline", view.kind === "timeline", () => setView({ kind: "timeline" }), <CalendarGlyph />, "Timeline"),
     place("files", view.kind === "folder", () => setView({ kind: "folder", id: null }), <FolderGlyph />, "Files", undefined, rootDrop),
     place("recent", view.kind === "recent", () => setView({ kind: "recent" }), <ClockGlyph />, "Recent"),
     place("photos", view.kind === "photos", () => setView({ kind: "photos" }), <PhotoGlyph />, "Photos"),
@@ -2552,12 +2562,6 @@ export function Vault() {
       "Favorites",
       liveFiles.filter((f) => f.favorite).length,
     ),
-    ...(expiringCount > 0
-      ? [place("expiring", view.kind === "expiring", () => setView({ kind: "expiring" }), <ClockGlyph />, "Expiring soon", expiringCount)]
-      : []),
-    ...(calendarWorthy
-      ? [place("calendar", view.kind === "calendar", () => setView({ kind: "calendar" }), <CalendarGlyph />, "Calendar")]
-      : []),
     ...(localMode
       ? []
       : [place("shared", view.kind === "shared", () => setView({ kind: "shared" }), <LinkGlyph />, "Shared")]),
@@ -2936,7 +2940,8 @@ export function Vault() {
           />
         </div>
 
-        <div className={cn("viewbar", phoneSearch && !searching && "tw:hidden")}>
+        {/* The Timeline carries its own heading and view bar. */}
+        <div className={cn("viewbar", ((phoneSearch && !searching) || (view.kind === "timeline" && !searching)) && "tw:hidden")}>
           <div className="crumbs">
             {view.kind === "folder" && !searching && !similarActive ? (
               (!isMobile || breadcrumbs.length > 0) && (
@@ -3083,7 +3088,7 @@ export function Vault() {
 
         <div
           ref={contentRef}
-          className="content"
+          className={`content${view.kind === "timeline" && !searching ? " content-timeline" : ""}`}
           onClick={(e) => isEmptySpace(e.target) && clearSelection()}
           {...(isMobile ? pullToRefresh.containerProps : {})}
         >
@@ -3116,7 +3121,7 @@ export function Vault() {
               onOpen={openFile}
             />
           )}
-          {!searching && (view.kind === "folder" || view.kind === "expiring") && (
+          {!searching && view.kind === "folder" && (
             <>
               <HeadsUp
                 files={liveFiles}
@@ -3124,7 +3129,7 @@ export function Vault() {
                 onConfirm={(fileId, factId, value) => void store.confirmFact(fileId, factId, value)}
                 onDismiss={(fileId, factId) => void store.dismissFact(fileId, factId)}
               />
-              <TripHeadsUp files={liveFiles} onOpen={(id) => openFile(id)} />
+              <TripMirror onOpenTimeline={() => setView({ kind: "timeline" })} />
             </>
           )}
           {phoneSearch && !searching ? (
@@ -3152,8 +3157,20 @@ export function Vault() {
             />
           ) : view.kind === "shared" ? (
             <SharedView onToast={showToast} />
-          ) : view.kind === "calendar" ? (
-            <CalendarView files={liveFiles} onOpen={openFile} />
+          ) : view.kind === "timeline" ? (
+            <TimelineView
+              files={liveFiles}
+              factsOn={factsOn}
+              {...(view.nonce !== undefined ? { focus: { ...(view.day ? { day: view.day } : { now: true }), nonce: view.nonce } } : {})}
+              {...(detailsFile && plan.details !== "hidden" ? { selectedFileId: detailsFile.id } : {})}
+              onInspect={inspect}
+              onOpen={openFile}
+              onToast={showToast}
+              onTurnOnDates={() => {
+                setFactsEnabled(true);
+                setFactsOn(true);
+              }}
+            />
           ) : view.kind === "profile" ? (
             <ProfileView
               ocrOn={ocrOn}
@@ -3440,6 +3457,10 @@ export function Vault() {
             onOpen={(id) => {
               setActivityOpen(false);
               openFile(id);
+            }}
+            onOpenDay={(day) => {
+              setActivityOpen(false);
+              setView({ kind: "timeline", day, nonce: Date.now() });
             }}
             onOpenProfile={() => {
               setActivityOpen(false);
@@ -3897,18 +3918,6 @@ function EmptyState(props: {
         <span className="empty-mark">⌘</span>
         <h3>Decrypting your library</h3>
         <p>One moment.</p>
-      </div>
-    );
-  }
-  if (props.view.kind === "expiring") {
-    return (
-      <div className="empty">
-        <span className="empty-mark">◷</span>
-        <h3>Nothing is expiring</h3>
-        <p>
-          Dates found in your documents appear here once you confirm them. Turn on "Read dates in
-          documents" in your profile to start looking.
-        </p>
       </div>
     );
   }

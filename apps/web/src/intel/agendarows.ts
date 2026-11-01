@@ -85,6 +85,24 @@ export function localTime(ms: number): string {
   return `${pad(at.getHours())}:${pad(at.getMinutes())}`;
 }
 
+/** The date of an instant in a named zone, as an ISO day; the device's when the zone is unknown. */
+export function zonedDay(ms: number, zone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(ms);
+  } catch {
+    return localDay(ms);
+  }
+}
+
+/** The time of an instant in a named zone, as HH:MM; the device's when the zone is unknown. */
+export function zonedTime(ms: number, zone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ms);
+  } catch {
+    return localTime(ms);
+  }
+}
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const LEG = /^((?:flight|train|bus|boat)\b.*?)\s+(departs|arrives)\b\s*(.*)$/i;
 const MODE = /^(?:flight|train|bus|boat)\s*/i;
@@ -108,6 +126,61 @@ async function placeName(place: string): Promise<string> {
     return (await lookupAirport(place))?.city ?? place;
   }
   return place;
+}
+
+/**
+ * The trips a document matched only by its date may be asked to join: a
+ * booked journey that exists as a trip (some file carries its tag), is
+ * recent, and was not refused.
+ */
+export function joinablePlans(
+  plans: readonly TripPlan[],
+  dismissed: ReadonlySet<string>,
+  carries: (fileId: string, tag: string) => boolean,
+): TripPlan[] {
+  return plans.filter(
+    (plan) =>
+      plan.anchorId !== undefined &&
+      plan.recent &&
+      !isPlanDismissed(plan, dismissed) &&
+      [...plan.exact.keys()].some((id) => carries(id, plan.tag)),
+  );
+}
+
+/**
+ * What the library asks about trips: whole trips to keep or refuse (a
+ * date-only plan, or a booked journey while trips do not group
+ * themselves), and documents a date suggests for an existing trip.
+ */
+export function offeredTrips(
+  plans: readonly TripPlan[],
+  ctx: Pick<RowContext, "dismissed" | "excluded" | "assembling">,
+  fileOf: (fileId: string) => { tags: readonly string[]; facts: readonly Fact[] } | undefined,
+): { proposals: TripPlan[]; joins: number } {
+  const tagsOf = (id: string) => fileOf(id)?.tags;
+  const carries = (id: string, tag: string) => tagsOf(id)?.includes(tag) ?? false;
+  // Dates alone make a trip question only around somewhere to stay: an
+  // ordinary week of dinners, deliveries and a concert is not a trip.
+  const staysAway = (plan: TripPlan) =>
+    plan.weak.some((id) =>
+      fileOf(id)?.facts.some(
+        (fact) => fact.kind === "event" && isTracked(fact) && (fact.document === "hotel-booking" || fact.document === "car-rental"),
+      ),
+    );
+  const proposals = plans.filter(
+    (plan) =>
+      (plan.anchorId !== undefined ? !ctx.assembling : staysAway(plan)) &&
+      plan.recent &&
+      !isPlanDismissed(plan, ctx.dismissed) &&
+      ![...plan.exact.keys(), ...plan.weak].some((id) => carries(id, plan.tag)),
+  );
+  const joins = joinablePlans(plans, ctx.dismissed, carries).reduce(
+    (count, plan) =>
+      count +
+      plan.weak.filter((id) => tagsOf(id) !== undefined && !tagsOf(id)!.some(isTripTag) && !ctx.excluded.has(`${plan.tag}|${id}`)).length,
+    0,
+  );
+  return { proposals, joins };
 }
 
 /** "18-21 Dec", or "30 Nov-2 Dec" across months. */
@@ -134,14 +207,7 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
     const tag = file.tags.find(isTripTag);
     return tag ? { tag, title: tripTitle(tag), name: nameOf(tag), evidence: "exact" } : undefined;
   };
-  // A date alone asks to join only a trip that exists, is recent, and was not refused.
-  const anchored = ctx.plans.filter(
-    (plan) =>
-      plan.anchorId !== undefined &&
-      plan.recent &&
-      !isPlanDismissed(plan, ctx.dismissed) &&
-      [...plan.exact.keys()].some((id) => byId.get(id)?.tags.includes(plan.tag)),
-  );
+  const anchored = joinablePlans(ctx.plans, ctx.dismissed, (id, tag) => byId.get(id)?.tags.includes(tag) ?? false);
   const suggested = (file: RowFile, day?: string): RowTrip | undefined => {
     if (file.tags.some(isTripTag)) {
       return undefined;
@@ -361,15 +427,9 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
 
   // A trip only dates link is asked about once, as one row; so is a booked
   // journey while trips do not group themselves.
-  for (const plan of ctx.plans) {
+  for (const plan of offeredTrips(ctx.plans, ctx, (id) => byId.get(id)).proposals) {
     const booked = plan.anchorId !== undefined;
-    if ((booked && ctx.assembling) || !plan.recent || isPlanDismissed(plan, ctx.dismissed)) {
-      continue;
-    }
     const members = [...plan.exact.keys(), ...plan.weak].flatMap((id) => byId.get(id) ?? []);
-    if (members.some((file) => file.tags.includes(plan.tag))) {
-      continue;
-    }
     rows.push({
       id: `trip:${plan.dismissKeys[0]}`,
       kind: "trip",

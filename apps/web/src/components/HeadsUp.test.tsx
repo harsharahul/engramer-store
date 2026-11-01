@@ -2,10 +2,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { decided } from "../decisions";
+import { decide } from "../decisions";
 import { withExactAcceptance, type Fact } from "../intel/facts";
 import { useStore, type FileEntry } from "../store";
-import { HeadsUp, TripHeadsUp } from "./HeadsUp";
+import { HeadsUp, TripMirror } from "./HeadsUp";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -88,8 +88,6 @@ const readByModel = (id: string, days: number, label: string): Fact => ({
   accepted: "grounded",
 });
 
-const confirmTrip = vi.fn(async () => {});
-
 /** Lets the plans' asynchronous work land; the airport table loads on first use. */
 async function settle() {
   await act(async () => {
@@ -98,13 +96,11 @@ async function settle() {
   });
 }
 
-function renderTrips(files: FileEntry[]) {
-  if (!container?.isConnected) {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-  }
-  act(() => root.render(<TripHeadsUp files={files} onOpen={() => {}} />));
+function renderMirror(onOpenTimeline: () => void) {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  act(() => root.render(<TripMirror onOpenTimeline={onOpenTimeline} />));
 }
 
 const click = (label: RegExp) => {
@@ -114,65 +110,31 @@ const click = (label: RegExp) => {
   });
 };
 
-describe("trips offered for a yes", () => {
+describe("trips in Files", () => {
   beforeEach(() => {
     localStorage.clear();
-    confirmTrip.mockClear();
     useStore.setState({
       session: { email: ACCOUNT, token: "t", masterKey: new Uint8Array(32), privateKey: new Uint8Array(32), publicKey: "" },
-      confirmTrip,
-      warmSearchIndex: async () => {},
     });
   });
 
-  it("a date-only trip is offered, and Ignore keeps it away for good", async () => {
+  it("the trip card in Files is one line now", async () => {
     const stay = doc("stay", [
       booked("in", 20, "Check-in: Casa do Rio", "hotel-booking"),
       booked("out", 24, "Check-out: Casa do Rio", "hotel-booking"),
     ]);
     const taxi = doc("taxi", [readByModel("ride", 21, "Taxi")]);
-    renderTrips([stay, taxi]);
+    useStore.setState({ files: new Map([stay, taxi].map((file) => [file.id, file])) });
+    const onOpenTimeline = vi.fn();
+    renderMirror(onOpenTimeline);
     await settle();
-    expect(container.textContent).toContain("These 2 documents look like one trip");
-    expect(container.textContent).toContain("stay.pdf");
-    expect(container.textContent).toContain("taxi.pdf");
-    click(/Ignore/);
-    expect(decided(ACCOUNT, "dismissedTrips").has("anchor:stay")).toBe(true);
+    expect(container.textContent).toBe("1 trip waits for a yes on the Timeline.Open Timeline");
+    expect(container.textContent).not.toContain("Group as");
+    click(/Open Timeline/);
+    expect(onOpenTimeline).toHaveBeenCalled();
+    // Refused on the Timeline, it is gone from Files too.
+    act(() => decide(ACCOUNT, "dismissedTrips", ["anchor:stay"]));
     await settle();
-    expect(container.textContent).not.toContain("look like one trip");
-    // A new receipt, even one that sorts first, does not bring it back.
-    renderTrips([stay, taxi, doc("a-receipt", [readByModel("pharmacy", 22, "Pharmacy")])]);
-    await settle();
-    expect(container.textContent).not.toContain("look like one trip");
-  });
-
-  it("an assembled trip with a date-only member offers only that member", async () => {
-    const tag = "trip:lisbon-2030-01";
-    const flight = doc(
-      "flight",
-      [
-        booked("out1", 20, "Flight TP 236 departs SFO", "itinerary"),
-        booked("out2", 21, "Flight TP 236 arrives LIS", "itinerary"),
-        booked("back1", 24, "Flight TP 237 departs LIS", "itinerary"),
-        booked("back2", 24, "Flight TP 237 arrives SFO", "itinerary"),
-      ],
-      [tag],
-    );
-    const hotel = doc(
-      "hotel",
-      [booked("in", 21, "Check-in: Casa do Rio", "hotel-booking"), booked("out", 24, "Check-out: Casa do Rio", "hotel-booking")],
-      [tag],
-    );
-    const taxi = doc("taxi", [readByModel("ride", 22, "Taxi")]);
-    renderTrips([flight, hotel, taxi]);
-    await settle();
-    expect(container.textContent).toContain("Part of Lisbon, Jan 2030? Only the date matches.");
-    const named = [...container.querySelectorAll(".trip-files button")].map((b) => b.textContent);
-    expect(named).toEqual(["taxi.pdf"]);
-    click(/^No$/);
-    expect(decided(ACCOUNT, "tripExclusions").has(`${tag}|taxi`)).toBe(true);
-    expect(decided(ACCOUNT, "dismissedTrips").size).toBe(0);
-    await settle();
-    expect(container.textContent).not.toContain("Part of Lisbon");
+    expect(container.textContent).toBe("");
   });
 });

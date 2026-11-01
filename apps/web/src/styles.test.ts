@@ -73,6 +73,18 @@ describe("the details panel survives the phone layout", () => {
   });
 });
 
+describe("the Timeline scrolls at every width", () => {
+  it("keeps a scroller and room above the tab bar on a phone", () => {
+    const phone = mediaBlocks(CSS).filter(([condition]) => /max-width:\s*760px/.test(condition));
+    const rule = phone
+      .flatMap(([, body]) => [...body.matchAll(/\.content\.content-timeline\s*\{([^}]*)\}/g)])
+      .map((match) => match[1]!)
+      .join(";");
+    expect(rule).toMatch(/overflow-y:\s*auto/);
+    expect(rule).toMatch(/padding-bottom:/);
+  });
+});
+
 /**
  * The sidebar rail keeps a footprint for every group. An album the owner
  * had just made vanished with its whole group when the sidebar railed on a

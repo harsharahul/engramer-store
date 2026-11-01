@@ -95,7 +95,7 @@ const hotel = (over: Partial<FileEntry> = {}) =>
     over,
   );
 
-/** The prototype's Lisbon trip: six documents that link exactly, and a taxi receipt that does not. */
+/** A trip to Lisbon: six documents that link exactly, and a taxi receipt that does not. */
 const lisbon = (): FileEntry[] => [
   flight(),
   hotel(),

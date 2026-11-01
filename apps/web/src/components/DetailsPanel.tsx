@@ -5,7 +5,7 @@ import { FileFacts } from "./FactsPanel";
 import { useStore, type FileEntry } from "../store";
 import { mailRows } from "../mail/details";
 import { albumTitle, isAlbumTag, isReservedTag } from "../albums";
-import { isTripTag } from "../intel/trips";
+import { TripSection } from "./TripSection";
 import { useSheetDrag } from "../sheetdrag";
 import { MOBILE_QUERY, useMediaQuery } from "../media";
 import { thumbnailUrl } from "../thumbs";
@@ -31,6 +31,11 @@ import {
  * The right-hand inspector: everything about the selected file in one place,
  * with tags editable inline. Multi-selection shows a summary instead.
  */
+/** The tags shown as editable chips: the owner's own, never a trip, album or mail namespace. */
+export function chipTags(tags: readonly string[]): string[] {
+  return tags.filter((tag) => !isReservedTag(tag));
+}
+
 export function DetailsPanel(props: {
   file: FileEntry | null;
   selectionCount: number;
@@ -59,7 +64,6 @@ export function DetailsPanel(props: {
   const setTags = useStore((s) => s.setTags);
   const removeSummary = useStore((s) => s.removeSummary);
   const removeFromAlbum = useStore((s) => s.removeFromAlbum);
-  const leaveTrip = useStore((s) => s.leaveTrip);
   const panelRef = useRef<HTMLElement>(null);
   const isSheet = useMediaQuery(MOBILE_QUERY);
   const drag = useSheetDrag(panelRef, props.onClose);
@@ -292,6 +296,8 @@ export function DetailsPanel(props: {
 
       <FileFacts file={file} />
 
+      <TripSection file={file} onToast={props.onToast} />
+
       {file.tags.some((t) => isAlbumTag(t)) && (
         <div className="details-tags">
           <span className="details-label">Albums</span>
@@ -319,23 +325,12 @@ export function DetailsPanel(props: {
       <div className="details-tags">
         <span className="details-label">Tags</span>
         <div className="tag-input compact">
-          {file.tags
-            .filter((tag) => !isReservedTag(tag) || isTripTag(tag))
-            .map((tag) => (
+          {chipTags(file.tags).map((tag) => (
             <span key={tag} className="tag editable">
               <button className="tag-link" title={`Search tag:${tag}`} onClick={() => props.onTagClick(tag)}>
                 {tag}
               </button>
-              <button
-                title="Remove"
-                onClick={() =>
-                  // setTags protects reserved namespaces; a trip chip's
-                  // remove takes the file out of the trip for good.
-                  void (isTripTag(tag)
-                    ? leaveTrip([file.id], tag)
-                    : setTags(file.id, file.tags.filter((t) => t !== tag)))
-                }
-              >
+              <button title="Remove" onClick={() => void setTags(file.id, file.tags.filter((t) => t !== tag))}>
                 <XGlyph size={10} />
               </button>
             </span>

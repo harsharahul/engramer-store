@@ -22,19 +22,10 @@ import type { Fact } from "../intel/facts";
 import { offeredFacts } from "../intel/facts";
 import { swappedReading } from "../intel/dates";
 import { describeFact, shown, withArticle } from "../intel/describe";
-import {
-  assembleTripsEnabled,
-  dismissedTrips,
-  factsFingerprint,
-  isTripTag,
-  keepOutOfTrip,
-  rememberTripDismissal,
-} from "../intel/trips";
-import { entitiesEnabled, extractEntities } from "../intel/entities";
-import { lookupAirport } from "../intel/airports";
-import { decided, DECISIONS_EVENT, decisionEvents } from "../decisions";
-import { isPlanDismissed, planTrips, type TripPlan } from "../intel/agenda";
-import { PlaneGlyph, SparkGlyph, XGlyph } from "./Icon";
+import { offeredTrips } from "../intel/agendarows";
+import { assembleTripsEnabled } from "../intel/trips";
+import { SparkGlyph, XGlyph } from "./Icon";
+import { useTripPlans } from "./useTripPlans";
 import { Button } from "./ui/button";
 
 /** More than this and the bar stays shut until asked; one is not a queue. */
@@ -156,213 +147,35 @@ export function HeadsUp(props: {
   );
 }
 
-/** What a proposal card asks about: a new trip, or files for one that exists. */
-interface Offer {
-  plan: TripPlan;
-  /** The members it asks about: those not yet carrying the trip's tag. */
-  missing: string[];
-  /** Some members already carry the tag: the question is whether these join. */
-  joining: boolean;
-}
-
 /**
- * Trips proposed above the files, in the queue's discipline: a card that
- * disappears the moment it is answered. A journey booked exactly groups
- * itself (store.assembleTrips); what links only by date is asked about
- * here, once. A refusal is the account's, keyed by the trip and never by
- * its member list, so a new receipt cannot bring it back.
+ * Trips in Files, as one line: the Timeline is where trips are kept or
+ * refused, and where a date-only document is added or kept out. This
+ * mirror says how many wait and opens the Timeline.
  */
-export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string) => void }) {
-  const confirmTrip = useStore((s) => s.confirmTrip);
-  const warmSearchIndex = useStore((s) => s.warmSearchIndex);
-  const account = useStore((s) => s.session?.email ?? "");
-  const [plans, setPlans] = useState<TripPlan[]>([]);
-  // The account's refusals, re-read when a decision lands from anywhere.
-  const [refused, setRefused] = useState(() => ({
-    trips: dismissedTrips(account),
-    kept: decided(account, "tripExclusions"),
-  }));
-  useEffect(() => {
-    const reread = () => setRefused({ trips: dismissedTrips(account), kept: decided(account, "tripExclusions") });
-    reread();
-    decisionEvents.addEventListener(DECISIONS_EVENT, reread);
-    return () => decisionEvents.removeEventListener(DECISIONS_EVENT, reread);
-  }, [account]);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [linking, setLinking] = useState(false);
-  const [linked, setLinked] = useState<Map<string, Set<string>> | null>(null);
-  const live = props.files.filter((file) => !file.trashed);
-  // The fingerprint covers answers and values, not just counts: confirming
-  // a fact changes no length, and it is precisely the moment clustering is
-  // allowed to begin.
-  const fingerprint = factsFingerprint(live);
-  useEffect(() => {
-    let stale = false;
-    void planTrips(live, Date.now(), linked ? { extraPlaces: linked } : undefined).then((all) => {
-      if (!stale) {
-        setPlans(all);
-      }
-    });
-    return () => {
-      stale = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fingerprint, linked]);
-
-  /**
-   * The entity pass, strictly on request. It reads the already-decrypted
-   * search text, asks the local extractor for places, and feeds them to the
-   * same deterministic clustering; spans are never stored anywhere.
-   */
-  const findConnections = async () => {
-    setLinking(true);
-    try {
-      await warmSearchIndex();
-      const fresh = useStore.getState().files;
-      const extra = new Map<string, Set<string>>();
-      for (const file of props.files) {
-        const entry = fresh.get(file.id);
-        const text = entry?.text;
-        if (!entry || entry.trashed || !text) {
-          continue;
-        }
-        if (!entry.facts.some((fact) => fact.kind === "event")) {
-          continue;
-        }
-        const spans = await extractEntities(text.slice(0, 2000), ["airport", "city"]);
-        const places = new Set<string>();
-        for (const span of spans) {
-          if (span.label === "airport" && /^[A-Za-z]{3}$/.test(span.text)) {
-            const airport = await lookupAirport(span.text);
-            if (airport) {
-              places.add(airport.city);
-            }
-          } else if (span.label === "city") {
-            places.add(span.text.trim());
-          }
-        }
-        if (places.size > 0) {
-          extra.set(entry.id, places);
-        }
-      }
-      setLinked(extra);
-    } catch {
-      // The model may still be downloading, or absent on this deployment;
-      // the button stays and a second press tries again.
-    } finally {
-      setLinking(false);
-    }
-  };
-
-  const tagsOf = new Map(live.map((file) => [file.id, file.tags]));
-  // While trips assemble themselves, exact members are the assembler's to
-  // tag; with the switch off, they are asked about like the rest.
-  const assembling = assembleTripsEnabled();
-  const open: Offer[] = plans.flatMap((plan) => {
-    if (!plan.recent || isPlanDismissed(plan, refused.trips)) {
-      return [];
-    }
-    const members = [...(assembling ? [] : [...plan.exact.keys()]), ...plan.weak];
-    const missing = members
-      .filter((id) => !tagsOf.get(id)?.includes(plan.tag) && !refused.kept.has(`${plan.tag}|${id}`))
-      .sort();
-    if (missing.length === 0) {
-      return [];
-    }
-    // A journey booked exactly is a trip already, or about to be one.
-    const joining =
-      (assembling && plan.anchorId !== undefined) ||
-      [...plan.exact.keys(), ...plan.weak].some((id) => tagsOf.get(id)?.includes(plan.tag));
-    return [{ plan, missing, joining }];
+export function TripMirror(props: { onOpenTimeline(): void }) {
+  const files = useStore((s) => s.files);
+  const { plans, dismissed, excluded } = useTripPlans();
+  const { proposals, joins } = offeredTrips(plans, { dismissed, excluded, assembling: assembleTripsEnabled() }, (id) => {
+    const file = files.get(id);
+    return file && !file.trashed ? file : undefined;
   });
-  const loose = live.filter(
-    (file) =>
-      file.facts.some((fact) => fact.kind === "event" && !fact.dismissed) &&
-      !file.tags.some(isTripTag),
-  );
-  const canLink = entitiesEnabled() && linked === null && loose.length >= 2;
-  if (open.length === 0 && !canLink) {
+  const total = proposals.length + joins;
+  if (total === 0) {
     return null;
   }
+  const text =
+    total > 1
+      ? `${total} trips and documents wait for a yes on the Timeline.`
+      : proposals.length === 1
+        ? "1 trip waits for a yes on the Timeline."
+        : "1 document waits for a yes on the Timeline.";
   return (
-    <section className="pending" aria-label="Trips worth grouping">
-      <div className="pending-list">
-        {canLink && (
-          <div className="pending-bulk">
-            <span>Documents that share no reference can still belong together.</span>
-            <Button
-              variant="secondary"
-              size="xs"
-              disabled={linking}
-              onClick={() => void findConnections()}
-            >
-              {linking ? "Looking…" : "Find connections"}
-            </Button>
-          </div>
-        )}
-        {open.map(({ plan, missing, joining }) => (
-          <div key={plan.dismissKeys.join("|")} className="pending-card">
-            <div className="pending-card-text">
-              <PlaneGlyph size={13} />{" "}
-              {joining ? (
-                <>
-                  Part of {plan.title}?
-                  {missing.every((id) => plan.weak.includes(id)) ? " Only the date matches." : ""}
-                </>
-              ) : (
-                <>
-                  These {missing.length} documents look like one trip
-                  {plan.destination ? ` to ${plan.destination}` : ""}, {shown(plan.start)} to {shown(plan.end)}. Group
-                  them?
-                </>
-              )}
-            </div>
-            <div className="trip-files">
-              {missing.map((id) => (
-                <button key={id} className="linky" onClick={() => props.onOpen(id)}>
-                  {live.find((file) => file.id === id)?.name ?? id}
-                </button>
-              ))}
-            </div>
-            <details className="trip-why">
-              <summary>Why these?</summary>
-              <ul>
-                {plan.why.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </details>
-            <div className="pending-card-actions">
-              <Button
-                size="xs"
-                disabled={busy === plan.dismissKeys.join("|")}
-                onClick={() => {
-                  setBusy(plan.dismissKeys.join("|"));
-                  void confirmTrip(plan).finally(() => setBusy(null));
-                }}
-              >
-                {joining ? "Add" : `Group as ${plan.title}`}
-              </Button>
-              <Button
-                variant="quiet"
-                size="xs"
-                onClick={() =>
-                  // Saying no to a document leaves the trip as it is;
-                  // saying no to a trip keeps the whole trip away.
-                  joining ? keepOutOfTrip(account, plan.tag, missing) : rememberTripDismissal(account, plan.dismissKeys)
-                }
-              >
-                {joining ? (
-                  "No"
-                ) : (
-                  <>
-                    <XGlyph size={12} /> Ignore
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-        ))}
+    <section className="pending" aria-label="Trips waiting on the Timeline">
+      <div className="pending-bulk">
+        <span>{text}</span>
+        <Button variant="secondary" size="xs" onClick={props.onOpenTimeline}>
+          Open Timeline
+        </Button>
       </div>
     </section>
   );

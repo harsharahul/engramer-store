@@ -44,6 +44,15 @@ export function openOn(): OpenOn {
   }
 }
 
+/**
+ * Whether the app should open on the Timeline: the owner did not choose
+ * Files, the library holds something dated, and the owner has not already
+ * gone somewhere else this session.
+ */
+export function shouldOpenOnTimeline(where: OpenOn, hasAgenda: boolean, navigated: boolean): boolean {
+  return where === "timeline" && hasAgenda && !navigated;
+}
+
 export function setOpenOn(where: OpenOn): void {
   try {
     localStorage.setItem(OPEN_KEY, where);

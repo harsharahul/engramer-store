@@ -24,7 +24,12 @@ import { ClockGlyph, CopyGlyph, InfoGlyph, XGlyph } from "./Icon";
 
 /** ------------------------------------------------------- the whole library */
 
-export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) => void }) {
+export function LibraryIntel(props: {
+  files: FileEntry[];
+  onOpen: (id: string) => void;
+  /** Opens a date on the Timeline; without it, a dated row opens its file. */
+  onOpenDay?: (iso: string) => void;
+}) {
   const account = useStore((s) => s.session?.email ?? "");
   // What the user dismissed is the account's record: a notice dismissed
   // here stays dismissed on every device, and one dismissed elsewhere
@@ -117,7 +122,10 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
           </h4>
           {upcoming.slice(0, 6).map(({ file, fact, days }) => (
             <div key={`${file.id}:${fact.id}`} className={`intel-row intel-row-wrap${days < 0 ? " overdue" : ""}`}>
-              <button className="intel-row-open" onClick={() => props.onOpen(file.id)}>
+              <button
+                className="intel-row-open"
+                onClick={() => (props.onOpenDay ? props.onOpenDay(fact.value) : props.onOpen(file.id))}
+              >
                 <span className="intel-when">{whenLabel(fact.value, now)}</span>
                 <span className="intel-what">{describeFact(fact)}</span>
                 <span className="intel-file">{file.name}</span>

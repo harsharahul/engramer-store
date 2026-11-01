@@ -442,6 +442,17 @@ const STATES = [
   { name: "folder", run: async (page) => { await toRoot(page); await openNotes(page); } },
   { name: "recent", run: async (page) => { await toRoot(page); await nav(page, "Recent"); await page.waitForTimeout(900); } },
   { name: "photos", run: async (page) => { await toRoot(page); await nav(page, "Photos"); await page.waitForTimeout(1200); } },
+  { name: "timeline", run: async (page) => { await toRoot(page); await nav(page, "Timeline"); await page.waitForTimeout(1200); } },
+  {
+    name: "timeline-month",
+    run: async (page) => {
+      await toRoot(page);
+      await nav(page, "Timeline");
+      await page.waitForTimeout(900);
+      await page.getByRole("button", { name: "Month", exact: true }).click({ timeout: 5000 });
+      await page.waitForTimeout(600);
+    },
+  },
   { name: "favorites", run: async (page) => { await toRoot(page); await nav(page, "Favorites"); await page.waitForTimeout(900); } },
   { name: "shared", run: async (page) => { await toRoot(page); await nav(page, "Shared"); await page.waitForTimeout(900); } },
   { name: "trash", run: async (page) => { await toRoot(page); await nav(page, "Trash"); await page.waitForTimeout(900); } },

@@ -6,6 +6,11 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Added
+- **The Timeline.** One place for time: every bill, booking, delivery,
+  trip and photo day in order, the day's time and sky at home, what is due
+  this week, and a Month view. Calendar and Expiring soon are part of it
+  now. The app opens on it once the library holds anything dated; Profile
+  sets the home city and can open on Files instead.
 - **Trips come together on their own.** When booking data in mail or
   documents shows a journey, its flights, stays, tickets and the documents
   that share its booking reference are grouped as a trip on every device,

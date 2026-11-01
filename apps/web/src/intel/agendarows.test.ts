@@ -1,4 +1,4 @@
-// Rows read local days and times; pin the zone the prototype's Everyday is in.
+// Rows read local days and times; pin the zone of the ordinary day below.
 process.env.TZ = "America/Los_Angeles";
 
 import { describe, expect, it } from "vitest";
@@ -217,6 +217,18 @@ describe("rowsOf", () => {
     });
     const refused = await rowsOf(files, { ...none, plans, dismissed: new Set([plans[0]!.dismissKeys[0]!]) }, NOW);
     expect(refused.some((row) => row.kind === "trip")).toBe(false);
+  });
+
+  it("an ordinary week of dinners, deliveries and a concert is not a trip question", async () => {
+    const files = [
+      email("dinner", "Your table is booked", [exact("event", "2026-09-08", "Table at Cedar & Salt", { document: "dining", time: "19:30" })]),
+      email("parcel", "Your order has shipped", [exact("event", "2026-09-09", "Delivery window opens", { document: "delivery", time: "10:00" })]),
+      email("concert", "Your tickets", [exact("event", "2026-09-12", "Concert at the Greek Theatre", { document: "event-ticket", time: "19:00" })]),
+    ];
+    const plans = await planTrips(files, NOW);
+    expect(plans).toHaveLength(1);
+    const rows = await rowsOf(files, { ...none, plans }, NOW);
+    expect(rows.some((row) => row.kind === "trip")).toBe(false);
   });
 
   it("rows sort by day then time and past rows say so", async () => {
