@@ -6,6 +6,11 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Added
+- **Trips come together on their own.** When booking data in mail or
+  documents shows a journey, its flights, stays, tickets and the documents
+  that share its booking reference are grouped as a trip on every device,
+  labelled, and undone with Not a trip. Anything matched only by date is
+  still offered for a yes, and a switch in Profile turns it off.
 - **The on-device assistant reads mail.** Emails are read newest first and
   from far shorter text than documents, inside a window of the last 12
   months (3 to 12 in Profile, following the account); older mail stays

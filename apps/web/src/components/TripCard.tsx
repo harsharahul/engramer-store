@@ -138,6 +138,9 @@ export function TripCard(props: {
   tag: string;
   members: FileEntry[];
   onOpen: (id: string) => void;
+  /** It came together on its own, from exact evidence, and can be undone. */
+  assembled: boolean;
+  onUndo: () => void;
 }) {
   const [legs, setLegs] = useState<ItineraryLeg[]>([]);
   const [advice, setAdvice] = useState<{ factId: string; text: string } | null>(null);
@@ -214,6 +217,14 @@ export function TripCard(props: {
       {start && end && (
         <p className="trip-range">
           {shortDay(start)} to {shortDay(end)} · {dayCount(start, end)} days · {whenLabel(start, now)}
+        </p>
+      )}
+      {props.assembled && (
+        <p className="trip-range">
+          Exact evidence, so this trip came together on its own.{" "}
+          <button className="linky quiet" onClick={props.onUndo}>
+            Not a trip
+          </button>
         </p>
       )}
       {segments.map((seg) => {

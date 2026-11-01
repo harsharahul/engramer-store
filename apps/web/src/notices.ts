@@ -10,7 +10,7 @@
  */
 
 import { decide, decided, DECISIONS_EVENT, decisionEvents } from "./decisions";
-import { itemsOf, tripsOf } from "./intel/agenda";
+import { isTripCurrent, itemsOf, tripsOf } from "./intel/agenda";
 import { describeFact } from "./intel/describe";
 import { duplicatesByDigest } from "./intel/duplicates";
 import type { Fact } from "./intel/facts";
@@ -43,8 +43,10 @@ export interface Notice {
 export function noticeKeys(files: readonly NoticeFile[], now: number): string[] {
   const live = files.filter((file) => !file.trashed);
   const keys: string[] = [];
-  for (const { tag } of tripsOf(live)) {
-    keys.push(`trip:${tag}`);
+  for (const trip of tripsOf(live)) {
+    if (isTripCurrent(trip, now)) {
+      keys.push(`trip:${trip.tag}`);
+    }
   }
   for (const { file, fact } of itemsOf(live, now, { name: "coming-up" })) {
     keys.push(`fact:${file.id}:${fact.id}`);

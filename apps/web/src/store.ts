@@ -39,7 +39,7 @@ import { openSharedFileKey, sealFileKeyFor } from "./collab";
 import { SaveConflictError, copyName } from "./conflict";
 import { analysisLanes, uploadLanes, withAnalysisSlot } from "./analysisslot";
 import { clearCache, loadCache, storeSyncRows } from "./cache";
-import { clearDecisions } from "./decisions";
+import { clearDecisions, decide, decided } from "./decisions";
 import { deletionProof } from "./accountdeletion";
 import { boundedRun, folderPlan, pathKey, type TreeFile } from "./uploader";
 import {
@@ -128,7 +128,8 @@ import {
   stampOf,
   type ReadingStamp,
 } from "./intel/reading";
-import { tripTag, type TripSuggestion } from "./intel/trips";
+import { isPlanDismissed, planTrips, type TripPlan } from "./intel/agenda";
+import { assembleTripsEnabled } from "./intel/trips";
 import { decodeIndexPayload, encodeIndexPayload } from "./indexblob";
 import { mergeRestoredMeta } from "./versions";
 import { blankDocument, DOCX_MIME, XLSX_MIME } from "./office/templates";
@@ -512,10 +513,26 @@ interface StoreState {
     decisions: { confirm?: string[]; dismiss?: string[] },
   ) => Promise<void>;
   /**
-   * Accepts a suggested trip: the trip's tag lands on every member, one
-   * metadata write per file, and the Library's tag machinery does the rest.
+   * The owner's "Group as": the trip's tag lands on every member in one
+   * batch, its exact events become the owner's word, and the trip is the
+   * owner's from then on, so Not a trip leaves it alone.
    */
-  confirmTrip: (suggestion: TripSuggestion) => Promise<void>;
+  confirmTrip: (plan: TripPlan) => Promise<void>;
+  /**
+   * Not a trip: takes away the tags the assembler wrote, never one the
+   * owner added, and records the refusal so the trip never comes back.
+   * Answers how many files changed.
+   */
+  undoTrip: (tag: string) => Promise<number>;
+  /** Takes files out of a trip for good: the assembler never puts them back. */
+  leaveTrip: (fileIds: string[], tag: string) => Promise<void>;
+  /**
+   * Groups every journey that booking data states exactly as a trip, with
+   * the documents that link to it exactly, across all of time. Refused
+   * trips and files taken out stay out; a second run writes nothing.
+   * Answers the files tagged.
+   */
+  assembleTrips: () => Promise<number>;
   /**
    * The evidence behind a file's facts: the complete reference numbers and
    * the passages they came from. Fetched on request rather than held, which
@@ -1218,6 +1235,87 @@ export const useStore = create<StoreState>((set, get) => {
     return result;
   };
 
+  /**
+   * The one way a trip's tag is written, by the owner's "Group as" or by
+   * the assembler: one batch over the live files that lack it. The owner's
+   * write also makes the exact events the owner's word and the trip the
+   * owner's; the assembler's is remembered pair by pair, so Not a trip can
+   * take back exactly what it wrote. Answers the files written.
+   */
+  const tagTrip = async (tag: string, fileIds: readonly string[], by: "owner" | "assembler"): Promise<string[]> => {
+    const account = get().session?.email;
+    // A file the owner took out of this trip stays out, whoever writes.
+    const excluded = account ? decided(account, "tripExclusions") : new Set<string>();
+    const ids = fileIds.filter((id) => {
+      const file = get().files.get(id);
+      return file !== undefined && !file.trashed && !file.tags.includes(tag) && !excluded.has(`${tag}|${id}`);
+    });
+    const { done } = await get().patchFilesMeta(ids, (file) => {
+      if (file.tags.includes(tag)) {
+        return null;
+      }
+      const tags = normalizeTags([...file.tags, tag]);
+      if (by === "assembler") {
+        return { tags };
+      }
+      // Accepting the group is ratification: the exact events that formed
+      // it become confirmed in the same write. Soft facts never took part
+      // in the grouping and stay as they were; nobody has looked at them.
+      const facts = file.facts.map((fact) =>
+        fact.kind === "event" && !ownerDecided(fact) && fact.accepted === "exact" ? { ...fact, confirmed: true } : fact,
+      );
+      return { tags, facts };
+    });
+    if (account) {
+      if (by === "owner") {
+        decide(account, "ownedTrips", [tag]);
+      } else if (done.length > 0) {
+        decide(
+          account,
+          "assembledTrips",
+          done.map((id) => `${tag}|${id}`),
+        );
+      }
+    }
+    return done;
+  };
+
+  /** The trip assembly in flight, shared by whoever asks meanwhile. */
+  let assemblyRun: Promise<number> | null = null;
+
+  /** One assembly pass; see `assembleTrips`. */
+  const assemble = async (): Promise<number> => {
+    const account = get().session?.email;
+    if (!account || !assembleTripsEnabled() || !factsEnabled()) {
+      return 0;
+    }
+    const live = [...get().files.values()].filter((file) => !file.trashed);
+    const plans = await planTrips(live, Date.now());
+    const grown: { title: string; documents: number }[] = [];
+    let written = 0;
+    for (const plan of plans) {
+      // Only a journey booked exactly assembles; the rest is offered. The
+      // owner's refusals are read again before each trip, so a Not a trip
+      // said while this run is under way holds.
+      if (plan.anchorId === undefined || isPlanDismissed(plan, decided(account, "dismissedTrips"))) {
+        continue;
+      }
+      const excluded = decided(account, "tripExclusions");
+      const ids = [...plan.exact.keys()].filter((id) => !excluded.has(`${plan.tag}|${id}`));
+      const done = await tagTrip(plan.tag, ids, "assembler");
+      if (done.length > 0) {
+        grown.push({ title: plan.title, documents: ids.length });
+        written += done.length;
+      }
+    }
+    // One line for the run, however many trips years of mail held.
+    if (grown.length === 1) {
+      get().finishActivity("processing", `Assembled ${grown[0]!.title} from ${grown[0]!.documents} documents`);
+    } else if (grown.length > 1) {
+      get().finishActivity("processing", `Assembled ${grown.length} trips from your bookings`);
+    }
+    return written;
+  };
 
   /** One cancel scope shared by every transfer in flight; a scope that has
    * been cancelled is spent, so the next batch opens a fresh one. */
@@ -2823,25 +2921,53 @@ export const useStore = create<StoreState>((set, get) => {
       await patchFileMeta(id, { facts });
     },
 
-    confirmTrip: async (suggestion) => {
-      const tag = tripTag(suggestion);
-      for (const fileId of suggestion.fileIds) {
-        const file = get().files.get(fileId);
-        if (!file || file.tags.includes(tag)) {
-          continue;
-        }
-        // Accepting the group is ratification: the exact events that formed
-        // it become confirmed in the same write: they already counted on
-        // their evidence, and now they are the owner's word too. Soft
-        // facts never took part in the grouping and stay as they were;
-        // nobody has looked at them yet.
-        const facts = file.facts.map((fact) =>
-          fact.kind === "event" && !ownerDecided(fact) && fact.accepted === "exact"
-            ? { ...fact, confirmed: true }
-            : fact,
-        );
-        await patchFileMeta(fileId, { tags: normalizeTags([...file.tags, tag]), facts });
+    confirmTrip: async (plan) => {
+      await tagTrip(plan.tag, [...plan.exact.keys(), ...plan.weak], "owner");
+    },
+
+    undoTrip: async (tag) => {
+      const account = get().session?.email;
+      if (!account) {
+        return 0;
       }
+      const live = [...get().files.values()].filter((file) => !file.trashed);
+      // The refusal is keyed by the trip as planned now, with its tags
+      // still on, and recorded first: an assembly run under way reads it
+      // before it reaches this trip, and skips it.
+      const plan = (await planTrips(live, Date.now())).find((candidate) => candidate.tag === tag);
+      decide(account, "dismissedTrips", plan ? plan.dismissKeys : [tag]);
+      if (decided(account, "ownedTrips").has(tag)) {
+        return 0;
+      }
+      const assembled = decided(account, "assembledTrips");
+      const ids = live.filter((file) => file.tags.includes(tag) && assembled.has(`${tag}|${file.id}`)).map((file) => file.id);
+      const { done } = await get().patchFilesMeta(ids, (file) =>
+        file.tags.includes(tag) ? { tags: file.tags.filter((t) => t !== tag) } : null,
+      );
+      return done.length;
+    },
+
+    leaveTrip: async (fileIds, tag) => {
+      const account = get().session?.email;
+      if (account) {
+        // Remembered before the write, so an assembly running meanwhile
+        // cannot put the file back.
+        decide(
+          account,
+          "tripExclusions",
+          fileIds.map((id) => `${tag}|${id}`),
+        );
+        decide(account, "ownedTrips", [tag]);
+      }
+      await get().removeFromAlbum(fileIds, tag);
+    },
+
+    assembleTrips: () => {
+      // One run at a time: a second caller shares the run in flight.
+      assemblyRun ??= assemble().finally(() => {
+        assemblyRun = null;
+      });
+      return assemblyRun;
     },
 
     factEvidence: async (id) => {

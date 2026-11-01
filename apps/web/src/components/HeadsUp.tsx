@@ -23,18 +23,17 @@ import { offeredFacts } from "../intel/facts";
 import { swappedReading } from "../intel/dates";
 import { describeFact, shown, withArticle } from "../intel/describe";
 import {
+  assembleTripsEnabled,
   dismissedTrips,
   factsFingerprint,
   isTripTag,
+  keepOutOfTrip,
   rememberTripDismissal,
-  suggestTrips,
-  tripTag,
-  tripTitle,
-  type TripSuggestion,
 } from "../intel/trips";
 import { entitiesEnabled, extractEntities } from "../intel/entities";
 import { lookupAirport } from "../intel/airports";
-import { DECISIONS_EVENT, decisionEvents } from "../decisions";
+import { decided, DECISIONS_EVENT, decisionEvents } from "../decisions";
+import { isPlanDismissed, planTrips, type TripPlan } from "../intel/agenda";
 import { PlaneGlyph, SparkGlyph, XGlyph } from "./Icon";
 import { Button } from "./ui/button";
 
@@ -157,21 +156,34 @@ export function HeadsUp(props: {
   );
 }
 
+/** What a proposal card asks about: a new trip, or files for one that exists. */
+interface Offer {
+  plan: TripPlan;
+  /** The members it asks about: those not yet carrying the trip's tag. */
+  missing: string[];
+  /** Some members already carry the tag: the question is whether these join. */
+  joining: boolean;
+}
+
 /**
  * Trips proposed above the files, in the queue's discipline: a card that
- * disappears the moment it is answered. Grouping never happens on its own;
- * the owner ratifies every trip, a confirmation is nothing more than a
- * shared tag on the members, and a refusal is remembered on this device.
+ * disappears the moment it is answered. A journey booked exactly groups
+ * itself (store.assembleTrips); what links only by date is asked about
+ * here, once. A refusal is the account's, keyed by the trip and never by
+ * its member list, so a new receipt cannot bring it back.
  */
 export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string) => void }) {
   const confirmTrip = useStore((s) => s.confirmTrip);
   const warmSearchIndex = useStore((s) => s.warmSearchIndex);
   const account = useStore((s) => s.session?.email ?? "");
-  const [trips, setTrips] = useState<TripSuggestion[]>([]);
+  const [plans, setPlans] = useState<TripPlan[]>([]);
   // The account's refusals, re-read when a decision lands from anywhere.
-  const [refused, setRefused] = useState<Set<string>>(() => dismissedTrips(account));
+  const [refused, setRefused] = useState(() => ({
+    trips: dismissedTrips(account),
+    kept: decided(account, "tripExclusions"),
+  }));
   useEffect(() => {
-    const reread = () => setRefused(dismissedTrips(account));
+    const reread = () => setRefused({ trips: dismissedTrips(account), kept: decided(account, "tripExclusions") });
     reread();
     decisionEvents.addEventListener(DECISIONS_EVENT, reread);
     return () => decisionEvents.removeEventListener(DECISIONS_EVENT, reread);
@@ -186,13 +198,9 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
   const fingerprint = factsFingerprint(live);
   useEffect(() => {
     let stale = false;
-    void suggestTrips(
-      live.map((file) => ({ id: file.id, name: file.name, facts: file.facts })),
-      Date.now(),
-      linked ?? undefined,
-    ).then((all) => {
+    void planTrips(live, Date.now(), linked ? { extraPlaces: linked } : undefined).then((all) => {
       if (!stale) {
-        setTrips(all);
+        setPlans(all);
       }
     });
     return () => {
@@ -247,11 +255,26 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
   };
 
   const tagsOf = new Map(live.map((file) => [file.id, file.tags]));
-  const open = trips.filter(
-    (trip) =>
-      !refused.has(trip.id) &&
-      !trip.fileIds.every((id) => tagsOf.get(id)?.includes(tripTag(trip))),
-  );
+  // While trips assemble themselves, exact members are the assembler's to
+  // tag; with the switch off, they are asked about like the rest.
+  const assembling = assembleTripsEnabled();
+  const open: Offer[] = plans.flatMap((plan) => {
+    if (!plan.recent || isPlanDismissed(plan, refused.trips)) {
+      return [];
+    }
+    const members = [...(assembling ? [] : [...plan.exact.keys()]), ...plan.weak];
+    const missing = members
+      .filter((id) => !tagsOf.get(id)?.includes(plan.tag) && !refused.kept.has(`${plan.tag}|${id}`))
+      .sort();
+    if (missing.length === 0) {
+      return [];
+    }
+    // A journey booked exactly is a trip already, or about to be one.
+    const joining =
+      (assembling && plan.anchorId !== undefined) ||
+      [...plan.exact.keys(), ...plan.weak].some((id) => tagsOf.get(id)?.includes(plan.tag));
+    return [{ plan, missing, joining }];
+  });
   const loose = live.filter(
     (file) =>
       file.facts.some((fact) => fact.kind === "event" && !fact.dismissed) &&
@@ -277,15 +300,25 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
             </Button>
           </div>
         )}
-        {open.map((trip) => (
-          <div key={trip.id} className="pending-card">
+        {open.map(({ plan, missing, joining }) => (
+          <div key={plan.dismissKeys.join("|")} className="pending-card">
             <div className="pending-card-text">
-              <PlaneGlyph size={13} /> These {trip.fileIds.length} documents look like one trip
-              {trip.destination ? ` to ${trip.destination}` : ""}, {shown(trip.start)} to{" "}
-              {shown(trip.end)}. Group them?
+              <PlaneGlyph size={13} />{" "}
+              {joining ? (
+                <>
+                  Part of {plan.title}?
+                  {missing.every((id) => plan.weak.includes(id)) ? " Only the date matches." : ""}
+                </>
+              ) : (
+                <>
+                  These {missing.length} documents look like one trip
+                  {plan.destination ? ` to ${plan.destination}` : ""}, {shown(plan.start)} to {shown(plan.end)}. Group
+                  them?
+                </>
+              )}
             </div>
             <div className="trip-files">
-              {trip.fileIds.map((id) => (
+              {missing.map((id) => (
                 <button key={id} className="linky" onClick={() => props.onOpen(id)}>
                   {live.find((file) => file.id === id)?.name ?? id}
                 </button>
@@ -294,7 +327,7 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
             <details className="trip-why">
               <summary>Why these?</summary>
               <ul>
-                {trip.why.map((line) => (
+                {plan.why.map((line) => (
                   <li key={line}>{line}</li>
                 ))}
               </ul>
@@ -302,20 +335,30 @@ export function TripHeadsUp(props: { files: FileEntry[]; onOpen: (fileId: string
             <div className="pending-card-actions">
               <Button
                 size="xs"
-                disabled={busy === trip.id}
+                disabled={busy === plan.dismissKeys.join("|")}
                 onClick={() => {
-                  setBusy(trip.id);
-                  void confirmTrip(trip).finally(() => setBusy(null));
+                  setBusy(plan.dismissKeys.join("|"));
+                  void confirmTrip(plan).finally(() => setBusy(null));
                 }}
               >
-                Group as {tripTitle(tripTag(trip))}
+                {joining ? "Add" : `Group as ${plan.title}`}
               </Button>
               <Button
                 variant="quiet"
                 size="xs"
-                onClick={() => rememberTripDismissal(account, trip.id)}
+                onClick={() =>
+                  // Saying no to a document leaves the trip as it is;
+                  // saying no to a trip keeps the whole trip away.
+                  joining ? keepOutOfTrip(account, plan.tag, missing) : rememberTripDismissal(account, plan.dismissKeys)
+                }
               >
-                <XGlyph size={12} /> Ignore
+                {joining ? (
+                  "No"
+                ) : (
+                  <>
+                    <XGlyph size={12} /> Ignore
+                  </>
+                )}
               </Button>
             </div>
           </div>

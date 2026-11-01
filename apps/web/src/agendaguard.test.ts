@@ -54,4 +54,9 @@ describe("one model for dates and trips", () => {
   it("defines isDated once", () => {
     expect(offenders([/\b(?:function|const)\s+isDated\b/], [join("intel", "facts.ts")])).toEqual([]);
   });
+
+  it("plans trips in one place", () => {
+    // Whatever assembles or offers a trip reads planTrips' plans.
+    expect(offenders([/\bsuggestTrips\(/], [join("intel", "agenda.ts"), join("intel", "trips.ts")])).toEqual([]);
+  });
 });

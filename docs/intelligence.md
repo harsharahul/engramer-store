@@ -375,12 +375,27 @@ where it is genuinely known, from a reservation's own offset or the offline
 airport table (about 3,700 scheduled-service airports with their zones,
 shipped with the app), which is also what turns JFK into New York on a card.
 
-**Trips are proposed, never assumed.** Documents whose confirmed events fall
-near each other, share a booking-reference tail, or point at the same
-destination are offered as one trip, with the evidence stated in words.
-Accepting writes a shared tag to the members and nothing more; the trip's
-name, span and itinerary derive from the members' facts, so a correction
-reshapes the trip on its own. The itinerary reads in city names with each
+**Trips booked exactly come together on their own; the rest are offered.**
+Documents whose tracked events fall near each other, share a
+booking-reference tail, or point at the same destination are candidates for
+one trip. When booking data states the journey itself (a flight, train, bus
+or boat, on the owner's word or from a structured source), the trip is
+grouped on every device without asking, together with what links to it
+exactly: a document dated near the journey that shares its booking
+reference, a file that came in the same email, and an exact booking for a
+day the traveller is away. Each journey is its own trip, so two trips a few
+weeks apart, or a commuter's weekly flights, never merge into one. The trip
+card says so and offers Not a trip, which takes back only what was grouped
+automatically and is remembered by the account, so the trip never comes
+back; a document taken out of a trip is never put back. A document that
+matches only by date is offered once for a yes, with the evidence stated in
+words, and a candidate with no exact journey is offered the same way.
+Assembly covers the whole library, and trips long past group quietly: one
+line in Activity, nothing in the bell. "Assemble trips automatically" in
+Profile turns it off, and then every candidate is offered. A trip is a
+shared tag on its members and nothing more; its name, span and itinerary
+derive from the members' facts, so a correction reshapes the trip on its
+own. The itinerary reads in city names with each
 leg's time as printed, exports any leg as a calendar event, and offers the
 place in Maps: a handoff to the system, because door-to-door timing would
 mean sending your location and route somewhere, and this feature refuses

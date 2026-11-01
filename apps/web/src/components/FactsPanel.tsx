@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { decide, decided, DECISIONS_EVENT, decisionEvents } from "../decisions";
 import { useStore, type FileEntry } from "../store";
 import { isDated, isTracked, type FactEvidence } from "../intel/facts";
-import { itemsOf, tripsOf } from "../intel/agenda";
+import { isTripCurrent, itemsOf, tripsOf } from "../intel/agenda";
 import { basisLabel, describeFact, shown, whenLabel } from "../intel/describe";
 import { insightsFor, type Insight } from "../intel/insights";
 import { duplicatesByDigest } from "../intel/duplicates";
@@ -30,13 +30,24 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
   // here stays dismissed on every device, and one dismissed elsewhere
   // disappears here as soon as the decision lands.
   const [hidden, setHidden] = useState<Set<string>>(() => decided(account, "dismissedInsights"));
+  // Which trips the assembler wrote and which the owner made their own,
+  // so only a trip that came together on its own offers Not a trip.
+  const [authored, setAuthored] = useState(() => ({
+    assembled: decided(account, "assembledTrips"),
+    owned: decided(account, "ownedTrips"),
+  }));
   useEffect(() => {
-    const reread = () => setHidden(decided(account, "dismissedInsights"));
+    const reread = () => {
+      setHidden(decided(account, "dismissedInsights"));
+      setAuthored({ assembled: decided(account, "assembledTrips"), owned: decided(account, "ownedTrips") });
+    };
     reread();
     decisionEvents.addEventListener(DECISIONS_EVENT, reread);
     return () => decisionEvents.removeEventListener(DECISIONS_EVENT, reread);
   }, [account]);
   const dismissFact = useStore((s) => s.dismissFact);
+  const undoTrip = useStore((s) => s.undoTrip);
+  const [said, setSaid] = useState<string | null>(null);
   const now = Date.now();
   const live = props.files.filter((file) => !file.trashed);
 
@@ -51,7 +62,8 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
   const spokenFor = new Set(insights.map((insight) => insight.fileId).filter(Boolean));
 
   // Confirmed trips are shared tags; the members' events are the itinerary.
-  const trips = tripsOf(live);
+  // A trip long over is history, not something that needs attention.
+  const trips = tripsOf(live).filter((trip) => isTripCurrent(trip, now));
   const inTrip = new Set(trips.flatMap((trip) => trip.members.map((file) => file.id)));
 
   // The same computation the bell counts and the notifications read.
@@ -65,21 +77,38 @@ export function LibraryIntel(props: { files: FileEntry[]; onOpen: (id: string) =
 
   const duplicates = duplicatesByDigest(live);
 
+  const status = said && (
+    <p className="panel-quiet" role="status">
+      {said}
+    </p>
+  );
+
   if (
     upcoming.length === 0 &&
     insights.length === 0 &&
     duplicates.length === 0 &&
     trips.length === 0
   ) {
-    return (
-      <p className="panel-quiet">Nothing needs your attention.</p>
-    );
+    return status || <p className="panel-quiet">Nothing needs your attention.</p>;
   }
 
   return (
     <div className="intel">
+      {status}
       {trips.map((trip) => (
-        <TripCard key={trip.tag} tag={trip.tag} members={trip.members} onOpen={props.onOpen} />
+        <TripCard
+          key={trip.tag}
+          tag={trip.tag}
+          members={trip.members}
+          onOpen={props.onOpen}
+          // Only a trip the assembler wrote whole came together on its own; a
+          // member tagged any other way (by hand, or before ownership was
+          // recorded) makes it the owner's.
+          assembled={
+            !authored.owned.has(trip.tag) && trip.members.every((file) => authored.assembled.has(`${trip.tag}|${file.id}`))
+          }
+          onUndo={() => void undoTrip(trip.tag).then(() => setSaid("Dismissed. It will not come back."))}
+        />
       ))}
       {upcoming.length > 0 && (
         <div className="intel-group">

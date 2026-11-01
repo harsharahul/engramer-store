@@ -83,6 +83,8 @@ const install = () => {
   const calls = {
     process: [] as SweepCall[],
     facts: [] as SweepCall[],
+    trips: 0,
+    order: [] as string[],
   };
   useStore.setState({
     session,
@@ -90,11 +92,18 @@ const install = () => {
     uploads: [],
     processLibrary: async (o?: SweepCall) => {
       calls.process.push(o ?? {});
+      calls.order.push("process");
       return counts(1);
     },
     scanLibraryForFacts: async (o?: SweepCall) => {
       calls.facts.push(o ?? {});
+      calls.order.push("facts");
       return 4;
+    },
+    assembleTrips: async () => {
+      calls.trips++;
+      calls.order.push("trips");
+      return 2;
     },
   });
   return calls;
@@ -208,8 +217,9 @@ describe("the automatic backfill can be declined and stopped", () => {
       },
     });
     const stopped = await runBackfill();
-    expect(stopped).toEqual({ files: 1, facts: 0 });
+    expect(stopped).toEqual({ files: 1, facts: 0, trips: 0 });
     expect(calls.facts).toHaveLength(0);
+    expect(calls.trips).toBe(0);
     // The stop is one pass's decision, not a permanent switch.
     install();
     expect(await runBackfill()).not.toBeNull();
@@ -229,7 +239,7 @@ describe("runBackfill", () => {
   it("runs both passes, each with its own remembered attempts, uncapped on desktop", async () => {
     const calls = install();
     const first = await runBackfill();
-    expect(first).toEqual({ files: 1, facts: 4 });
+    expect(first).toEqual({ files: 1, facts: 4, trips: 2 });
     expect(calls.process[0]!.maxBytes).toBeUndefined();
     // Attempts are remembered per pass, not shared between passes.
     expect(calls.process[0]!.skip).not.toBe(calls.facts[0]!.skip);
@@ -246,8 +256,25 @@ describe("runBackfill", () => {
     const calls = install();
     knobs.facts = false;
     const result = await runBackfill();
-    expect(result).toEqual({ files: 1, facts: 0 });
+    expect(result).toEqual({ files: 1, facts: 0, trips: 2 });
     expect(calls.facts).toHaveLength(0);
+  });
+
+  it("a backfill pass assembles trips after reading dates", async () => {
+    const calls = install();
+    await runBackfill();
+    expect(calls.order).toEqual(["process", "facts", "trips"]);
+    // Once told to stop, the pass ends before assembling.
+    const stopped = install();
+    useStore.setState({
+      scanLibraryForFacts: async () => {
+        stopped.order.push("facts");
+        stopBackfill();
+        return 0;
+      },
+    });
+    await runBackfill();
+    expect(stopped.order).toEqual(["process", "facts"]);
   });
 
   it("caps the auto pass to modest files on a handheld", async () => {

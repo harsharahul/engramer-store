@@ -17,6 +17,7 @@
  */
 
 import { decide, decided } from "../decisions";
+import { settingChanged } from "../settingsbus";
 import { lookupAirport } from "./airports";
 import { isTracked, type Fact } from "./facts";
 
@@ -56,7 +57,7 @@ const WINDOW_DAYS = 14;
 /** Reference and destination bridges reach at most this far. */
 const MERGE_GAP_DAYS = 45;
 /** A trip this long over is history, not a suggestion. */
-const RECENT_PAST_DAYS = 60;
+export const RECENT_PAST_DAYS = 60;
 
 const usable = isTracked;
 
@@ -76,6 +77,7 @@ function shown(iso: string): string {
 }
 
 const ARRIVAL = /\b(?:to|arrives)\s+([A-Z]{3})\b/;
+const DEPARTURE = /\bdeparts\s+([A-Z]{3})\b/;
 
 /**
  * Airport-code shaped tokens in a label. A fresh iterator per call on
@@ -259,16 +261,55 @@ function commonest(all: string[]): string | undefined {
 }
 
 /**
+ * Where a run of legs sets out from, where it ends, and where it goes:
+ * cities from the airport codes its labels name. The destination is the
+ * commonest arrival other than the origin, because a round trip arrives
+ * home as often as it arrives away, and home is never the destination.
+ */
+export async function legPlaces(
+  legs: readonly Fact[],
+): Promise<{ from?: string; to?: string; destination?: string }> {
+  const ordered = [...legs].sort(
+    (a, b) => `${a.value} ${a.time ?? ""}`.localeCompare(`${b.value} ${b.time ?? ""}`) || a.id.localeCompare(b.id),
+  );
+  const city = async (pattern: RegExp, fact: Fact) => {
+    const code = pattern.exec(fact.label ?? "")?.[1];
+    return code ? (await lookupAirport(code))?.city : undefined;
+  };
+  let from: string | undefined;
+  let to: string | undefined;
+  const arrivals: string[] = [];
+  for (const fact of ordered) {
+    from ??= await city(DEPARTURE, fact);
+    const arrived = await city(ARRIVAL, fact);
+    if (arrived) {
+      arrivals.push(arrived);
+      to = arrived;
+    }
+  }
+  const destination = commonest(arrivals.filter((place) => place !== from));
+  return {
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+    ...(destination ? { destination } : {}),
+  };
+}
+
+/**
  * Every group of documents that looks like one trip, ready to be offered.
  * Deterministic: the same library always yields the same suggestions.
  * `extraPlaces` carries destination tokens found outside this module, the
  * entity extractor's contribution, for documents that share nothing exact.
+ * `recentPastDays` is how long over a trip may be and still be returned;
+ * assembly asks for all of time.
  */
 export async function suggestTrips(
   files: TripFile[],
   now: number,
   extraPlaces?: ReadonlyMap<string, ReadonlySet<string>>,
+  opts?: { recentPastDays?: number },
 ): Promise<TripSuggestion[]> {
+  const recentPastDays = opts?.recentPastDays ?? RECENT_PAST_DAYS;
   const none: ReadonlySet<string> = new Set();
   const members: Member[] = [];
   for (const file of files) {
@@ -302,16 +343,19 @@ export async function suggestTrips(
       continue;
     }
     // A thousand old documents hold many past trips; none is a suggestion.
-    if (dayOf(cluster.end) < nowDay - RECENT_PAST_DAYS) {
+    if (dayOf(cluster.end) < nowDay - recentPastDays) {
       continue;
     }
     const fileIds = cluster.members.map((member) => member.file.id).sort();
+    const { from: origin } = await legPlaces(cluster.members.flatMap((member) => member.events));
+    const away = (city: string) => city !== origin;
     const destination =
-      commonest(cluster.members.flatMap((m) => [...m.reach])) ??
+      commonest(cluster.members.flatMap((m) => [...m.reach]).filter(away)) ??
       commonest(
         cluster.members
           .flatMap((m) => [...m.cities])
-          .filter((city, _, all) => all.indexOf(city) !== all.lastIndexOf(city)),
+          .filter((city, _, all) => all.indexOf(city) !== all.lastIndexOf(city))
+          .filter(away),
       );
     const why = [`dates fall together, ${shown(cluster.start)} to ${shown(cluster.end)}`];
     const tailCounts = new Map<string, number>();
@@ -505,6 +549,26 @@ export function tripTitle(tag: string): string {
   return `${words}, ${MONTHS[Number(match[3]) - 1]} ${match[2]}`;
 }
 
+const ASSEMBLE_KEY = "engram-assemble-trips";
+
+/** Whether journeys in booking data group themselves as trips; on unless turned off. */
+export function assembleTripsEnabled(): boolean {
+  try {
+    return localStorage.getItem(ASSEMBLE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setAssembleTripsEnabled(on: boolean): void {
+  try {
+    localStorage.setItem(ASSEMBLE_KEY, on ? "1" : "0");
+    settingChanged();
+  } catch {
+    // Preference persistence is best-effort.
+  }
+}
+
 /**
  * Refused groupings, as the account's record: a trip refused on one
  * device is not proposed again on another.
@@ -513,6 +577,15 @@ export function dismissedTrips(account: string): Set<string> {
   return decided(account, "dismissedTrips");
 }
 
-export function rememberTripDismissal(account: string, id: string): void {
-  decide(account, "dismissedTrips", [id]);
+export function rememberTripDismissal(account: string, keys: readonly string[]): void {
+  decide(account, "dismissedTrips", keys);
+}
+
+/** Documents the owner said do not belong to a trip: never offered for it, never added to it. */
+export function keepOutOfTrip(account: string, tag: string, fileIds: readonly string[]): void {
+  decide(
+    account,
+    "tripExclusions",
+    fileIds.map((id) => `${tag}|${id}`),
+  );
 }

@@ -127,6 +127,38 @@ describe("suggestTrips", () => {
     expect(await suggestTrips([flight(), hotel()], Date.UTC(2028, 0, 1))).toEqual([]);
   });
 
+  it("a trip long past is still a candidate when asked for all of time", async () => {
+    const trips = await suggestTrips([flight(), hotel()], Date.UTC(2028, 0, 1), undefined, { recentPastDays: Infinity });
+    expect(trips).toHaveLength(1);
+    expect(trips[0]!.destination).toBe("New York");
+  });
+
+  it("a round trip is named for where it goes, not home", async () => {
+    const booking: TripFile = {
+      id: "f-rome",
+      name: "aquila-rome.html",
+      facts: [
+        event("2027-05-02", "Flight AQ 5 departs BOS", { time: "17:00" }),
+        event("2027-05-02", "Flight AQ 5 arrives FCO", { time: "23:50" }),
+        event("2027-05-09", "Flight AQ 6 departs FCO", { time: "10:15" }),
+        event("2027-05-09", "Flight AQ 6 arrives BOS", { time: "13:40" }),
+        ref("7KQ2"),
+      ],
+    };
+    const stay: TripFile = {
+      id: "f-roma-stay",
+      name: "albergo.html",
+      facts: [
+        event("2027-05-03", "Check-in: Albergo", { document: "hotel-booking" }),
+        event("2027-05-08", "Check-out: Albergo", { document: "hotel-booking" }),
+      ],
+    };
+    const trips = await suggestTrips([booking, stay], NOW);
+    expect(trips).toHaveLength(1);
+    expect(trips[0]!.destination).toBe("Rome");
+    expect(tripTag(trips[0]!)).toBe("trip:rome-2027-05");
+  });
+
   it("never clusters on an unconfirmed soft fact, and never reads trash", async () => {
     const soft: TripFile = {
       id: "f-soft",

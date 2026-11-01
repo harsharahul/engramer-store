@@ -102,6 +102,7 @@ import {
 } from "../intel/semantic";
 import { factsEnabled, setFactsEnabled } from "../intel/scan";
 import { entitiesEnabled, setEntitiesEnabled } from "../intel/entities";
+import { assembleTripsEnabled, setAssembleTripsEnabled } from "../intel/trips";
 import {
   NEEDS_SERVER,
   packDownloading,
@@ -393,6 +394,7 @@ export function Vault() {
   const [ocrOn, setOcrOn] = useState(() => ocrEnabled());
   const [semanticOn, setSemanticOn] = useState(() => semanticEnabled());
   const [factsOn, setFactsOn] = useState(() => factsEnabled());
+  const [assembleOn, setAssembleOn] = useState(() => assembleTripsEnabled());
   const [entitiesOn, setEntitiesOn] = useState(() => entitiesEnabled());
   const [assistantOn, setAssistantOn] = useState(() => assistantEnabled());
   // Whether the on-device model is here, probed on mount and on every
@@ -1911,6 +1913,7 @@ export function Vault() {
       setOcrOn(ocrEnabled());
       setSemanticOn(semanticEnabled());
       setFactsOn(factsEnabled());
+      setAssembleOn(assembleTripsEnabled());
       setEntitiesOn(entitiesEnabled());
       setAssistantOn(assistantEnabled());
     };
@@ -3162,6 +3165,16 @@ export function Vault() {
                 const next = !factsOn;
                 setFactsEnabled(next);
                 setFactsOn(next);
+              }}
+              assembleTripsOn={assembleOn}
+              onToggleAssembleTrips={() => {
+                const next = !assembleOn;
+                setAssembleTripsEnabled(next);
+                setAssembleOn(next);
+                if (next) {
+                  // Turned on: what booking data already shows groups now.
+                  void store.assembleTrips();
+                }
               }}
               entitiesOn={entitiesOn}
               onToggleEntities={() => {
