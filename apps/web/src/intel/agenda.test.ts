@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { hasAgenda, itemsOf, tripsOf, type AgendaFile } from "./agenda";
-import { isDated, type Fact } from "./facts";
+import { hasAgenda, isPlanDismissed, itemsOf, planTrips, tripsOf, type AgendaFile, type PlanFile, type TripPlan } from "./agenda";
+import { isDated, withExactAcceptance, type Fact } from "./facts";
+import { suggestTrips } from "./trips";
 
 const NOW = Date.UTC(2026, 8, 10, 12);
 const DAY = 86_400_000;
@@ -149,5 +150,164 @@ describe("isDated", () => {
     for (const kind of ["issued", "period", "amount", "identifier"] as const) {
       expect(isDated({ kind })).toBe(false);
     }
+  });
+});
+
+// The prototype's Lisbon trip, as stored facts.
+let seq = 0;
+const exact = (kind: Fact["kind"], value: string, label: string, extra: Partial<Fact> = {}): Fact =>
+  withExactAcceptance({
+    id: `${kind}:${value}:${seq++}`,
+    kind,
+    document: "itinerary",
+    value,
+    label,
+    source: "jsonld",
+    confidence: 1,
+    ...extra,
+  });
+const reference = (tail: string, label: string, extra: Partial<Fact> = {}): Fact =>
+  exact("identifier", tail, label, { masked: tail, ...extra });
+const doc = (id: string, facts: Fact[], extra: Partial<PlanFile> = {}): PlanFile => ({
+  id,
+  name: `${id}.pdf`,
+  tags: [],
+  facts,
+  trashed: false,
+  ...extra,
+});
+
+const flights = (extra: Partial<Fact> = {}) => [
+  exact("event", "2026-11-12", "Flight TP 236 departs SFO", { time: "18:10", ...extra }),
+  exact("event", "2026-11-13", "Flight TP 236 arrives LIS", { time: "13:05", ...extra }),
+  exact("event", "2026-11-16", "Flight TP 237 departs LIS", { time: "11:05", ...extra }),
+  exact("event", "2026-11-16", "Flight TP 237 arrives SFO", { time: "14:20", ...extra }),
+];
+
+const lisbon = (): PlanFile[] => [
+  doc("flight", [...flights(), reference("4F2K", "Confirmation number")]),
+  doc("hotel", [
+    exact("event", "2026-11-13", "Check-in: Casa do Rio", { document: "hotel-booking", time: "15:00" }),
+    exact("event", "2026-11-16", "Check-out: Casa do Rio", { document: "hotel-booking", time: "11:00" }),
+    reference("9C1D", "Confirmation number", { document: "hotel-booking" }),
+  ]),
+  doc("pass", [
+    // Read from the barcode, which knows the flight but not its date for certain.
+    {
+      id: "event:pass",
+      kind: "event",
+      document: "boarding-pass",
+      value: "2026-11-12",
+      label: "Flight TP 236 departs SFO",
+      source: "barcode",
+      confidence: 0.6,
+    },
+    reference("4F2K", "Booking reference", { document: "boarding-pass", source: "barcode" }),
+  ]),
+  doc("museum", [exact("event", "2026-11-14", "Museu do Azulejo", { document: "event-ticket", time: "10:00" })]),
+  doc("dinner", [exact("event", "2026-11-15", "Dinner: Taberna da Rua", { document: "dining", time: "20:00" })]),
+  doc("eticket", [], { mailParent: "flight" }),
+  doc("taxi", [
+    { id: "amount:taxi", kind: "amount", document: "invoice", value: "38.00", unit: "EUR", source: "label", confidence: 0.7 },
+    {
+      id: "event:taxi",
+      kind: "event",
+      document: "invoice",
+      value: "2026-11-13",
+      label: "Taxi",
+      source: "model",
+      confidence: 0.8,
+      accepted: "grounded",
+    },
+  ]),
+];
+
+const only = (plans: TripPlan[]): TripPlan => {
+  expect(plans).toHaveLength(1);
+  return plans[0]!;
+};
+
+describe("planTrips", () => {
+  it("an exact journey anchors the plan and its bookings join on exact evidence", async () => {
+    const plan = only(await planTrips(lisbon(), NOW));
+    expect(plan.anchorId).toBe("flight");
+    expect(Object.fromEntries(plan.exact)).toEqual({
+      dinner: "away",
+      eticket: "email",
+      flight: "booking",
+      hotel: "away",
+      museum: "away",
+      pass: "reference",
+    });
+    expect(plan.weak).toEqual(["taxi"]);
+    expect(plan).toMatchObject({ tag: "trip:lisbon-2026-11", title: "Lisbon, Nov 2026", destination: "Lisbon" });
+    expect(plan).toMatchObject({ start: "2026-11-12", end: "2026-11-16", recent: true });
+  });
+
+  it("a booking on the day of departure only asks", async () => {
+    const files = lisbon().map((file) =>
+      file.id === "dinner" ? doc("dinner", [exact("event", "2026-11-12", "Dinner: Airport", { document: "dining" })]) : file,
+    );
+    const plan = only(await planTrips(files, NOW));
+    expect(plan.exact.has("dinner")).toBe(false);
+    expect(plan.weak).toEqual(["dinner", "taxi"]);
+  });
+
+  it("a model-read date never anchors a trip", async () => {
+    const files = lisbon().map((file) =>
+      file.id === "flight"
+        ? doc("flight", [...flights({ source: "model", confidence: 0.9, accepted: "grounded" }), reference("4F2K", "Confirmation number")])
+        : file,
+    );
+    const plan = only(await planTrips(files, NOW));
+    expect(plan.anchorId).toBeUndefined();
+    expect(plan.exact.size).toBe(0);
+    expect(plan.weak).toEqual(["dinner", "flight", "hotel", "museum", "taxi"]);
+    expect(plan.dismissKeys).toEqual(["anchor:dinner"]);
+  });
+
+  it("the tag already on any member is the trip's tag", async () => {
+    const files = lisbon().map((file) => (file.id === "hotel" ? { ...file, tags: ["trip:lisbon-2026-11-a"] } : file));
+    expect(only(await planTrips(files, NOW)).tag).toBe("trip:lisbon-2026-11-a");
+  });
+
+  it("an unrelated reference does not join", async () => {
+    const invoice = doc("invoice", [
+      reference("4F2K", "Invoice number", { document: "invoice" }),
+      exact("due", "2026-11-20", "Due", { document: "invoice" }),
+    ]);
+    const plan = only(await planTrips([...lisbon(), invoice], NOW));
+    expect(plan.exact.has("invoice")).toBe(false);
+    expect(plan.weak).not.toContain("invoice");
+  });
+
+  it("dismissal keys are the tag and the anchor", async () => {
+    const plan = only(await planTrips(lisbon(), NOW));
+    expect(plan.dismissKeys).toEqual(["trip:lisbon-2026-11", "anchor:flight"]);
+    const [legacy] = await suggestTrips(lisbon(), NOW);
+    expect(plan.legacyId).toBe(legacy!.id);
+  });
+
+  it("a second plan over the same files is the same plan", async () => {
+    const entries = (plans: TripPlan[]) => plans.map((plan) => ({ ...plan, exact: [...plan.exact] }));
+    expect(entries(await planTrips(lisbon(), NOW))).toEqual(entries(await planTrips(lisbon(), NOW)));
+  });
+
+  it("a trip long over is planned, and marked as no longer one to ask about", async () => {
+    const plan = only(await planTrips(lisbon(), Date.UTC(2029, 0, 1)));
+    expect(plan.anchorId).toBe("flight");
+    expect(plan.recent).toBe(false);
+  });
+});
+
+describe("isPlanDismissed", () => {
+  it("a refusal holds through a new member, an old refusal and a new anchor", async () => {
+    const plan = only(await planTrips(lisbon(), NOW));
+    expect(isPlanDismissed(plan, new Set())).toBe(false);
+    expect(isPlanDismissed(plan, new Set(["trip:lisbon-2026-11"]))).toBe(true);
+    expect(isPlanDismissed(plan, new Set([plan.legacyId]))).toBe(true);
+    // Refused while it was dates only, keyed by a file that is still in it.
+    expect(isPlanDismissed(plan, new Set(["anchor:hotel"]))).toBe(true);
+    expect(isPlanDismissed(plan, new Set(["anchor:elsewhere", "trip:rome-2027-05"]))).toBe(false);
   });
 });

@@ -56,7 +56,7 @@ const WINDOW_DAYS = 14;
 /** Reference and destination bridges reach at most this far. */
 const MERGE_GAP_DAYS = 45;
 /** A trip this long over is history, not a suggestion. */
-const RECENT_PAST_DAYS = 60;
+export const RECENT_PAST_DAYS = 60;
 
 const usable = isTracked;
 
@@ -76,6 +76,7 @@ function shown(iso: string): string {
 }
 
 const ARRIVAL = /\b(?:to|arrives)\s+([A-Z]{3})\b/;
+const DEPARTURE = /\bdeparts\s+([A-Z]{3})\b/;
 
 /**
  * Airport-code shaped tokens in a label. A fresh iterator per call on
@@ -259,16 +260,37 @@ function commonest(all: string[]): string | undefined {
 }
 
 /**
+ * Where a cluster sets out from: the city of the first departure its
+ * events name. A round trip arrives home as often as it arrives away, and
+ * home is never the destination.
+ */
+async function originOf(members: Member[]): Promise<string | undefined> {
+  const departures = members.flatMap((member) =>
+    member.events.flatMap((fact) => {
+      const code = DEPARTURE.exec(fact.label ?? "")?.[1];
+      return code ? [{ code, at: `${fact.value} ${fact.time ?? ""}`, id: member.file.id }] : [];
+    }),
+  );
+  departures.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+  const first = departures[0];
+  return first ? (await lookupAirport(first.code))?.city : undefined;
+}
+
+/**
  * Every group of documents that looks like one trip, ready to be offered.
  * Deterministic: the same library always yields the same suggestions.
  * `extraPlaces` carries destination tokens found outside this module, the
  * entity extractor's contribution, for documents that share nothing exact.
+ * `recentPastDays` is how long over a trip may be and still be returned;
+ * assembly asks for all of time.
  */
 export async function suggestTrips(
   files: TripFile[],
   now: number,
   extraPlaces?: ReadonlyMap<string, ReadonlySet<string>>,
+  opts?: { recentPastDays?: number },
 ): Promise<TripSuggestion[]> {
+  const recentPastDays = opts?.recentPastDays ?? RECENT_PAST_DAYS;
   const none: ReadonlySet<string> = new Set();
   const members: Member[] = [];
   for (const file of files) {
@@ -302,16 +324,19 @@ export async function suggestTrips(
       continue;
     }
     // A thousand old documents hold many past trips; none is a suggestion.
-    if (dayOf(cluster.end) < nowDay - RECENT_PAST_DAYS) {
+    if (dayOf(cluster.end) < nowDay - recentPastDays) {
       continue;
     }
     const fileIds = cluster.members.map((member) => member.file.id).sort();
+    const origin = await originOf(cluster.members);
+    const away = (city: string) => city !== origin;
     const destination =
-      commonest(cluster.members.flatMap((m) => [...m.reach])) ??
+      commonest(cluster.members.flatMap((m) => [...m.reach]).filter(away)) ??
       commonest(
         cluster.members
           .flatMap((m) => [...m.cities])
-          .filter((city, _, all) => all.indexOf(city) !== all.lastIndexOf(city)),
+          .filter((city, _, all) => all.indexOf(city) !== all.lastIndexOf(city))
+          .filter(away),
       );
     const why = [`dates fall together, ${shown(cluster.start)} to ${shown(cluster.end)}`];
     const tailCounts = new Map<string, number>();
