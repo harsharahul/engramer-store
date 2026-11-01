@@ -266,7 +266,8 @@ export function TimelineList(props: {
   );
 }
 
-function Tile(props: { file?: FileEntry; index: number; more?: number; onOpen(): void }) {
+/** A photo's thumbnail, or a soft gradient while it loads or when it has none. */
+export function Tile(props: { file?: FileEntry; index: number; more?: number; onOpen(): void }) {
   const { ref, thumb } = usePhotoThumb<HTMLButtonElement>(
     props.file ?? { id: `tile-${props.index}`, key: new Uint8Array(0), hasThumb: false },
   );
