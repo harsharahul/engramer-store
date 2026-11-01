@@ -124,7 +124,6 @@ import {
 import { soonestDated } from "../intel/facts";
 import { hasAgenda } from "../intel/agenda";
 import { extractText } from "../intel/extract";
-import { CalendarView } from "./CalendarView";
 import { HeadsUp, TripHeadsUp } from "./HeadsUp";
 import { extension, fileKind, formatBytes } from "../format";
 import { albumTitle, albumsFrom, type Album } from "../albums";
@@ -3152,9 +3151,7 @@ export function Vault() {
             />
           ) : view.kind === "shared" ? (
             <SharedView onToast={showToast} />
-          ) : view.kind === "calendar" ? (
-            <CalendarView files={liveFiles} onOpen={openFile} />
-          ) : view.kind === "profile" ? (
+          ) : view.kind === "calendar" ? null : view.kind === "profile" ? (
             <ProfileView
               ocrOn={ocrOn}
               onToggleOcr={toggleOcr}

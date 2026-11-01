@@ -58,7 +58,7 @@ describe("one model for dates and trips", () => {
   it("the Timeline reads rows, not facts", () => {
     const timeline = sources(join(__dirname, "components"))
       .map((file) => relative(join(__dirname), file))
-      .filter((path) => /^components\/Timeline[^/]*\.tsx$/.test(path));
+      .filter((path) => /^components\/(?:Timeline[^/]*|CalendarView)\.tsx$/.test(path));
     const others = sources(join(__dirname)).map((file) => relative(join(__dirname), file)).filter((path) => !timeline.includes(path));
     expect(offenders([/\bitemsOf\(/, /\bofferedFacts\(/], others)).toEqual([]);
   });

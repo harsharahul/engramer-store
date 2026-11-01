@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Fact } from "../intel/facts";
-import type { FileEntry } from "../store";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type { Trip } from "../intel/agenda";
+import type { AgendaRow } from "../intel/agendarows";
 import { CalendarView } from "./CalendarView";
 
 let container: HTMLDivElement;
@@ -13,78 +13,66 @@ beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 
-beforeEach(() => {
-  // Only the clock is fake: the month on screen is November 2026.
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(new Date(2026, 10, 1, 12));
-});
-
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
-  vi.useRealTimers();
 });
 
-const fact = (value: string, extra: Partial<Fact> = {}): Fact => ({
-  id: `event:${value}`,
-  kind: "event",
-  document: "hotel-booking",
-  value,
-  label: "Check-in: Casa do Rio",
-  source: "jsonld",
-  confidence: 1,
-  accepted: "exact",
-  ...extra,
+const row = (id: string, kind: AgendaRow["kind"], day: string, title: string): AgendaRow => ({
+  id,
+  kind,
+  tag: kind.toUpperCase(),
+  day,
+  title,
+  source: "EMAIL",
+  fileIds: [id],
+  past: false,
 });
+const LISBON: Trip = { tag: "trip:lisbon-2026-11", title: "Lisbon, Nov 2026", members: [], start: "2026-11-12", end: "2026-11-16" };
+const rows = [
+  row("out", "flight", "2026-11-12", "San Francisco to Lisbon"),
+  row("in", "stay", "2026-11-13", "Check in · Casa do Rio"),
+  row("power", "due", "2026-11-20", "Electricity bill due"),
+  row("a", "bill", "2026-11-20", "Groceries"),
+];
 
-const file = (id: string, facts: Fact[], tags: string[] = []): FileEntry =>
-  ({
-    id,
-    folderId: null,
-    name: `${id}.pdf`,
-    mime: "application/pdf",
-    size: 10,
-    mtime: 0,
-    hasText: true,
-    hasClip: false,
-    inlineText: false,
-    tags,
-    facts,
-    favorite: false,
-    key: new Uint8Array(32),
-    hasThumb: false,
-    trashed: false,
-    createdAt: 0,
-    updatedAt: 0,
-  }) as FileEntry;
-
-function render(files: FileEntry[]) {
+function render(onDay = vi.fn()) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root.render(<CalendarView files={files} onOpen={() => {}} />));
+  act(() =>
+    root.render(<CalendarView rows={rows} trips={[LISBON]} month={{ y: 2026, m: 10 }} today="2026-11-14" onDay={onDay} onMonth={() => {}} />),
+  );
+  return onDay;
 }
 
-const tracked = () =>
-  [...container.querySelectorAll('[role="gridcell"]')].filter((cell) => /tracked/.test(cell.getAttribute("aria-label") ?? ""));
+const cell = (iso: string) => container.querySelector<HTMLElement>(`[data-day="${iso}"]`)!;
 
-describe("the calendar", () => {
-  it("a trip draws one bar titled from its tag across its dates", () => {
-    render([
-      file("out", [fact("2026-11-12")], ["trip:lisbon-2026-11"]),
-      file("back", [fact("2026-11-16", { label: "Check-out: Casa do Rio" })], ["trip:lisbon-2026-11"]),
-    ]);
-    const spans = [...container.querySelectorAll(".cal-span")];
-    expect(spans.length).toBeGreaterThan(0);
-    expect(spans.every((span) => span.getAttribute("title") === "Lisbon, Nov 2026")).toBe(true);
-    expect(spans.filter((span) => span.textContent === "Lisbon, Nov 2026")).toHaveLength(1);
+describe("the Month view", () => {
+  it("a trip is one strip with its name, and a day shows its first row", () => {
+    render();
+    expect(container.querySelector("h3")!.textContent).toBe("November 2026");
+    expect(container.textContent).toContain("Trips, bookings, bills and dates. Click a day to open it on the timeline.");
+    expect([...container.querySelectorAll(".mon-dow")].map((d) => d.textContent)).toEqual(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]);
+    // Thu 12 to Mon 16: two week segments, each named once.
+    expect([...container.querySelectorAll(".mon-lab")].map((l) => l.textContent)).toEqual(["LISBON", "LISBON"]);
+    expect(cell("2026-11-12").classList.contains("mon-ts")).toBe(true);
+    expect(cell("2026-11-14").classList.contains("mon-te")).toBe(true);
+    expect(cell("2026-11-15").classList.contains("mon-ts")).toBe(true);
+    expect(cell("2026-11-16").classList.contains("mon-te")).toBe(true);
+    expect(cell("2026-11-20").querySelector(".mon-t")!.textContent).toBe("Electricity bill due");
+    expect(cell("2026-11-20").querySelectorAll(".mon-dots i")).toHaveLength(2);
+    expect(cell("2026-11-13").querySelector(".mon-t")).toBeNull();
+    expect(cell("2026-11-14").classList.contains("mon-today")).toBe(true);
+    // The weeks run on into the next month, faded.
+    expect(cell("2026-12-01").classList.contains("mon-out")).toBe(true);
   });
 
-  it("a tracked date marks its day and an untracked one does not", () => {
-    render([
-      file("bill", [fact("2026-11-20", { kind: "due", document: "invoice", label: "Payment due", source: "label", confidence: 0.7, accepted: undefined, confirmed: true })]),
-      file("flyer", [fact("2026-11-21", { kind: "due", document: "other", label: "Sale ends", source: "model", confidence: 0.45, accepted: undefined })]),
-    ]);
-    expect(tracked().map((cell) => cell.getAttribute("aria-label"))).toEqual([expect.stringContaining("1 tracked")]);
+  it("clicking or pressing Enter on a day opens it", () => {
+    const onDay = render();
+    act(() => cell("2026-11-20").dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(onDay).toHaveBeenLastCalledWith("2026-11-20");
+    act(() => cell("2026-11-13").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(onDay).toHaveBeenLastCalledWith("2026-11-13");
   });
 });
