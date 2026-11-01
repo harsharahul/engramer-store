@@ -55,6 +55,14 @@ describe("one model for dates and trips", () => {
     expect(offenders([/\b(?:function|const)\s+isDated\b/], [join("intel", "facts.ts")])).toEqual([]);
   });
 
+  it("the Timeline reads rows, not facts", () => {
+    const timeline = sources(join(__dirname, "components"))
+      .map((file) => relative(join(__dirname), file))
+      .filter((path) => /^components\/Timeline[^/]*\.tsx$/.test(path));
+    const others = sources(join(__dirname)).map((file) => relative(join(__dirname), file)).filter((path) => !timeline.includes(path));
+    expect(offenders([/\bitemsOf\(/, /\bofferedFacts\(/], others)).toEqual([]);
+  });
+
   it("plans trips in one place", () => {
     // Whatever assembles or offers a trip reads planTrips' plans.
     expect(offenders([/\bsuggestTrips\(/], [join("intel", "agenda.ts"), join("intel", "trips.ts")])).toEqual([]);

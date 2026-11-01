@@ -527,6 +527,11 @@ interface StoreState {
   /** Takes files out of a trip for good: the assembler never puts them back. */
   leaveTrip: (fileIds: string[], tag: string) => Promise<void>;
   /**
+   * The owner puts these files in a trip, even ones taken out before; the
+   * trip is the owner's from then on.
+   */
+  addToTrip: (fileIds: string[], tag: string) => Promise<void>;
+  /**
    * Groups every journey that booking data states exactly as a trip, with
    * the documents that link to it exactly, across all of time. Refused
    * trips and files taken out stay out; a second run writes nothing.
@@ -1242,10 +1247,16 @@ export const useStore = create<StoreState>((set, get) => {
    * owner's; the assembler's is remembered pair by pair, so Not a trip can
    * take back exactly what it wrote. Answers the files written.
    */
-  const tagTrip = async (tag: string, fileIds: readonly string[], by: "owner" | "assembler"): Promise<string[]> => {
+  const tagTrip = async (
+    tag: string,
+    fileIds: readonly string[],
+    by: "owner" | "assembler",
+    opts?: { evenIfExcluded?: boolean },
+  ): Promise<string[]> => {
     const account = get().session?.email;
-    // A file the owner took out of this trip stays out, whoever writes.
-    const excluded = account ? decided(account, "tripExclusions") : new Set<string>();
+    // A file the owner took out of this trip stays out, whoever writes,
+    // unless the owner puts that very file back.
+    const excluded = account && !opts?.evenIfExcluded ? decided(account, "tripExclusions") : new Set<string>();
     const ids = fileIds.filter((id) => {
       const file = get().files.get(id);
       return file !== undefined && !file.trashed && !file.tags.includes(tag) && !excluded.has(`${tag}|${id}`);
@@ -2945,6 +2956,10 @@ export const useStore = create<StoreState>((set, get) => {
         file.tags.includes(tag) ? { tags: file.tags.filter((t) => t !== tag) } : null,
       );
       return done.length;
+    },
+
+    addToTrip: async (fileIds, tag) => {
+      await tagTrip(tag, fileIds, "owner", { evenIfExcluded: true });
     },
 
     leaveTrip: async (fileIds, tag) => {

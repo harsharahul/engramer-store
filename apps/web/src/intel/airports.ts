@@ -41,3 +41,14 @@ export async function lookupAirport(code: string): Promise<Airport | null> {
   }
   return (await table()).get(code.toUpperCase()) ?? null;
 }
+
+/** The first airport (by code) serving a city, or null when none does. */
+export async function airportForCity(city: string): Promise<Airport | null> {
+  const wanted = city.trim().toLowerCase();
+  for (const airport of (await table()).values()) {
+    if (airport.city.toLowerCase() === wanted) {
+      return airport;
+    }
+  }
+  return null;
+}

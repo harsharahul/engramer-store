@@ -247,6 +247,22 @@ describe("tagging a trip", () => {
     expect(tagged(TAG)).toEqual(["dinner", "eticket", "flight", "hotel", "pass", "taxi"]);
   });
 
+  it("adding one file puts it in the trip even after it was taken out", async () => {
+    library([flight({ tags: [TAG] }), hotel({ tags: [TAG] })]);
+    await useStore.getState().leaveTrip(["hotel"], TAG);
+    expect(file("hotel").tags).not.toContain(TAG);
+    await useStore.getState().addToTrip(["hotel"], TAG);
+    expect(file("hotel").tags).toContain(TAG);
+    expect(decided(ACCOUNT, "ownedTrips").has(TAG)).toBe(true);
+  });
+
+  it("adding twice writes once", async () => {
+    library([flight({ tags: [TAG] }), hotel()]);
+    await useStore.getState().addToTrip(["hotel"], TAG);
+    await useStore.getState().addToTrip(["hotel"], TAG);
+    expect(writes.patches).toBe(1);
+  });
+
   it("taking a file out of a trip remembers it", async () => {
     library([flight({ tags: [TAG] }), hotel({ tags: [TAG] })]);
     await useStore.getState().leaveTrip(["hotel"], TAG);
