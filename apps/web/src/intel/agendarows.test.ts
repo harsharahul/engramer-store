@@ -39,7 +39,7 @@ const email = (id: string, subject: string, facts: Fact[], extra: Partial<RowFil
 const photo = (id: string, iso: string, time: string) =>
   file(id, [], { name: `${id}.jpg`, mime: "image/jpeg", mtime: at(iso, time) });
 
-const none: RowContext = { plans: [], dismissed: new Set(), excluded: new Set() };
+const none: RowContext = { plans: [], dismissed: new Set(), excluded: new Set(), assembling: true };
 const titles = (rows: AgendaRow[]) => rows.map((row) => row.title);
 
 const flights = () =>
@@ -193,7 +193,7 @@ describe("rowsOf", () => {
       category: "Receipts",
       mtime: at("2026-11-14", "13:30"),
     });
-    const files = [flights(), hotel(), lunch];
+    const files = [flights(), hotel({ tags: ["trip:lisbon-2026-11"] }), lunch];
     const rows = await rowsOf(files, { ...none, plans: await planTrips(files, NOW) }, NOW);
     expect(rows.find((row) => row.kind === "bill")!.trip).toMatchObject({ evidence: "weak", name: "Lisbon" });
   });
@@ -248,6 +248,111 @@ describe("rowsOf", () => {
     const rows = await rowsOf(files, none, NOW);
     expect(performance.now() - started).toBeLessThan(500);
     expect(rows.length).toBeGreaterThan(5_000);
+  });
+
+  it("an invoice whose due date still asks, or was refused, is not a paid bill", async () => {
+    const asking = email("statement", "Your September statement", [
+      { id: "due:statement", kind: "due", document: "invoice", value: "2026-09-25", source: "label", confidence: 0.7 },
+      amount("65.00", "USD", { label: "Amount due", document: "invoice" }),
+    ]);
+    const refused = email("refused", "Your bill", [
+      { id: "due:refused", kind: "due", document: "invoice", value: "2026-09-26", source: "label", confidence: 0.7, dismissed: true },
+      amount("40.00", "USD", { label: "Amount due", document: "invoice" }),
+    ]);
+    const rows = await rowsOf([asking, refused], none, NOW);
+    expect(rows.map((row) => [row.kind, row.ask ?? false])).toEqual([["due", true]]);
+  });
+
+  it("a round trip under one designator keeps both journeys", async () => {
+    const bus = email("bus", "Your bus tickets", [
+      exact("event", "2026-10-01", "Bus FlixBus departs Berlin ZOB", { time: "08:00" }),
+      exact("event", "2026-10-01", "Bus FlixBus arrives Prague", { time: "12:30" }),
+      exact("event", "2026-10-05", "Bus FlixBus departs Prague", { time: "15:00" }),
+      exact("event", "2026-10-05", "Bus FlixBus arrives Berlin ZOB", { time: "19:30" }),
+    ]);
+    const rows = await rowsOf([bus], none, NOW);
+    expect(titles(rows)).toEqual(["Berlin ZOB to Prague", "Prague to Berlin ZOB"]);
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2);
+    expect(rows.map((row) => row.flight?.number)).toEqual(["FlixBus", "FlixBus"]);
+  });
+
+  it("a date-only document is asked about only for a trip that exists, is recent and was not refused", async () => {
+    const taxi = file("taxi", [
+      { id: "event:taxi", kind: "event", document: "invoice", value: "2026-11-13", label: "Taxi", source: "model", confidence: 0.8, accepted: "grounded" },
+    ]);
+    const untagged = [flights(), hotel(), taxi];
+    const plans = await planTrips(untagged, NOW);
+    const weak = (rows: AgendaRow[]) => rows.find((row) => row.fileIds[0] === "taxi")!.trip;
+    expect(weak(await rowsOf(untagged, { ...none, plans }, NOW))).toBeUndefined();
+    const tagged = [flights(), hotel({ tags: ["trip:lisbon-2026-11"] }), taxi];
+    const taggedPlans = await planTrips(tagged, NOW);
+    const refused = new Set(taggedPlans[0]!.dismissKeys);
+    expect(weak(await rowsOf(tagged, { ...none, plans: taggedPlans, dismissed: refused }, NOW))).toBeUndefined();
+    const later = Date.UTC(2027, 5, 1);
+    expect(weak(await rowsOf(tagged, { ...none, plans: await planTrips(tagged, later) }, later))).toBeUndefined();
+  });
+
+  it("with automatic trips off, a booked journey is one proposal", async () => {
+    const files = [flights(), hotel()];
+    const plans = await planTrips(files, NOW);
+    const off = await rowsOf(files, { ...none, plans, assembling: false }, NOW);
+    expect(off.filter((row) => row.kind === "trip").map((row) => [row.title, row.fileIds])).toEqual([
+      ["Lisbon, 12-16 Nov?", ["flight", "hotel"]],
+    ]);
+    expect((await rowsOf(files, { ...none, plans }, NOW)).some((row) => row.kind === "trip")).toBe(false);
+  });
+
+  it("an asking flight row names the facts to confirm", async () => {
+    const read = (id: string, value: string, label: string, time: string): Fact => ({
+      id,
+      kind: "event",
+      document: "itinerary",
+      value,
+      label,
+      time,
+      source: "model",
+      confidence: 0.8,
+    });
+    const leg = email("leg", "Itinerary", [
+      read("out", "2026-11-12", "Flight TP 236 departs SFO", "18:10"),
+      read("in", "2026-11-13", "Flight TP 236 arrives LIS", "14:05"),
+    ]);
+    const [row] = await rowsOf([leg], none, NOW);
+    expect(row).toMatchObject({ kind: "flight", ask: true, factIds: ["out", "in"] });
+  });
+
+  it("an email and its receipt are one bill, dated and named by the email", async () => {
+    const receiptEmail = email("tax-mail", "Your receipt", [amount("6.00", "EUR", { source: "user", confirmed: true })], {
+      mail: { subject: "Your receipt", from: "Casa do Rio", date: at("2026-09-02", "10:00") },
+    });
+    const pdf = file("tax-pdf", [amount("6.00", "EUR", { source: "user", confirmed: true })], { mailParent: "tax-mail", mtime: at("2026-09-05", "12:00") });
+    const lonePdf = file("lone-pdf", [amount("9.00", "EUR", { source: "user", confirmed: true })], { mailParent: "lone-mail", mtime: at("2026-09-06", "12:00") });
+    const loneEmail = email("lone-mail", "Your invoice", [], { mail: { subject: "Your invoice", date: at("2026-09-03", "08:00") } });
+    const rows = await rowsOf([receiptEmail, pdf, lonePdf, loneEmail], none, NOW);
+    expect(rows.map((row) => [row.kind, row.title, row.day, row.amount?.value])).toEqual([
+      ["bill", "Your receipt", "2026-09-02", "6.00"],
+      ["bill", "Your invoice", "2026-09-03", "9.00"],
+    ]);
+  });
+
+  it("a paid booking is a bill as well as its flights", async () => {
+    const paid = email("paid", "Your booking confirmation", [...flights().facts, amount("1184.00", "USD", { source: "user", confirmed: true })], {
+      mail: { subject: "Your booking confirmation", date: at("2026-09-18", "20:14") },
+    });
+    const rows = await rowsOf([paid], none, NOW);
+    expect(rows.map((row) => [row.kind, row.day])).toEqual([
+      ["bill", "2026-09-18"],
+      ["flight", "2026-11-12"],
+      ["flight", "2026-11-16"],
+    ]);
+    expect(rows[0]!.amount).toEqual({ currency: "USD", value: "1184.00" });
+  });
+
+  it("a delivery window that only opens reads From", async () => {
+    const opens = email("opens", "Out for delivery", [exact("event", "2026-09-09", "Delivery window opens", { document: "delivery", time: "10:00" })]);
+    const by = email("by", "Arriving today", [exact("event", "2026-09-10", "Delivery expected by", { document: "delivery", time: "14:00" })]);
+    const rows = await rowsOf([opens, by], none, NOW);
+    expect(rows.map((row) => row.sub)).toEqual(["From 10:00", "By 14:00"]);
   });
 
   it("local days and times are the device's", () => {

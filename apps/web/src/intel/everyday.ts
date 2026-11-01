@@ -88,7 +88,8 @@ export function everydayOf(rows: readonly AgendaRow[], trips: readonly Trip[], n
   const next = trips
     .filter((trip) => trip.start !== undefined && trip.start > today)
     .sort((a, b) => a.start!.localeCompare(b.start!))[0];
-  const needsYes = rows.find((row) => row.ask && row.day >= today && row.day <= askEnd);
+  // Only a row that names its facts can be answered.
+  const needsYes = rows.find((row) => row.ask && row.factIds?.length && row.day >= today && row.day <= askEnd);
 
   return {
     today: todays,
