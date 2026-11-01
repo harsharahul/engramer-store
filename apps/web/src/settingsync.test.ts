@@ -31,6 +31,7 @@ import { semanticEnabled } from "./intel/semantic";
 import { assistantEnabled, setAssistantEnabled } from "./intel/assistant";
 import { readingWindowMonths, setReadingWindowMonths } from "./intel/reading";
 import { assembleTripsEnabled, setAssembleTripsEnabled } from "./intel/trips";
+import { homeCity, openOn, setHomeCity, setOpenOn } from "./timelineprefs";
 import { loadPolicy, savePolicy, DEFAULT_POLICY } from "./backuppolicy";
 
 // Prefs live in localStorage; give the node test env one.
@@ -92,6 +93,23 @@ describe("settings snapshot and apply", () => {
     delete older.readingWindowMonths;
     applySettings(older as SyncedSettings);
     expect(readingWindowMonths()).toBe(6);
+  });
+
+  it("home city and open on follow the account, and an older blob leaves them alone", () => {
+    setHomeCity("Lisbon");
+    setOpenOn("files");
+    const snapshot = snapshotSettings();
+    expect(snapshot).toMatchObject({ homeCity: "Lisbon", openOn: "files" });
+    localStorage.clear();
+    applySettings(snapshot);
+    expect(homeCity()).toBe("Lisbon");
+    expect(openOn()).toBe("files");
+    const older = { ...snapshot } as Partial<SyncedSettings>;
+    delete older.homeCity;
+    delete older.openOn;
+    applySettings(older as SyncedSettings);
+    expect(homeCity()).toBe("Lisbon");
+    expect(openOn()).toBe("files");
   });
 
   it("the assemble switch follows the account, and an older blob leaves it alone", () => {

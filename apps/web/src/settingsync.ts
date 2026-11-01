@@ -35,6 +35,7 @@ import { mergePins, pinnedKeys } from "./keypins";
 import { onSettingChanged } from "./settingsbus";
 import { readingWindowMonths, setReadingWindowMonths } from "./intel/reading";
 import { assembleTripsEnabled, setAssembleTripsEnabled } from "./intel/trips";
+import { homeCity, openOn, setHomeCity, setOpenOn, type OpenOn } from "./timelineprefs";
 
 export interface SyncedSettings {
   version: 1;
@@ -58,6 +59,10 @@ export interface SyncedSettings {
   readingWindowMonths?: number;
   /** Whether trips in booking data assemble themselves; absent means the blob predates it. */
   assembleTrips?: boolean;
+  /** The home city the Timeline speaks for; "" means use the guess. Absent means the blob predates it. */
+  homeCity?: string;
+  /** Where the app opens; absent means the blob predates it. */
+  openOn?: OpenOn;
   /** The account public key last released to, per email address. */
   contacts?: Record<string, string>;
   /** What the user decided about the library: dismissed notices and
@@ -116,6 +121,8 @@ export function snapshotSettings(account?: string): SyncedSettings {
     assistant: assistantEnabled(),
     readingWindowMonths: readingWindowMonths(),
     assembleTrips: assembleTripsEnabled(),
+    homeCity: homeCity() ?? "",
+    openOn: openOn(),
     contacts: pinnedKeys(),
   };
 }
@@ -175,6 +182,12 @@ function applyInner(values: SyncedSettings): void {
   }
   if (values.assembleTrips !== undefined) {
     setAssembleTripsEnabled(values.assembleTrips);
+  }
+  if (values.homeCity !== undefined) {
+    setHomeCity(values.homeCity);
+  }
+  if (values.openOn !== undefined) {
+    setOpenOn(values.openOn);
   }
   mergePins(values.contacts);
 }
