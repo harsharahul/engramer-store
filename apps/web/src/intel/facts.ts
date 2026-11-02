@@ -1,4 +1,5 @@
 import { daysUntil } from "./dates";
+import type { Subject } from "./subject";
 
 /**
  * Typed facts read out of documents: an expiry, an amount due, a reference
@@ -150,6 +151,12 @@ export interface Fact {
   digest?: string;
   /** Confirmed, but the current contents no longer say it. */
   stale?: boolean;
+  /**
+   * What the date is about, stated by the reader: which flight, stay or place.
+   * Kept exactly as stored, so a subject a newer version wrote survives this
+   * one; read it only through `subjectOf`, which checks it.
+   */
+  subject?: Subject;
 }
 
 /** The half that stays out of metadata, fetched only when a fact is opened. */
@@ -161,6 +168,9 @@ export interface FactEvidence {
   /** The passage the value was read from, so the fact can show its work. */
   span?: string;
   page?: number;
+  /** A link the sender gave for acting on this, such as an airline's check-in
+   * page. Kept here because such links often carry the reference and a name. */
+  link?: string;
 }
 
 /** Metadata is synced everywhere; a document cannot grow it without bound. */
@@ -335,7 +345,7 @@ export function reconcileFacts(existing: Fact[], rescanned: Fact[], digest: stri
       continue;
     }
     if (again) {
-      const forward: Fact = { ...fact, digest };
+      const forward: Fact = { ...withSubjectFrom(fact, again), digest };
       delete forward.stale;
       kept.push(forward);
       continue;
@@ -503,7 +513,7 @@ export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
     if (prior.confirmed || prior.dismissed) {
       continue;
     }
-    merged.set(fact.id, pick(prior, fact));
+    merged.set(fact.id, withSubjectFrom(pick(prior, fact), fact));
   }
   // The cap has to drop the weakest rather than whichever arrived last.
   return resolveSlots([...merged.values()])
@@ -543,6 +553,15 @@ function readers(fact: Fact): string[] {
 }
 
 /** The same reading from two readers: exact wins; two grounded readers agree. */
+/**
+ * A stored fact with the subject a fresh reading by the same reader stated.
+ * The subject is the reader's own statement, unlike a confirmation, so the
+ * newest reading of it wins; a different reader never rewrites it.
+ */
+function withSubjectFrom(kept: Fact, fresh: Fact): Fact {
+  return fresh.subject && kept !== fresh && kept.source === fresh.source ? { ...kept, subject: fresh.subject } : kept;
+}
+
 function pick(prior: Fact, fact: Fact): Fact {
   if (isExact(prior) !== isExact(fact)) {
     return isExact(prior) ? prior : withExactAcceptance(fact);

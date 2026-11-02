@@ -414,3 +414,25 @@ describe("readers as they really meet", () => {
     expect(offeredFacts([{ id: "f", trashed: false, facts }], NOW)).toEqual([]);
   });
 });
+
+describe("subjects across stores and rescans", () => {
+  const checkIn = (over: Partial<Fact> = {}): Fact =>
+    fact({ id: "event:2026-11-13 check-in: casa do rio", kind: "event", document: "hotel-booking", value: "2026-11-13", label: "Check-in: Casa do Rio", source: "jsonld", confidence: 1, ...over });
+
+  it("a subject a newer version wrote is kept as written", () => {
+    const stored = [checkIn({ subject: { role: "teleport", place: "Casa do Rio" } as never })];
+    expect(asFacts(stored)[0]!.subject).toEqual({ role: "teleport", place: "Casa do Rio" });
+  });
+
+  it("a rescan brings a fact's subject forward and keeps the owner's answer", () => {
+    const subject = { role: "check-in" as const, place: "Casa do Rio", address: "Rua das Flores 12, 1200-195 Lisboa" };
+    const [out] = reconcileFacts([checkIn({ confirmed: true, digest: "d1" })], [checkIn({ subject, digest: "d2" })], "d2");
+    expect(out).toMatchObject({ confirmed: true, digest: "d2", subject });
+  });
+
+  it("a fresh reading adds its subject to the stored fact", () => {
+    const subject = { role: "check-in" as const, place: "Casa do Rio", reservation: 0 };
+    const [out] = mergeFacts([checkIn({ accepted: "exact" })], [checkIn({ subject })]);
+    expect(out!.subject).toEqual(subject);
+  });
+});
