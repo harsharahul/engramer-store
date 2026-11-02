@@ -87,6 +87,36 @@ final class ScreenWalk: XCTestCase {
         }
         clearSearch()
       }
+
+      // The Timeline: the hero's cards swipe card by card, and a trip
+      // opens as a page with its own scroll and the details sheet over it.
+      if tab("Timeline") {
+        pause(2.5)
+        shot("timeline")
+        let cards = web.otherElements.matching(NSPredicate(format: "label ENDSWITH %@", "trip")).firstMatch
+        if cards.waitForExistence(timeout: 3) {
+          cards.swipeLeft()
+          pause(1)
+          shot("timeline-card-2")
+        } else {
+          note("no hero card row to swipe")
+        }
+        if tapAny("LISBON") {
+          pause(2)
+          shot("trip-page")
+          web.swipeUp()
+          web.swipeUp()
+          pause(1)
+          shot("trip-page-scrolled")
+          if tapFirst(web.buttons, endingWith: "12 Nov") {
+            pause(1.5)
+            shot("trip-page-details")
+            dismissSheet()
+          }
+          tapAny("Back to Timeline")
+          pause(1)
+        }
+      }
       tab("Files")
       pause(1)
     } else {

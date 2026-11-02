@@ -8,14 +8,45 @@
  * way airline, hotel and shop emails do, so importing the mailbox runs the
  * real reading pipeline. Every name, number and address is invented.
  *
- * Usage: node apps/web/scripts/timeline-fixture.mjs [out.mbox]
+ * Usage: node apps/web/scripts/timeline-fixture.mjs [out.mbox] [--shift-days N]
  * Default output: .playwright-mcp/timeline-fixture.mbox (ignored by git).
+ *
+ * --shift-days moves every date and time in the mailbox by N days, offsets
+ * as written, so a check in the real app (which runs on the real clock) can
+ * find the trip under way today: the Lisbon stay's second night is 14 Nov
+ * 2026, so N is the days from then to the day of the check.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-const out = process.argv[2] ?? ".playwright-mcp/timeline-fixture.mbox";
+const args = process.argv.slice(2);
+const shiftAt = args.indexOf("--shift-days");
+const shiftDays = shiftAt >= 0 ? Number(args[shiftAt + 1]) : 0;
+if (!Number.isInteger(shiftDays)) {
+  console.error("--shift-days takes a whole number of days");
+  process.exit(1);
+}
+const shiftValueAt = shiftAt >= 0 ? shiftAt + 1 : -1;
+const out = args.find((arg, i) => !arg.startsWith("--") && i !== shiftValueAt) ?? ".playwright-mcp/timeline-fixture.mbox";
+
+/** "2026-11-12" moved by `shiftDays`; the time and offset beside it stay as written. */
+function shiftDay(y, m, d) {
+  const moved = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)) + shiftDays * 86_400_000);
+  return [moved.getUTCFullYear(), String(moved.getUTCMonth() + 1).padStart(2, "0"), String(moved.getUTCDate()).padStart(2, "0")];
+}
+
+/** Every ISO date (booking data, headers) and every compact invite date (DTSTART:20261112T...) moved. */
+function shifted(value) {
+  if (shiftDays === 0) {
+    return value;
+  }
+  const text = JSON.stringify(value)
+    // Digit lookarounds, not \b: "2026-11-12T18:10" has no word boundary before the T.
+    .replace(/(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)/g, (_, y, m, d) => shiftDay(y, m, d).join("-"))
+    .replace(/(?<!\d)(\d{4})(\d{2})(\d{2})(T\d{6})/g, (_, y, m, d, rest) => `${shiftDay(y, m, d).join("")}${rest}`);
+  return JSON.parse(text);
+}
 
 const flight = (number, from, departs, to, arrives) => ({
   "@type": "Flight",
@@ -227,7 +258,7 @@ function message(spec, index) {
   ].join("\r\n");
 }
 
-const mbox = messages
+const mbox = shifted(messages)
   .map((spec, index) => `From fixture@example.com Thu Jan  1 00:00:00 1970\n${message(spec, index).replace(/^From /gm, ">From ")}\n`)
   .join("");
 mkdirSync(dirname(out), { recursive: true });
