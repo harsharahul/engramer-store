@@ -3,7 +3,8 @@ import { email, exact, file, flights, hotel, lisbonFiles, lisbonTrip, PLANNING_N
 import { tripsOf } from "./agenda";
 import { rowsOf } from "./agendarows";
 import type { Fact } from "./facts";
-import { comingUp, tripSpend, tripViewOf, windowOf } from "./tripview";
+import { sum } from "./everyday";
+import { comingUp, tripSources, tripSpend, tripViewOf, windowOf } from "./tripview";
 
 describe("tripViewOf", () => {
   it("a trip view knows where its destination is", async () => {
@@ -90,6 +91,26 @@ describe("tripSpend", () => {
     expect(spend.sums).toEqual([{ currency: "EUR", value: "114.00" }]);
     expect(spend.count).toBe(2);
     expect(spend.waiting?.fileIds).toEqual(["taxi"]);
+  });
+
+  it("the spend total is the sum of the bills it lists", async () => {
+    const { view, rows } = await lisbonTrip();
+    const spend = tripSpend(view, rows);
+    expect(spend.bills.length).toBe(spend.count);
+    expect(sum(spend.bills)).toEqual(spend.sums);
+    expect(new Set(spend.bills.map((bill) => bill.fileIds[0])).size).toBe(spend.bills.length);
+  });
+});
+
+describe("tripSources", () => {
+  it("everything for the trip lists each member once, flights by their route", async () => {
+    const { view, rows, files } = await lisbonTrip();
+    const byId = new Map(files.map((member) => [member.id, member]));
+    const tiles = tripSources(view, rows, (id) => byId.get(id));
+    expect(tiles.map((tile) => tile.fileId).sort()).toEqual([...view.memberIds].sort());
+    expect(tiles.find((tile) => tile.fileId === "booking")).toMatchObject({ chip: "EMAIL", title: "SFO to LIS" });
+    expect(tiles.find((tile) => tile.fileId === "museum")).toMatchObject({ chip: "PDF", title: "Museu do Azulejo", day: "2026-11-14" });
+    expect(tiles.map((tile) => tile.day)).toEqual([...tiles.map((tile) => tile.day)].sort());
   });
 });
 
