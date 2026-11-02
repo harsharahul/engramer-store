@@ -12,7 +12,7 @@ import { createInterface } from "node:readline";
 import { generate, type AssistantTransport } from "../../../apps/web/src/intel/assistant";
 import { CATEGORIES } from "../../../apps/web/src/intel/categorize";
 import { EVAL_CASES } from "../../../apps/web/src/intel/eval/cases";
-import { factCases, kindCases, scoreKinds, scoreReader } from "../../../apps/web/src/intel/eval/score";
+import { factCases, kindCases, scoreKinds, scoreReader, scoreRoles } from "../../../apps/web/src/intel/eval/score";
 import { EMAIL_MIME } from "../../../apps/web/src/mail/kind";
 import { MODEL_READER, READER_VERSION } from "../../../apps/web/src/intel/reading";
 import { readingFingerprint, summarize } from "../../../apps/web/src/intel/summarize";
@@ -75,6 +75,7 @@ const counts = (score: Awaited<ReturnType<typeof scoreReader>>) => ({
 const dates = await scoreReader(factCases(EVAL_CASES), read, "dates");
 const amounts = await scoreReader(factCases(EVAL_CASES), read, "amounts");
 const kinds = await scoreKinds(kindCases(EVAL_CASES), async (evalCase) => readings.get(evalCase.id)?.mailKind ?? null);
+const roles = await scoreRoles(factCases(EVAL_CASES), read);
 const scores = {
   reader: MODEL_READER,
   version: READER_VERSION[MODEL_READER],
@@ -87,6 +88,9 @@ const scores = {
     dates: { precision: dates.precision, recall: dates.recall, ...counts(dates) },
     amounts: { precision: amounts.precision, recall: amounts.recall, ...counts(amounts) },
     mailKind: kinds,
+    // What each found date is (a check-in, a departure). Informational: a
+    // model's date still waits for a yes, and the role rides with it.
+    roles,
   },
 };
 writeFileSync(out, `${JSON.stringify(scores, null, 2)}\n`);

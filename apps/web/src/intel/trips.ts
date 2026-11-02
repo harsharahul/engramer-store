@@ -20,6 +20,9 @@ import { decide, decided } from "../decisions";
 import { settingChanged } from "../settingsbus";
 import { lookupAirport } from "./airports";
 import { isTracked, type Fact } from "./facts";
+import { zonedTime } from "./instants";
+import { legsOf, type Leg } from "./legs";
+import { arrivalCode, codesOf, departureCode, subjectOf } from "./subject";
 
 export interface TripFile {
   id: string;
@@ -76,9 +79,6 @@ function shown(iso: string): string {
   return `${Number(day)} ${MONTHS[Number(month) - 1]} ${year}`;
 }
 
-const ARRIVAL = /\b(?:to|arrives)\s+([A-Z]{3})\b/;
-const DEPARTURE = /\bdeparts\s+([A-Z]{3})\b/;
-
 /**
  * Airport-code shaped tokens in a label. A fresh iterator per call on
  * purpose: a shared global regex carries lastIndex across the awaits these
@@ -122,16 +122,16 @@ async function memberOf(file: TripFile, extra: ReadonlySet<string>): Promise<Mem
   const cities = new Set<string>();
   const arrivals = new Set<string>();
   for (const fact of events) {
-    const label = fact.label ?? "";
-    for (const code of codesIn(label)) {
+    const subject = subjectOf(fact);
+    for (const code of codesOf(subject)) {
       const airport = await lookupAirport(code);
       if (airport) {
         cities.add(airport.city);
       }
     }
-    const arriving = ARRIVAL.exec(label);
+    const arriving = arrivalCode(subject);
     if (arriving) {
-      const airport = await lookupAirport(arriving[1]!);
+      const airport = await lookupAirport(arriving);
       if (airport) {
         arrivals.add(airport.city);
       }
@@ -147,6 +147,12 @@ async function memberOf(file: TripFile, extra: ReadonlySet<string>): Promise<Mem
     arrivals,
     reach: new Set([...arrivals, ...extra]),
   };
+}
+
+/** Whether one file's own journeys leave a place, reach another, and come back. */
+async function roundJourney(member: Member): Promise<boolean> {
+  const { from, to, destination } = await legPlaces(member.events);
+  return from !== undefined && from === to && destination !== undefined;
 }
 
 export interface TravelSpan {
@@ -272,16 +278,14 @@ export async function legPlaces(
   const ordered = [...legs].sort(
     (a, b) => `${a.value} ${a.time ?? ""}`.localeCompare(`${b.value} ${b.time ?? ""}`) || a.id.localeCompare(b.id),
   );
-  const city = async (pattern: RegExp, fact: Fact) => {
-    const code = pattern.exec(fact.label ?? "")?.[1];
-    return code ? (await lookupAirport(code))?.city : undefined;
-  };
+  const city = async (code: string | undefined) => (code ? (await lookupAirport(code))?.city : undefined);
   let from: string | undefined;
   let to: string | undefined;
   const arrivals: string[] = [];
   for (const fact of ordered) {
-    from ??= await city(DEPARTURE, fact);
-    const arrived = await city(ARRIVAL, fact);
+    const subject = subjectOf(fact);
+    from ??= await city(departureCode(subject));
+    const arrived = await city(arrivalCode(subject));
     if (arrived) {
       arrivals.push(arrived);
       to = arrived;
@@ -339,7 +343,9 @@ export async function suggestTrips(
   const nowDay = now / 86_400_000;
   const suggestions: TripSuggestion[] = [];
   for (const cluster of clusters) {
-    if (cluster.members.length < 2) {
+    // One document is a trip only when it books the way out and the way back
+    // itself, as a single airline or agency email often does.
+    if (cluster.members.length < 2 && !(await roundJourney(cluster.members[0]!))) {
       continue;
     }
     // A thousand old documents hold many past trips; none is a suggestion.
@@ -428,14 +434,14 @@ export function tripTag(suggestion: TripSuggestion): string {
 }
 
 function legKind(fact: Fact): ItineraryLeg["kind"] {
-  const label = fact.label ?? "";
-  if (/^flight\b/i.test(label) || fact.document === "boarding-pass") {
+  const subject = subjectOf(fact);
+  if (subject?.mode === "flight" || fact.document === "boarding-pass") {
     return "flight";
   }
-  if (/^check[- ]?(in|out)\b/i.test(label) || fact.document === "hotel-booking") {
+  if (subject?.role === "check-in" || subject?.role === "check-out" || fact.document === "hotel-booking") {
     return "stay";
   }
-  if (/^(pick[- ]?up|drop[- ]?off)\b/i.test(label) || fact.document === "car-rental") {
+  if (subject?.role === "pick-up" || subject?.role === "drop-off" || fact.document === "car-rental") {
     return "car";
   }
   return "other";
@@ -494,46 +500,35 @@ export async function assembleItinerary(members: TripFile[]): Promise<ItineraryL
  * offers a Maps handoff instead.
  */
 export async function departureAdvice(
-  legs: ItineraryLeg[],
-): Promise<{ leg: ItineraryLeg; text: string } | null> {
-  for (const leg of legs) {
-    if (leg.kind !== "flight" || !leg.time || !/\bdeparts?\b|\bto\b/i.test(leg.title)) {
-      continue;
-    }
-    // Every leg of one flight shares a title prefix; their codes together
-    // name both ends even when this leg only mentions one.
-    const prefix = leg.title.split(/\s+(?:departs|arrives)\s+/i)[0]!;
-    const codes = new Set<string>();
-    for (const other of legs) {
-      if (other.kind === "flight" && other.title.startsWith(prefix)) {
-        for (const code of other.codes ?? []) {
-          codes.add(code);
-        }
-      }
-    }
-    const countries = new Set<string>();
-    for (const code of codes) {
-      const airport = await lookupAirport(code);
-      if (airport) {
-        countries.add(airport.country);
-      }
-    }
-    if (codes.size < 2 || countries.size === 0) {
-      continue;
-    }
-    const international = countries.size > 1;
-    const [hour, minute] = leg.time.split(":").map(Number);
-    const total = hour! * 60 + minute! - (international ? 180 : 120);
-    if (total < 0) {
-      continue;
-    }
-    const at = `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-    return {
-      leg,
-      text: `${international ? "International" : "Domestic"} departure, so be at the airport by ${at}.`,
-    };
+  leg: Leg,
+): Promise<{ at: number; zone: string; hours: 2 | 3; international: boolean } | null> {
+  if (leg.mode !== "flight" || !leg.dep?.time || !leg.dep.code) {
+    return null;
   }
-  return null;
+  const toCode = leg.arr?.code ?? (/^[A-Z]{3}$/.test(leg.to) ? leg.to : undefined);
+  const from = await lookupAirport(leg.dep.code);
+  const to = toCode ? await lookupAirport(toCode) : null;
+  if (!from || !to) {
+    return null;
+  }
+  const international = from.country !== to.country;
+  const hours = international ? 3 : 2;
+  // An instant, so a departure just after midnight is left for the evening before.
+  return { at: leg.dep.at - hours * 3_600_000, zone: leg.dep.zone, hours, international };
+}
+
+/** The leave-by advice in words, at the departure's own clock. */
+export function adviceText(advice: { at: number; zone: string; international: boolean }): string {
+  return `${advice.international ? "International" : "Domestic"} departure, so be at the airport by ${zonedTime(advice.at, advice.zone)}.`;
+}
+
+/** The legs a trip's members state, from the facts that count. */
+export function memberLegs(members: readonly TripFile[]): Promise<Leg[]> {
+  return legsOf(
+    members.flatMap((file) =>
+      file.facts.filter((fact) => fact.kind === "event" && usable(fact)).map((fact) => ({ fileId: file.id, fact, ask: false })),
+    ),
+  );
 }
 
 /** The tag rendered back into words: "trip:new-york-2027-03" reads as a title. */

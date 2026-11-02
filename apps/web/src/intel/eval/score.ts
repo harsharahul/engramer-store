@@ -10,6 +10,7 @@
 
 import type { Fact, FactKind } from "../facts";
 import { EMAIL_MIME } from "../../mail/kind";
+import { subjectOf, type Role } from "../subject";
 
 export interface EvalCase {
   id: string;
@@ -19,7 +20,7 @@ export interface EvalCase {
   /** The document as written, when it carries structured data (HTML, an invite). */
   raw?: string;
   /** What a good reader finds: the time only where the document gives one. */
-  expected: { kind: FactKind; value: string; time?: string; label?: string }[];
+  expected: { kind: FactKind; value: string; time?: string; label?: string; role?: Role }[];
   /** The kind of email this is, for the mail-kind task. */
   mailKind?: string;
   /** Every expected fact is stated in structured data, so exact readers find them all. */
@@ -81,6 +82,46 @@ export async function scoreReader(
     precision: found + extra === 0 ? 1 : found / (found + extra),
     recall: found + missed === 0 ? 1 : found / (found + missed),
     perCase,
+  };
+}
+
+/**
+ * How often a reader says rightly what a date is, over the dates it found
+ * whose expected role the case names. The role is read as the app reads it,
+ * through subjectOf, so a label that already says "Check-in" counts.
+ */
+export async function scoreRoles(
+  cases: readonly EvalCase[],
+  read: (evalCase: EvalCase) => Promise<Fact[]>,
+): Promise<{ precision: number; recall: number; offered: number; expected: number }> {
+  let right = 0;
+  let offered = 0;
+  let expected = 0;
+  for (const evalCase of cases) {
+    const wanted = evalCase.expected.filter((fact) => fact.role !== undefined);
+    expected += wanted.length;
+    if (wanted.length === 0) {
+      continue;
+    }
+    const used = new Set<number>();
+    for (const fact of await read(evalCase)) {
+      const at = wanted.findIndex((want, i) => !used.has(i) && matches(fact, want));
+      const role = subjectOf(fact)?.role;
+      if (at < 0 || role === undefined) {
+        continue;
+      }
+      used.add(at);
+      offered++;
+      if (role === wanted[at]!.role) {
+        right++;
+      }
+    }
+  }
+  return {
+    precision: offered === 0 ? 1 : right / offered,
+    recall: expected === 0 ? 1 : right / expected,
+    offered,
+    expected,
   };
 }
 

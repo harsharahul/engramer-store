@@ -17,7 +17,6 @@ import { Button } from "./ui/button";
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MEMORY_TILES = 6;
 
-const instantOf = (row: AgendaRow) => new Date(`${row.day}T${row.time ?? "00:00"}:00`).getTime();
 /** "1 receipt", "2 receipts". */
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 /** Countries the poster names by their short form, as people say them. */
@@ -147,7 +146,7 @@ export function TimelineHero(props: {
                       <span className="tln-faint">{row.kind === "bill" ? "paid" : "done"}</span>
                     ) : row.time ? (
                       <span className="tln-soon">
-                        in <Until at={instantOf(row)} />
+                        in <Until at={row.at} />
                       </span>
                     ) : (
                       <span className="tln-soon">today</span>

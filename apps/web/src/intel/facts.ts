@@ -1,4 +1,5 @@
 import { daysUntil } from "./dates";
+import type { Subject } from "./subject";
 
 /**
  * Typed facts read out of documents: an expiry, an amount due, a reference
@@ -150,6 +151,12 @@ export interface Fact {
   digest?: string;
   /** Confirmed, but the current contents no longer say it. */
   stale?: boolean;
+  /**
+   * What the date is about, stated by the reader: which flight, stay or place.
+   * Kept exactly as stored, so a subject a newer version wrote survives this
+   * one; read it only through `subjectOf`, which checks it.
+   */
+  subject?: Subject;
 }
 
 /** The half that stays out of metadata, fetched only when a fact is opened. */
@@ -161,7 +168,16 @@ export interface FactEvidence {
   /** The passage the value was read from, so the fact can show its work. */
   span?: string;
   page?: number;
+  /** A link the sender gave for acting on this, such as an airline's check-in
+   * page. Kept here because such links often carry the reference and a name. */
+  link?: string;
 }
+
+/**
+ * What a reader hands back: a fact, plus a link that must never be stored
+ * with it. scanForFacts moves the link into evidence before facts leave it.
+ */
+export type ReadFact = Fact & { link?: string };
 
 /** Metadata is synced everywhere; a document cannot grow it without bound. */
 export const MAX_FACTS_PER_FILE = 12;
@@ -335,7 +351,7 @@ export function reconcileFacts(existing: Fact[], rescanned: Fact[], digest: stri
       continue;
     }
     if (again) {
-      const forward: Fact = { ...fact, digest };
+      const forward: Fact = { ...withSubjectFrom(fact, again), digest };
       delete forward.stale;
       kept.push(forward);
       continue;
@@ -415,6 +431,12 @@ export function groundFacts(facts: Fact[], source: string): Fact[] {
 
 function normalize(text: string): string {
   return text.toLowerCase().replace(/[\s.,/\\_:-]+/g, "");
+}
+
+/** Whether the document states this phrase, by the same measure dates are grounded with. */
+export function isStated(phrase: string, source: string): boolean {
+  const wanted = normalize(phrase);
+  return wanted.length > 0 && normalize(source).includes(wanted);
 }
 
 /**
@@ -497,13 +519,28 @@ export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
     if (!prior) {
       if (!confirmedValues.has(`${fact.kind}:${fact.value}`)) {
         merged.set(fact.id, fact);
+        continue;
+      }
+      // The owner already said this date under other words. What the same
+      // reader now says it is still applies to the owner's fact.
+      const owned = [...merged.values()].find(
+        (other) =>
+          other.confirmed && !other.subject && other.kind === fact.kind && other.value === fact.value && other.time === fact.time,
+      );
+      if (owned) {
+        merged.set(owned.id, withSubjectFrom(owned, fact));
       }
       continue;
     }
-    if (prior.confirmed || prior.dismissed) {
+    if (prior.dismissed) {
       continue;
     }
-    merged.set(fact.id, pick(prior, fact));
+    if (prior.confirmed) {
+      // The owner's answer stands; only the reader's statement of meaning moves.
+      merged.set(fact.id, withSubjectFrom(prior, fact));
+      continue;
+    }
+    merged.set(fact.id, withSubjectFrom(pick(prior, fact), fact));
   }
   // The cap has to drop the weakest rather than whichever arrived last.
   return resolveSlots([...merged.values()])
@@ -543,6 +580,15 @@ function readers(fact: Fact): string[] {
 }
 
 /** The same reading from two readers: exact wins; two grounded readers agree. */
+/**
+ * A stored fact with the subject a fresh reading by the same reader stated.
+ * The subject is the reader's own statement, unlike a confirmation, so the
+ * newest reading of it wins; a different reader never rewrites it.
+ */
+function withSubjectFrom(kept: Fact, fresh: Fact): Fact {
+  return fresh.subject && kept !== fresh && kept.source === fresh.source ? { ...kept, subject: fresh.subject } : kept;
+}
+
 function pick(prior: Fact, fact: Fact): Fact {
   if (isExact(prior) !== isExact(fact)) {
     return isExact(prior) ? prior : withExactAcceptance(fact);

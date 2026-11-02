@@ -26,6 +26,7 @@ import {
   withExactAcceptance,
   type Fact,
   type FactEvidence,
+  type ReadFact,
 } from "./facts";
 import { harvestFacts, labelledFacts, structuralDatedFacts } from "./labels";
 import { mrzFacts } from "./mrz";
@@ -144,7 +145,13 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
 
   const facts: Fact[] = [];
   const evidence: FactEvidence[] = [];
-  for (const fact of kept) {
+  for (const read of kept) {
+    // A sender's link can carry the reference and a name, so it goes to the
+    // evidence blob and never rides in synced metadata.
+    const { link, ...fact } = read as ReadFact;
+    if (link) {
+      evidence.push({ id: fact.id, link });
+    }
     if (fact.kind !== "identifier") {
       facts.push(withExactAcceptance(fact));
       continue;

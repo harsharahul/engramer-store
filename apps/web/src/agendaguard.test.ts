@@ -79,3 +79,47 @@ describe("one model for dates and trips", () => {
     expect(offenders([/\bsuggestTrips\(/], [join("intel", "agenda.ts"), join("intel", "trips.ts")])).toEqual([]);
   });
 });
+
+/** The shapes label parsing takes: a pattern run on a label, a label searched, a pattern of meaning words. */
+const MEANING: RegExp[] = [
+  /\.(?:test|exec|match)\(\s*[\w.?]*\blabel\b/,
+  /\blabel\b(?!\s*[:=])[^;]*?\.(?:test|exec|match|startsWith|endsWith|includes)\(/,
+  /=\s*\/(?:[^/\n\\]|\\.)*(?:depart|arriv|check|pick|drop|flight|train|bus|boat|opens|ends)(?:[^/\n\\]|\\.)*\/[gimsuy]*;?$/i,
+];
+
+describe("one reading of what a fact is about", () => {
+  it("the meaning guard catches the forms it replaces", () => {
+    const replaced = [
+      'const leg = fact.kind === "event" ? LEG.exec(label) : null;',
+      "if (/^check-in/i.test(label)) {",
+      'fact.label?.toLowerCase().startsWith("check")',
+      'label.includes("depart")',
+      "const FLIGHT = /\\bflight\\b|\\bdepart/i;",
+      "const ARRIVES = /\\barriv/i;",
+      "const stay = /^check-(in|out):\\s*(.*)$/i.exec(label);",
+      'entry[/opens/i.test(label) ? "opens" : "by"] = fact;',
+      'if (fact.kind === "event" && / ends$/.test(label)) {',
+    ];
+    for (const line of replaced) {
+      expect(MEANING.some((pattern) => pattern.test(line)), line).toBe(true);
+    }
+  });
+
+  it("reads a label's meaning only in intel/subject.ts", () => {
+    // A label is the document's own words; what it means comes from subjectOf.
+    // An amount's "Total" label is not a date's subject: facts.ts reads it for
+    // slots. confidence.ts raises the stakes on any travel word in a label, on
+    // top of the subject, so that check stays deliberately broad. labels.ts is
+    // the reader that writes labels from a document's text, and the palette
+    // filters its own action names, not facts.
+    const allowed = ["subject.ts", "facts.ts", "confidence.ts", "labels.ts"].map((name) => join("intel", name));
+    expect(offenders(MEANING, [...allowed, join("components", "CommandPalette.tsx")])).toEqual([]);
+  });
+});
+
+describe("one way to read a printed time", () => {
+  it("turns a printed time into an instant only in intel/instants.ts", () => {
+    // A day and a clock joined into a Date reads the clock as this device's.
+    expect(offenders([/(?:new Date|Date\.parse)\([^)]*\}T\$\{/], [join("intel", "instants.ts")])).toEqual([]);
+  });
+});

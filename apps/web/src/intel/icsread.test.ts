@@ -96,3 +96,39 @@ describe("invites through the scanner", () => {
     ]);
   });
 });
+
+describe("what an invite is about", () => {
+  it("an invite says start and end, with its location", () => {
+    const facts = icsFacts(
+      calendar(
+        "BEGIN:VEVENT",
+        "UID:evt-9@example.com",
+        "SUMMARY:Harbor Lights Concert",
+        "DTSTART;TZID=Europe/Lisbon:20270512T193000",
+        "DTEND;TZID=Europe/Lisbon:20270512T220000",
+        "LOCATION:Example Hall\\, Lisbon",
+        "END:VEVENT",
+      ),
+    );
+    expect(facts[0]!.subject).toEqual({ role: "start", place: "Example Hall, Lisbon" });
+    expect(facts[1]!.subject).toEqual({ role: "end", place: "Example Hall, Lisbon" });
+  });
+});
+
+describe("an invite that says what it is", () => {
+  it("an invite that names a check-in keeps that meaning, with its location as the address", () => {
+    const facts = icsFacts(
+      calendar(
+        "BEGIN:VEVENT",
+        "UID:stay-1@example.com",
+        "SUMMARY:Check-in: Casa do Rio",
+        "DTSTART:20261113T150000Z",
+        "DTEND:20261113T160000Z",
+        "LOCATION:Rua das Flores 12\\, Lisboa",
+        "END:VEVENT",
+      ),
+    );
+    expect(facts[0]!.subject).toEqual({ role: "check-in", place: "Casa do Rio", address: "Rua das Flores 12, Lisboa" });
+    expect(facts[1]!.subject?.role).toBe("end");
+  });
+});

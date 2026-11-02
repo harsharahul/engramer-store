@@ -257,8 +257,19 @@ export const EVAL_CASES: readonly EvalCase[] = [
     mime: EMAIL,
     text: "Hello! Your room is ready for you from 15:00 on 8 April 2027. Please leave the key at reception by 11:00 on 12 April 2027. Warm regards, the Casa do Rio family.",
     expected: [
-      { kind: "event", value: "2027-04-08", time: "15:00" },
-      { kind: "event", value: "2027-04-12", time: "11:00" },
+      { kind: "event", value: "2027-04-08", time: "15:00", role: "check-in" },
+      { kind: "event", value: "2027-04-12", time: "11:00", role: "check-out" },
+    ],
+    mailKind: "booking",
+  },
+  {
+    id: "train-plain",
+    name: "Your tickets for 11 June.email",
+    mime: EMAIL,
+    text: "Thanks for travelling with Linha Azul. Train IC 521 leaves Porto Campanha at 08:05 on 11 June 2027 and arrives at Lisboa Santa Apolonia at 10:55. Coach 4, seat 61.",
+    expected: [
+      { kind: "event", value: "2027-06-11", time: "08:05", role: "depart" },
+      { kind: "event", value: "2027-06-11", time: "10:55", role: "arrive" },
     ],
     mailKind: "booking",
   },

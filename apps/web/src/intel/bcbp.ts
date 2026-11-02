@@ -13,6 +13,7 @@
  */
 
 import { factId, type Fact } from "./facts";
+import { cleanSubject } from "./subject";
 
 export interface BcbpLeg {
   pnr: string;
@@ -96,6 +97,14 @@ export function bcbpFacts(payload: string, storedAt: number): Fact[] {
     }
   }
   const flight = `Flight ${leg.carrier} ${leg.flight} ${leg.from} to ${leg.to}`;
+  const subject = cleanSubject({
+    role: "depart",
+    mode: "flight",
+    carrier: leg.carrier,
+    number: leg.flight,
+    code: leg.from,
+    otherEnd: leg.to,
+  });
   return [
     {
       id: factId("event", `${best.iso} ${leg.carrier}${leg.flight}`),
@@ -103,6 +112,7 @@ export function bcbpFacts(payload: string, storedAt: number): Fact[] {
       document: "boarding-pass",
       value: best.iso,
       label: flight,
+      ...(subject ? { subject } : {}),
       source: "barcode",
       confidence: 0.6,
     },

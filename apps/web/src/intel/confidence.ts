@@ -14,6 +14,7 @@
 import { isRealDate } from "./dates";
 import { EXACT_SOURCES, type Fact } from "./facts";
 import { READER_VERSION } from "./reading";
+import { subjectOf } from "./subject";
 import { readingFingerprint } from "./summarize";
 import shipped from "./eval/scores.json";
 
@@ -60,7 +61,10 @@ export function stakesOf(fact: Fact): Stakes {
   if (fact.kind === "expiry" && IDENTITY_DOCUMENTS.has(fact.document)) {
     return "high";
   }
-  if (fact.kind === "event" && TRAVEL_TIME.test(label)) {
+  // Any travel word counts, on top of a stated departure or arrival: stakes
+  // err high, whoever wrote the label.
+  const role = subjectOf(fact)?.role;
+  if (fact.kind === "event" && (role === "depart" || role === "arrive" || TRAVEL_TIME.test(label))) {
     return "high";
   }
   if (LEGAL.test(label)) {
@@ -85,11 +89,13 @@ export function saneFact(fact: Fact, siblings: readonly Fact[], now: number): bo
     return false;
   }
   // A stay ends after it begins.
-  if (/check-?out/i.test(fact.label ?? "")) {
-    const place = (fact.label ?? "").replace(/^.*?:\s*/, "").toLowerCase();
-    const checkin = siblings.find(
-      (other) => /check-?in/i.test(other.label ?? "") && (other.label ?? "").toLowerCase().includes(place),
-    );
+  const subject = subjectOf(fact);
+  if (subject?.role === "check-out") {
+    const place = subject.place?.toLowerCase();
+    const checkin = siblings.find((other) => {
+      const begins = subjectOf(other);
+      return begins?.role === "check-in" && begins.place?.toLowerCase() === place;
+    });
     if (checkin && checkin.value > fact.value) {
       return false;
     }

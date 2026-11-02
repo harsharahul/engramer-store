@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgendaRow } from "../intel/agendarows";
 import { everydayOf, type Everyday } from "../intel/everyday";
+import { instantOf } from "../intel/instants";
 import { useStore } from "../store";
 import { TimelineHero } from "./TimelineHero";
 
@@ -35,12 +36,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// The home city's own clock: San Francisco, wherever the test runs.
 const row = (id: string, kind: AgendaRow["kind"], day: string, time: string | undefined, extra: Partial<AgendaRow> = {}): AgendaRow => ({
   id,
   kind,
   tag: kind.toUpperCase(),
   day,
   ...(time ? { time } : {}),
+  at: instantOf(day, time, "America/Los_Angeles"),
   title: id,
   source: "EMAIL",
   fileIds: [`f-${id}`],
@@ -121,6 +124,13 @@ describe("the Everyday hero", () => {
     await settle();
     expect(container.querySelector(".tln-pmeta")!.textContent).toBe("Portugal · Tue 8 Sep · 16:40 in Lisbon");
     expect(container.querySelector(".tln-sky")!.classList.contains("tln-sky-day")).toBe(true);
+  });
+
+  it("a booking in another zone counts down to its own instant", () => {
+    // 19:30 in Lisbon is 11:30 in San Francisco, where the device is: 2 h 50 m away, not 10 h 50 m.
+    const lisbon = row("Fado night", "event", "2026-09-08", "19:30", { at: instantOf("2026-09-08", "19:30", "Europe/Lisbon") });
+    render(true, "San Francisco", everydayOf([lisbon], [], NOW));
+    expect(text()).toContain("in 2 h 50 m");
   });
 
   it("the cards read an ordinary September", () => {

@@ -9,6 +9,7 @@
 import { daysUntil } from "./dates";
 import { shown } from "./describe";
 import { basisOf, DATED_KINDS, isTracked, type DocumentKind, type Fact } from "./facts";
+import { isLegEnd, subjectOf } from "./subject";
 import {
   isTripTag,
   legPlaces,
@@ -176,18 +177,19 @@ function exactly(fact: Fact): boolean {
 }
 
 function travelLeg(fact: Fact): boolean {
-  const label = fact.label ?? "";
+  if (fact.kind !== "event" || !exactly(fact)) {
+    return false;
+  }
+  const subject = subjectOf(fact);
   return (
-    fact.kind === "event" &&
-    exactly(fact) &&
-    (/^(?:flight|train|bus|boat)\b/i.test(label) ||
-      /^(?:pick[- ]?up|drop[- ]?off)\b/i.test(label) ||
-      fact.document === "boarding-pass" ||
-      fact.document === "car-rental")
+    isLegEnd(subject) ||
+    subject?.role === "pick-up" ||
+    subject?.role === "drop-off" ||
+    fact.document === "boarding-pass" ||
+    fact.document === "car-rental"
   );
 }
 
-const BOOKING_REFERENCE = /\b(?:confirmation|booking|reservation|reference|pnr)\b/i;
 const AWAY_DOCUMENTS: ReadonlySet<DocumentKind> = new Set([
   "hotel-booking",
   "event-ticket",
@@ -199,7 +201,7 @@ const AWAY_DOCUMENTS: ReadonlySet<DocumentKind> = new Set([
 /** The booking-reference tails a file states exactly. */
 function bookingTails(file: PlanFile): string[] {
   return file.facts.flatMap((fact) =>
-    fact.kind === "identifier" && exactly(fact) && BOOKING_REFERENCE.test(fact.label ?? "")
+    fact.kind === "identifier" && exactly(fact) && subjectOf(fact)?.role === "reference"
       ? [fact.masked ?? fact.value]
       : [],
   );
@@ -215,7 +217,7 @@ function bookedWhileAway(file: PlanFile, first: string, last: string): boolean {
         exactly(fact) &&
         AWAY_DOCUMENTS.has(fact.document) &&
         fact.value > first &&
-        (fact.value < last || (fact.value === last && /check-?out/i.test(fact.label ?? ""))),
+        (fact.value < last || (fact.value === last && subjectOf(fact)?.role === "check-out")),
     )
   );
 }

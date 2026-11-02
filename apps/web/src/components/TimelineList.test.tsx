@@ -8,6 +8,7 @@ import { decided } from "../decisions";
 import type { Trip } from "../intel/agenda";
 import type { AgendaRow } from "../intel/agendarows";
 import type { TripPlan } from "../intel/agenda";
+import { deviceZone, instantOf } from "../intel/instants";
 import { isEmptySpace } from "../marquee";
 import { useStore } from "../store";
 import { TimelineList } from "./TimelineList";
@@ -50,6 +51,7 @@ const row = (id: string, kind: AgendaRow["kind"], day: string, time: string | un
   kind,
   tag: kind.toUpperCase(),
   day,
+  at: instantOf(day, time, deviceZone()),
   ...(time ? { time } : {}),
   title: id,
   source: "EMAIL",
@@ -60,7 +62,30 @@ const row = (id: string, kind: AgendaRow["kind"], day: string, time: string | un
 const LISBON: Trip = { tag: "trip:lisbon-2026-11", title: "Lisbon, Nov 2026", members: [], start: "2026-11-12", end: "2026-11-16" };
 const exactTrip = { tag: LISBON.tag, title: LISBON.title, name: "Lisbon", evidence: "exact" as const };
 const flight = (id: string, day: string, time: string, extra: Partial<AgendaRow> = {}) =>
-  row(id, "flight", day, time, { tag: "FLIGHT", trip: exactTrip, flight: { from: "SFO", to: "LIS", number: "TP 236", dep: time, arr: "14:05", plusDays: 1 }, ...extra });
+  row(id, "flight", day, time, {
+    tag: "FLIGHT",
+    trip: exactTrip,
+    flight: {
+      from: "SFO",
+      to: "LIS",
+      number: "TP 236",
+      dep: time,
+      arr: "14:05",
+      plusDays: 1,
+      leg: {
+        key: "Flight TP 236",
+        mode: "flight",
+        designator: "TP 236",
+        from: "SFO",
+        to: "LIS",
+        dep: { day, time, zone: "America/Los_Angeles", at: instantOf(day, time, "America/Los_Angeles"), code: "SFO", place: "SFO", factId: `${id}:dep` },
+        fileId: `f-${id}`,
+        factIds: [`${id}:dep`],
+        ask: false,
+      },
+    },
+    ...extra,
+  });
 
 function render(props: Partial<Parameters<typeof TimelineList>[0]> & { rows: AgendaRow[]; now: number }) {
   container = document.createElement("div");
@@ -105,6 +130,19 @@ describe("the timeline list", () => {
     expect(order(".tln-row.tln-in")).toHaveLength(4);
     expect(container.querySelector('[data-id="out"]')!.textContent).toContain("TP 236");
     expect(container.querySelector('[data-id="out"]')!.textContent).toContain("LISBON");
+  });
+
+  it("a booking already begun in its own zone sits above the now line", () => {
+    // 20:00 in Tokyo was 11:00 here; at 15:42 it has begun, though its printed clock is later.
+    const now = new Date("2026-11-14T15:42:00").getTime();
+    render({
+      now,
+      rows: [
+        row("tokyo", "event", "2026-11-14", "20:00", { at: instantOf("2026-11-14", "20:00", "Asia/Tokyo"), past: true }),
+        row("dinner", "event", "2026-11-14", "21:00"),
+      ],
+    });
+    expect(order(".tln-row, .tln-now").map((el) => el.getAttribute("data-id") ?? "now")).toEqual(["tokyo", "now", "dinner"]);
   });
 
   it("quiet days and past rows", () => {

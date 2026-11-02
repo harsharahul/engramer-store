@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { Trip } from "./agenda";
 import { rowsOf, type AgendaRow, type RowFile } from "./agendarows";
 import type { Fact } from "./facts";
+import { deviceZone, instantOf } from "./instants";
 import { dayLabel, durationLabel, everydayOf, money, skyOf } from "./everyday";
 
 const NOW = Date.UTC(2026, 8, 8, 15, 40); // Tue 8 Sep 2026, 08:40 PDT
@@ -14,6 +15,7 @@ const row = (id: string, kind: AgendaRow["kind"], day: string, time: string | un
   kind,
   tag: kind.toUpperCase(),
   day,
+  at: instantOf(day, time, deviceZone()),
   ...(time ? { time } : {}),
   title: id,
   source: "EMAIL",
