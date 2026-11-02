@@ -6048,6 +6048,11 @@ button.tln-check {
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
 }
+.tln-trip-actions {
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 14px;
+}
 .tln-tsrc {
   display: flex;
   flex-direction: column;

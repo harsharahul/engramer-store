@@ -6,16 +6,19 @@
  * worked out a second way.
  */
 
-import { useEffect, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { triggerDownload } from "../download";
 import type { AgendaRow, RowFile } from "../intel/agendarows";
 import type { LatLon } from "../intel/airports";
 import { dayLabel, durationLabel, money } from "../intel/everyday";
+import { tripToCalendar } from "../intel/ics";
 import { tripChecks } from "../intel/insights";
 import type { Leg } from "../intel/legs";
 import { pagePosterOf } from "../intel/moments";
 import { routeOf } from "../intel/route";
 import { tripSources, windowOf, type Stay, type TripView } from "../intel/tripview";
-import type { FileEntry } from "../store";
+import { useStore, type FileEntry } from "../store";
+import { Button } from "./ui/button";
 import { RouteArc } from "./RouteArc";
 import { Card } from "./TimelineCard";
 import { Board } from "./TimelineList";
@@ -158,6 +161,61 @@ export function TripPage(props: {
           </Card>
         )}
       </div>
+      <TripActions view={view} onClose={props.onClose} onToast={props.onToast} />
+    </div>
+  );
+}
+
+/**
+ * Export to calendar, and Not a trip. Taking a trip apart cannot be
+ * undone, so it asks once, in place.
+ */
+function TripActions(props: { view: TripView; onClose(): void; onToast(text: string): void }) {
+  const undoTrip = useStore((s) => s.undoTrip);
+  const [asking, setAsking] = useState(false);
+  const { view } = props;
+  // A trip with nothing dated to export offers no export: the file would be empty.
+  const exportable = tripToCalendar(view, 0).ics.includes("BEGIN:VEVENT");
+
+  if (asking) {
+    return (
+      <div className="tln-actions tln-trip-actions">
+        <span className="tln-faint">Take this trip apart? The files stay where they are.</span>
+        <Button
+          size="xs"
+          variant="destructive"
+          onClick={async () => {
+            await undoTrip(view.tag);
+            props.onToast("The trip comes apart. The files stay where they are.");
+            props.onClose();
+          }}
+        >
+          Take apart
+        </Button>
+        <Button size="xs" variant="secondary" onClick={() => setAsking(false)}>
+          Keep trip
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="tln-actions tln-trip-actions">
+      {exportable && (
+        <Button
+          size="xs"
+          variant="secondary"
+          onClick={() => {
+            const event = tripToCalendar(view, Date.now());
+            triggerDownload(new Blob([event.ics], { type: "text/calendar" }), event.filename);
+            props.onToast(`Saved ${event.filename}. Open it to add the trip to your calendar.`);
+          }}
+        >
+          Export to calendar
+        </Button>
+      )}
+      <Button size="xs" variant="ghost" onClick={() => setAsking(true)}>
+        Not a trip
+      </Button>
     </div>
   );
 }

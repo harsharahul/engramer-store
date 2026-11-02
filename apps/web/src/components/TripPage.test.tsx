@@ -19,6 +19,9 @@ let trip: { view: TripView; rows: AgendaRow[]; files: RowFile[] };
 const onClose = vi.fn();
 const onInspect = vi.fn();
 const onToast = vi.fn();
+const undoTrip = vi.fn(async () => 2);
+const triggerDownload = vi.hoisted(() => vi.fn());
+vi.mock("../download", () => ({ triggerDownload }));
 
 beforeAll(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,10 +31,10 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  for (const fn of [onClose, onInspect, onToast]) {
+  for (const fn of [onClose, onInspect, onToast, undoTrip, triggerDownload]) {
     fn.mockClear();
   }
-  useStore.setState({ addToTrip: vi.fn(async () => {}) } as never);
+  useStore.setState({ addToTrip: vi.fn(async () => {}), undoTrip } as never);
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(PLANNING_NOW);
 });
@@ -105,6 +108,36 @@ describe("the trip page", () => {
     press(byText("button", "Back to Timeline"));
     act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
     expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("export saves one calendar file for the trip", () => {
+    mount();
+    press(byText("button", "Export to calendar"));
+    expect(triggerDownload).toHaveBeenCalledTimes(1);
+    const [blob, name] = triggerDownload.mock.calls[0]!;
+    expect((blob as Blob).type).toBe("text/calendar");
+    expect(name).toBe("lisbon-2026-11-12.ics");
+    expect(onToast).toHaveBeenCalledWith("Saved lisbon-2026-11-12.ics. Open it to add the trip to your calendar.");
+  });
+
+  it("a trip with nothing to put in a calendar offers no export", () => {
+    mount({ ...trip.view, legs: [], stays: [], booked: [], leaveBy: [] });
+    expect(byText("button", "Export to calendar")).toBeUndefined();
+  });
+
+  it("Not a trip asks once, then takes the trip apart", async () => {
+    mount();
+    press(byText("button", "Not a trip"));
+    expect(container.textContent).toContain("Take this trip apart? The files stay where they are.");
+    press(byText("button", "Keep trip"));
+    expect(container.textContent).not.toContain("Take this trip apart?");
+    press(byText("button", "Not a trip"));
+    await act(async () => {
+      byText("button", "Take apart")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(undoTrip).toHaveBeenCalledWith(trip.view.tag);
+    expect(onToast).toHaveBeenCalledWith("The trip comes apart. The files stay where they are.");
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("Escape inside a text field does not close the page", () => {
