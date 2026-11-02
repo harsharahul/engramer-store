@@ -19,6 +19,8 @@ import { TimelineList, type TimelineFilter } from "./TimelineList";
 import { useFindConnections } from "./useFindConnections";
 import { useTripPlans } from "./useTripPlans";
 import { useTripView, useTripViews } from "./useTripViews";
+import { TripPage } from "./TripPage";
+import { deviceZone } from "../intel/instants";
 import { Button } from "./ui/button";
 
 const FILTERS: { key: TimelineFilter; label: string }[] = [
@@ -244,6 +246,20 @@ export function TimelineView(props: {
           )}
         </div>
       </section>
+      {tripView && (
+        <TripPage
+          view={tripView}
+          rows={rows}
+          files={props.files}
+          now={now}
+          homeZone={deviceZone()}
+          onClose={() => props.onCloseTrip?.()}
+          onInspect={props.onInspect}
+          onOpen={props.onOpen}
+          onToast={props.onToast}
+          fileOf={(id) => storeFiles.get(id)}
+        />
+      )}
     </div>
   );
 }

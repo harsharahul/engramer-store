@@ -5988,6 +5988,79 @@ button.tln-check {
   }
 }
 
+/* ----- a trip's page, over the Timeline ----- */
+
+.tln-view {
+  position: relative;
+}
+.tln-trip {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-page);
+  overflow: auto;
+  padding: 4px 16px 24px;
+  background: var(--ink-0);
+  animation: tln-rise 0.35s ease both;
+}
+.tln-poster-opens {
+  cursor: pointer;
+}
+.tln-glassb {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(8px);
+}
+.tln-tp-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding-top: 12px;
+}
+.tln-span2 {
+  grid-column: span 2;
+}
+.tln-arc {
+  display: block;
+  width: 100%;
+  height: 180px;
+}
+.tln-leg {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hairline);
+  cursor: pointer;
+}
+.tln-leg:last-child {
+  border-bottom: none;
+}
+.tln-small {
+  font-size: 11.5px;
+}
+.tln-sub {
+  margin-top: 16px;
+  font: 600 10.5px var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+}
+.tln-srcgrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.tln-tsrc {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
 /* ----- the Timeline's Month view ----- */
 
 .mon {

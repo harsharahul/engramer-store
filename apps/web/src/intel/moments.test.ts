@@ -3,7 +3,7 @@ import { email, exact, file, hotel, lisbonFiles, lisbonTrip, PLANNING_NOW } from
 import { planTrips, tripsOf } from "./agenda";
 import { rowsOf } from "./agendarows";
 import { instantOf } from "./instants";
-import { momentOf, posterOf } from "./moments";
+import { momentOf, pagePosterOf, posterOf } from "./moments";
 import { tripViewOf, type TripView } from "./tripview";
 
 const LA = "America/Los_Angeles";
@@ -255,5 +255,21 @@ describe("between connections", () => {
     const moment = momentOf([view], at("2026-11-12", "17:00", "America/New_York"));
     expect(moment.kind).toBe("travel");
     expect(moment.leaveBy).toBeUndefined();
+  });
+});
+
+describe("the trip page's poster", () => {
+  it("a past trip's page poster names its days, not a moment", () => {
+    expect(pagePosterOf(lisbon, at("2027-06-01", "09:00", LA), LA)).toMatchObject({ big: "5 days in Lisbon", cap: "November 2026" });
+  });
+
+  it("a trip months away counts its days", () => {
+    expect(pagePosterOf(lisbon, at("2026-08-29", "12:00", LA), LA)).toMatchObject({ big: "In 75 days", cap: "TP 236 departs Thu 12 Nov 18:10" });
+  });
+
+  it("the page poster's meta names the country, the dates and the days", () => {
+    const poster = pagePosterOf(lisbon, at("2026-10-26", "10:00", LA), LA);
+    expect(poster).toMatchObject({ big: "17 days", meta: "Portugal · 12-16 Nov 2026 · 5 days", lead: "Portugal · 12-16 Nov 2026 · 5 days" });
+    expect(poster.clockZone).toBeUndefined();
   });
 });

@@ -7,8 +7,15 @@
 import type { KeyboardEvent } from "react";
 import type { Poster } from "../intel/moments";
 import { Clock, Until } from "./Clock";
+import { Button } from "./ui/button";
 
-export function TripPoster(props: { poster: Poster; /** Opens the trip's page. */ onOpen?(): void }) {
+export function TripPoster(props: {
+  poster: Poster;
+  /** Opens the trip's page. */
+  onOpen?(): void;
+  /** On the trip's page: the top line becomes the way back. */
+  back?(): void;
+}) {
   const { poster, onOpen } = props;
   const sky = poster.sky;
   const opens = onOpen
@@ -30,7 +37,15 @@ export function TripPoster(props: { poster: Poster; /** Opens the trip's page. *
       <div className={`tln-sky tln-sky-${sky}${sky === "night" ? " tln-stars" : ""}`} />
       {poster.code && <div className="tln-wm">{poster.code}</div>}
       <div className="tln-pin">
-        <div className="tln-ptop">{poster.top}</div>
+        <div className="tln-ptop">
+          {props.back ? (
+            <Button size="xs" variant="ghost" className="tln-glassb" onClick={props.back}>
+              Back to Timeline
+            </Button>
+          ) : (
+            poster.top
+          )}
+        </div>
         <div className="tln-pstate">
           <div className="tln-big">{poster.big}</div>
           <div className="tln-cap">

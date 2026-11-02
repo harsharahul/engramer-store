@@ -341,3 +341,39 @@ export function posterOf(
       return words("Your last trip", "Welcome back", `${count(dayNumber(view.end) - dayNumber(view.start) + 1, "day")} in ${view.city}`);
   }
 }
+
+const FULL_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/**
+ * The trip page's poster: the trip's moment while it is near, else how far
+ * off it is or how long it lasted. Its meta line is the trip itself, with
+ * no clock: the page is about the whole trip, not the minute.
+ */
+export function pagePosterOf(view: TripView, now: number, homeZone: string, homePlace?: LatLon): Poster {
+  const days = dayNumber(view.end) - dayNumber(view.start) + 1;
+  const lead = [countryName(view.country), rangeLabel(view.start, view.end), count(days, "day")].filter(Boolean).join(" · ");
+  const page = { lead, meta: lead };
+  const moment = momentOf([view], now);
+  const near = posterOf(moment, now, homeZone, homePlace ? { homePlace } : {});
+  if (near) {
+    const { clockZone: _zone, tail: _tail, ...rest } = near;
+    return { ...rest, ...page };
+  }
+  const today = zonedDay(now, homeZone);
+  const out = journeyOf(view).outbound;
+  const ahead = view.start > today;
+  const [year, month] = view.start.split("-").map(Number) as [number, number];
+  return {
+    top: ahead ? "Next trip" : "Your trip",
+    city: view.city,
+    code: view.code ?? "",
+    big: ahead ? `In ${count(dayNumber(view.start) - dayNumber(today), "day")}` : `${count(days, "day")} in ${view.city}`,
+    cap: ahead
+      ? out?.dep?.time && !out.ask
+        ? `${named(out)} departs ${dayLabel(out.dep.day)} ${out.dep.time}`
+        : `Starts ${dayLabel(view.start)}`
+      : `${FULL_MONTHS[month - 1]} ${year}`,
+    ...page,
+    sky: skyOf(now, view.zone, view.place),
+  };
+}
