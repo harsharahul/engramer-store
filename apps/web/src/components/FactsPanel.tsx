@@ -20,8 +20,9 @@ import { useTripWindows } from "./useTripViews";
 import { duplicatesByDigest } from "../intel/duplicates";
 import { factToCalendar } from "../intel/ics";
 import { triggerDownload } from "../download";
-import { TripCard } from "./TripCard";
-import { ClockGlyph, CopyGlyph, InfoGlyph, XGlyph } from "./Icon";
+import { rangeLabel } from "../intel/moments";
+import { tripTitle } from "../intel/trips";
+import { ClockGlyph, CopyGlyph, InfoGlyph, PlaneGlyph, XGlyph } from "./Icon";
 
 /** ------------------------------------------------------- the whole library */
 
@@ -30,6 +31,8 @@ export function LibraryIntel(props: {
   onOpen: (id: string) => void;
   /** Opens a date on the Timeline; without it, a dated row opens its file. */
   onOpenDay?: (iso: string) => void;
+  /** Opens a trip's page; without it, a trip's line opens its first file. */
+  onOpenTrip?: (tag: string) => void;
 }) {
   const account = useStore((s) => s.session?.email ?? "");
   // What the user dismissed is the account's record: a notice dismissed
@@ -52,8 +55,6 @@ export function LibraryIntel(props: {
     return () => decisionEvents.removeEventListener(DECISIONS_EVENT, reread);
   }, [account]);
   const dismissFact = useStore((s) => s.dismissFact);
-  const undoTrip = useStore((s) => s.undoTrip);
-  const [said, setSaid] = useState<string | null>(null);
   const now = Date.now();
   const live = props.files.filter((file) => !file.trashed);
   // The trips the Timeline's hero checks, so the two say the same thing.
@@ -90,39 +91,44 @@ export function LibraryIntel(props: {
 
   const duplicates = duplicatesByDigest(live);
 
-  const status = said && (
-    <p className="panel-quiet" role="status">
-      {said}
-    </p>
-  );
-
   if (
     upcoming.length === 0 &&
     insights.length === 0 &&
     duplicates.length === 0 &&
     trips.length === 0
   ) {
-    return status || <p className="panel-quiet">Nothing needs your attention.</p>;
+    return <p className="panel-quiet">Nothing needs your attention.</p>;
   }
 
   return (
     <div className="intel">
-      {status}
-      {trips.map((trip) => (
-        <TripCard
-          key={trip.tag}
-          tag={trip.tag}
-          members={trip.members}
-          onOpen={props.onOpen}
-          // Only a trip the assembler wrote whole came together on its own; a
-          // member tagged any other way (by hand, or before ownership was
-          // recorded) makes it the owner's.
-          assembled={
-            !authored.owned.has(trip.tag) && trip.members.every((file) => authored.assembled.has(`${trip.tag}|${file.id}`))
-          }
-          onUndo={() => void undoTrip(trip.tag).then(() => setSaid("Dismissed. It will not come back."))}
-        />
-      ))}
+      {trips.length > 0 && (
+        <div className="intel-group">
+          <h4>
+            <PlaneGlyph size={12} /> Trips
+          </h4>
+          {trips.map((trip) => {
+            // Only a trip the assembler wrote whole came together on its own; a
+            // member tagged any other way (by hand, or before ownership was
+            // recorded) makes it the owner's.
+            const found =
+              !authored.owned.has(trip.tag) && trip.members.every((file) => authored.assembled.has(`${trip.tag}|${file.id}`));
+            // One line per trip; its page holds the itinerary and Not a trip.
+            return (
+              <button
+                key={trip.tag}
+                type="button"
+                className="intel-row-open intel-trip"
+                onClick={() => (props.onOpenTrip ? props.onOpenTrip(trip.tag) : props.onOpen(trip.members[0]!.id))}
+              >
+                {tripTitle(trip.tag)}
+                {trip.start && trip.end ? ` · ${rangeLabel(trip.start, trip.end)}` : ""}
+                {found && <span className="intel-faint"> · Found in your mail</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {upcoming.length > 0 && (
         <div className="intel-group">
           <h4>

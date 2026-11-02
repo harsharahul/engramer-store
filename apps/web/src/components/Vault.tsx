@@ -3507,6 +3507,10 @@ export function Vault() {
               setActivityOpen(false);
               setView({ kind: "timeline", day, nonce: Date.now() });
             }}
+            onOpenTrip={(tag) => {
+              setActivityOpen(false);
+              openTrip(tag);
+            }}
             onOpenProfile={() => {
               setActivityOpen(false);
               setView({ kind: "profile" });

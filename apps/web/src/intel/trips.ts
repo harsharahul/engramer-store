@@ -42,19 +42,6 @@ export interface TripSuggestion {
   why: string[];
 }
 
-export interface ItineraryLeg {
-  at: string;
-  time?: string;
-  zone?: string;
-  title: string;
-  fileId: string;
-  /** The fact this leg came from, so a card can act on it (calendar export). */
-  factId: string;
-  /** Airport codes the title mentions, resolved against the table. */
-  codes?: string[];
-  kind: "flight" | "stay" | "car" | "other";
-}
-
 /** Events this many days apart still belong to one candidate. */
 const WINDOW_DAYS = 14;
 /** Reference and destination bridges reach at most this far. */
@@ -77,15 +64,6 @@ const MONTHS = [
 function shown(iso: string): string {
   const [year, month, day] = iso.split("-") as [string, string, string];
   return `${Number(day)} ${MONTHS[Number(month) - 1]} ${year}`;
-}
-
-/**
- * Airport-code shaped tokens in a label. A fresh iterator per call on
- * purpose: a shared global regex carries lastIndex across the awaits these
- * loops do, and two interleaved calls silently skip each other's matches.
- */
-function codesIn(label: string): string[] {
-  return [...label.matchAll(/\b([A-Z]{3})\b/g)].map((match) => match[1]!);
 }
 
 interface Member {
@@ -451,64 +429,6 @@ export function isTripTag(tag: string): boolean {
 export function tripTag(suggestion: TripSuggestion): string {
   const where = suggestion.destination ? slug(suggestion.destination) : suggestion.start;
   return `${TRIP_PREFIX}${where}-${suggestion.start.slice(0, 7)}`;
-}
-
-function legKind(fact: Fact): ItineraryLeg["kind"] {
-  const subject = subjectOf(fact);
-  if (subject?.mode === "flight" || fact.document === "boarding-pass") {
-    return "flight";
-  }
-  if (subject?.role === "check-in" || subject?.role === "check-out" || fact.document === "hotel-booking") {
-    return "stay";
-  }
-  if (subject?.role === "pick-up" || subject?.role === "drop-off" || fact.document === "car-rental") {
-    return "car";
-  }
-  return "other";
-}
-
-/** Airport codes resolved into the words a person recognizes. */
-async function inCityWords(label: string): Promise<{ text: string; codes: string[] }> {
-  let text = label;
-  const codes: string[] = [];
-  for (const code of new Set(codesIn(label))) {
-    const airport = await lookupAirport(code);
-    if (airport) {
-      codes.push(code);
-      text = text.split(code).join(`${airport.city} (${code})`);
-    }
-  }
-  return { text, codes };
-}
-
-/**
- * The trip's timeline, derived from the members' facts at render time. Legs
- * sort by date and clock as printed; times stay local to their places, which
- * is honest ordering rather than instant ordering, and the zones ride along
- * for anything that needs the real instant.
- */
-export async function assembleItinerary(members: TripFile[]): Promise<ItineraryLeg[]> {
-  const legs: ItineraryLeg[] = [];
-  for (const file of members) {
-    for (const fact of file.facts) {
-      if (fact.kind !== "event" || !usable(fact)) {
-        continue;
-      }
-      const { text, codes } = await inCityWords(fact.label ?? "Event");
-      legs.push({
-        at: fact.value,
-        ...(fact.time ? { time: fact.time } : {}),
-        ...(fact.zone ? { zone: fact.zone } : {}),
-        title: text,
-        fileId: file.id,
-        factId: fact.id,
-        ...(codes.length > 0 ? { codes } : {}),
-        kind: legKind(fact),
-      });
-    }
-  }
-  legs.sort((a, b) => `${a.at} ${a.time ?? ""}`.localeCompare(`${b.at} ${b.time ?? ""}`));
-  return legs;
 }
 
 /**

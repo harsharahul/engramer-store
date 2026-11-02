@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -115,6 +115,31 @@ describe("one reading of what a fact is about", () => {
     // filters its own action names, not facts.
     const allowed = ["subject.ts", "facts.ts", "confidence.ts", "labels.ts"].map((name) => join("intel", name));
     expect(offenders(MEANING, [...allowed, join("components", "CommandPalette.tsx")])).toEqual([]);
+  });
+});
+
+describe("one place for a trip's itinerary, calendar file and sky", () => {
+  const inIntel = sources(__dirname)
+    .map((file) => relative(__dirname, file))
+    .filter((path) => path.startsWith(`intel${sep}`));
+
+  it("a trip's legs are built only in intel", () => {
+    expect(offenders([/\bmemberLegs\(/, /\blegsOf\(/], inIntel)).toEqual([]);
+  });
+
+  it("TripCard is gone", () => {
+    // The trip page is the one place a trip's itinerary is shown.
+    expect(offenders([/from "\.\/TripCard"/, /\bassembleItinerary\b/], [])).toEqual([]);
+  });
+
+  it("calendar files are written only in ics.ts", () => {
+    // A written header is a string of its own; the reader only tests for one.
+    // The reader eval builds a sample invite to read, not a file to save.
+    expect(offenders([/["'`]BEGIN:VCALENDAR["'`]/], [join("intel", "ics.ts"), join("intel", "eval", "cases.ts")])).toEqual([]);
+  });
+
+  it("the sky has one rule", () => {
+    expect(offenders([/function skyOf\b/], [join("intel", "sun.ts")])).toEqual([]);
   });
 });
 
