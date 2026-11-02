@@ -63,6 +63,7 @@ describe("windowOf", () => {
   it("the trip as the checks read it", async () => {
     const { view } = await lisbonTrip();
     expect(windowOf(view)).toEqual({
+      tag: TAG,
       start: "2026-11-12",
       end: "2026-11-16",
       international: true,
@@ -187,5 +188,23 @@ describe("stays, duplicates and amounts", () => {
     const maybe = file("maybe", [{ id: "event:maybe", kind: "event", document: "other", value: "2026-11-20", time: "09:30", label: "Dentist", source: "label", confidence: 0.7 }]);
     const { view, rows } = await lisbonTrip(lisbonFiles(), [maybe]);
     expect(comingUp(rows, view, NOW, 3).map((row) => row.title)).not.toContain("Dentist");
+  });
+});
+
+describe("across the date line", () => {
+  it("a flight that lands two days after it left spends both nights on the plane", async () => {
+    const files = [
+      email("booking", "2026-10-01", [
+        exact("event", "2026-11-12", "Flight QF 74 departs SFO", { time: "21:55" }),
+        exact("event", "2026-11-14", "Flight QF 74 arrives SYD", { time: "06:35" }),
+      ]),
+      email("hotel", "2026-10-02", [
+        exact("event", "2026-11-14", "Check-in: Harbour View", { document: "hotel-booking", time: "14:00" }),
+        exact("event", "2026-11-18", "Check-out: Harbour View", { document: "hotel-booking", time: "10:00" }),
+      ]),
+    ].map((member) => ({ ...member, tags: ["trip:sydney-2026-11"] }));
+    const rows = await rowsOf(files, { plans: [], dismissed: new Set(), excluded: new Set(), assembling: true }, NOW);
+    const view = await tripViewOf(tripsOf(files)[0]!, rows, {});
+    expect(windowOf(view).overnightLegs).toEqual(["2026-11-12", "2026-11-13"]);
   });
 });

@@ -57,6 +57,8 @@ type Finding = Omit<Insight, "id" | "ruleId">;
  * windowOf), so the bell and the Timeline's hero check the same trip.
  */
 export interface TripWindow {
+  /** The trip's tag: its checks are its own on the bell. */
+  tag: string;
   start: string;
   end: string;
   international: boolean;
@@ -82,7 +84,7 @@ export interface Check {
 interface Rule {
   id: string;
   /** Over the library's travel windows, for a caller with no trips read. */
-  run(files: FactfulFile[], now: number): Finding[];
+  run(files: FactfulFile[], now: number, held?: readonly TripWindow[]): Finding[];
   /** Over one trip, with what is in order as well as what is not. */
   trip?(window: TripWindow, files: FactfulFile[], now: number): Omit<Check, "ruleId">[];
 }
@@ -163,9 +165,12 @@ const WARRANTY_WARN_DAYS = 30;
  * authoritative voice does not, and accepting a trip proposal confirms its
  * exact events, so a ratified trip passes this bar on its own.
  */
-function confirmedSpans(files: FactfulFile[], now: number): TravelSpan[] {
+function confirmedSpans(files: FactfulFile[], now: number, held: readonly TripWindow[] = []): TravelSpan[] {
+  // Travel a trip already holds is checked as that trip.
   return travelSpans(files, isTracked).filter(
-    (span) => daysUntil(span.end, now) >= 0,
+    (span) =>
+      daysUntil(span.end, now) >= 0 &&
+      !held.some((window) => window.start && span.start <= window.end && span.end >= window.start),
   );
 }
 
@@ -286,7 +291,7 @@ const RULES: Rule[] = [
       }
       return [{ state: "ok", fileId, title: `Passport valid to ${monthYear(expiry)}`, text: `Well past your return on ${dayMonth(window.end)}` }];
     },
-    run(files, now) {
+    run(files, now, held) {
       const passport = expiriesOf(files, "passport")
         .sort((a, b) => a.fact.value.localeCompare(b.fact.value))
         .at(-1);
@@ -295,7 +300,7 @@ const RULES: Rule[] = [
       }
       const expiry = passport.fact.value;
       const cutoff = monthsBefore(expiry, PASSPORT_RULE_MONTHS);
-      return confirmedSpans(files, now).flatMap((span): Finding[] => {
+      return confirmedSpans(files, now, held).flatMap((span): Finding[] => {
         if (span.end >= expiry) {
           return [
             {
@@ -338,9 +343,9 @@ const RULES: Rule[] = [
           text: `This expires ${shown(fact.value)}, inside the ${shown(window.start)} to ${shown(window.end)} trip.`,
         }));
     },
-    run(files, now) {
+    run(files, now, held) {
       const attached = [...expiriesOf(files, "residence-permit"), ...expiriesOf(files, "visa")];
-      return confirmedSpans(files, now).flatMap((span) =>
+      return confirmedSpans(files, now, held).flatMap((span) =>
         attached
           .filter(({ fact }) => fact.value >= span.start && fact.value <= span.end)
           .map(({ file, fact }) => ({
@@ -421,8 +426,8 @@ const RULES: Rule[] = [
       ];
       return [{ state: "ok", title: "Every night has a place to sleep", text: parts.join(", then ") }];
     },
-    run(files, now) {
-      return confirmedSpans(files, now).flatMap((span) => {
+    run(files, now, held) {
+      return confirmedSpans(files, now, held).flatMap((span) => {
         const landing = span.events
           .filter(({ fact }) => roleOf(fact) === "arrive")
           .map(({ fact }) => fact.value)
@@ -518,28 +523,27 @@ const ORDER: Record<Severity, number> = { overdue: 0, soon: 1, info: 2 };
 /** Everything the rules have to say, most urgent first. */
 export function insightsFor(files: FactfulFile[], now: number, views?: readonly TripWindow[]): Insight[] {
   const found: Insight[] = [];
+  // Only a trip not yet over has anything to check.
+  const current = (views ?? []).filter((window) => window.start && daysUntil(window.end, now) >= 0);
   for (const rule of RULES) {
-    // With the trips read, a trip rule checks each trip as the hero does and
-    // brings only what is not in order; without them, the travel windows.
-    const findings: Finding[] =
-      views && rule.trip
-        ? views.flatMap((window) =>
-            rule.trip!(window, files, now)
-              .filter((check) => check.state !== "ok")
-              .map((check) => ({
-                ...(check.fileId ? { fileId: check.fileId } : {}),
-                severity: check.severity ?? "info",
-                title: check.title,
-                text: check.text ?? "",
-              })),
-          )
-        : rule.run(files, now);
-    for (const finding of findings) {
-      found.push({
-        ...finding,
-        ruleId: rule.id,
-        id: `${rule.id}:${finding.fileId ?? "library"}`,
-      });
+    const add = (finding: Finding, id: string) => found.push({ ...finding, ruleId: rule.id, id });
+    if (views && rule.trip) {
+      // With the trips read, a trip rule checks each trip as the hero does and
+      // brings only what is not in order, under that trip's own identity.
+      for (const window of current) {
+        for (const check of rule.trip(window, files, now)) {
+          if (check.state !== "ok") {
+            add(
+              { ...(check.fileId ? { fileId: check.fileId } : {}), severity: check.severity ?? "info", title: check.title, text: check.text ?? "" },
+              `${rule.id}:${window.tag}:${check.fileId ?? "trip"}`,
+            );
+          }
+        }
+      }
+    }
+    // Travel no trip holds is still checked over its travel windows.
+    for (const finding of rule.run(files, now, views)) {
+      add(finding, `${rule.id}:${finding.fileId ?? "library"}`);
     }
   }
   return found.sort((a, b) => ORDER[a.severity] - ORDER[b.severity]);
@@ -547,5 +551,8 @@ export function insightsFor(files: FactfulFile[], now: number, views?: readonly 
 
 /** One trip's checks for the Timeline: what is in order, and what is not, in the rules' order. */
 export function tripChecks(window: TripWindow, files: FactfulFile[], now: number): Check[] {
+  if (!window.start || !window.end) {
+    return [];
+  }
   return RULES.flatMap((rule) => (rule.trip ? rule.trip(window, files, now).map((check) => ({ ...check, ruleId: rule.id })) : []));
 }

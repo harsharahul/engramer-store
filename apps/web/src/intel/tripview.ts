@@ -233,6 +233,7 @@ export async function tripViewOf(
 export function windowOf(view: TripView): TripWindow {
   const landing = view.legs.find((leg) => leg.arr && leg.arr.code !== undefined && leg.arr.code === view.code) ?? view.legs.find((leg) => leg.arr);
   return {
+    tag: view.tag,
     start: view.start,
     end: view.end,
     international: view.international,
@@ -243,7 +244,14 @@ export function windowOf(view: TripView): TripWindow {
       ...(stay.checkIn ? { checkIn: { day: stay.checkIn.day, ...(stay.checkIn.time ? { time: stay.checkIn.time } : {}) } } : {}),
       ...(stay.checkOut ? { checkOut: { day: stay.checkOut.day } } : {}),
     })),
-    overnightLegs: view.legs.flatMap((leg) => (leg.dep && leg.arr && leg.arr.day > leg.dep.day ? [leg.dep.day] : [])),
+    // Every night between leaving and landing, two across the date line.
+    overnightLegs: view.legs.flatMap((leg) => {
+      const nights: string[] = [];
+      for (let day = leg.dep?.day; leg.arr && day && day < leg.arr.day; day = new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)) {
+        nights.push(day);
+      }
+      return nights;
+    }),
   };
 }
 

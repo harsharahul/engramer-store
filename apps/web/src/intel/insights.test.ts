@@ -251,6 +251,7 @@ describe("rules read what each date is", () => {
 describe("one set of trip checks for the bell and the hero", () => {
   const NOW_TRIP = Date.UTC(2026, 9, 26);
   const window = (over: Partial<TripWindow> = {}): TripWindow => ({
+    tag: "trip:lisbon-2026-11",
     start: "2026-11-12",
     end: "2026-11-16",
     international: true,
@@ -355,5 +356,48 @@ describe("one set of trip checks for the bell and the hero", () => {
       .sort();
     expect(hero.length).toBeGreaterThan(0);
     expect(bell).toEqual(hero);
+  });
+});
+
+describe("the bell's trip checks", () => {
+  const NOW_TRIP = Date.UTC(2026, 9, 26);
+  const window = (over: Partial<TripWindow> = {}): TripWindow => ({
+    tag: "trip:lisbon-2026-11",
+    start: "2026-11-12",
+    end: "2026-11-16",
+    international: true,
+    memberIds: [],
+    stays: [],
+    overnightLegs: [],
+    ...over,
+  });
+  const passport = file("pp", "passport.pdf", [fact({ document: "passport", value: "2027-03-01" })]);
+  const passportIds = (views: TripWindow[], files = [passport]) =>
+    insightsFor(files, NOW_TRIP, views)
+      .filter((insight) => insight.ruleId === "passport-short-for-trip")
+      .map((insight) => insight.id);
+
+  it("each trip's checks are its own on the bell", () => {
+    const ids = passportIds([window(), window({ tag: "trip:porto-2026-12", start: "2026-12-01", end: "2026-12-05" })]);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("a trip that is over says nothing on the bell", () => {
+    const old = file("old", "old-passport.pdf", [fact({ document: "passport", value: "2026-04-03" })]);
+    expect(passportIds([window({ start: "2026-04-01", end: "2026-04-05" })], [old])).toEqual([]);
+  });
+
+  it("travel no trip holds still warns about the passport when trips are read", () => {
+    const flights = file("ft", "flights.html", [
+      fact({ kind: "event", value: "2026-11-20", label: "Flight AQ 214 departs SFO", time: "09:40" }),
+      fact({ kind: "event", value: "2026-11-20", label: "Flight AQ 214 arrives JFK" }),
+      fact({ kind: "event", value: "2026-11-28", label: "Flight AQ 215 departs JFK" }),
+    ]);
+    expect(passportIds([], [passport, flights])).toHaveLength(1);
+  });
+
+  it("a trip with no days asks nothing", () => {
+    expect(tripChecks(window({ start: "", end: "" }), [passport], NOW_TRIP)).toEqual([]);
   });
 });
