@@ -6,6 +6,15 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Added
+- **The Timeline follows your trip.** From a month before you fly, the
+  Timeline's hero becomes the trip: the countdown, what to check, when to
+  leave for the airport, your boarding pass and hotel on the day, progress
+  in the air, the night of your stay, and a recap when you are back.
+- **Every reader says what a date is.** Booking data, boarding passes,
+  invites and the on-device model now record whether a date is a
+  departure, a check-in or an event, and where, so a guesthouse booked by
+  plain email becomes a stay like any hotel, and a boarding pass joins the
+  flight it was issued for.
 - **The Timeline.** One place for time: every bill, booking, delivery,
   trip and photo day in order, the day's time and sky at home, what is due
   this week, and a Month view. Calendar and Expiring soon are part of it

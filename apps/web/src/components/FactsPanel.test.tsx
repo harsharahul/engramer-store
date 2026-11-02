@@ -11,7 +11,7 @@ const undoTrip = vi.hoisted(() => vi.fn(async (_tag: string) => 1));
 
 vi.mock("../store", () => ({
   useStore: (select: (state: unknown) => unknown) =>
-    select({ session: { email: "a@example.com" }, dismissFact: vi.fn(), undoTrip }),
+    select({ session: { email: "a@example.com" }, files: new Map(), dismissFact: vi.fn(), undoTrip }),
 }));
 
 let container: HTMLDivElement;

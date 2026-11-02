@@ -129,7 +129,7 @@ export function TimelineView(props: {
   const home = setHome ?? guess ?? zoneCity();
 
   // The hero follows a near trip through its moments; otherwise it is the ordinary day.
-  const views = useTripViews({ rows, plans, homeCity: home, now });
+  const views = useTripViews({ rows, plans, now });
   const moment = useMemo(() => momentOf(views, now), [views, now]);
 
   // The Month view opens at its top, wherever the list was scrolled.
