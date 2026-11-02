@@ -79,6 +79,16 @@ describe("tripToCalendar", () => {
     expect(uids(tripToCalendar(lisbon, STAMP + 60_000).ics)).toEqual(first);
   });
 
+  it("every event keeps its own UID, even legs with one name and stays from one file", () => {
+    const sameName = {
+      ...lisbon,
+      legs: lisbon.legs.map((leg) => ({ ...leg, key: "Train" })),
+      stays: [lisbon.stays[0]!, { ...lisbon.stays[0]!, checkIn: { ...lisbon.stays[0]!.checkIn!, day: "2026-11-16" } }],
+    };
+    const uids = tripToCalendar(sameName, STAMP).ics.match(/^UID:.*$/gm)!;
+    expect(new Set(uids).size).toBe(uids.length);
+  });
+
   it("a date nobody has said yes to is not exported", () => {
     const asking = { ...lisbon, legs: lisbon.legs.map((leg, i) => (i === 1 ? { ...leg, ask: true } : leg)) };
     expect(tripToCalendar(asking, STAMP).ics).not.toContain("TP 237");

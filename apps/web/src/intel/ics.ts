@@ -105,7 +105,9 @@ export function tripToCalendar(view: TripView, stamp: number): CalendarEvent {
       return;
     }
     const name = leg.designator || leg.mode.charAt(0).toUpperCase() + leg.mode.slice(1);
-    const lines = [uid(leg.key), stamped];
+    // A key names the service; a through flight or an unnumbered train
+    // shares it across legs, so the day and both ends make it one leg's.
+    const lines = [uid(`${leg.key}-${leg.dep.day}-${leg.from}-${leg.to}`), stamped];
     if (leg.dep.time) {
       lines.push(`DTSTART:${utc(leg.dep.at)}`);
       if (leg.arr?.time && leg.arr.at > leg.dep.at) {
@@ -134,7 +136,8 @@ export function tripToCalendar(view: TripView, stamp: number): CalendarEvent {
     }
     const last = stay.checkOut && stay.checkOut.day > stay.checkIn.day ? stay.checkOut.day : dayAfter(stay.checkIn.day);
     events.push([
-      uid(`stay-${stay.fileId}`),
+      // One booking can hold two stays; each starts on its own day.
+      uid(`stay-${stay.fileId}-${stay.checkIn.day}`),
       stamped,
       `DTSTART;VALUE=DATE:${compact(stay.checkIn.day)}`,
       `DTEND;VALUE=DATE:${compact(last)}`,
