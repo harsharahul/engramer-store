@@ -394,3 +394,12 @@ describe("service numbers", () => {
     ]);
   });
 });
+
+describe("cancellations", () => {
+  it("a cancelled reservation states no dates", () => {
+    const cancelled = FLIGHT_HTML.replace('"reservationNumber": "ZK8Q2P",', '"reservationNumber": "ZK8Q2P", "reservationStatus": "http://schema.org/ReservationCancelled",');
+    expect(cancelled).toContain("ReservationCancelled");
+    expect(reservationFacts(cancelled)).toEqual([]);
+    expect(reservationFacts(FLIGHT_HTML.replace('"reservationNumber": "ZK8Q2P",', '"reservationNumber": "ZK8Q2P", "reservationStatus": "ReservationConfirmed",'))).toHaveLength(3);
+  });
+});

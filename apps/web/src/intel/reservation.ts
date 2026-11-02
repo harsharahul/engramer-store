@@ -122,6 +122,10 @@ function checkinLink(res: Node): string | undefined {
 }
 
 function factsOf(res: Node, reservation: number): ReadFact[] {
+  // A cancellation repeats the booking it cancels; none of its dates happen.
+  if (/ReservationCancelled$/.test(str(res["reservationStatus"]) ?? "")) {
+    return [];
+  }
   // "http://schema.org/FlightReservation" and "FlightReservation" alike.
   const type = (str(res["@type"]) ?? "").replace(/^.*[:/]/, "");
   const document: DocumentKind = type.startsWith("Lodging")
