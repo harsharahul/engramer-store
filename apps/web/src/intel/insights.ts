@@ -20,6 +20,7 @@
 
 import { isTracked, type Fact } from "./facts";
 import { daysUntil } from "./dates";
+import { subjectOf } from "./subject";
 import { travelSpans, type TravelSpan } from "./trips";
 
 export type Severity = "overdue" | "soon" | "info";
@@ -112,9 +113,7 @@ function confirmedSpans(files: FactfulFile[], now: number): TravelSpan[] {
   );
 }
 
-const ARRIVES = /\barriv/i;
-const CHECKIN = /^check[- ]?in\b/i;
-const FLIGHT = /\bflight\b|\bdepart/i;
+const roleOf = (fact: Fact) => subjectOf(fact)?.role;
 
 const RULES: Rule[] = [
   {
@@ -269,11 +268,11 @@ const RULES: Rule[] = [
     run(files, now) {
       return confirmedSpans(files, now).flatMap((span) => {
         const landing = span.events
-          .filter(({ fact }) => ARRIVES.test(fact.label ?? ""))
+          .filter(({ fact }) => roleOf(fact) === "arrive")
           .map(({ fact }) => fact.value)
           .sort()[0];
         const stay = span.events
-          .filter(({ fact }) => CHECKIN.test(fact.label ?? ""))
+          .filter(({ fact }) => roleOf(fact) === "check-in")
           .sort((a, b) => a.fact.value.localeCompare(b.fact.value))[0];
         if (!landing || !stay || stay.fact.value <= landing) {
           return [];
@@ -299,7 +298,8 @@ const RULES: Rule[] = [
           .filter(
             (fact) =>
               fact.kind === "event" &&
-              FLIGHT.test(fact.label ?? "") &&
+              roleOf(fact) === "depart" &&
+              subjectOf(fact)?.mode === "flight" &&
               daysUntil(fact.value, now) === 1,
           )
           .map((fact) => ({

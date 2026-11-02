@@ -240,3 +240,10 @@ describe("facts that count without a yes", () => {
     expect(ruleIds([file("f1", "passport.pdf", [offered])])).not.toContain("passport-six-months");
   });
 });
+
+describe("rules read what each date is", () => {
+  it("a flight landing tomorrow does not say check-in opens", () => {
+    const files = [file("ft", "flight.html", [fact({ kind: "event", value: "2026-08-05", label: "Flight AQ 214 arrives JFK", time: "18:05" })])];
+    expect(ruleIds(files)).not.toContain("checkin-opens");
+  });
+});

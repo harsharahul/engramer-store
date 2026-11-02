@@ -372,3 +372,26 @@ describe("rowsOf", () => {
     expect(localTime(NOW)).toBe("08:40");
   });
 });
+
+describe("rows read what each date is", () => {
+  it("a confirmed stay the model read is a stay row", async () => {
+    const said = (value: string, time: string, role: "check-in" | "check-out", label: string): Fact => ({
+      id: `event:${value} ${label.toLowerCase()} ${time}`,
+      kind: "event",
+      document: "hotel-booking",
+      value,
+      time,
+      label,
+      source: "model",
+      confidence: 0.45,
+      confirmed: true,
+      subject: { role, place: "Casa Azulejo" },
+    });
+    const guesthouse = email("guesthouse", "Re: your room", [
+      said("2026-11-13", "15:00", "check-in", "Room ready"),
+      said("2026-11-16", "11:00", "check-out", "Key at reception"),
+    ]);
+    const rows = await rowsOf([guesthouse], none, NOW);
+    expect(rows.filter((row) => row.kind === "stay").map((row) => row.title)).toEqual(["Check in · Casa Azulejo", "Check out · Casa Azulejo"]);
+  });
+});

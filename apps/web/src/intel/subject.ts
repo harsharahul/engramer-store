@@ -144,6 +144,26 @@ export function plainNumber(raw: string | undefined, carrier?: string): string |
   return NUMBER.test(number) ? number : undefined;
 }
 
+/** A departure or an arrival of a journey by some mode: a leg, not just a date. */
+export function isLegEnd(subject: Subject | undefined): subject is Subject & { mode: Mode } {
+  return subject?.mode !== undefined && (subject.role === "depart" || subject.role === "arrive");
+}
+
+/** Where a journey leaves from, when the fact says. */
+export function departureCode(subject: Subject | undefined): string | undefined {
+  return subject?.role === "depart" ? subject.code : undefined;
+}
+
+/** Where a journey arrives: an arrival's own airport, or the far end a boarding pass names. */
+export function arrivalCode(subject: Subject | undefined): string | undefined {
+  return subject?.role === "arrive" ? subject.code : subject?.role === "depart" ? subject.otherEnd : undefined;
+}
+
+/** Every airport code a fact names. */
+export function codesOf(subject: Subject | undefined): string[] {
+  return [subject?.code, subject?.otherEnd].filter((code): code is string => code !== undefined);
+}
+
 /** "TP 236": the carrier and number together, when either is known. */
 export function designatorOf(subject: Subject): string | undefined {
   return [subject.carrier, subject.number].filter(Boolean).join(" ") || undefined;

@@ -79,3 +79,22 @@ describe("one model for dates and trips", () => {
     expect(offenders([/\bsuggestTrips\(/], [join("intel", "agenda.ts"), join("intel", "trips.ts")])).toEqual([]);
   });
 });
+
+describe("one reading of what a fact is about", () => {
+  it("reads a label's meaning only in intel/subject.ts", () => {
+    // A label is the document's own words; what it means comes from subjectOf.
+    // An amount's "Total" label is not a date's subject: facts.ts reads it for
+    // slots. confidence.ts raises the stakes on any travel word in a label, on
+    // top of the subject, so that check stays deliberately broad.
+    expect(
+      offenders(
+        [
+          /\.(?:test|exec)\(\s*[\w.]*\.label\b/,
+          /\.label\b(?:\s*\?\?\s*""\s*\))?\s*\.(?:match|startsWith)\(/,
+          /=\s*\/(?:[^/\n\\]|\\.)*\b(?:depart|arriv|check|pick|drop)(?:[^/\n\\]|\\.)*\/[gimsuy]*;?$/i,
+        ],
+        [join("intel", "subject.ts"), join("intel", "facts.ts"), join("intel", "confidence.ts")],
+      ),
+    ).toEqual([]);
+  });
+});

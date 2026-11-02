@@ -20,6 +20,7 @@ import { decide, decided } from "../decisions";
 import { settingChanged } from "../settingsbus";
 import { lookupAirport } from "./airports";
 import { isTracked, type Fact } from "./facts";
+import { arrivalCode, codesOf, departureCode, subjectOf } from "./subject";
 
 export interface TripFile {
   id: string;
@@ -76,9 +77,6 @@ function shown(iso: string): string {
   return `${Number(day)} ${MONTHS[Number(month) - 1]} ${year}`;
 }
 
-const ARRIVAL = /\b(?:to|arrives)\s+([A-Z]{3})\b/;
-const DEPARTURE = /\bdeparts\s+([A-Z]{3})\b/;
-
 /**
  * Airport-code shaped tokens in a label. A fresh iterator per call on
  * purpose: a shared global regex carries lastIndex across the awaits these
@@ -122,16 +120,16 @@ async function memberOf(file: TripFile, extra: ReadonlySet<string>): Promise<Mem
   const cities = new Set<string>();
   const arrivals = new Set<string>();
   for (const fact of events) {
-    const label = fact.label ?? "";
-    for (const code of codesIn(label)) {
+    const subject = subjectOf(fact);
+    for (const code of codesOf(subject)) {
       const airport = await lookupAirport(code);
       if (airport) {
         cities.add(airport.city);
       }
     }
-    const arriving = ARRIVAL.exec(label);
+    const arriving = arrivalCode(subject);
     if (arriving) {
-      const airport = await lookupAirport(arriving[1]!);
+      const airport = await lookupAirport(arriving);
       if (airport) {
         arrivals.add(airport.city);
       }
@@ -272,16 +270,14 @@ export async function legPlaces(
   const ordered = [...legs].sort(
     (a, b) => `${a.value} ${a.time ?? ""}`.localeCompare(`${b.value} ${b.time ?? ""}`) || a.id.localeCompare(b.id),
   );
-  const city = async (pattern: RegExp, fact: Fact) => {
-    const code = pattern.exec(fact.label ?? "")?.[1];
-    return code ? (await lookupAirport(code))?.city : undefined;
-  };
+  const city = async (code: string | undefined) => (code ? (await lookupAirport(code))?.city : undefined);
   let from: string | undefined;
   let to: string | undefined;
   const arrivals: string[] = [];
   for (const fact of ordered) {
-    from ??= await city(DEPARTURE, fact);
-    const arrived = await city(ARRIVAL, fact);
+    const subject = subjectOf(fact);
+    from ??= await city(departureCode(subject));
+    const arrived = await city(arrivalCode(subject));
     if (arrived) {
       arrivals.push(arrived);
       to = arrived;
@@ -428,14 +424,14 @@ export function tripTag(suggestion: TripSuggestion): string {
 }
 
 function legKind(fact: Fact): ItineraryLeg["kind"] {
-  const label = fact.label ?? "";
-  if (/^flight\b/i.test(label) || fact.document === "boarding-pass") {
+  const subject = subjectOf(fact);
+  if (subject?.mode === "flight" || fact.document === "boarding-pass") {
     return "flight";
   }
-  if (/^check[- ]?(in|out)\b/i.test(label) || fact.document === "hotel-booking") {
+  if (subject?.role === "check-in" || subject?.role === "check-out" || fact.document === "hotel-booking") {
     return "stay";
   }
-  if (/^(pick[- ]?up|drop[- ]?off)\b/i.test(label) || fact.document === "car-rental") {
+  if (subject?.role === "pick-up" || subject?.role === "drop-off" || fact.document === "car-rental") {
     return "car";
   }
   return "other";

@@ -436,3 +436,23 @@ describe("planTrips reaches only near the journey", () => {
     expect(plan.exact.get("eticket")).toBe("email");
   });
 });
+
+describe("trips read what each date is", () => {
+  // As the barcode states it: the flight, both airports, a date whose year is inferred.
+  const pass = (extra: Partial<Fact> = {}) =>
+    doc("pass", [
+      { id: "event:pass", kind: "event", document: "boarding-pass", value: "2026-11-12", label: "Flight TP 236 SFO to LIS", source: "barcode", confidence: 0.6, ...extra },
+      reference("4F2K", "Booking reference", { document: "boarding-pass", source: "barcode" }),
+    ]);
+
+  it("a boarding pass and its booking plan as one journey", async () => {
+    const [flight, hotel] = lisbon();
+    const plan = only(await planTrips([flight!, hotel!, pass()], NOW));
+    expect(plan.exact.get("pass")).toBe("reference");
+    expect(plan.destination).toBe("Lisbon");
+  });
+
+  it("a confirmed boarding pass counts where its journey leaves from", async () => {
+    expect(await homeCityGuess([pass({ confirmed: true })])).toBe("San Francisco");
+  });
+});
