@@ -102,19 +102,19 @@ function TheTrip(props: { view: TripView; onInspect(fileId: string): void }) {
         {flights.length > 0 && (
           <>
             <span>Flights</span>
-            <span>{flights.join(" · ")}</span>
+            <div>{flights.join(" · ")}</div>
           </>
         )}
         {stays.length > 0 && (
           <>
             <span>Stay</span>
-            <span>{stays.join(", ")}</span>
+            <div>{stays.join(", ")}</div>
           </>
         )}
         {booked.length > 0 && (
           <>
             <span>Booked</span>
-            <span>{bookedLine}</span>
+            <div>{bookedLine}</div>
           </>
         )}
       </div>
@@ -399,7 +399,7 @@ function Hotel(props: {
       return null;
     }
     return (
-      <Card title="Check out by">
+      <Card title="Check out by" className="tln-card-stay">
         <div className="tln-big-local">{out.time}</div>
         <div className="tln-muted">
           in <Until at={out.at} />
@@ -424,21 +424,23 @@ function Hotel(props: {
           : arr.time
       : undefined;
     return (
-      <Card title="When you land">
-        <div className="tln-kv">
+      <Card title="When you land" className="tln-card-stay">
+        {stay?.name && <div className="tln-title">{stay.name}</div>}
+        {stay?.address && <div className="tln-muted">{stay.address}</div>}
+        <div className="tln-kv tln-kv-gap">
           {checkIn && (
             <>
               <span>Check-in</span>
-              <span>
+              <div>
                 {dayLabel(checkIn.day)}
                 {checkIn.time ? ` · from ${checkIn.time}` : ""}
-              </span>
+              </div>
             </>
           )}
           {landingLine && (
             <>
               <span>Landing</span>
-              <span>{landingLine}</span>
+              <div>{landingLine}</div>
             </>
           )}
         </div>
@@ -467,17 +469,17 @@ function Hotel(props: {
         {stay.checkOut && (
           <>
             <span>Check-out</span>
-            <span>
+            <div>
               {dayLabel(stay.checkOut.day)}
               {stay.checkOut.time ? ` · ${stay.checkOut.time}` : ""}
-            </span>
+            </div>
           </>
         )}
         {reference && (
           <>
             <span>Booking</span>
-            <span>
-              <span className="tln-mono">{revealed ?? `••••${reference.masked ?? reference.value}`}</span>{" "}
+            <div>
+              <span className="tln-mono">{revealed ?? `…${reference.masked ?? reference.value}`}</span>{" "}
               {revealed ? (
                 <Button size="xs" variant="link" onClick={() => setRevealed(null)}>
                   Hide
@@ -496,7 +498,7 @@ function Hotel(props: {
                   Reveal
                 </Button>
               )}
-            </span>
+            </div>
           </>
         )}
       </div>
@@ -545,17 +547,17 @@ function FlightHome(props: { moment: Moment; onInspect(fileId: string): void }) 
         {leave && (
           <>
             <span>Leave by</span>
-            <span>
+            <div>
               {zonedTime(leave.at, leave.zone)} · {leave.hours} hours before departure
-            </span>
+            </div>
           </>
         )}
         {opens !== undefined && (
           <>
             <span>Check-in</span>
-            <span>
+            <div>
               opens {weekday(zonedDay(opens, leg.dep.zone))} {zonedTime(opens, leg.dep.zone)}
-            </span>
+            </div>
           </>
         )}
       </div>

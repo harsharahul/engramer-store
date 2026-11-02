@@ -5793,7 +5793,11 @@ span.item-menu {
 .tln-hd-aside {
   float: right;
   letter-spacing: 0.08em;
-  color: var(--accent-2);
+  color: var(--paper-dim);
+}
+.tln-card-stay {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--hairline));
+  background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 12%, var(--glass-bg)), var(--glass-bg) 70%);
 }
 .tln-kv-gap {
   margin-top: 8px;
@@ -5848,8 +5852,8 @@ button.tln-check {
   background: color-mix(in srgb, var(--ok) 13%, transparent);
 }
 .tln-ck-note {
-  color: var(--accent-2);
-  background: color-mix(in srgb, var(--accent-2) 13%, transparent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 .tln-ck-warn {
   color: var(--warn);
@@ -5915,7 +5919,8 @@ button.tln-check {
 .tln-pmini {
   display: grid;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 0 12px 10px;
+  overflow: hidden;
   border: 1px solid var(--hairline-strong);
   border-radius: 12px;
   background: var(--ink-2);
@@ -5923,9 +5928,12 @@ button.tln-check {
 .tln-pmini-head {
   display: flex;
   justify-content: space-between;
+  margin: 0 -12px;
+  padding: 6px 12px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
   font: 600 10px var(--font-mono);
   letter-spacing: 0.14em;
-  color: var(--paper-faint);
+  color: #fff;
 }
 .tln-pmini-route {
   display: grid;

@@ -264,13 +264,13 @@ describe("the trip's cards from soon to the last day", () => {
     useStore.setState({ factEvidence: evidence([{ id: reference.id, full: "CR-7741-9C1D" }]) });
     mount(instantOf("2026-11-14", "15:42", LIS));
     const stay = () => card("Staying")!;
-    expect(kv(stay()).Booking).toContain("••••9C1D");
+    expect(kv(stay()).Booking).toContain("…9C1D");
     await act(async () => {
       [...stay().querySelectorAll("button")].find((button) => button.textContent === "Reveal")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(kv(stay()).Booking).toContain("CR-7741-9C1D");
     click([...stay().querySelectorAll("button")].find((button) => button.textContent === "Hide"));
-    expect(kv(stay()).Booking).toContain("••••9C1D");
+    expect(kv(stay()).Booking).toContain("…9C1D");
   });
 
   it("the last day shows check-out, when to leave and what the trip cost", () => {
@@ -288,5 +288,30 @@ describe("the trip's cards from soon to the last day", () => {
     mount(instantOf("2026-11-14", "15:42", LIS), oneWay);
     expect(headers()).not.toContain("Flight home");
     expect(headers()[0]).toBe("Staying");
+  });
+});
+
+describe("the cards as the prototype draws them", () => {
+  const LIS = "Europe/Lisbon";
+
+  it("a card's values are not drawn as its labels", () => {
+    mount(PLANNING);
+    const cells = [...card("The trip")!.querySelectorAll(".tln-kv > *")];
+    expect(cells.filter((_, i) => i % 2 === 0).every((cell) => cell.tagName === "SPAN")).toBe(true);
+    expect(cells.filter((_, i) => i % 2 === 1).every((cell) => cell.tagName === "DIV")).toBe(true);
+  });
+
+  it("the hotel's cards wear the hotel's look, and landing names the hotel", () => {
+    useStore.setState({ factEvidence: vi.fn(async () => []) });
+    mount(instantOf("2026-11-12", "13:30", LA));
+    const land = card("When you land")!;
+    expect(land.classList.contains("tln-card-stay")).toBe(true);
+    expect(land.querySelector(".tln-title")!.textContent).toBe("Casa do Rio");
+  });
+
+  it("a booking reference shows only its last characters until revealed", () => {
+    useStore.setState({ factEvidence: vi.fn(async () => []) });
+    mount(instantOf("2026-11-14", "15:42", LIS));
+    expect(kv(card("Staying")).Booking).toContain("…9C1D");
   });
 });
