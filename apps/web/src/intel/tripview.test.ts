@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { email, exact, file, hotel, lisbonFiles, lisbonTrip, PLANNING_NOW as NOW, TAG } from "./__fixtures__/lisbon";
 import { tripsOf } from "./agenda";
 import { rowsOf } from "./agendarows";
-import { comingUp, tripSpend, tripViewOf } from "./tripview";
+import { comingUp, tripSpend, tripViewOf, windowOf } from "./tripview";
 
 describe("tripViewOf", () => {
   it("a trip reads as legs, a stay and bookings", async () => {
@@ -55,6 +55,21 @@ describe("tripViewOf", () => {
     const { view } = await lisbonTrip(lisbonFiles({ source: "label", confidence: 0.7, accepted: undefined }), [], true);
     expect(view.legs.map((leg) => leg.designator)).toEqual(["TP 236"]);
     expect(view.end).toBe("2026-11-16");
+  });
+});
+
+describe("windowOf", () => {
+  it("the trip as the checks read it", async () => {
+    const { view } = await lisbonTrip();
+    expect(windowOf(view)).toEqual({
+      start: "2026-11-12",
+      end: "2026-11-16",
+      international: true,
+      memberIds: view.memberIds,
+      firstArrival: { day: "2026-11-13", time: "14:05" },
+      stays: [{ name: "Casa do Rio", checkIn: { day: "2026-11-13", time: "15:00" }, checkOut: { day: "2026-11-16" } }],
+      overnightLegs: ["2026-11-12"],
+    });
   });
 });
 

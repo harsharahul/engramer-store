@@ -12,6 +12,7 @@ import type { AgendaRow, RowFile } from "./agendarows";
 import { airportForCity, lookupAirport, type Airport } from "./airports";
 import { sum, type Money } from "./everyday";
 import type { Fact } from "./facts";
+import type { TripWindow } from "./insights";
 import { deviceZone } from "./instants";
 import type { Leg, Stop } from "./legs";
 import { subjectOf } from "./subject";
@@ -178,6 +179,24 @@ export async function tripViewOf(
     exact: opts.plan?.anchorId !== undefined,
     leaveBy: await Promise.all(legs.map(departureAdvice)),
     cities,
+  };
+}
+
+/** The trip as the checks read it, the same for the bell and the hero. */
+export function windowOf(view: TripView): TripWindow {
+  const landing = view.legs.find((leg) => leg.arr && leg.arr.code !== undefined && leg.arr.code === view.code) ?? view.legs.find((leg) => leg.arr);
+  return {
+    start: view.start,
+    end: view.end,
+    international: view.international,
+    memberIds: view.memberIds,
+    ...(landing?.arr ? { firstArrival: { day: landing.arr.day, ...(landing.arr.time ? { time: landing.arr.time } : {}) } } : {}),
+    stays: view.stays.map((stay) => ({
+      name: stay.name,
+      ...(stay.checkIn ? { checkIn: { day: stay.checkIn.day, ...(stay.checkIn.time ? { time: stay.checkIn.time } : {}) } } : {}),
+      ...(stay.checkOut ? { checkOut: { day: stay.checkOut.day } } : {}),
+    })),
+    overnightLegs: view.legs.flatMap((leg) => (leg.dep && leg.arr && leg.arr.day > leg.dep.day ? [leg.dep.day] : [])),
   };
 }
 
