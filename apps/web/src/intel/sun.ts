@@ -6,7 +6,7 @@
  */
 
 import type { LatLon } from "./airports";
-import { zonedDay, zonedTime } from "./instants";
+import { instantOf, zonedDay, zonedTime } from "./instants";
 
 export type Sky = "night" | "dawn" | "day" | "dusk";
 
@@ -23,10 +23,16 @@ const TWILIGHT_MS = 90 * 60_000;
  * circle, which of the two lasts the whole day. The sunrise equation with
  * the standard 0.833° allowance for refraction and the sun's disc; accurate
  * to a few minutes, which is all a sky needs.
+ *
+ * With `zone`, `day` is that zone's calendar day, and the sun is the one
+ * crossing the sky nearest its local noon: in Samoa (UTC+13 at 172° west)
+ * that is the previous UTC day's transit. Without it, the day is UTC's.
  */
-export function sunTimes(day: string, place: LatLon): { rise: number; set: number } | { polar: "day" | "night" } {
-  // Days since J2000 at the day's noon UTC, then the mean solar noon there.
-  const n = Date.parse(`${day}T12:00:00Z`) / DAY_MS + UNIX_JD - J2000;
+export function sunTimes(day: string, place: LatLon, zone?: string): { rise: number; set: number } | { polar: "day" | "night" } {
+  // The whole number of days since J2000 whose transit at this longitude
+  // falls nearest the day's noon, then that mean solar noon.
+  const localNoon = (zone ? instantOf(day, "12:00", zone) : Date.parse(`${day}T12:00:00Z`)) / DAY_MS + UNIX_JD;
+  const n = Math.round(localNoon - J2000 + place.lon / 360);
   const noon = n - place.lon / 360;
   const anomaly = (((357.5291 + 0.98560028 * noon) % 360) + 360) % 360;
   const centre =
@@ -64,7 +70,7 @@ export function skyOf(at: number, zone: string, place?: LatLon): Sky {
     }
     return hour < 17 ? "day" : "dusk";
   }
-  const sun = sunTimes(zonedDay(at, zone), place);
+  const sun = sunTimes(zonedDay(at, zone), place, zone);
   if ("polar" in sun) {
     return sun.polar;
   }

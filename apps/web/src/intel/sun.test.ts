@@ -37,6 +37,13 @@ describe("skyOf", () => {
     expect([at("07:00"), at("12:00"), at("17:30"), at("20:00")]).toEqual(["dawn", "day", "dusk", "night"]);
   });
 
+  it("a place whose clock is across the date line from its longitude has day at noon", () => {
+    // Samoa keeps UTC+13 at 172° west: its local noon is the previous UTC day.
+    const apia = { lat: -13.83, lon: -172.01 };
+    expect(skyOf(Date.parse("2026-07-15T14:00:00+13:00"), "Pacific/Apia", apia)).toBe("day");
+    expect(skyOf(Date.parse("2026-07-15T23:00:00+13:00"), "Pacific/Apia", apia)).toBe("night");
+  });
+
   it("without coordinates the hour decides", () => {
     const at = (t: string) => skyOf(Date.parse(`2026-09-08T${t}:00-07:00`), "America/Los_Angeles");
     expect([at("05:30"), at("08:40"), at("18:00"), at("21:00")]).toEqual(["dawn", "day", "dusk", "night"]);
