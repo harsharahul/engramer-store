@@ -349,3 +349,48 @@ describe("what each date is about", () => {
     expect(result.evidence).toContainEqual({ id: depart!.id, link: "https://checkin.example.com/?ref=TQ4XRM&name=STONE" });
   });
 });
+
+describe("service numbers", () => {
+  const booking = (node: Record<string, unknown>) => `<script type="application/ld+json">${JSON.stringify(node)}</script>`;
+
+  it("a booking that names its airline without a code keys its flight by the code in its number", () => {
+    const facts = reservationFacts(
+      booking({
+        "@type": "FlightReservation",
+        reservationFor: {
+          "@type": "Flight",
+          flightNumber: "TP236",
+          airline: { "@type": "Airline", name: "TAP Air Portugal" },
+          departureAirport: { "@type": "Airport", iataCode: "SFO" },
+          arrivalAirport: { "@type": "Airport", iataCode: "LIS" },
+          departureTime: "2026-11-12T18:10:00-08:00",
+          arrivalTime: "2026-11-13T14:05:00+00:00",
+        },
+      }),
+    );
+    expect(facts.map((f) => [f.label, f.subject?.carrier, f.subject?.number])).toEqual([
+      ["Flight TAP Air Portugal TP236 departs SFO", "TP", "236"],
+      ["Flight TAP Air Portugal TP236 arrives LIS", "TP", "236"],
+    ]);
+  });
+
+  it("a train number with letters keeps its letters as the operator", () => {
+    const facts = reservationFacts(
+      booking({
+        "@type": "TrainReservation",
+        reservationFor: {
+          "@type": "TrainTrip",
+          trainNumber: "ICE 597",
+          departureStation: { "@type": "TrainStation", name: "Berlin Hbf" },
+          arrivalStation: { "@type": "TrainStation", name: "Hamburg Hbf" },
+          departureTime: "2027-06-01T07:12:00+02:00",
+          arrivalTime: "2027-06-01T09:00:00+02:00",
+        },
+      }),
+    );
+    expect(facts.map((f) => [f.subject?.carrier, f.subject?.number, f.subject?.place])).toEqual([
+      ["ICE", "597", "Berlin Hbf"],
+      ["ICE", "597", "Hamburg Hbf"],
+    ]);
+  });
+});

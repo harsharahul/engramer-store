@@ -16,7 +16,7 @@
 
 import { isRealDate } from "./dates";
 import { factId, type DocumentKind, type Fact, type ReadFact } from "./facts";
-import { cleanSubject, plainNumber, type Subject } from "./subject";
+import { cleanSubject, serviceOf, type Subject } from "./subject";
 
 const SCRIPT_BLOCK = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
 
@@ -168,7 +168,10 @@ function factsOf(res: Node, reservation: number): ReadFact[] {
     const fromName = str(from?.["iataCode"]) ?? str(from?.["name"]) ?? "";
     const toName = str(to?.["iataCode"]) ?? str(to?.["name"]) ?? "";
     const flight = ["Flight", carrier, number].filter(Boolean).join(" ");
-    const service = { mode: "flight" as const, carrier, number: plainNumber(number, str(airline?.["iataCode"])) };
+    // Keyed by the airline's code: from the booking, else from the code the
+    // number itself carries ("TP236"), so the boarding pass can find it.
+    const read = serviceOf(number, str(airline?.["iataCode"]));
+    const service = { mode: "flight" as const, carrier: read.carrier ?? carrier, number: read.number };
     const seat =
       str(res["airplaneSeat"]) ?? str(record(record(res["reservedTicket"])?.["ticketedSeat"])?.["seatNumber"]);
     event(
@@ -215,7 +218,8 @@ function factsOf(res: Node, reservation: number): ReadFact[] {
     const number = str(target?.["trainNumber"]) ?? "";
     const station = str(record(target?.["departureStation"])?.["name"]) ?? "";
     const train = ["Train", number].filter(Boolean).join(" ");
-    const service = { mode: "train" as const, carrier: str(record(target?.["provider"])?.["name"]), number: plainNumber(number) };
+    const read = serviceOf(number);
+    const service = { mode: "train" as const, carrier: read.carrier ?? str(record(target?.["provider"])?.["name"]), number: read.number };
     event(target?.["departureTime"], `${train} departs ${station}`.trim(), { role: "depart", ...service, place: station });
     event(target?.["arrivalTime"], `${train} arrives`.trim(), {
       role: "arrive",

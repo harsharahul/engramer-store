@@ -11,7 +11,7 @@
 import { isRealDate } from "./dates";
 import { factId, groundFacts, isStated, type DocumentKind, type Fact, type FactKind } from "./facts";
 import type { JsonSchemaProperty } from "./assistant";
-import { cleanSubject, type Subject } from "./subject";
+import { cleanSubject, serviceOf, type Subject } from "./subject";
 
 /** Every document kind the facts vocabulary knows, in its own order. */
 export const DOCUMENT_KINDS: readonly DocumentKind[] = [
@@ -43,8 +43,8 @@ const PROPOSABLE_KINDS: readonly FactKind[] = ["expiry", "due", "issued", "event
 /** What the model may say a date is; "other" says nothing. */
 const ROLES = ["check-in", "check-out", "depart", "arrive", "start", "end", "other"] as const;
 const MODES = ["flight", "train", "bus", "boat"] as const;
-/** A printed service number: "AQ 214", "IC 521", "214". */
-const SERVICE = /^(?:([A-Z0-9]{2,3})\s*)?(\d{1,4}[A-Z]?)$/;
+/** An airport named by its code: "LIS", or "San Francisco (SFO)". */
+const AIRPORT = /^([A-Z]{3})$|\(([A-Z]{3})\)/;
 
 /**
  * What the model says a date is about, keeping only what the document's own
@@ -58,13 +58,18 @@ function subjectFrom(proposal: Record<string, unknown>, text: string): Subject |
   }
   const stated = (value: unknown) =>
     typeof value === "string" && value.trim() && isStated(value.trim(), text) ? value.trim() : undefined;
-  const service = SERVICE.exec(stated(proposal["number"]) ?? "");
+  const place = stated(proposal["place"]);
+  // A stop named by its airport code is read in that airport's own time, and
+  // is a flight whether or not the model said so.
+  const airport = place ? AIRPORT.exec(place) : null;
+  const code = airport ? (airport[1] ?? airport[2]) : undefined;
+  const journey = role === "depart" || role === "arrive";
   return cleanSubject({
     role,
-    mode: proposal["mode"],
-    carrier: service?.[1],
-    number: service?.[2],
-    place: stated(proposal["place"]),
+    mode: proposal["mode"] || (code && journey ? "flight" : undefined),
+    ...serviceOf(stated(proposal["number"])),
+    ...(code && journey ? { code } : {}),
+    place,
   });
 }
 

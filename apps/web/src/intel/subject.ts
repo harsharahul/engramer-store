@@ -164,6 +164,29 @@ export function codesOf(subject: Subject | undefined): string[] {
   return [subject?.code, subject?.otherEnd].filter((code): code is string => code !== undefined);
 }
 
+// A service number with its operator in front: "TP236", "ICE 597", "U2 123".
+const PACKED = /^([A-Z]{1,4})\s*0*(\d{1,4}[A-Z]?)$/;
+const PACKED_DIGIT = /^([A-Z0-9]{2})\s+0*(\d{1,4}[A-Z]?)$/;
+
+/**
+ * A printed service number read into its operator and number: with a known
+ * carrier code, the number alone; without one, an operator code written in
+ * front of the number ("TP236" is TP 236, "ICE 597" is ICE 597).
+ */
+export function serviceOf(raw: string | undefined, carrier?: string): Pick<Subject, "carrier" | "number"> {
+  const text = (raw ?? "").trim().toUpperCase().replace(/\s+/g, " ");
+  if (carrier) {
+    const number = plainNumber(text, carrier);
+    return { carrier, ...(number ? { number } : {}) };
+  }
+  const number = plainNumber(text);
+  if (number) {
+    return { number };
+  }
+  const packed = PACKED.exec(text) ?? PACKED_DIGIT.exec(text);
+  return packed ? { carrier: packed[1]!, number: packed[2]! } : {};
+}
+
 /** "TP 236": the carrier and number together, when either is known. */
 export function designatorOf(subject: Subject): string | undefined {
   return [subject.carrier, subject.number].filter(Boolean).join(" ") || undefined;
@@ -189,6 +212,11 @@ function service(designator: string): Pick<Subject, "carrier" | "number"> {
   if (number) {
     const carrier = words.slice(0, -1).join(" ");
     return { ...(carrier ? { carrier } : {}), number };
+  }
+  // "TAP Air Portugal TP236": the code packed into the number names the flight.
+  const packed = serviceOf(words.at(-1));
+  if (packed.carrier && packed.number) {
+    return packed;
   }
   return words.length > 0 ? { carrier: words.join(" ") } : {};
 }

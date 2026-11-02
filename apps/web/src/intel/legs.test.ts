@@ -154,3 +154,26 @@ describe("departureAdvice", () => {
     expect(await departureAdvice(untimed!)).toBeNull();
   });
 });
+
+describe("a boarding pass meets its booking", () => {
+  it("a pass joins a booking that named its airline without a code", async () => {
+    const { reservationFacts } = await import("./reservation");
+    const booked = reservationFacts(
+      `<script type="application/ld+json">${JSON.stringify({
+        "@type": "FlightReservation",
+        reservationFor: {
+          "@type": "Flight",
+          flightNumber: "TP236",
+          airline: { "@type": "Airline", name: "TAP Air Portugal" },
+          departureAirport: { "@type": "Airport", iataCode: "SFO" },
+          arrivalAirport: { "@type": "Airport", iataCode: "LIS" },
+          departureTime: "2026-11-12T18:10:00-08:00",
+          arrivalTime: "2026-11-13T14:05:00+00:00",
+        },
+      })}</script>`,
+    ).map(withExactAcceptance);
+    const legs = await legsOf([...entries("booking", booked), ...entries("pass", [pass("2026-11-12")], true)]);
+    expect(legs).toHaveLength(1);
+    expect(legs[0]).toMatchObject({ designator: "TP 236", fileId: "booking", passFileId: "pass" });
+  });
+});

@@ -135,3 +135,26 @@ describe("what the model says a date is", () => {
     expect(facts.map((f) => f.subject)).toEqual([undefined, undefined]);
   });
 });
+
+describe("where a journey the model read leaves from", () => {
+  const ticket = "Your flight TP 236 leaves San Francisco (SFO) at 18:10 on 12 November 2026 and lands in LIS at 14:05 on 13 November 2026.";
+
+  it("a departure the model read at an airport keeps the airport's code", async () => {
+    const facts = proposedFacts(
+      {
+        document: "itinerary",
+        facts: [
+          { kind: "event", label: "Departure", value: "2026-11-12", time: "18:10", role: "depart", place: "San Francisco (SFO)", number: "TP 236" },
+          { kind: "event", label: "Arrival", value: "2026-11-13", time: "14:05", role: "arrive", place: "LIS" },
+        ],
+      },
+      ticket,
+    );
+    expect(facts.map((f) => f.subject)).toEqual([
+      { role: "depart", mode: "flight", carrier: "TP", number: "236", code: "SFO", place: "San Francisco (SFO)" },
+      { role: "arrive", mode: "flight", code: "LIS", place: "LIS" },
+    ]);
+    const { zoneOf } = await import("./instants");
+    expect(await zoneOf(facts[0]!, { tripZone: "Europe/Lisbon" })).toBe("America/Los_Angeles");
+  });
+});
