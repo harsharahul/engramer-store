@@ -15,7 +15,7 @@ import type { Fact } from "./facts";
 import { deviceZone } from "./instants";
 import type { Leg, Stop } from "./legs";
 import { subjectOf } from "./subject";
-import { tripTitle } from "./trips";
+import { departureAdvice, tripTitle } from "./trips";
 import { isEmailRecord } from "../mail/kind";
 
 export interface Stay {
@@ -50,7 +50,13 @@ export interface TripView {
   sources: { email: number; pdf: number; other: number };
   /** An exact journey anchors the trip: it was found, not guessed. */
   exact: boolean;
+  /** When to leave for each leg's airport, in the legs' order; null where it cannot be said. */
+  leaveBy: (Advice | null)[];
+  /** The city each airport code the legs name is in. */
+  cities: Record<string, string>;
 }
+
+export type Advice = NonNullable<Awaited<ReturnType<typeof departureAdvice>>>;
 
 const CODE = /^[A-Z]{3}$/;
 const dayNumber = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / 86_400_000;
@@ -148,6 +154,13 @@ export async function tripViewOf(
     sources[isEmailRecord(file.name, file.mime) ? "email" : file.mime === "application/pdf" ? "pdf" : "other"]++;
   }
   const city = airport?.city ?? opts.plan?.destination ?? tripTitle(trip.tag).split(",")[0]!;
+  const cities: Record<string, string> = {};
+  for (const code of new Set(legs.flatMap((leg) => [leg.dep?.code, leg.arr?.code, CODE.test(leg.to) ? leg.to : undefined]))) {
+    const place = code ? await lookupAirport(code) : null;
+    if (place) {
+      cities[code!] = place.city;
+    }
+  }
   return {
     tag: trip.tag,
     title: opts.plan?.title ?? tripTitle(trip.tag),
@@ -163,6 +176,8 @@ export async function tripViewOf(
     memberIds: [...members],
     sources,
     exact: opts.plan?.anchorId !== undefined,
+    leaveBy: await Promise.all(legs.map(departureAdvice)),
+    cities,
   };
 }
 
