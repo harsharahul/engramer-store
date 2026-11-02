@@ -1,8 +1,23 @@
+import { statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { airportForCity, lookupAirport } from "./airports";
 import rows from "./tables/airports.json";
 
 describe("lookupAirport", () => {
+  it("an airport carries where it is", async () => {
+    const lis = await lookupAirport("LIS");
+    expect(lis?.lat).toBeCloseTo(38.77, 1);
+    expect(lis?.lon).toBeCloseTo(-9.13, 1);
+    const sfo = await lookupAirport("SFO");
+    expect(sfo?.lat).toBeCloseTo(37.62, 1);
+    expect(sfo?.lon).toBeCloseTo(-122.38, 1);
+  });
+
+  it("the airports table stays small enough to load on a phone", () => {
+    expect(statSync(fileURLToPath(new URL("./tables/airports.json", import.meta.url))).size).toBeLessThan(260_000);
+  });
+
   it("names the city and zone for a code", async () => {
     expect(await lookupAirport("JFK")).toMatchObject({
       city: "New York",

@@ -13,10 +13,12 @@
  *
  * Usage: node tools/build-airports.mjs <ourairports.csv> <mwgg-airports.json>
  *
- * Writes apps/web/src/intel/tables/airports.json as [iata, city, country, zone]
- * tuples, sorted by code, scheduled-service airports only. A row without a
- * timezone or a city is dropped: a code the table cannot place is worse than
- * a code it does not know.
+ * Writes apps/web/src/intel/tables/airports.json as [iata, city, country, zone,
+ * lat, lon] tuples, sorted by code, scheduled-service airports only, with
+ * coordinates to two decimals (about a kilometre, enough to draw a route and
+ * work out the sun). A row without a timezone, a city or a position is
+ * dropped: a code the table cannot place is worse than a code it does not
+ * know.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -64,6 +66,8 @@ const TYPE = col("type");
 const SCHED = col("scheduled_service");
 const CITY = col("municipality");
 const COUNTRY = col("iso_country");
+const LAT = col("latitude_deg");
+const LON = col("longitude_deg");
 
 const zones = new Map();
 const fallbackCities = new Map();
@@ -98,8 +102,14 @@ for (const line of lines.slice(1)) {
   if (!city) {
     continue;
   }
+  const lat = Number.parseFloat(fields[LAT] ?? "");
+  const lon = Number.parseFloat(fields[LON] ?? "");
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    continue;
+  }
   seen.add(iata);
-  rows.push([iata, city, fields[COUNTRY]?.trim() ?? "", zone]);
+  const round = (n) => Math.round(n * 100) / 100;
+  rows.push([iata, city, fields[COUNTRY]?.trim() ?? "", zone, round(lat), round(lon)]);
 }
 rows.sort((a, b) => a[0].localeCompare(b[0]));
 
