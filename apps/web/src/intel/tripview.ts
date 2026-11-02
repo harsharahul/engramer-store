@@ -169,10 +169,16 @@ export async function tripViewOf(
     (await Promise.all(legs.map(crossesBorder))).some(Boolean) ||
     (opts.homeCountry !== undefined && airport?.country !== undefined && airport.country !== opts.homeCountry);
 
-  const firsts = [legs[0] && (legs[0].dep ?? legs[0].arr)!.day, stays[0] && (stays[0].checkIn ?? stays[0].checkOut)!.day, trip.start];
-  const lastLeg = legs.at(-1);
-  const lastStay = stays.at(-1);
-  const lasts = [lastLeg && (lastLeg.arr ?? lastLeg.dep)!.day, lastStay && (lastStay.checkOut ?? lastStay.checkIn)!.day, trip.end];
+  // The trip's own days come from its journeys and stays; any other dated
+  // member (a dinner at home the owner added) does not stretch them.
+  const own = [
+    ...legs.flatMap((leg) => [leg.dep?.day, leg.arr?.day]),
+    ...stays.flatMap((stay) => [stay.checkIn?.day, stay.checkOut?.day]),
+  ]
+    .filter((day): day is string => day !== undefined)
+    .sort();
+  const firsts = own.length > 0 ? own : [trip.start];
+  const lasts = own.length > 0 ? own : [trip.end];
   const days = (list: (string | undefined)[]) => list.filter((day): day is string => day !== undefined).sort();
 
   const sources = { email: 0, pdf: 0, other: 0 };

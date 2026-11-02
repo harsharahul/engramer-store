@@ -131,3 +131,11 @@ describe("where a trip goes", () => {
     expect(view.stays[0]!.checkIn!.at).toBe(Date.UTC(2026, 10, 14, 4, 0));
   });
 });
+
+describe("the trip's own days", () => {
+  it("an owner-added date at home does not stretch the trip", async () => {
+    const dinner = file("farewell", [exact("event", "2026-11-11", "Farewell dinner", { document: "dining", time: "19:00" })]);
+    const { view } = await lisbonTrip([...lisbonFiles(), dinner], [], true);
+    expect([view.start, view.end]).toEqual(["2026-11-12", "2026-11-16"]);
+  });
+});

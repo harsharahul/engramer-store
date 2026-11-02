@@ -9,7 +9,7 @@
  */
 import { dayLabel, durationLabel } from "./everyday";
 import { instantOf, zonedDay, zonedTime } from "./instants";
-import type { Leg } from "./legs";
+import type { Leg, Stop } from "./legs";
 import type { Advice, Stay, TripView } from "./tripview";
 
 export type MomentKind = "everyday" | "planning" | "soon" | "travel" | "air" | "staying" | "last" | "home";
@@ -60,9 +60,10 @@ function shapeOf(view: TripView): Shape {
   const lastStay = view.stays.at(-1);
   const last = legs.at(-1);
   const startAt = outbound?.dep?.at ?? firstStay?.checkIn?.at ?? instantOf(view.start, undefined, view.zone);
+  const ends = (stop: Stop | undefined) => (stop ? (stop.time ? stop.at : endOfDay(stop)) : undefined);
   const endAt = homeward
-    ? (last!.arr ?? last!.dep)!.at
-    : (lastStay?.checkOut?.at ?? (last ? (last.arr ?? last.dep)!.at : instantOf(view.end, "23:59", view.zone)));
+    ? (ends(last!.arr) ?? leaves(last!.dep!))
+    : (ends(lastStay?.checkOut) ?? (last ? (ends(last.arr) ?? leaves(last.dep!)) : instantOf(view.end, "23:59", view.zone)));
   return {
     view,
     startAt,
@@ -73,6 +74,15 @@ function shapeOf(view: TripView): Shape {
     ...(firstStay ? { firstStay } : {}),
     ...(lastStay ? { lastStay } : {}),
   };
+}
+
+function endOfDay(stop: Stop): number {
+  return instantOf(stop.day, "23:59", stop.zone);
+}
+
+/** When a departure is gone: its time, or, with none printed, the end of its day. */
+function leaves(stop: Stop): number {
+  return stop.time ? stop.at : endOfDay(stop);
 }
 
 /** Calendar days from today to the first departure, both read at the place it leaves from. */
@@ -105,8 +115,9 @@ export function momentOf(views: readonly TripView[], now: number): Moment {
     const advice = leg ? view.leaveBy[view.legs.indexOf(leg)] : null;
     return advice && leg?.dep?.code ? { leaveBy: { ...advice, code: leg.dep.code } } : {};
   };
+  // A departure with no printed time has no check-in hour and no countdown.
   const departing = (leg: Leg | undefined) =>
-    leg?.dep ? { next: leg, checkInOpens: leg.dep.at - 24 * HOUR, ...leave(leg) } : {};
+    leg?.dep ? { next: leg, ...(leg.dep.time ? { checkInOpens: leg.dep.at - 24 * HOUR } : {}), ...leave(leg) } : {};
   const dayCount = () => {
     const of = dayNumber(view.end) - dayNumber(view.start) + 1;
     const n = Math.min(Math.max(dayNumber(destDay) - dayNumber(view.start) + 1, 1), of);
@@ -124,16 +135,17 @@ export function momentOf(views: readonly TripView[], now: number): Moment {
   };
   const base = { trip: view };
 
-  const flying = view.legs.find((leg) => leg.dep && leg.arr && leg.dep.at <= now && now < leg.arr.at);
+  // Only a leg with both times printed is known to be in the air.
+  const flying = view.legs.find((leg) => leg.dep?.time && leg.arr?.time && leg.dep.at <= now && now < leg.arr.at);
   if (flying) {
     return { kind: "air", ...base, flying: { leg: flying, progress: (now - flying.dep!.at) / (flying.arr!.at - flying.dep!.at) } };
   }
 
-  if (outbound?.dep && now < outbound.dep.at && zonedDay(now, outbound.dep.zone) === outbound.dep.day) {
+  if (outbound?.dep && now < leaves(outbound.dep) && zonedDay(now, outbound.dep.zone) === outbound.dep.day) {
     return { kind: "travel", ...base, ...departing(outbound) };
   }
   const arrivalAt = shape.arrival?.arr?.at;
-  if (outbound?.dep && arrivalAt !== undefined && now >= outbound.dep.at && now < arrivalAt) {
+  if (outbound?.dep && arrivalAt !== undefined && now >= leaves(outbound.dep) && now < arrivalAt) {
     // Between connections on the way out.
     return { kind: "travel", ...base, ...departing(view.legs.find((leg) => leg.dep && leg.dep.at > now)) };
   }
@@ -143,13 +155,14 @@ export function momentOf(views: readonly TripView[], now: number): Moment {
 
   if (now >= shape.startAt && now < shape.endAt) {
     const checkOut = shape.lastStay?.checkOut;
-    const lastDay =
-      (homeward?.dep && destDay === homeward.dep.day && now < homeward.dep.at) ||
-      (checkOut && destDay === checkOut.day && (!homeward?.dep || now < homeward.dep.at));
+    // With a flight home, the last day is that flight's day; without one, the check-out's.
+    const lastDay = homeward?.dep
+      ? destDay === homeward.dep.day && now < leaves(homeward.dep)
+      : checkOut !== undefined && destDay === checkOut.day;
     if (lastDay) {
       return { kind: "last", ...base, ...dayCount(), ...departing(homeward) };
     }
-    if (!homeward?.dep || now < homeward.dep.at) {
+    if (!homeward?.dep || now < leaves(homeward.dep)) {
       return { kind: "staying", ...base, ...dayCount(), ...tonight(), ...departing(homeward) };
     }
     // On the way home, between connections.
@@ -157,7 +170,8 @@ export function momentOf(views: readonly TripView[], now: number): Moment {
   }
 
   if (now >= shape.endAt) {
-    return { kind: "home", ...base };
+    // A trip flown out to with no known way back has not come home.
+    return outbound && !homeward ? { kind: "everyday" } : { kind: "home", ...base };
   }
   const days = daysUntil(shape, now);
   if (days >= 1 && days <= 7) {
@@ -233,29 +247,40 @@ export function posterOf(moment: Moment, now: number, homeZone: string, opts: { 
     ? { lead, meta: lead }
     : { lead, clockZone: view.zone, tail: `in ${view.city}`, meta: `${lead} · ${zonedTime(now, view.zone)} in ${view.city}` };
   const next = moment.next;
+  // A caption always says something true: the city, when nothing more is known.
   const words = (top: string, big: string, cap: string, until?: Poster["until"]): Poster => ({
     top,
     ...place,
     big,
-    cap,
+    cap: cap || `in ${view.city}`,
     ...(until ? { until } : {}),
     ...meta,
     skyHour,
   });
+  const homeBy = (leg: Leg) => (leg.mode === "flight" ? "flight" : leg.mode);
 
   switch (moment.kind) {
     case "planning":
-      return words("Next trip", count(moment.daysUntil!, "day"), next && next.mode !== "flight" ? "until you leave" : "until you fly");
+      return words("Next trip", count(moment.daysUntil!, "day"), next?.mode === "flight" ? "until you fly" : "until you leave");
     case "soon": {
       const big = moment.daysUntil === 1 ? "Tomorrow" : count(moment.daysUntil!, "day");
       if (!next?.dep) {
         return words("Next trip", big, "until you leave");
       }
+      if (!next.dep.time) {
+        return words("Next trip", big, `${named(next)} on ${dayLabel(next.dep.day)}`);
+      }
       return words("Next trip", big, `${named(next)} in ${durationLabel(next.dep.at - now)}`, { lead: `${named(next)} in`, at: next.dep.at });
     }
     case "travel": {
       const checkIn = view.stays[0]?.checkIn;
-      const cap = next?.dep?.time ? `${named(next)} departs ${next.dep.time}` : checkIn?.time ? `check-in from ${checkIn.time}` : "";
+      const cap = next?.dep
+        ? next.dep.time
+          ? `${named(next)} departs ${next.dep.time}`
+          : `${named(next)} leaves today`
+        : checkIn?.time
+          ? `check-in from ${checkIn.time}`
+          : "";
       return words("Travel day", "Today", cap);
     }
     case "air": {
@@ -275,8 +300,10 @@ export function posterOf(moment: Moment, now: number, homeZone: string, opts: { 
     }
     case "last": {
       const checkOut = view.stays.at(-1)?.checkOut;
-      const cap = next?.dep?.time
-        ? `${next.mode === "flight" ? "flight" : next.mode} home at ${next.dep.time}`
+      const cap = next?.dep
+        ? next.dep.time
+          ? `${homeBy(next)} home at ${next.dep.time}`
+          : `${homeBy(next)} home today`
         : checkOut?.time
           ? `check-out at ${checkOut.time}`
           : "";

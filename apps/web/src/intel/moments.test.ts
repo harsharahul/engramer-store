@@ -175,3 +175,55 @@ describe("the way home", () => {
     expect(posterOf(moment, now, LA)!.cap).toBe("flight home at 10:00");
   });
 });
+
+describe("what a trip does not say", () => {
+  const untimed = () =>
+    lisbonFiles().map((member) =>
+      member.id !== "booking" ? member : { ...member, facts: member.facts.map(({ time: _time, ...fact }) => fact) },
+    );
+
+  it("a booking with dates and no times sets no clock", async () => {
+    const view = (await lisbonTrip(untimed())).view;
+    expect(momentOf([view], at("2026-11-12", "08:00", LA)).kind).toBe("travel");
+    const soon = momentOf([view], at("2026-11-11", "09:00", LA));
+    expect(soon.kind).toBe("soon");
+    expect(soon.checkInOpens).toBeUndefined();
+    const soonWords = posterOf(soon, at("2026-11-11", "09:00", LA), LA)!;
+    expect(soonWords.cap).toBe("TP 236 on Thu 12 Nov");
+    expect(soonWords.until).toBeUndefined();
+    expect(posterOf(momentOf([view], at("2026-11-12", "08:00", LA)), at("2026-11-12", "08:00", LA), LA)!.cap).toBe("TP 236 leaves today");
+    const last = momentOf([view], at("2026-11-16", "09:00", LIS));
+    expect(last.kind).toBe("last");
+    expect(posterOf(last, at("2026-11-16", "09:00", LIS), LA)!.cap).toBe("flight home today");
+    expect(momentOf([view], at("2026-11-17", "12:00", LA)).kind).toBe("home");
+  });
+
+  it("no welcome back while the way home is unknown", async () => {
+    const oneWay = (
+      await lisbonTrip(
+        lisbonFiles().map((member) => (member.id === "booking" ? { ...member, facts: member.facts.filter((fact) => !/TP 237/.test(fact.label ?? "")) } : member)),
+        [],
+        true,
+      )
+    ).view;
+    expect(momentOf([oneWay], at("2026-11-16", "09:00", LIS)).kind).toBe("last");
+    expect(momentOf([oneWay], at("2026-11-16", "12:00", LIS)).kind).toBe("everyday");
+  });
+
+  it("the last day is the day of the flight home", async () => {
+    const early = lisbonFiles().map((member) =>
+      member.id !== "hotel"
+        ? member
+        : { ...member, facts: member.facts.map((fact) => (/Check-out/.test(fact.label ?? "") ? { ...fact, value: "2026-11-15", id: `${fact.id}:15` } : fact)) },
+    );
+    const view = (await lisbonTrip(early, [], true)).view;
+    expect(momentOf([view], at("2026-11-15", "12:00", LIS)).kind).toBe("staying");
+    expect(momentOf([view], at("2026-11-16", "08:30", LIS)).kind).toBe("last");
+  });
+
+  it("a trip with no flight is counted until you leave", async () => {
+    const stay = await viewOf([email("hotel", "2026-10-02", hotel()), file("fado", [exact("event", "2026-11-14", "Fado night", { time: "21:00" })])], "trip:lisbon-2026-11");
+    const now = at("2026-10-26", "10:00", LA);
+    expect(posterOf(momentOf([stay], now), now, LA)!.cap).toBe("until you leave");
+  });
+});
