@@ -6,7 +6,7 @@
  * worked out a second way.
  */
 
-import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { triggerDownload } from "../download";
 import type { AgendaRow, RowFile } from "../intel/agendarows";
 import type { LatLon } from "../intel/airports";
@@ -44,6 +44,8 @@ export function TripPage(props: {
   now: number;
   homeZone: string;
   homePlace?: LatLon;
+  /** Something is open over the page (a preview, an editor, a menu, Notices): Escape is its. */
+  covered?: boolean;
   onClose(): void;
   onInspect(fileId: string): void;
   onOpen(fileId: string): void;
@@ -51,10 +53,25 @@ export function TripPage(props: {
   fileOf?(id: string): FileEntry | undefined;
 }) {
   const { view } = props;
+  const page = useRef<HTMLDivElement>(null);
+  const covered = useRef(props.covered);
+  covered.current = props.covered;
+
+  // The page takes focus as it opens, so the keyboard and a screen reader
+  // land on it, and gives it back to whatever opened it when it closes.
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    page.current?.focus({ preventScroll: true });
+    return () => {
+      if (opener?.isConnected) {
+        opener.focus({ preventScroll: true });
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented && !typing(event.target)) {
+      if (event.key === "Escape" && !event.defaultPrevented && !covered.current && !typing(event.target)) {
         props.onClose();
       }
     };
@@ -109,7 +126,7 @@ export function TripPage(props: {
   entries.sort((a, b) => a.at - b.at);
 
   return (
-    <div className="tln-trip">
+    <div ref={page} className="tln-trip" role="region" aria-label={`${view.city} trip`} tabIndex={-1}>
       <TripPoster poster={poster} back={props.onClose} />
       <div className="tln-tp-grid">
         {route && (
@@ -173,7 +190,22 @@ export function TripPage(props: {
 function TripActions(props: { view: TripView; onClose(): void; onToast(text: string): void }) {
   const undoTrip = useStore((s) => s.undoTrip);
   const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
   const { view } = props;
+  // Done only when every member left the trip; a change that failed (offline)
+  // is said, and the trip stays on screen as it still is.
+  const takeApart = async () => {
+    setBusy(true);
+    const changed = await undoTrip(view.tag).catch(() => -1);
+    setBusy(false);
+    if (changed < view.memberIds.length) {
+      setAsking(false);
+      props.onToast("Some files could not be changed, so the trip is still here. Try again when you are online.");
+      return;
+    }
+    props.onToast("The trip comes apart. The files stay where they are.");
+    props.onClose();
+  };
   // A trip with nothing dated to export offers no export: the file would be empty.
   const exportable = tripToCalendar(view, 0).ics.includes("BEGIN:VEVENT");
 
@@ -181,18 +213,10 @@ function TripActions(props: { view: TripView; onClose(): void; onToast(text: str
     return (
       <div className="tln-actions tln-trip-actions">
         <span className="tln-faint">Take this trip apart? The files stay where they are.</span>
-        <Button
-          size="xs"
-          variant="destructive"
-          onClick={async () => {
-            await undoTrip(view.tag);
-            props.onToast("The trip comes apart. The files stay where they are.");
-            props.onClose();
-          }}
-        >
+        <Button size="xs" variant="destructive" disabled={busy} onClick={() => void takeApart()}>
           Take apart
         </Button>
-        <Button size="xs" variant="secondary" onClick={() => setAsking(false)}>
+        <Button size="xs" variant="secondary" disabled={busy} onClick={() => setAsking(false)}>
           Keep trip
         </Button>
       </div>

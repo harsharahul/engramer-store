@@ -57,6 +57,8 @@ export function TimelineView(props: {
   onCloseTrip?(): void;
   /** Opens the photos of a span of days, as an album of them. */
   onOpenPhotos?(from: string, to: string, title: string): void;
+  /** Something is open over the Timeline (a preview, an editor, a menu, Notices). */
+  covered?: boolean;
   /** The file open in the details pane, marked on the list. */
   selectedFileId?: string;
 }) {
@@ -170,7 +172,9 @@ export function TimelineView(props: {
 
   return (
     <div className="tln-view">
-      <aside className="tln-side">
+      {/* Behind an open trip page the hero and the list are out of reach of
+          Tab and of a screen reader, as they are of the eye. */}
+      <aside className="tln-side" inert={tripView ? true : undefined}>
         <TimelineHero
           everyday={everyday}
           moment={moment}
@@ -188,7 +192,7 @@ export function TimelineView(props: {
           fileOf={(id) => storeFiles.get(id)}
         />
       </aside>
-      <section className="tln-main">
+      <section className="tln-main" inert={tripView ? true : undefined}>
         <div className="tln-bar">
           <h2>Timeline</h2>
           <div className="tln-seg" role="group" aria-label="View">
@@ -256,6 +260,7 @@ export function TimelineView(props: {
           files={props.files}
           now={now}
           homeZone={deviceZone()}
+          {...(props.covered ? { covered: true } : {})}
           onClose={() => props.onCloseTrip?.()}
           onInspect={props.onInspect}
           onOpen={props.onOpen}

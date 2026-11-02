@@ -19,7 +19,8 @@ let trip: { view: TripView; rows: AgendaRow[]; files: RowFile[] };
 const onClose = vi.fn();
 const onInspect = vi.fn();
 const onToast = vi.fn();
-const undoTrip = vi.fn(async () => 2);
+// Every member leaves the trip, unless a test says otherwise.
+const undoTrip = vi.fn(async () => trip.view.memberIds.length);
 const triggerDownload = vi.hoisted(() => vi.fn());
 vi.mock("../download", () => ({ triggerDownload }));
 
@@ -45,7 +46,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function mount(view: TripView = trip.view) {
+function mount(view: TripView = trip.view, extra: { covered?: boolean } = {}) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -53,6 +54,7 @@ function mount(view: TripView = trip.view) {
   act(() =>
     root.render(
       <TripPage
+        {...extra}
         view={view}
         rows={trip.rows}
         files={trip.files}
@@ -138,6 +140,36 @@ describe("the trip page", () => {
     expect(undoTrip).toHaveBeenCalledWith(trip.view.tag);
     expect(onToast).toHaveBeenCalledWith("The trip comes apart. The files stay where they are.");
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape belongs to whatever is open over the page", () => {
+    mount(trip.view, { covered: true });
+    act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("the page takes focus when it opens and gives it back when it closes", () => {
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    mount();
+    expect(document.activeElement).toBe(container.querySelector(".tln-trip"));
+    act(() => root.unmount());
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+    // afterEach unmounts again; give it a root to unmount.
+    root = createRoot(container);
+  });
+
+  it("taking apart a trip that could not finish says so and keeps the page", async () => {
+    undoTrip.mockResolvedValueOnce(1);
+    mount();
+    press(byText("button", "Not a trip"));
+    await act(async () => {
+      byText("button", "Take apart")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onToast).toHaveBeenCalledWith("Some files could not be changed, so the trip is still here. Try again when you are online.");
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("Escape inside a text field does not close the page", () => {

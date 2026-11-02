@@ -180,6 +180,15 @@ describe("the Timeline during a trip", () => {
     expect(container.querySelector(".tln-trip")).toBeNull();
   });
 
+  it("the list behind an open trip page is out of reach", async () => {
+    const trip = lisbonFiles().map((file) => ({ ...entry(file.id, file.facts), name: file.name, mime: file.mime, tags: [TAG] }));
+    useStore.setState({ files: new Map(trip.map((file) => [file.id, file])) });
+    await render({ trip: TAG, nonce: 1 }, trip);
+    expect(container.querySelector(".tln-trip")).not.toBeNull();
+    expect(container.querySelector(".tln-side")!.hasAttribute("inert")).toBe(true);
+    expect(container.querySelector(".tln-main")!.hasAttribute("inert")).toBe(true);
+  });
+
   it("opening and closing a trip leaves the list where it was", async () => {
     const trip = lisbonFiles().map((file) => ({ ...entry(file.id, file.facts), name: file.name, mime: file.mime, tags: [TAG] }));
     useStore.setState({ files: new Map(trip.map((file) => [file.id, file])) });

@@ -3195,6 +3195,8 @@ export function Vault() {
                   }
                 : {})}
               onOpenTrip={openTrip}
+              // Escape belongs to whatever is open over the Timeline, not to a trip page under it.
+              covered={previewId !== null || editorId !== null || ctxMenu !== null || activityOpen}
               onOpenPhotos={(from, to, title) => {
                 setQuery("");
                 setView({ kind: "photos", days: { from, to, title } });
