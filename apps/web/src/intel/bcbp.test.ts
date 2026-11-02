@@ -69,3 +69,11 @@ describe("year inference boundaries", () => {
     expect(event!.value).toBe("2027-03-04");
   });
 });
+
+describe("what a boarding pass is about", () => {
+  it("a boarding pass says depart, with both airports", () => {
+    const event = bcbpFacts(PASS, STORED).find((fact) => fact.kind === "event");
+    expect(event!.subject).toEqual({ role: "depart", mode: "flight", carrier: "AQ", number: "214", code: "SFO", otherEnd: "JFK" });
+    expect(event!.label).toBe("Flight AQ 214 SFO to JFK");
+  });
+});

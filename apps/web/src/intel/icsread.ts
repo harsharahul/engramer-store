@@ -10,6 +10,7 @@
 
 import { isRealDate } from "./dates";
 import { MAX_FACTS_PER_FILE, factId, type DocumentKind, type Fact } from "./facts";
+import { cleanSubject } from "./subject";
 
 const LABEL_MAX = 60;
 /** A zone name longer than this is not one; it would only bloat synced metadata. */
@@ -109,22 +110,27 @@ function eventFacts(event: Map<string, Property>): Fact[] {
   }
   const summary = unescapeText(event.get("SUMMARY")?.value ?? "").slice(0, LABEL_MAX) || "Event";
   const document: DocumentKind = TICKETED.test(summary) ? "event-ticket" : "other";
-  const fact = (at: NonNullable<ReturnType<typeof stamp>>, label: string): Fact => ({
-    id: factId("event", `${at.value} ${label.toLowerCase()}`),
-    kind: "event",
-    document,
-    value: at.value,
-    ...(at.time ? { time: at.time } : {}),
-    ...(at.zone ? { zone: at.zone } : {}),
-    label,
-    source: "ics",
-    confidence: 1,
-  });
-  const facts = [fact(start, summary)];
+  const place = unescapeText(event.get("LOCATION")?.value ?? "");
+  const fact = (at: NonNullable<ReturnType<typeof stamp>>, label: string, role: "start" | "end"): Fact => {
+    const subject = cleanSubject({ role, place });
+    return {
+      id: factId("event", `${at.value} ${label.toLowerCase()}`),
+      kind: "event",
+      document,
+      value: at.value,
+      ...(at.time ? { time: at.time } : {}),
+      ...(at.zone ? { zone: at.zone } : {}),
+      label,
+      ...(subject ? { subject } : {}),
+      source: "ics",
+      confidence: 1,
+    };
+  };
+  const facts = [fact(start, summary, "start")];
   const end = event.get("DTEND") && stamp(event.get("DTEND")!);
   // A whole-day event's end is the next day by definition: not a date of its own.
   if (end && !end.allDay && (end.value !== start.value || end.time !== start.time)) {
-    facts.push(fact(end, `${summary} ends`));
+    facts.push(fact(end, `${summary} ends`, "end"));
   }
   return facts;
 }

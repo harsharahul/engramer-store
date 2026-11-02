@@ -131,6 +131,19 @@ export function cleanSubject(raw: unknown): Subject | undefined {
   return subject;
 }
 
+/**
+ * A flight or train number as a bare number: "TP0236" with carrier "TP" and
+ * "0236" both read as "236", so a booking and a boarding pass agree.
+ */
+export function plainNumber(raw: string | undefined, carrier?: string): string | undefined {
+  let number = (raw ?? "").replace(/\s+/g, "");
+  if (carrier && number.toUpperCase().startsWith(carrier.toUpperCase())) {
+    number = number.slice(carrier.length);
+  }
+  number = number.replace(/^0+(?=\d)/, "");
+  return NUMBER.test(number) ? number : undefined;
+}
+
 /** "TP 236": the carrier and number together, when either is known. */
 export function designatorOf(subject: Subject): string | undefined {
   return [subject.carrier, subject.number].filter(Boolean).join(" ") || undefined;
@@ -152,10 +165,10 @@ const UNNAMED: ReadonlySet<string> = new Set(["the stay", "the rental", "the eve
 
 function service(designator: string): Pick<Subject, "carrier" | "number"> {
   const words = designator.trim().split(/\s+/).filter(Boolean);
-  const last = words.at(-1);
-  if (last && NUMBER.test(last)) {
+  const number = plainNumber(words.at(-1), words.at(-2));
+  if (number) {
     const carrier = words.slice(0, -1).join(" ");
-    return { ...(carrier ? { carrier } : {}), number: last };
+    return { ...(carrier ? { carrier } : {}), number };
   }
   return words.length > 0 ? { carrier: words.join(" ") } : {};
 }

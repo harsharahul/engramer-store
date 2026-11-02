@@ -15,7 +15,8 @@
  */
 
 import { isRealDate } from "./dates";
-import { factId, type DocumentKind, type Fact } from "./facts";
+import { factId, type DocumentKind, type Fact, type ReadFact } from "./facts";
+import { cleanSubject, plainNumber, type Subject } from "./subject";
 
 const SCRIPT_BLOCK = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
 
@@ -97,7 +98,30 @@ function when(stamp: unknown): { value: string; time?: string; zone?: string } |
   };
 }
 
-function factsOf(res: Node): Fact[] {
+/** A postal address as one line, whether written as text or as its parts. */
+function addressOf(value: unknown): string | undefined {
+  const plain = str(value);
+  if (plain) {
+    return plain;
+  }
+  const postal = record(value);
+  if (!postal) {
+    return undefined;
+  }
+  const town = [str(postal["postalCode"]), str(postal["addressLocality"])].filter(Boolean).join(" ");
+  return [str(postal["streetAddress"]), town].filter(Boolean).join(", ") || undefined;
+}
+
+/** The airline's own check-in page, https only. */
+function checkinLink(res: Node): string | undefined {
+  const action = record(res["potentialAction"]);
+  const raw =
+    str(res["checkinUrl"]) ??
+    (/CheckInAction$/.test(str(action?.["@type"]) ?? "") ? (str(action?.["target"]) ?? str(action?.["url"])) : undefined);
+  return raw && raw.length <= 300 && /^https:\/\/\S+$/.test(raw) ? raw : undefined;
+}
+
+function factsOf(res: Node, reservation: number): ReadFact[] {
   // "http://schema.org/FlightReservation" and "FlightReservation" alike.
   const type = (str(res["@type"]) ?? "").replace(/^.*[:/]/, "");
   const document: DocumentKind = type.startsWith("Lodging")
@@ -110,13 +134,16 @@ function factsOf(res: Node): Fact[] {
           ? "dining"
           : "itinerary";
   const target = record(res["reservationFor"]);
-  const facts: Fact[] = [];
+  const facts: ReadFact[] = [];
 
-  const event = (stamp: unknown, label: string): void => {
+  // The label stays exactly as it always was: it is part of the fact's
+  // identity, and the owner's answers are stored against that identity.
+  const event = (stamp: unknown, label: string, about: Omit<Subject, "reservation">, link?: string): void => {
     const at = when(stamp);
     if (!at || !label.trim()) {
       return;
     }
+    const subject = cleanSubject({ ...about, reservation });
     facts.push({
       id: factId("event", `${at.value} ${label.toLowerCase()}`),
       kind: "event",
@@ -125,6 +152,8 @@ function factsOf(res: Node): Fact[] {
       ...(at.time ? { time: at.time } : {}),
       ...(at.zone ? { zone: at.zone } : {}),
       label,
+      ...(subject ? { subject } : {}),
+      ...(link ? { link } : {}),
       source: "jsonld",
       confidence: 1,
     });
@@ -139,48 +168,94 @@ function factsOf(res: Node): Fact[] {
     const fromName = str(from?.["iataCode"]) ?? str(from?.["name"]) ?? "";
     const toName = str(to?.["iataCode"]) ?? str(to?.["name"]) ?? "";
     const flight = ["Flight", carrier, number].filter(Boolean).join(" ");
-    event(target?.["departureTime"], `${flight} departs ${fromName}`.trim());
-    event(target?.["arrivalTime"], `${flight} arrives ${toName}`.trim());
+    const service = { mode: "flight" as const, carrier, number: plainNumber(number, str(airline?.["iataCode"])) };
+    const seat =
+      str(res["airplaneSeat"]) ?? str(record(record(res["reservedTicket"])?.["ticketedSeat"])?.["seatNumber"]);
+    event(
+      target?.["departureTime"],
+      `${flight} departs ${fromName}`.trim(),
+      {
+        role: "depart",
+        ...service,
+        code: str(from?.["iataCode"]),
+        place: str(from?.["name"]),
+        seat,
+        gate: str(target?.["departureGate"]),
+        boardingGroup: str(res["boardingGroup"]),
+        boardingTime: when(res["boardingTime"] ?? target?.["boardingTime"])?.time,
+      },
+      checkinLink(res),
+    );
+    event(target?.["arrivalTime"], `${flight} arrives ${toName}`.trim(), {
+      role: "arrive",
+      ...service,
+      code: str(to?.["iataCode"]),
+      place: str(to?.["name"]),
+    });
   } else if (type.startsWith("Lodging")) {
     const name = str(target?.["name"]) ?? "the stay";
-    event(res["checkinTime"], `Check-in: ${name}`);
-    event(res["checkoutTime"], `Check-out: ${name}`);
+    const where = { place: str(target?.["name"]), address: addressOf(target?.["address"]) };
+    event(res["checkinTime"], `Check-in: ${name}`, { role: "check-in", ...where });
+    event(res["checkoutTime"], `Check-out: ${name}`, { role: "check-out", ...where });
   } else if (type.startsWith("RentalCar")) {
-    const name =
-      str(record(res["pickupLocation"])?.["name"]) ?? str(target?.["name"]) ?? "the rental";
-    event(res["pickupTime"], `Pick-up: ${name}`);
-    event(res["dropoffTime"], `Drop-off: ${name}`);
+    const pickup = record(res["pickupLocation"]);
+    const dropoff = record(res["dropoffLocation"]) ?? pickup;
+    const name = str(pickup?.["name"]) ?? str(target?.["name"]) ?? "the rental";
+    event(res["pickupTime"], `Pick-up: ${name}`, {
+      role: "pick-up",
+      place: str(pickup?.["name"]) ?? str(target?.["name"]),
+      address: addressOf(pickup?.["address"]),
+    });
+    event(res["dropoffTime"], `Drop-off: ${name}`, {
+      role: "drop-off",
+      place: str(dropoff?.["name"]) ?? str(target?.["name"]),
+      address: addressOf(dropoff?.["address"]),
+    });
   } else if (type.startsWith("Train")) {
     const number = str(target?.["trainNumber"]) ?? "";
     const station = str(record(target?.["departureStation"])?.["name"]) ?? "";
     const train = ["Train", number].filter(Boolean).join(" ");
-    event(target?.["departureTime"], `${train} departs ${station}`.trim());
-    event(target?.["arrivalTime"], `${train} arrives`.trim());
+    const service = { mode: "train" as const, carrier: str(record(target?.["provider"])?.["name"]), number: plainNumber(number) };
+    event(target?.["departureTime"], `${train} departs ${station}`.trim(), { role: "depart", ...service, place: station });
+    event(target?.["arrivalTime"], `${train} arrives`.trim(), {
+      role: "arrive",
+      ...service,
+      place: str(record(target?.["arrivalStation"])?.["name"]),
+    });
   } else if (type.startsWith("Bus") || type.startsWith("Boat")) {
     const bus = type.startsWith("Bus");
     const provider = str(record(target?.["provider"])?.["name"]) ?? "";
     const from = str(record(target?.[bus ? "departureBusStop" : "departureBoatTerminal"])?.["name"]) ?? "";
     const to = str(record(target?.[bus ? "arrivalBusStop" : "arrivalBoatTerminal"])?.["name"]) ?? "";
     const trip = [bus ? "Bus" : "Boat", provider].filter(Boolean).join(" ");
-    event(target?.["departureTime"] ?? res["departureTime"], `${trip} departs ${from}`.trim());
-    event(target?.["arrivalTime"] ?? res["arrivalTime"], `${trip} arrives ${to}`.trim());
+    const service = { mode: bus ? ("bus" as const) : ("boat" as const), carrier: provider };
+    event(target?.["departureTime"] ?? res["departureTime"], `${trip} departs ${from}`.trim(), { role: "depart", ...service, place: from });
+    event(target?.["arrivalTime"] ?? res["arrivalTime"], `${trip} arrives ${to}`.trim(), { role: "arrive", ...service, place: to });
   } else if (type.startsWith("EventReservation")) {
     const name = str(target?.["name"]) ?? "the event";
-    event(target?.["startDate"] ?? res["startTime"], name);
-    event(target?.["endDate"] ?? res["endTime"], `${name} ends`);
+    const location = record(target?.["location"]);
+    const where = { place: str(location?.["name"]), address: addressOf(location?.["address"]) };
+    event(target?.["startDate"] ?? res["startTime"], name, { role: "start", ...where });
+    event(target?.["endDate"] ?? res["endTime"], `${name} ends`, { role: "end", ...where });
   } else if (type.startsWith("FoodEstablishment")) {
     const name = str(target?.["name"]) ?? "the restaurant";
-    event(res["startTime"] ?? target?.["startDate"], `Table at ${name}`);
+    event(res["startTime"] ?? target?.["startDate"], `Table at ${name}`, {
+      role: "start",
+      place: str(target?.["name"]),
+      address: addressOf(target?.["address"]),
+    });
   }
 
   const reference = str(res["reservationNumber"]);
   if (reference) {
+    const subject = cleanSubject({ role: "reference", reservation });
     facts.push({
       id: factId("identifier", reference),
       kind: "identifier",
       document,
       value: reference,
       label: "Confirmation number",
+      ...(subject ? { subject } : {}),
       source: "jsonld",
       confidence: 1,
     });
@@ -194,7 +269,7 @@ function billingFactsOf(node: Node): Fact[] {
   const invoice = type === "Invoice";
   const document: DocumentKind = invoice ? "invoice" : "delivery";
   const facts: Fact[] = [];
-  const dated = (kind: "due" | "event", stamp: unknown, label: string) => {
+  const dated = (kind: "due" | "event", stamp: unknown, label: string, role?: "opens" | "by") => {
     const at = when(stamp);
     if (!at) {
       return;
@@ -207,6 +282,7 @@ function billingFactsOf(node: Node): Fact[] {
       ...(at.time ? { time: at.time } : {}),
       ...(at.zone ? { zone: at.zone } : {}),
       label,
+      ...(role ? { subject: { role } } : {}),
       source: "jsonld",
       confidence: 1,
     });
@@ -245,8 +321,8 @@ function billingFactsOf(node: Node): Fact[] {
     identifier(str(node["confirmationNumber"]) ?? str(node["identifier"]), "Invoice number");
     identifier(str(node["accountId"]), "Account number");
   } else {
-    dated("event", node["expectedArrivalFrom"], "Delivery window opens");
-    dated("event", node["expectedArrivalUntil"], "Delivery expected by");
+    dated("event", node["expectedArrivalFrom"], "Delivery window opens", "opens");
+    dated("event", node["expectedArrivalUntil"], "Delivery expected by", "by");
     identifier(str(node["trackingNumber"]), "Tracking number");
   }
   return facts;
@@ -254,8 +330,8 @@ function billingFactsOf(node: Node): Fact[] {
 
 /** The first statement of each fact wins: the same data often appears in
  * both the html and text parts of a saved email. */
-function firstOfEach(facts: Iterable<Fact>): Fact[] {
-  const byId = new Map<string, Fact>();
+function firstOfEach<F extends Fact>(facts: Iterable<F>): F[] {
+  const byId = new Map<string, F>();
   for (const fact of facts) {
     if (!byId.has(fact.id)) {
       byId.set(fact.id, fact);
@@ -265,21 +341,24 @@ function firstOfEach(facts: Iterable<Fact>): Fact[] {
 }
 
 /** Everything the document's own reservation data states, or nothing. */
-export function reservationFacts(raw: string): Fact[] {
+export function reservationFacts(raw: string): ReadFact[] {
   const found: Node[] = [];
   for (const block of jsonBlocks(raw)) {
     nodesIn(block, RESERVATION_TYPE, found);
   }
-  return firstOfEach(found.flatMap(factsOf));
+  return firstOfEach(found.flatMap((res, index) => factsOf(res, index)));
 }
 
 /** Reservations, bills and deliveries a document states about itself. */
-export function structuredDataFacts(raw: string): Fact[] {
+export function structuredDataFacts(raw: string): ReadFact[] {
   const reservations: Node[] = [];
   const billing: Node[] = [];
   for (const block of jsonBlocks(raw)) {
     nodesIn(block, RESERVATION_TYPE, reservations);
     nodesIn(block, BILLING_TYPE, billing);
   }
-  return firstOfEach([...reservations.flatMap(factsOf), ...billing.flatMap(billingFactsOf)]);
+  return firstOfEach<ReadFact>([
+    ...reservations.flatMap((res, index) => factsOf(res, index)),
+    ...billing.flatMap(billingFactsOf),
+  ]);
 }

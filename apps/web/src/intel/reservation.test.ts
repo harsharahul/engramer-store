@@ -262,3 +262,90 @@ describe("invoices and deliveries", () => {
     expect(facts.filter((f) => f.kind === "event")).toHaveLength(2);
   });
 });
+
+// Synthetic: invented airline, hotel, address, reference, passenger.
+const RICH_HTML = `<html><head><script type="application/ld+json">
+[{
+  "@type": "FlightReservation",
+  "reservationNumber": "TQ4XRM",
+  "underName": { "@type": "Person", "name": "Avery Stone" },
+  "boardingGroup": "4",
+  "boardingTime": "2027-03-04T09:00:00-08:00",
+  "checkinUrl": "https://checkin.example.com/?ref=TQ4XRM&name=STONE",
+  "reservedTicket": { "@type": "Ticket", "ticketedSeat": { "@type": "Seat", "seatNumber": "14A" } },
+  "reservationFor": {
+    "@type": "Flight",
+    "flightNumber": "AQ0214",
+    "airline": { "@type": "Airline", "name": "Aquila Airways", "iataCode": "AQ" },
+    "departureAirport": { "@type": "Airport", "name": "San Francisco", "iataCode": "SFO" },
+    "arrivalAirport": { "@type": "Airport", "name": "New York JFK", "iataCode": "JFK" },
+    "departureGate": "B12",
+    "departureTime": "2027-03-04T09:40:00-08:00",
+    "arrivalTime": "2027-03-04T18:05:00-05:00"
+  }
+}, {
+  "@type": "LodgingReservation",
+  "reservationNumber": "LRK-449022",
+  "reservationFor": {
+    "@type": "LodgingBusiness",
+    "name": "The Larkspur Hotel",
+    "address": { "@type": "PostalAddress", "streetAddress": "12 Harbor Street", "postalCode": "10001", "addressLocality": "New York" }
+  },
+  "checkinTime": "2027-03-04T15:00:00-05:00",
+  "checkoutTime": "2027-03-09T11:00:00-05:00"
+}]
+</script></head><body>Your trip is booked.</body></html>`;
+
+describe("what each date is about", () => {
+  it("a flight booking says depart and arrive, with carrier, number and airports", () => {
+    const facts = reservationFacts(FLIGHT_HTML);
+    const depart = facts.find((f) => f.label === "Flight AQ 214 departs SFO");
+    const arrive = facts.find((f) => f.label === "Flight AQ 214 arrives JFK");
+    expect(depart!.subject).toEqual({ role: "depart", mode: "flight", carrier: "AQ", number: "214", code: "SFO", place: "San Francisco", reservation: 0 });
+    expect(arrive!.subject).toEqual({ role: "arrive", mode: "flight", carrier: "AQ", number: "214", code: "JFK", place: "New York JFK", reservation: 0 });
+    expect(facts.find((f) => f.kind === "identifier")!.subject).toEqual({ role: "reference", reservation: 0 });
+  });
+
+  it("a hotel booking keeps its name and address", () => {
+    const facts = reservationFacts(RICH_HTML);
+    expect(facts.find((f) => f.label === "Check-in: The Larkspur Hotel")!.subject).toEqual({
+      role: "check-in",
+      place: "The Larkspur Hotel",
+      address: "12 Harbor Street, 10001 New York",
+      reservation: 1,
+    });
+    expect(facts.find((f) => f.label === "Check-out: The Larkspur Hotel")!.subject).toMatchObject({ role: "check-out", reservation: 1 });
+  });
+
+  it("seat, gate and boarding time are kept when the booking gives them", () => {
+    const facts = reservationFacts(RICH_HTML);
+    const depart = facts.find((f) => f.kind === "event" && f.subject?.role === "depart");
+    expect(depart!.subject).toMatchObject({ number: "214", seat: "14A", gate: "B12", boardingGroup: "4", boardingTime: "09:00" });
+    const arrive = facts.find((f) => f.kind === "event" && f.subject?.role === "arrive");
+    expect(arrive!.subject!.seat).toBeUndefined();
+  });
+
+  it("labels and ids are unchanged", () => {
+    expect(reservationFacts(FLIGHT_HTML).map((f) => [f.id, f.label])).toEqual([
+      ["event:2027-03-04 flight aq 214 departs sfo", "Flight AQ 214 departs SFO"],
+      ["event:2027-03-04 flight aq 214 arrives jfk", "Flight AQ 214 arrives JFK"],
+      ["identifier:ZK8Q2P", "Confirmation number"],
+    ]);
+    expect(reservationFacts(HOTEL_HTML).map((f) => f.id)).toEqual([
+      "event:2027-03-04 check-in: the larkspur hotel",
+      "event:2027-03-09 check-out: the larkspur hotel",
+      "identifier:LRK-449022",
+    ]);
+  });
+
+  it("the check-in link goes to evidence and never to metadata", async () => {
+    const { scanForFacts } = await import("./scan");
+    const result = await scanForFacts({ name: "booking.html", mime: "text/html", raw: RICH_HTML, text: "Your trip is booked." });
+    const stored = JSON.stringify(result.facts);
+    expect(stored).not.toContain("checkin.example.com");
+    expect(stored).not.toContain("STONE");
+    expect(stored).not.toContain("Avery");
+    const depart = result.facts.find((f) => f.subject?.role === "depart");
+    expect(result.evidence).toContainEqual({ id: depart!.id, link: "https://checkin.example.com/?ref=TQ4XRM&name=STONE" });
+  });
+});

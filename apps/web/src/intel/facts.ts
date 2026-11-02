@@ -173,6 +173,12 @@ export interface FactEvidence {
   link?: string;
 }
 
+/**
+ * What a reader hands back: a fact, plus a link that must never be stored
+ * with it. scanForFacts moves the link into evidence before facts leave it.
+ */
+export type ReadFact = Fact & { link?: string };
+
 /** Metadata is synced everywhere; a document cannot grow it without bound. */
 export const MAX_FACTS_PER_FILE = 12;
 

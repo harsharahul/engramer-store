@@ -96,3 +96,21 @@ describe("invites through the scanner", () => {
     ]);
   });
 });
+
+describe("what an invite is about", () => {
+  it("an invite says start and end, with its location", () => {
+    const facts = icsFacts(
+      calendar(
+        "BEGIN:VEVENT",
+        "UID:evt-9@example.com",
+        "SUMMARY:Harbor Lights Concert",
+        "DTSTART;TZID=Europe/Lisbon:20270512T193000",
+        "DTEND;TZID=Europe/Lisbon:20270512T220000",
+        "LOCATION:Example Hall\\, Lisbon",
+        "END:VEVENT",
+      ),
+    );
+    expect(facts[0]!.subject).toEqual({ role: "start", place: "Example Hall, Lisbon" });
+    expect(facts[1]!.subject).toEqual({ role: "end", place: "Example Hall, Lisbon" });
+  });
+});
