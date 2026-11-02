@@ -130,6 +130,16 @@ describe("the route", () => {
     expect(routeOf(lisbonView, NOW)!.lines[0]!.inAir).toBeUndefined();
   });
 
+  it("the route leaves room around its airports for their labels", () => {
+    // Each end's code and city are written under its dot; a box drawn tight
+    // to the arc cuts them off at the card's edge.
+    const route = routeOf(lisbonView, NOW)!;
+    const ends = [route.origin.at, route.destination.at];
+    expect(Math.min(...ends.map((p) => p.lat)) - route.bounds.lat0).toBeGreaterThanOrEqual(8);
+    expect(Math.min(...ends.map((p) => p.lon)) - route.bounds.lon0).toBeGreaterThanOrEqual(8);
+    expect(route.bounds.lon1 - Math.max(...ends.map((p) => p.lon))).toBeGreaterThanOrEqual(8);
+  });
+
   it("no located place, no route", async () => {
     expect(routeOf(await viewWith([trainLeg("Porto Campanha", "Lisboa Oriente")]), NOW)).toBeNull();
   });

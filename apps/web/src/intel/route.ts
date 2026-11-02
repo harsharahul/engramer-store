@@ -160,8 +160,10 @@ export function routeOf(view: TripView, now: number): Route | null {
   const lons = all.map((p) => p.lon);
   const lats = all.map((p) => p.lat);
   const [lon0, lon1, lat0, lat1] = [Math.min(...lons), Math.max(...lons), Math.min(...lats), Math.max(...lats)];
-  const padLon = Math.max(5, (lon1 - lon0) * 0.1);
-  const padLat = Math.max(5, (lat1 - lat0) * 0.1);
+  // Room for each end's code and city, written beside and under its dot,
+  // much as the design leaves about 15° around its San Francisco to Lisbon arc.
+  const padLon = Math.max(10, (lon1 - lon0) * 0.15);
+  const padLat = Math.max(10, (lat1 - lat0) * 0.5);
 
   return {
     lines,
