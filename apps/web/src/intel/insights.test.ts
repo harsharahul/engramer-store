@@ -407,3 +407,20 @@ describe("the bell's trip checks", () => {
     expect(tripChecks(window({ start: "", end: "" }), [passport], NOW_TRIP)).toEqual([]);
   });
 });
+
+describe("what a nights note opens", () => {
+  it("an open-nights note opens no unrelated file", () => {
+    const window: TripWindow = {
+      tag: "trip:lisbon-2026-11",
+      start: "2026-11-12",
+      end: "2026-11-16",
+      international: true,
+      memberIds: [],
+      stays: [{ name: "Casa do Rio", checkIn: { day: "2026-11-14" }, checkOut: { day: "2026-11-16" }, fileId: "hotel" }],
+      overnightLegs: ["2026-11-12"],
+    };
+    const nights = tripChecks(window, [], Date.UTC(2026, 9, 26)).find((check) => check.ruleId === "checkin-gap")!;
+    expect(nights.state).toBe("note");
+    expect(nights.fileId).toBeUndefined();
+  });
+});

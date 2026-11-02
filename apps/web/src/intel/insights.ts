@@ -411,9 +411,9 @@ const RULES: Rule[] = [
       if (open.length > 0) {
         return [
           {
+            // Nothing booked is the point, so there is no file to open.
             state: "note",
             severity: "info",
-            ...opens,
             title: `${nightsWord(open.length)} ${open.length === 1 ? "has" : "have"} no stay stored`,
             text: open.map(dayMonth).join(", "),
           },

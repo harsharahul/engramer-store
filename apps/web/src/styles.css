@@ -5802,6 +5802,30 @@ span.item-menu {
 .tln-kv-gap {
   margin-top: 8px;
 }
+.tln-link,
+.tln-plain {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tln-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.tln-link:focus-visible,
+.tln-plain:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.tln-big-local.tln-plain {
+  display: block;
+}
 .tln-found {
   display: flex;
   flex-wrap: wrap;

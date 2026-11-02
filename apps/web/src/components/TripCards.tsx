@@ -4,7 +4,7 @@
  * the file it came from.
  */
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { dayLabel, durationLabel, money } from "../intel/everyday";
 import type { AgendaRow } from "../intel/agendarows";
 import type { FactEvidence } from "../intel/facts";
@@ -85,17 +85,40 @@ export interface TripCardProps {
   fileOf?(id: string): FileEntry | undefined;
 }
 
+interface Opens {
+  key: string;
+  text: string;
+  fileId: string;
+}
+
+/** A line of values, each opening the file it came from. */
+function Links(props: { items: Opens[]; separator: string; more?: number; onInspect(fileId: string): void }) {
+  return (
+    <div>
+      {props.items.map((item, i) => (
+        <Fragment key={item.key}>
+          {i > 0 && props.separator}
+          <button type="button" className="tln-link" onClick={() => props.onInspect(item.fileId)}>
+            {item.text}
+          </button>
+        </Fragment>
+      ))}
+      {props.more ? ` and ${props.more} more` : ""}
+    </div>
+  );
+}
+
 function TheTrip(props: { view: TripView; onInspect(fileId: string): void }) {
   const { view } = props;
   const { outbound: out, homeward: back } = journeyOf(view);
-  const flights = [
-    out?.dep?.time ? `${named(out)} out ${weekday(out.dep.day)} ${out.dep.time}` : "",
-    back?.dep?.time ? `${named(back)} home ${weekday(back.dep.day)} ${back.dep.time}` : "",
-  ].filter(Boolean);
-  const stays = view.stays.filter((stay) => stay.nights > 0).map((stay) => `${stay.name || "Stay"} · ${count(stay.nights, "night")}`);
-  const booked = view.booked.map((row) => row.title);
-  const bookedLine =
-    booked.length > BOOKED_SHOWN ? `${booked.slice(0, BOOKED_SHOWN).join(", ")} and ${booked.length - BOOKED_SHOWN} more` : booked.join(", ");
+  const flights: Opens[] = [
+    ...(out?.dep?.time ? [{ key: "out", text: `${named(out)} out ${weekday(out.dep.day)} ${out.dep.time}`, fileId: out.fileId }] : []),
+    ...(back?.dep?.time ? [{ key: "home", text: `${named(back)} home ${weekday(back.dep.day)} ${back.dep.time}`, fileId: back.fileId }] : []),
+  ];
+  const stays: Opens[] = view.stays
+    .filter((stay) => stay.nights > 0)
+    .map((stay, i) => ({ key: `stay${i}`, text: `${stay.name || "Stay"} · ${count(stay.nights, "night")}`, fileId: stay.fileId }));
+  const booked: Opens[] = view.booked.map((row) => ({ key: row.id, text: row.title, fileId: row.fileIds[0]! }));
   return (
     <Card title="The trip">
       <div className="tln-title">
@@ -105,19 +128,24 @@ function TheTrip(props: { view: TripView; onInspect(fileId: string): void }) {
         {flights.length > 0 && (
           <>
             <span>{view.legs.every((leg) => leg.mode === "flight") ? "Flights" : "Journeys"}</span>
-            <div>{flights.join(" · ")}</div>
+            <Links items={flights} separator=" · " onInspect={props.onInspect} />
           </>
         )}
         {stays.length > 0 && (
           <>
             <span>Stay</span>
-            <div>{stays.join(", ")}</div>
+            <Links items={stays} separator=", " onInspect={props.onInspect} />
           </>
         )}
         {booked.length > 0 && (
           <>
             <span>Booked</span>
-            <div>{bookedLine}</div>
+            <Links
+              items={booked.slice(0, BOOKED_SHOWN)}
+              separator=", "
+              {...(booked.length > BOOKED_SHOWN ? { more: booked.length - BOOKED_SHOWN } : {})}
+              onInspect={props.onInspect}
+            />
           </>
         )}
       </div>
@@ -165,7 +193,7 @@ export function Checks(props: { title: string; checks: Check[]; onInspect(fileId
   );
 }
 
-function Spend(props: { view: TripView; rows: readonly AgendaRow[]; title: string; onToast(text: string): void }) {
+function Spend(props: { view: TripView; rows: readonly AgendaRow[]; title: string; onToast(text: string): void; onInspect(fileId: string): void }) {
   const addToTrip = useStore((s) => s.addToTrip);
   const spend = tripSpend(props.view, props.rows);
   const waiting = spend.waiting;
@@ -178,8 +206,11 @@ function Spend(props: { view: TripView; rows: readonly AgendaRow[]; title: strin
       {waiting && (
         <div className="tln-suggest">
           <span>
-            1 receipt waits: {waiting.title}
-            {waiting.amount ? ` ${money(waiting.amount)}` : ""}
+            1 receipt waits:{" "}
+            <button type="button" className="tln-link" onClick={() => props.onInspect(waiting.fileIds[0]!)}>
+              {waiting.title}
+              {waiting.amount ? ` ${money(waiting.amount)}` : ""}
+            </button>
           </span>
           <Button
             size="xs"
@@ -358,7 +389,7 @@ function BoardingPass(props: { leg: Leg | undefined; now: number; onOpen(fileId:
   );
 }
 
-function LeaveBy(props: { moment: Moment; now: number }) {
+function LeaveBy(props: { moment: Moment; now: number; onInspect(fileId: string): void }) {
   const leave = props.moment.leaveBy;
   // Once the time to leave has passed, the card has nothing left to say.
   if (!leave || leave.at <= props.now) {
@@ -366,7 +397,9 @@ function LeaveBy(props: { moment: Moment; now: number }) {
   }
   return (
     <Card title={`Leave for ${leave.code} by`}>
-      <div className="tln-big-local">{zonedTime(leave.at, leave.zone)}</div>
+      <button type="button" className="tln-big-local tln-plain" onClick={() => props.moment.next && props.onInspect(props.moment.next.fileId)}>
+        {zonedTime(leave.at, leave.zone)}
+      </button>
       <div className="tln-muted">
         in <Until at={leave.at} /> · {leave.hours} hours before {leave.international ? "an international" : "a domestic"} departure
       </div>
@@ -391,8 +424,10 @@ function Hotel(props: {
       : props.mode === "land"
         ? (view.stays.find((candidate) => candidate.checkIn?.day === landing?.arr?.day) ?? view.stays[0])
         : view.stays.at(-1);
-  const directions = stay ? (
-    <Button size="xs" variant="secondary" nativeButton={false} render={<a href={mapsUrl(stay.address ?? `${stay.name}, ${view.city}`)} target="_blank" rel="noreferrer" />}>
+  // Directions need something to search for: an address, else a name.
+  const place = stay?.address ?? (stay?.name ? `${stay.name}, ${view.city}` : undefined);
+  const directions = place ? (
+    <Button size="xs" variant="secondary" nativeButton={false} render={<a href={mapsUrl(place)} target="_blank" rel="noreferrer" />}>
       Directions
     </Button>
   ) : null;
@@ -519,7 +554,7 @@ function Hotel(props: {
   );
 }
 
-function InTheAir(props: { moment: Moment }) {
+function InTheAir(props: { moment: Moment; onInspect(fileId: string): void }) {
   const flying = props.moment.flying;
   const view = props.moment.trip!;
   if (!flying?.leg.arr) {
@@ -528,7 +563,14 @@ function InTheAir(props: { moment: Moment }) {
   const { leg, progress } = flying;
   const lands = leg.arr!.code ? (view.cities[leg.arr!.code] ?? leg.to) : leg.to;
   return (
-    <Card title="In the air" aside={named(leg)}>
+    <Card
+      title="In the air"
+      aside={
+        <button type="button" className="tln-link" onClick={() => props.onInspect(leg.fileId)}>
+          {named(leg)}
+        </button>
+      }
+    >
       <Board from={leg.from} to={leg.to} dep={leg.dep?.time} arr={leg.arr!.time} number={leg.designator} plusDays={plusDays(leg)} progress={progress} />
       <div className="tln-prog">
         <div className="tln-prog-fill" style={{ width: `${Math.round(progress * 100)}%` }} />
@@ -630,7 +672,7 @@ export function TripCards(props: TripCardProps) {
     return null;
   }
   const checks = () => tripChecks(windowOf(view), [...props.files], props.now);
-  const spent = (title: string) => <Spend key="spend" view={view} rows={props.rows} title={title} onToast={props.onToast} />;
+  const spent = (title: string) => <Spend key="spend" view={view} rows={props.rows} title={title} onToast={props.onToast} onInspect={props.onInspect} />;
   const next = <ComingUp key="coming" rows={comingUp(props.rows, view, props.now, 2)} onInspect={props.onInspect} />;
   switch (props.moment.kind) {
     case "planning":
@@ -663,7 +705,7 @@ export function TripCards(props: TripCardProps) {
     case "travel":
       return (
         <>
-          <LeaveBy moment={props.moment} now={props.now} />
+          <LeaveBy moment={props.moment} now={props.now} onInspect={props.onInspect} />
           <BoardingPass leg={props.moment.next} now={props.now} onOpen={props.onOpen} />
           <Hotel mode="land" moment={props.moment} files={props.files} now={props.now} onInspect={props.onInspect} />
         </>
@@ -675,7 +717,7 @@ export function TripCards(props: TripCardProps) {
       const outward = flying !== undefined && arrival?.arr !== undefined && flying.dep !== undefined && flying.dep.at < arrival.arr.at;
       return (
         <>
-          <InTheAir moment={props.moment} />
+          <InTheAir moment={props.moment} onInspect={props.onInspect} />
           {outward && (
             <>
               <Hotel mode="land" moment={props.moment} files={props.files} now={props.now} onInspect={props.onInspect} />
@@ -707,7 +749,7 @@ export function TripCards(props: TripCardProps) {
       return (
         <>
           <Hotel mode="out" moment={props.moment} files={props.files} now={props.now} onInspect={props.onInspect} />
-          <LeaveBy moment={props.moment} now={props.now} />
+          <LeaveBy moment={props.moment} now={props.now} onInspect={props.onInspect} />
           <BoardingPass leg={props.moment.next} now={props.now} onOpen={props.onOpen} />
           {spent("Spent on this trip")}
         </>

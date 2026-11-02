@@ -398,3 +398,59 @@ describe("the destination's days count down only to real, confirmed times", () =
     expect(rows.find((row) => row!.includes("Walking tour"))).toMatch(/not confirmed$/);
   });
 });
+
+describe("every value opens its source", () => {
+  const LIS = "Europe/Lisbon";
+  const press = (root: Element, text: string) =>
+    click([...root.querySelectorAll("button")].find((button) => button.textContent?.includes(text)));
+
+  it("the trip card's flights, stay and bookings open their files", () => {
+    mount(PLANNING);
+    const summary = card("The trip")!;
+    press(summary, "TP 236 out");
+    expect(onInspect).toHaveBeenLastCalledWith("booking");
+    press(summary, "Casa do Rio · 3 nights");
+    expect(onInspect).toHaveBeenLastCalledWith("hotel");
+    press(summary, "Fado night");
+    expect(onInspect).toHaveBeenLastCalledWith("fado");
+  });
+
+  it("a receipt waiting to join opens before it is added", () => {
+    mount(PLANNING);
+    press(card("Spent so far")!, "taxi");
+    expect(onInspect).toHaveBeenLastCalledWith("taxi");
+    expect(addToTrip).not.toHaveBeenCalled();
+  });
+
+  it("leave-by and the flight in the air open the booking", () => {
+    useStore.setState({ factEvidence: vi.fn(async () => []) });
+    mount(instantOf("2026-11-12", "13:30", LA));
+    press(card("Leave for SFO by")!, "15:10");
+    expect(onInspect).toHaveBeenLastCalledWith("booking");
+    act(() => root.unmount());
+    container.remove();
+    mount(instantOf("2026-11-13", "06:00", LIS));
+    press(card("In the air")!, "TP 236");
+    expect(onInspect).toHaveBeenLastCalledWith("booking");
+  });
+
+  it("a stay with no name or address offers no directions", async () => {
+    useStore.setState({ factEvidence: vi.fn(async () => []) });
+    const said = (value: string, time: string, role: "check-in" | "check-out", label: string) => ({
+      id: `event:${value} ${label.toLowerCase()} ${time}`,
+      kind: "event" as const,
+      document: "hotel-booking" as const,
+      value,
+      time,
+      label,
+      source: "model" as const,
+      confidence: 0.45,
+      confirmed: true,
+      subject: { role },
+    });
+    const room = email("room", "2026-10-02", [said("2026-11-13", "15:00", "check-in", "Room ready"), said("2026-11-16", "11:00", "check-out", "Leave the key")]);
+    const unnamed = await lisbonTrip([...lisbonFiles().filter((member) => member.id !== "hotel"), room], [], true);
+    mount(instantOf("2026-11-14", "15:42", LIS), unnamed);
+    expect(card("Staying")!.querySelector("a")).toBeNull();
+  });
+});
