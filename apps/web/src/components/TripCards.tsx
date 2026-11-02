@@ -579,7 +579,15 @@ function FlightHome(props: { moment: Moment; onInspect(fileId: string): void }) 
   );
 }
 
-function DestinationDay(props: { title: string; day: string; rows: readonly AgendaRow[]; now: number; onInspect(fileId: string): void }) {
+function DestinationDay(props: {
+  title: string;
+  day: string;
+  /** The word for a row with no printed time. */
+  when: "today" | "tomorrow";
+  rows: readonly AgendaRow[];
+  now: number;
+  onInspect(fileId: string): void;
+}) {
   const rows = props.rows.filter((row) => row.day === props.day && row.kind !== "photos" && row.kind !== "trip");
   if (rows.length === 0) {
     return null;
@@ -594,8 +602,13 @@ function DestinationDay(props: { title: string; day: string; rows: readonly Agen
               {row.title}
               {row.amount && <span className="tln-faint"> {money(row.amount)}</span>}
             </span>
+            {/* A countdown only to a confirmed, printed time: nothing else is a real instant. */}
             {row.past ? (
               <span className="tln-faint">done</span>
+            ) : row.ask ? (
+              <span className="tln-faint">not confirmed</span>
+            ) : !row.time ? (
+              <span className="tln-soon">{props.when}</span>
             ) : row.at > props.now ? (
               <span className="tln-soon">
                 in <Until at={row.at} />
@@ -669,6 +682,7 @@ export function TripCards(props: TripCardProps) {
               <DestinationDay
                 title={`Tomorrow in ${view.city}`}
                 day={nextDay(zonedDay(props.now, view.zone))}
+                when="tomorrow"
                 rows={props.rows}
                 now={props.now}
                 onInspect={props.onInspect}
@@ -683,7 +697,7 @@ export function TripCards(props: TripCardProps) {
       return (
         <>
           <Hotel mode="stay" moment={props.moment} files={props.files} now={props.now} onInspect={props.onInspect} />
-          <DestinationDay title={`Today · ${dayLabel(today)}`} day={today} rows={props.rows} now={props.now} onInspect={props.onInspect} />
+          <DestinationDay title={`Today · ${dayLabel(today)}`} day={today} when="today" rows={props.rows} now={props.now} onInspect={props.onInspect} />
           <FlightHome moment={props.moment} onInspect={props.onInspect} />
           {spent("Spent so far")}
         </>

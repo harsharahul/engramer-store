@@ -145,6 +145,8 @@ export function TimelineHero(props: {
                     </span>
                     {row.past ? (
                       <span className="tln-faint">{row.kind === "bill" ? "paid" : "done"}</span>
+                    ) : row.ask ? (
+                      <span className="tln-faint">not confirmed</span>
                     ) : row.time ? (
                       <span className="tln-soon">
                         in <Until at={row.at} />

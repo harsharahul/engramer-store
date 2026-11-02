@@ -384,3 +384,17 @@ describe("the cards say only what is true now", () => {
     expect(card("In the air")!.querySelector(".tln-tm sup")!.textContent).toBe("+1");
   });
 });
+
+describe("the destination's days count down only to real, confirmed times", () => {
+  const LIS = "Europe/Lisbon";
+  it("an untimed row says today, and an unconfirmed one gets no countdown", async () => {
+    useStore.setState({ factEvidence: vi.fn(async () => []) });
+    const tram = file("tram", [exact("event", "2026-11-14", "Tram 28 tour", { document: "event-ticket" })]);
+    const tour = file("tour", [{ id: "event:tour", kind: "event", document: "other", value: "2026-11-14", time: "18:00", label: "Walking tour", source: "label", confidence: 0.7 }]);
+    const withDay = await lisbonTrip([...lisbonFiles(), tram], [tour], true);
+    mount(instantOf("2026-11-14", "15:42", LIS), withDay);
+    const rows = [...card("Today · Sat 14 Nov")!.querySelectorAll(".tln-trow")].map((row) => row.textContent);
+    expect(rows.find((row) => row!.includes("Tram 28 tour"))).toMatch(/today$/);
+    expect(rows.find((row) => row!.includes("Walking tour"))).toMatch(/not confirmed$/);
+  });
+});
