@@ -372,8 +372,10 @@ with confirmation, assembled.
 converting it without knowing the zone produces an answer that looks precise
 and is hours wrong. Times are stored as printed; a zone rides along only
 where it is genuinely known, from a reservation's own offset or the offline
-airport table (about 3,700 scheduled-service airports with their zones,
-shipped with the app), which is also what turns JFK into New York on a card.
+airport table (about 3,800 airports with their zones and positions, shipped
+with the app), which is also what turns JFK into New York on a card. An
+airport that loses its scheduled service or its code stays in the table, so
+bookings already stored keep their times.
 
 **Trips booked exactly come together on their own; the rest are offered.**
 Documents whose tracked events fall near each other, share a
@@ -384,10 +386,11 @@ grouped on every device without asking, together with what links to it
 exactly: a document dated near the journey that shares its booking
 reference, a file that came in the same email, and an exact booking for a
 day the traveller is away. Each journey is its own trip, so two trips a few
-weeks apart, or a commuter's weekly flights, never merge into one. The trip
-card says so and offers Not a trip, which takes back only what was grouped
-automatically and is remembered by the account, so the trip never comes
-back; a document taken out of a trip is never put back. A document that
+weeks apart, or a commuter's weekly flights, never merge into one. The
+bell and the trip's page say so, and the page offers Not a trip: after
+asking once, it takes the trip's tag off every member, the documents you
+added included, and the refusal is remembered by the account, so the trip
+never comes back; a document taken out of a trip is never put back. A document that
 matches only by date is offered once for a yes, with the evidence stated in
 words, and a candidate with no exact journey is offered the same way.
 Assembly covers the whole library, and trips long past group quietly: one
@@ -395,13 +398,11 @@ line in Activity, nothing in the bell. "Assemble trips automatically" in
 Profile turns it off, and then every candidate is offered. A trip is a
 shared tag on its members and nothing more; its name, span and itinerary
 derive from the members' facts, so a correction reshapes the trip on its
-own. The itinerary reads in city names with each
-leg's time as printed, exports any leg as a calendar event, and offers the
-place in Maps: a handoff to the system, because door-to-door timing would
-mean sending your location and route somewhere, and this feature refuses
-that. The one computed line is the airport lead time, three hours
-international and two domestic, stated only when both ends of the flight
-resolve.
+own. Places open in Maps: a handoff to the system, because door-to-door
+timing would mean sending your location and route somewhere, and this
+feature refuses that. The one computed line is the airport lead time,
+three hours international and two domestic, stated only when both ends of
+the flight resolve.
 
 Cross-document rules run on confirmed facts: a passport checked against
 every trip's return date, a permit that expires mid-trip, the night between
@@ -422,7 +423,9 @@ list, an ordinary day's cards: what is left today, this week, the one date
 waiting for a yes, the photos from this day in earlier years, and what the
 month has paid and still owes per currency, never converted. The poster
 shows the home city (set in Profile, otherwise the city most journeys start
-from) with its local time and a sky for the hour.
+from) with its local time and its sky: dawn and dusk around a sunrise and
+sunset worked out on the device from the airport's position, the hour
+alone where no airport is known.
 
 **What a fact is about.** Every reader says what each date is, not only
 when: a departure or an arrival (with its carrier, number and airports), a
@@ -451,6 +454,22 @@ hub it changes planes at; day and night counts follow the destination's
 calendar. A date nobody has said yes to sets no time, and a trip flown out
 to with no known way back never says Welcome back. The trip's checks are
 the same ones the bell gives, so the two never disagree.
+
+**A trip's page.** Any trip, near or far, past or future, opens as a page
+over the Timeline: from its poster, Welcome back, a row's trip chip, the
+details pane's "Part of" line, or the bell. It shows the route drawn on the
+device as great circles between the trip's airports on a plain grid (no map
+tiles, so no map service learns the destination), with the flight in the
+air drawn up to where it is; the itinerary in time order; what is booked
+there and the trip's checks; what it cost, bill by bill, per currency and
+never converted, with a receipt matched only by date waiting for Add; and
+every document that belongs to it. Every value opens its document.
+Export to calendar saves the whole trip as one file: each leg at its real
+instants with an alarm at leave-by, each stay as all-day nights, each
+booking; dates nobody has said yes to stay out, and exporting again
+updates the same events. Open album, on the hero's photos card, opens
+Photos limited to the trip's days, counted by the same rule as the
+Timeline, without creating an album.
 
 **Finding connections without a shared reference** is the one place a model
 enters, and only on request. A small zero-shot entity extractor (GLiNER,
