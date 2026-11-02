@@ -99,7 +99,16 @@ describe("cleanSubject", () => {
         reservation: -1,
         extra: "dropped",
       }),
-    ).toEqual({ role: "depart", carrier: "TP", number: "236", otherEnd: "LIS", gate: "B12", boardingGroup: "4" });
+    ).toEqual({
+      role: "depart",
+      carrier: "TP",
+      number: "236",
+      otherEnd: "LIS",
+      place: "x".repeat(60),
+      address: "y".repeat(120),
+      gate: "B12",
+      boardingGroup: "4",
+    });
     expect(cleanSubject({ role: "depart", seat: "14A", boardingTime: "17:20", reservation: 0 })).toEqual({
       role: "depart",
       seat: "14A",
@@ -126,5 +135,14 @@ describe("ends", () => {
   it("an end that names a check-in is an end", () => {
     expect(subjectOf(event("Check-in: Casa do Rio ends", { source: "ics" }))).toEqual({ role: "end" });
     expect(subjectOf(event("Table at Taberna da Rua ends", { source: "ics" }))).toEqual({ role: "end" });
+  });
+});
+
+describe("long names", () => {
+  it("a long place name or address is cut to fit, not dropped", () => {
+    const name = "Hotel Example Grande, A Member of the Synthetic Collection, Lisbon Baixa";
+    const subject = cleanSubject({ role: "check-in", place: name, address: "y".repeat(130) });
+    expect(subject!.place).toBe(name.slice(0, 60).trim());
+    expect(subject!.address).toHaveLength(120);
   });
 });

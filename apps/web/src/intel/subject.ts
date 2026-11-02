@@ -86,6 +86,14 @@ function text(value: unknown, max: number): string | undefined {
   return trimmed && trimmed.length <= max ? trimmed : undefined;
 }
 
+/** A name or address kept to its bound: cut, not dropped, so a long hotel name still shows. */
+function cut(value: unknown, max: number): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  return value.trim().slice(0, max).trim() || undefined;
+}
+
 function shaped(value: unknown, pattern: RegExp): string | undefined {
   return typeof value === "string" && pattern.test(value) ? value : undefined;
 }
@@ -108,8 +116,8 @@ export function cleanSubject(raw: unknown): Subject | undefined {
     number: shaped(given["number"], NUMBER),
     code: shaped(given["code"], CODE),
     otherEnd: shaped(given["otherEnd"], CODE),
-    place: text(given["place"], PLACE_MAX),
-    address: text(given["address"], ADDRESS_MAX),
+    place: cut(given["place"], PLACE_MAX),
+    address: cut(given["address"], ADDRESS_MAX),
     seat: shaped(given["seat"], SEAT),
     gate: text(given["gate"], SHORT_MAX),
     boardingGroup: text(given["boardingGroup"], SHORT_MAX),
