@@ -45,11 +45,16 @@ async function mountTrip(tag: string, now: number) {
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => root.render(<OneTrip tag={tag} now={now} />));
-  await act(async () => {
-    for (let i = 0; i < 5; i++) {
+  await readUntil(() => opened.at(-1) !== undefined);
+}
+
+/** Lets the readings run until `done` holds: a loaded machine can take longer than any fixed wait. */
+async function readUntil(done: () => boolean) {
+  for (let i = 0; i < 100 && !done(); i++) {
+    await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  });
+    });
+  }
 }
 
 describe("useTripView", () => {
@@ -77,11 +82,7 @@ describe("useTripWindows", () => {
     root = createRoot(container);
     act(() => root.render(<Probe now={now} />));
     expect(seen[0]).toBeUndefined();
-    await act(async () => {
-      for (let i = 0; i < 5; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-    });
+    await readUntil(() => seen.at(-1) !== undefined);
     expect(seen.at(-1)).toHaveLength(1);
     expect(seen.at(-1)![0]!.tag).toBe(TAG);
   });

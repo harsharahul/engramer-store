@@ -50,7 +50,8 @@ final class ScreenWalk: XCTestCase {
       web.swipeDown()
       pause(0.5)
 
-      if tab("Notices") {
+      // Notices is the bell in the top bar, as on the Mac, not a tab.
+      if tapAny("Notices") {
         pause(1.2)
         shot("notices")
         dismissSheet()
