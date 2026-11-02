@@ -134,14 +134,3 @@ export function dayLabel(iso: string): string {
   const at = new Date(`${iso}T00:00:00Z`);
   return `${WEEKDAYS[at.getUTCDay()]} ${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]}`;
 }
-
-/** The sky the poster shows for a local hour. */
-export function skyOf(hour: number): "night" | "dawn" | "day" | "dusk" {
-  if (hour >= 21 || hour < 5) {
-    return "night";
-  }
-  if (hour < 8) {
-    return "dawn";
-  }
-  return hour < 17 ? "day" : "dusk";
-}

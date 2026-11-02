@@ -6,6 +6,13 @@ import type { Fact } from "./facts";
 import { comingUp, tripSpend, tripViewOf, windowOf } from "./tripview";
 
 describe("tripViewOf", () => {
+  it("a trip view knows where its destination is", async () => {
+    const { view } = await lisbonTrip();
+    expect(view.place?.lat).toBeCloseTo(38.77, 1);
+    expect(view.place?.lon).toBeCloseTo(-9.13, 1);
+    expect(view.coords.SFO?.lat).toBeCloseTo(37.62, 1);
+  });
+
   it("a trip reads as legs, a stay and bookings", async () => {
     const { view } = await lisbonTrip();
     expect(view).toMatchObject({

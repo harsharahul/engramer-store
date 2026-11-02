@@ -9,7 +9,7 @@
  */
 import type { Trip, TripPlan } from "./agenda";
 import type { AgendaRow, RowFile } from "./agendarows";
-import { lookupAirport, placeForCity, plainCity, type Airport } from "./airports";
+import { lookupAirport, placeForCity, plainCity, type Airport, type LatLon } from "./airports";
 import { sum, type Money } from "./everyday";
 import type { Fact } from "./facts";
 import type { TripWindow } from "./insights";
@@ -55,6 +55,10 @@ export interface TripView {
   leaveBy: (Advice | null)[];
   /** The city each airport code the legs name is in. */
   cities: Record<string, string>;
+  /** Where each airport code the legs name is, from the airport table. */
+  coords: Record<string, LatLon>;
+  /** Where the destination is, when its airport is known. */
+  place?: LatLon;
 }
 
 export type Advice = NonNullable<Awaited<ReturnType<typeof departureAdvice>>>;
@@ -201,11 +205,15 @@ export async function tripViewOf(
     sources[isEmailRecord(file.name, file.mime) ? "email" : file.mime === "application/pdf" ? "pdf" : "other"]++;
   }
   const city = airport?.city ?? opts.plan?.destination ?? tripTitle(trip.tag).split(",")[0]!;
+  // Only an airport the table knows has a position; a city named by the tag alone has none.
+  const destination = airport?.code ? await lookupAirport(airport.code) : null;
   const cities: Record<string, string> = {};
+  const coords: Record<string, LatLon> = {};
   for (const code of new Set(legs.flatMap((leg) => [leg.dep?.code, leg.arr?.code, CODE.test(leg.to) ? leg.to : undefined]))) {
     const place = code ? await lookupAirport(code) : null;
     if (place) {
       cities[code!] = place.city;
+      coords[code!] = { lat: place.lat, lon: place.lon };
     }
   }
   return {
@@ -226,6 +234,8 @@ export async function tripViewOf(
     exact: opts.plan?.anchorId !== undefined,
     leaveBy: await Promise.all(legs.map(departureAdvice)),
     cities,
+    coords,
+    ...(destination ? { place: { lat: destination.lat, lon: destination.lon } } : {}),
   };
 }
 

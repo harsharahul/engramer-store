@@ -1,16 +1,15 @@
 /**
  * The trip's poster on the Timeline: the destination set large, the sky for
- * its hour, and the words of the moment. The words come from posterOf; this
+ * its sun, and the words of the moment. The words come from posterOf; this
  * only lays them out, with the clock and any countdown ticking in place.
  */
 
-import { skyOf } from "../intel/everyday";
 import type { Poster } from "../intel/moments";
 import { Clock, Until } from "./Clock";
 
 export function TripPoster(props: { poster: Poster }) {
   const { poster } = props;
-  const sky = skyOf(poster.skyHour);
+  const sky = poster.sky;
   return (
     <div className="tln-poster">
       <div className={`tln-sky tln-sky-${sky}${sky === "night" ? " tln-stars" : ""}`} />

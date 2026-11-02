@@ -5,9 +5,10 @@
  */
 
 import { useEffect, useState } from "react";
-import { localDay, localTime, zonedDay, zonedTime } from "../intel/agendarows";
+import { localDay, zonedDay } from "../intel/agendarows";
 import { airportForCity } from "../intel/airports";
-import { dayLabel, money, skyOf, type Everyday } from "../intel/everyday";
+import { dayLabel, money, type Everyday } from "../intel/everyday";
+import { skyOf } from "../intel/sun";
 import type { AgendaRow } from "../intel/agendarows";
 import { useStore, type FileEntry } from "../store";
 import { deviceZone } from "../intel/instants";
@@ -49,7 +50,7 @@ export function TimelineHero(props: {
   fileOf?(id: string): FileEntry | undefined;
 }) {
   const resolveFacts = useStore((s) => s.resolveFacts);
-  const [place, setPlace] = useState<{ code: string; zone: string; country?: string } | null>(null);
+  const [place, setPlace] = useState<{ code: string; zone: string; lat: number; lon: number; country?: string } | null>(null);
   useEffect(() => {
     let stale = false;
     setPlace(null);
@@ -57,7 +58,7 @@ export function TimelineHero(props: {
       if (stale || !airport) {
         return;
       }
-      setPlace({ code: airport.code, zone: airport.zone, ...countryOf(airport.country) });
+      setPlace({ code: airport.code, zone: airport.zone, lat: airport.lat, lon: airport.lon, ...countryOf(airport.country) });
     });
     return () => {
       stale = true;
@@ -68,8 +69,8 @@ export function TimelineHero(props: {
   // The poster is home: its date, time and sky are home's, even away.
   const home = place?.zone;
   const posterDay = home ? zonedDay(props.now, home) : localDay(props.now);
-  const posterHour = Number((home ? zonedTime(props.now, home) : localTime(props.now)).slice(0, 2));
-  const sky = skyOf(posterHour);
+  const sky = skyOf(props.now, home ?? deviceZone(), place ? { lat: place.lat, lon: place.lon } : undefined);
+  const homePlace = place ? { lat: place.lat, lon: place.lon } : undefined;
   const today = localDay(props.now);
   const yes = everyday.needsYes;
 
@@ -79,7 +80,7 @@ export function TimelineHero(props: {
     const photos = (props.rows ?? [])
       .filter((row) => row.kind === "photos" && row.day >= view.start && row.day <= view.end)
       .reduce((sum, row) => sum + row.fileIds.length, 0);
-    const poster = posterOf(moment, props.now, home ?? deviceZone(), { photos });
+    const poster = posterOf(moment, props.now, home ?? deviceZone(), { photos, ...(homePlace ? { homePlace } : {}) });
     return (
       <div className="tln-hero">
         {poster && <TripPoster poster={poster} />}
