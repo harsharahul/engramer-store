@@ -152,6 +152,7 @@ export function TimelineView(props: {
           everyday={everyday}
           moment={moment}
           rows={rows}
+          files={props.files}
           homeCity={home}
           now={now}
           factsOn={props.factsOn}

@@ -69,7 +69,7 @@ describe("windowOf", () => {
       international: true,
       memberIds: view.memberIds,
       firstArrival: { day: "2026-11-13", time: "14:05" },
-      stays: [{ name: "Casa do Rio", checkIn: { day: "2026-11-13", time: "15:00" }, checkOut: { day: "2026-11-16" } }],
+      stays: [{ name: "Casa do Rio", checkIn: { day: "2026-11-13", time: "15:00" }, checkOut: { day: "2026-11-16" }, fileId: "hotel" }],
       overnightLegs: ["2026-11-12"],
     });
   });

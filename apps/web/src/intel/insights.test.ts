@@ -257,9 +257,15 @@ describe("one set of trip checks for the bell and the hero", () => {
     international: true,
     memberIds: ["booking", "policy"],
     firstArrival: { day: "2026-11-13", time: "14:05" },
-    stays: [{ name: "Casa do Rio", checkIn: { day: "2026-11-13", time: "15:00" }, checkOut: { day: "2026-11-16" } }],
+    stays: [{ name: "Casa do Rio", checkIn: { day: "2026-11-13", time: "15:00" }, checkOut: { day: "2026-11-16" }, fileId: "hotel" }],
     overnightLegs: ["2026-11-12"],
     ...over,
+  });
+
+  it("the nights and landing lines open the stay's confirmation", () => {
+    const checks = tripChecks(window(), [], NOW_TRIP);
+    expect(line(checks, "checkin-gap")!.fileId).toBe("hotel");
+    expect(line(checks, "lands-before-checkin")!.fileId).toBe("hotel");
   });
   const passport = (value: string) => file("pp", "passport.pdf", [fact({ document: "passport", value })]);
   const policy = (value: string) => file("policy", "travel-policy.pdf", [fact({ document: "insurance", value })]);

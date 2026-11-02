@@ -217,14 +217,15 @@ export function countryName(code: string | undefined): string | undefined {
   }
 }
 
-/** "12-16 Nov 2026", "28 Nov-2 Dec 2026", "30 Dec 2026-2 Jan 2027". */
-export function rangeLabel(start: string, end: string): string {
+/** "12-16 Nov 2026", "28 Nov-2 Dec 2026", "30 Dec 2026-2 Jan 2027"; "12-16 Nov" without the year. */
+export function rangeLabel(start: string, end: string, withYear = true): string {
   const [y1, m1, d1] = start.split("-").map(Number) as [number, number, number];
   const [y2, m2, d2] = end.split("-").map(Number) as [number, number, number];
   if (y1 !== y2) {
     return `${d1} ${MONTHS[m1 - 1]} ${y1}-${d2} ${MONTHS[m2 - 1]} ${y2}`;
   }
-  return m1 === m2 ? `${d1}-${d2} ${MONTHS[m1 - 1]} ${y1}` : `${d1} ${MONTHS[m1 - 1]}-${d2} ${MONTHS[m2 - 1]} ${y1}`;
+  const year = withYear ? ` ${y1}` : "";
+  return m1 === m2 ? `${d1}-${d2} ${MONTHS[m1 - 1]}${year}` : `${d1} ${MONTHS[m1 - 1]}-${d2} ${MONTHS[m2 - 1]}${year}`;
 }
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
