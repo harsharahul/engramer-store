@@ -44,7 +44,8 @@ const dayNumber = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / DAY_MS;
 const daysAfter = (iso: string, days: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
 
 /** Sums amounts per currency, in cents so nothing drifts. */
-function sum(rows: readonly AgendaRow[]): Money[] {
+/** Amounts summed per currency, never converted, in cents so nothing drifts. */
+export function sum(rows: readonly AgendaRow[]): Money[] {
   const cents = new Map<string, number>();
   for (const row of rows) {
     if (row.amount) {
