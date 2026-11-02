@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { insightsFor } from "./insights";
+import { insightsFor, tripChecks, type TripWindow } from "./insights";
 import type { Fact } from "./facts";
 
 const NOW = Date.UTC(2026, 7, 4);
@@ -245,5 +245,159 @@ describe("rules read what each date is", () => {
   it("a flight landing tomorrow does not say check-in opens", () => {
     const files = [file("ft", "flight.html", [fact({ kind: "event", value: "2026-08-05", label: "Flight AQ 214 arrives JFK", time: "18:05" })])];
     expect(ruleIds(files)).not.toContain("checkin-opens");
+  });
+});
+
+describe("one set of trip checks for the bell and the hero", () => {
+  const NOW_TRIP = Date.UTC(2026, 9, 26);
+  const window = (over: Partial<TripWindow> = {}): TripWindow => ({
+    tag: "trip:lisbon-2026-11",
+    start: "2026-11-12",
+    end: "2026-11-16",
+    international: true,
+    memberIds: ["booking", "policy"],
+    firstArrival: { day: "2026-11-13", time: "14:05" },
+    stays: [{ name: "Casa do Rio", checkIn: { day: "2026-11-13", time: "15:00" }, checkOut: { day: "2026-11-16" } }],
+    overnightLegs: ["2026-11-12"],
+    ...over,
+  });
+  const passport = (value: string) => file("pp", "passport.pdf", [fact({ document: "passport", value })]);
+  const policy = (value: string) => file("policy", "travel-policy.pdf", [fact({ document: "insurance", value })]);
+  const line = (checks: ReturnType<typeof tripChecks>, ruleId: string) => checks.find((check) => check.ruleId === ruleId);
+
+  it("a passport good for months past the return is OK", () => {
+    expect(line(tripChecks(window(), [passport("2029-03-20")], NOW_TRIP), "passport-short-for-trip")).toMatchObject({
+      state: "ok",
+      title: "Passport valid to Mar 2029",
+      text: "Well past your return on 16 Nov",
+      fileId: "pp",
+    });
+  });
+
+  it("a passport inside six months is a note", () => {
+    expect(line(tripChecks(window(), [passport("2027-03-01")], NOW_TRIP), "passport-short-for-trip")).toMatchObject({
+      state: "note",
+      title: "Passport expires 1 Mar 2027",
+      text: "Inside six months of your return on 16 Nov",
+    });
+  });
+
+  it("a passport that runs out during the trip is a warning", () => {
+    expect(line(tripChecks(window(), [passport("2026-11-14")], NOW_TRIP), "passport-short-for-trip")).toMatchObject({
+      state: "warn",
+      title: "Passport expires during this trip",
+    });
+  });
+
+  it("a domestic trip asks nothing about passports, on the bell or the hero", () => {
+    const domestic = window({ international: false });
+    expect(line(tripChecks(domestic, [passport("2027-03-01")], NOW_TRIP), "passport-short-for-trip")).toBeUndefined();
+    expect(insightsFor([passport("2027-03-01")], NOW_TRIP, [domestic]).map((insight) => insight.ruleId)).not.toContain("passport-short-for-trip");
+  });
+
+  it("insurance through the return is OK and names its file", () => {
+    expect(line(tripChecks(window(), [policy("2026-11-17")], NOW_TRIP), "insurance-short-for-trip")).toMatchObject({
+      state: "ok",
+      title: "Travel insurance valid to 17 Nov",
+      text: "From travel-policy.pdf",
+      fileId: "policy",
+    });
+    expect(line(tripChecks(window(), [policy("2026-11-15")], NOW_TRIP), "insurance-short-for-trip")).toMatchObject({
+      state: "note",
+      title: "Travel insurance ends 15 Nov, before your return",
+    });
+  });
+
+  it("a policy that is not part of the trip is not its travel insurance", () => {
+    expect(line(tripChecks(window({ memberIds: ["booking"] }), [policy("2026-11-17")], NOW_TRIP), "insurance-short-for-trip")).toBeUndefined();
+  });
+
+  it("every night covered by a flight and a hotel is OK", () => {
+    expect(line(tripChecks(window(), [], NOW_TRIP), "checkin-gap")).toMatchObject({
+      state: "ok",
+      title: "Every night has a place to sleep",
+      text: "12 Nov on the plane, then 3 nights at Casa do Rio",
+    });
+  });
+
+  it("a night with no stay is a note", () => {
+    const late = window({ stays: [{ name: "Casa do Rio", checkIn: { day: "2026-11-14", time: "15:00" }, checkOut: { day: "2026-11-16" } }] });
+    expect(line(tripChecks(late, [], NOW_TRIP), "checkin-gap")).toMatchObject({ state: "note", title: "1 night has no stay stored", text: "13 Nov" });
+  });
+
+  it("landing before check-in is a note", () => {
+    expect(line(tripChecks(window(), [], NOW_TRIP), "lands-before-checkin")).toMatchObject({
+      state: "note",
+      title: "You land at 14:05; check-in opens at 15:00",
+    });
+    expect(line(tripChecks(window({ firstArrival: { day: "2026-11-13", time: "16:30" } }), [], NOW_TRIP), "lands-before-checkin")).toBeUndefined();
+  });
+
+  it("the checks come in the order passport, insurance, nights, landing", () => {
+    expect(tripChecks(window(), [passport("2029-03-20"), policy("2026-11-17")], NOW_TRIP).map((check) => check.ruleId)).toEqual([
+      "passport-short-for-trip",
+      "insurance-short-for-trip",
+      "checkin-gap",
+      "lands-before-checkin",
+    ]);
+  });
+
+  it("the bell and the hero agree on the same trip", () => {
+    const files = [passport("2027-03-01"), policy("2026-11-15")];
+    const late = window({ stays: [{ name: "Casa do Rio", checkIn: { day: "2026-11-14" }, checkOut: { day: "2026-11-16" } }] });
+    const hero = tripChecks(late, files, NOW_TRIP)
+      .filter((check) => check.state !== "ok")
+      .map((check) => check.title)
+      .sort();
+    const tripRules = new Set(tripChecks(late, files, NOW_TRIP).map((check) => check.ruleId));
+    const bell = insightsFor(files, NOW_TRIP, [late])
+      .filter((insight) => tripRules.has(insight.ruleId))
+      .map((insight) => insight.title)
+      .sort();
+    expect(hero.length).toBeGreaterThan(0);
+    expect(bell).toEqual(hero);
+  });
+});
+
+describe("the bell's trip checks", () => {
+  const NOW_TRIP = Date.UTC(2026, 9, 26);
+  const window = (over: Partial<TripWindow> = {}): TripWindow => ({
+    tag: "trip:lisbon-2026-11",
+    start: "2026-11-12",
+    end: "2026-11-16",
+    international: true,
+    memberIds: [],
+    stays: [],
+    overnightLegs: [],
+    ...over,
+  });
+  const passport = file("pp", "passport.pdf", [fact({ document: "passport", value: "2027-03-01" })]);
+  const passportIds = (views: TripWindow[], files = [passport]) =>
+    insightsFor(files, NOW_TRIP, views)
+      .filter((insight) => insight.ruleId === "passport-short-for-trip")
+      .map((insight) => insight.id);
+
+  it("each trip's checks are its own on the bell", () => {
+    const ids = passportIds([window(), window({ tag: "trip:porto-2026-12", start: "2026-12-01", end: "2026-12-05" })]);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it("a trip that is over says nothing on the bell", () => {
+    const old = file("old", "old-passport.pdf", [fact({ document: "passport", value: "2026-04-03" })]);
+    expect(passportIds([window({ start: "2026-04-01", end: "2026-04-05" })], [old])).toEqual([]);
+  });
+
+  it("travel no trip holds still warns about the passport when trips are read", () => {
+    const flights = file("ft", "flights.html", [
+      fact({ kind: "event", value: "2026-11-20", label: "Flight AQ 214 departs SFO", time: "09:40" }),
+      fact({ kind: "event", value: "2026-11-20", label: "Flight AQ 214 arrives JFK" }),
+      fact({ kind: "event", value: "2026-11-28", label: "Flight AQ 215 departs JFK" }),
+    ]);
+    expect(passportIds([], [passport, flights])).toHaveLength(1);
+  });
+
+  it("a trip with no days asks nothing", () => {
+    expect(tripChecks(window({ start: "", end: "" }), [passport], NOW_TRIP)).toEqual([]);
   });
 });

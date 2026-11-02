@@ -12,7 +12,7 @@
 
 import { isEmailRecord } from "../mail/kind";
 import { isPlanDismissed, itemsOf, type PlanFile, type TripPlan } from "./agenda";
-import { airportForCity, lookupAirport } from "./airports";
+import { lookupAirport, placeForCity } from "./airports";
 import { deviceZone, instantOf, localDay, localTime, zoneOf } from "./instants";
 import { legsOf, type DatedEntry, type Leg } from "./legs";
 import { documentLabel } from "./describe";
@@ -216,7 +216,7 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
       return Promise.resolve(undefined);
     }
     if (!tripZones.has(tag)) {
-      tripZones.set(tag, airportForCity(nameOf(tag)).then((airport) => airport?.zone));
+      tripZones.set(tag, placeForCity(nameOf(tag)).then((place) => place?.zone));
     }
     return tripZones.get(tag)!;
   };

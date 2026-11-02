@@ -11,8 +11,12 @@ import { planTrips, tripsOf, type TripPlan } from "./agenda";
 import { rowsOf, type AgendaRow, type RowContext, type RowFile } from "./agendarows";
 import { bcbpFacts } from "./bcbp";
 import { factId, maskTail, mergeFacts, withExactAcceptance, type Fact } from "./facts";
+import { tripChecks } from "./insights";
+import { instantOf } from "./instants";
 import { proposedFacts } from "./modelfacts";
+import { momentOf, posterOf } from "./moments";
 import { scanForFacts } from "./scan";
+import { tripViewOf, windowOf } from "./tripview";
 
 const EMAIL = "application/vnd.engram.email+json";
 const NOW = Date.UTC(2026, 9, 26, 17); // Mon 26 Oct 2026, 10:00 in San Francisco
@@ -113,5 +117,50 @@ describe("one trip, from raw mail to the Timeline's rows", () => {
     const second = await booking(mail.BOOKING_WITH_HOTEL);
     expect(second).toEqual(first);
     expect(mergeFacts(first, second)).toEqual(mergeFacts([], first));
+  });
+});
+
+describe("one trip, from raw mail to the poster's words", () => {
+  const LA = "America/Los_Angeles";
+  const LIS = "Europe/Lisbon";
+
+  async function view(files: RowFile[]) {
+    const { plan, rows, files: tagged } = await timeline(files);
+    return { view: await tripViewOf(tripsOf(tagged).find((trip) => trip.tag === plan.tag)!, rows, { plan }), files: tagged };
+  }
+
+  it("the booked trip's poster reads right at every moment", async () => {
+    const { view: lisbon } = await view([file("booking", await booking(mail.BOOKING_WITH_HOTEL)), file("pass", pass(), false)]);
+    const words = (day: string, time: string, zone: string) => {
+      const now = instantOf(day, time, zone);
+      const poster = posterOf(momentOf([lisbon], now), now, LA)!;
+      return [poster.big, poster.cap];
+    };
+    expect(words("2026-10-26", "10:00", LA)).toEqual(["17 days", "until you fly"]);
+    expect(words("2026-11-11", "09:30", LA)).toEqual(["Tomorrow", "TP 236 in 1 d 8 h"]);
+    expect(words("2026-11-12", "13:30", LA)).toEqual(["Today", "TP 236 departs 18:10"]);
+    expect(words("2026-11-13", "06:00", LIS)).toEqual(["In the air", "lands 14:05 Lisbon time"]);
+    expect(words("2026-11-14", "15:42", LIS)).toEqual(["Day 3 of 5", "Night 2 of 3 at Casa do Rio"]);
+    expect(words("2026-11-16", "08:30", LIS)).toEqual(["Last day", "flight home at 13:20"]);
+    expect(words("2026-11-18", "19:00", LA)).toEqual(["Welcome back", "5 days in Lisbon"]);
+  });
+
+  it("the guesthouse trip says night 2 of 3 at the guesthouse", async () => {
+    const { view: lisbon } = await view([
+      file("booking", await booking(mail.BOOKING_FLIGHTS_ONLY)),
+      file("guesthouse", guesthouse(true)),
+      file("pass", pass(), false),
+    ]);
+    const now = instantOf("2026-11-14", "15:42", LIS);
+    expect(posterOf(momentOf([lisbon], now), now, LA)!.cap).toBe("Night 2 of 3 at Casa Azulejo");
+  });
+
+  it("the trip's checks name its nights and its landing", async () => {
+    const { view: lisbon, files } = await view([file("booking", await booking(mail.BOOKING_WITH_HOTEL)), file("pass", pass(), false)]);
+    const checks = tripChecks(windowOf(lisbon), files, NOW);
+    expect(checks.map((check) => [check.state, check.title, check.text])).toEqual([
+      ["ok", "Every night has a place to sleep", "12 Nov on the plane, then 3 nights at Casa do Rio"],
+      ["note", "You land at 14:05; check-in opens at 15:00", "At Casa do Rio, on 13 Nov."],
+    ]);
   });
 });

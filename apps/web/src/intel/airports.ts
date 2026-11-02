@@ -43,6 +43,27 @@ export async function lookupAirport(code: string): Promise<Airport | null> {
 }
 
 /** The first airport (by code) serving a city, or null when none does. */
+/** A city's name without the district the table adds: "Sydney (Mascot)" is Sydney. */
+export function plainCity(name: string): string {
+  return name.replace(/\s*\([^)]*\)\s*$/, "").trim();
+}
+
+/**
+ * Where a city is, as far as its name alone can say: its zone and country
+ * when every airport of that name agrees, and its airport code only when
+ * there is just one. "Sydney" names an airport in Australia and one in
+ * Canada, so it says nothing; "London" has several airports and one zone.
+ */
+export async function placeForCity(city: string): Promise<{ zone: string; country: string; code?: string } | null> {
+  const wanted = plainCity(city).toLowerCase();
+  const named = [...(await table()).values()].filter((airport) => plainCity(airport.city).toLowerCase() === wanted);
+  const first = named[0];
+  if (!first || named.some((airport) => airport.zone !== first.zone || airport.country !== first.country)) {
+    return null;
+  }
+  return { zone: first.zone, country: first.country, ...(named.length === 1 ? { code: first.code } : {}) };
+}
+
 export async function airportForCity(city: string): Promise<Airport | null> {
   const wanted = city.trim().toLowerCase();
   for (const airport of (await table()).values()) {
