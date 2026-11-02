@@ -10,7 +10,10 @@ import { airportForCity } from "../intel/airports";
 import { dayLabel, money, skyOf, type Everyday, type Money } from "../intel/everyday";
 import type { AgendaRow } from "../intel/agendarows";
 import { useStore, type FileEntry } from "../store";
+import { deviceZone } from "../intel/instants";
+import { countryName, posterOf, type Moment } from "../intel/moments";
 import { Clock, Until } from "./Clock";
+import { TripPoster } from "./TripPoster";
 import { Tile } from "./TimelineList";
 import { Button } from "./ui/button";
 
@@ -20,18 +23,9 @@ const MEMORY_TILES = 6;
 /** "1 receipt", "2 receipts". */
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 /** Countries the poster names by their short form, as people say them. */
-const SHORT_COUNTRIES: Record<string, string> = { US: "USA", GB: "UK", AE: "UAE" };
-
 function countryOf(code: string): { country?: string } {
-  if (SHORT_COUNTRIES[code]) {
-    return { country: SHORT_COUNTRIES[code] };
-  }
-  try {
-    const name = new Intl.DisplayNames(["en"], { type: "region" }).of(code);
-    return name ? { country: name } : {};
-  } catch {
-    return {};
-  }
+  const name = countryName(code);
+  return name ? { country: name } : {};
 }
 const shortDay = (iso: string) => dayLabel(iso).split(" ").slice(0, 2).join(" ");
 
@@ -62,6 +56,9 @@ function Card(props: { title: string; tone?: "yes" | "dashed"; children: React.R
 
 export function TimelineHero(props: {
   everyday: Everyday;
+  /** Where a near trip stands; the ordinary day when absent or "everyday". */
+  moment?: Moment;
+  rows?: readonly AgendaRow[];
   homeCity: string;
   now: number;
   factsOn: boolean;
@@ -95,6 +92,16 @@ export function TimelineHero(props: {
   const sky = skyOf(posterHour);
   const today = localDay(props.now);
   const yes = everyday.needsYes;
+
+  const moment = props.moment;
+  if (moment && moment.kind !== "everyday" && moment.trip) {
+    const view = moment.trip;
+    const photos = (props.rows ?? [])
+      .filter((row) => row.kind === "photos" && row.day >= view.start && row.day <= view.end)
+      .reduce((sum, row) => sum + row.fileIds.length, 0);
+    const poster = posterOf(moment, props.now, home ?? deviceZone(), { photos });
+    return <div className="tln-hero">{poster && <TripPoster poster={poster} />}</div>;
+  }
 
   return (
     <div className="tln-hero">

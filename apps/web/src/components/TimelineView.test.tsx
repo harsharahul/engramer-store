@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { withExactAcceptance, type Fact } from "../intel/facts";
 import { useStore, type FileEntry } from "../store";
+import { lisbonFiles, TAG } from "../intel/__fixtures__/lisbon";
 import { TimelineView } from "./TimelineView";
 
 const NOW = Date.UTC(2026, 8, 8, 15, 40); // Tue 8 Sep 2026, 08:40 PDT
@@ -71,14 +72,14 @@ async function settle() {
   });
 }
 
-async function render(focus?: { day?: string; now?: boolean; nonce: number }) {
+async function render(focus?: { day?: string; now?: boolean; nonce: number }, list: FileEntry[] = files) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() =>
     root.render(
       <TimelineView
-        files={files}
+        files={list}
         factsOn
         {...(focus ? { focus } : {})}
         onInspect={() => {}}
@@ -146,5 +147,18 @@ describe("the Timeline view", () => {
     expect(container.querySelector(".tln-list")).not.toBeNull();
     const target = scrolled.mock.calls.map(([el]) => el as Element).find((el) => el.classList.contains("tln-dayh"));
     expect(target?.textContent).toContain("Sun 20 Sep");
+  });
+});
+
+describe("the Timeline during a trip", () => {
+  it("the Timeline follows a trip that is near", async () => {
+    // Sat 14 Nov 2026, 15:42 in Lisbon: the third day of the trip.
+    vi.setSystemTime(Date.UTC(2026, 10, 14, 15, 42));
+    const trip = lisbonFiles().map((file) => ({ ...entry(file.id, file.facts), name: file.name, mime: file.mime, tags: [TAG] }));
+    useStore.setState({ files: new Map(trip.map((file) => [file.id, file])) });
+    await render(undefined, trip);
+    expect(container.querySelector(".tln-ptop")?.textContent).toBe("You are here");
+    expect(container.querySelector(".tln-big")?.textContent).toBe("Day 3 of 5");
+    expect(container.querySelector(".tln-cap")?.textContent).toBe("Night 2 of 3 at Casa do Rio");
   });
 });
