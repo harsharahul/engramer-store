@@ -13,11 +13,12 @@
 import { isEmailRecord } from "../mail/kind";
 import { isPlanDismissed, itemsOf, type PlanFile, type TripPlan } from "./agenda";
 import { airportForCity, lookupAirport } from "./airports";
-import { deviceZone, instantOf, zoneOf } from "./instants";
+import { deviceZone, instantOf, localDay, localTime, zoneOf } from "./instants";
+import { legsOf, type DatedEntry, type Leg } from "./legs";
 import { documentLabel } from "./describe";
 import { basisOf, isDated, isTracked, offeredFacts, type Fact } from "./facts";
 import { isTripTag, tripTitle } from "./trips";
-import { arrivalCode, designatorOf, isLegEnd, subjectOf, type Subject } from "./subject";
+import { isLegEnd, subjectOf } from "./subject";
 
 export interface RowFile extends PlanFile {
   mime: string;
@@ -58,7 +59,18 @@ export interface AgendaRow {
   fileIds: string[];
   /** The facts a dated row stands for, so a yes or a no can answer all of them. */
   factIds?: string[];
-  flight?: { from: string; to: string; number: string; dep?: string; arr?: string; plusDays: number };
+  flight?: {
+    from: string;
+    to: string;
+    number: string;
+    dep?: string;
+    arr?: string;
+    plusDays: number;
+    /** The boarding pass stored for this flight, when one is. */
+    passFileId?: string;
+    /** The leg itself, with the real instants at each end. */
+    leg: Leg;
+  };
   trip?: RowTrip;
   /** A date nobody has said yes to yet. */
   ask?: true;
@@ -77,48 +89,10 @@ export interface RowContext {
   assembling: boolean;
 }
 
-const pad = (n: number) => String(n).padStart(2, "0");
-
-/** The device-local date of an instant, as an ISO day. */
-export function localDay(ms: number): string {
-  const at = new Date(ms);
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
-}
-
-/** The device-local time of an instant, as HH:MM. */
-export function localTime(ms: number): string {
-  const at = new Date(ms);
-  return `${pad(at.getHours())}:${pad(at.getMinutes())}`;
-}
-
-/** The date of an instant in a named zone, as an ISO day; the device's when the zone is unknown. */
-export function zonedDay(ms: number, zone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(ms);
-  } catch {
-    return localDay(ms);
-  }
-}
-
-/** The time of an instant in a named zone, as HH:MM; the device's when the zone is unknown. */
-export function zonedTime(ms: number, zone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ms);
-  } catch {
-    return localTime(ms);
-  }
-}
+// Time lives in intel/instants.ts; the Timeline's callers reach it here too.
+export { localDay, localTime, zonedDay, zonedTime } from "./instants";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-/** "Flight TP 236": the mode in words, then the carrier and number; a leg's key within its file. */
-function legKey(subject: Subject & { mode: string }): string {
-  return [subject.mode[0]!.toUpperCase() + subject.mode.slice(1), designatorOf(subject)].filter(Boolean).join(" ");
-}
-
-/** Where a leg end is, as its fact states it: the airport code, else the place's name. */
-function stopOf(subject: Subject | undefined): string {
-  return subject?.code ?? subject?.place ?? "";
-}
 const dayNumber = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / 86_400_000;
 
 function sourceOf(file: RowFile): AgendaRow["source"] {
@@ -273,16 +247,12 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
   const ticketed = new Set<string>();
   for (const [fileId, entries] of dated) {
     const file = byId.get(fileId)!;
-    const legFacts = new Map<string, { fact: Fact; ask: boolean }[]>();
     const deliveries = new Map<string, { opens?: Fact; by?: Fact; ask: boolean }>();
     for (const { fact, ask } of entries) {
       const label = fact.label ?? "";
       const subject = fact.kind === "event" ? subjectOf(fact) : undefined;
       if (isLegEnd(subject)) {
-        const key = legKey(subject);
-        const held = legFacts.get(key) ?? [];
-        held.push({ fact, ask });
-        legFacts.set(key, held);
+        // Journeys are built below, across files, by the one leg builder.
         continue;
       }
       if (fact.kind === "event" && fact.document === "delivery") {
@@ -330,56 +300,6 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
         });
       }
     }
-    // One designator can name several legs (a round trip by the same bus
-    // line): each departure pairs with the next arrival after it.
-    const legs: { designator: string; departs?: Fact; arrives?: Fact; ask: boolean }[] = [];
-    for (const [designator, held] of legFacts) {
-      held.sort((a, b) => `${a.fact.value} ${a.fact.time ?? ""}`.localeCompare(`${b.fact.value} ${b.fact.time ?? ""}`));
-      let open: (typeof legs)[number] | undefined;
-      for (const { fact, ask } of held) {
-        if (subjectOf(fact)?.role === "depart") {
-          open = { designator, departs: fact, ask };
-          legs.push(open);
-        } else if (open && !open.arrives) {
-          open.arrives = fact;
-          open.ask ||= ask;
-        } else {
-          legs.push({ designator, arrives: fact, ask });
-        }
-      }
-    }
-    for (const { designator, departs, arrives, ask } of legs) {
-      const start = departs ?? arrives!;
-      const leaving = departs ? subjectOf(departs) : undefined;
-      const from = stopOf(leaving);
-      // A boarding pass names both ends on its one departure.
-      const to = arrives ? stopOf(subjectOf(arrives)) : (arrivalCode(leaving) ?? "");
-      const service = subjectOf(start);
-      const title = [from && (await placeName(from)), to && (await placeName(to))].filter(Boolean).join(" to ") || designator;
-      rows.push({
-        ...base(file),
-        id: `flight:${file.id}:${designator}:${start.value} ${start.time ?? ""}`,
-        factIds: [departs?.id, arrives?.id].filter((id): id is string => id !== undefined),
-        kind: "flight",
-        tag: "FLIGHT",
-        day: start.value,
-        ...(start.time ? { time: start.time } : {}),
-        ...(arrives ? { endDay: arrives.value, ...(arrives.time ? { endTime: arrives.time } : {}) } : {}),
-        at: await whenOf(file, start),
-        ...(arrives && departs ? { endAt: await whenOf(file, arrives) } : {}),
-        title,
-        sub: subOf(file),
-        flight: {
-          from,
-          to,
-          number: (service && designatorOf(service)) ?? "",
-          ...(departs?.time ? { dep: departs.time } : {}),
-          ...(arrives?.time ? { arr: arrives.time } : {}),
-          plusDays: departs && arrives ? dayNumber(arrives.value) - dayNumber(departs.value) : 0,
-        },
-        ...(ask ? { ask: true as const } : {}),
-      });
-    }
     for (const [day, { opens, by, ask }] of deliveries) {
       const sub =
         opens?.time && by?.time
@@ -403,6 +323,40 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
         ...(ask ? { ask: true as const } : {}),
       });
     }
+  }
+
+  // Journeys: one builder pairs every file's legs, and a boarding pass joins
+  // the flight it was issued for instead of standing beside it.
+  const entries: DatedEntry[] = [...dated].flatMap(([fileId, held]) => held.map(({ fact, ask }) => ({ fileId, fact, ask })));
+  for (const leg of await legsOf(entries, (fileId) => tripZoneOf(byId.get(fileId)!))) {
+    const file = byId.get(leg.fileId)!;
+    const start = (leg.dep ?? leg.arr)!;
+    const title = [leg.from && (await placeName(leg.from)), leg.to && (await placeName(leg.to))].filter(Boolean).join(" to ") || leg.key;
+    rows.push({
+      ...base(file),
+      id: `flight:${file.id}:${leg.key}:${start.day} ${start.time ?? ""}`,
+      factIds: leg.factIds,
+      kind: "flight",
+      tag: "FLIGHT",
+      day: start.day,
+      ...(start.time ? { time: start.time } : {}),
+      ...(leg.arr ? { endDay: leg.arr.day, ...(leg.arr.time ? { endTime: leg.arr.time } : {}) } : {}),
+      at: start.at,
+      ...(leg.dep && leg.arr ? { endAt: leg.arr.at } : {}),
+      title,
+      sub: subOf(file),
+      flight: {
+        from: leg.from,
+        to: leg.to,
+        number: leg.designator,
+        ...(leg.dep?.time ? { dep: leg.dep.time } : {}),
+        ...(leg.arr?.time ? { arr: leg.arr.time } : {}),
+        plusDays: leg.dep && leg.arr ? dayNumber(leg.arr.day) - dayNumber(leg.dep.day) : 0,
+        ...(leg.passFileId ? { passFileId: leg.passFileId } : {}),
+        leg,
+      },
+      ...(leg.ask ? { ask: true as const } : {}),
+    });
   }
 
   // Bills: a tracked amount, once per email and its attachments, on the

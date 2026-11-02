@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { withExactAcceptance, type Fact } from "./facts";
-import { assembleItinerary, departureAdvice, isTripTag, suggestTrips, tripTag, tripTitle, type TripFile } from "./trips";
+import {
+  adviceText,
+  assembleItinerary,
+  departureAdvice,
+  isTripTag,
+  memberLegs,
+  suggestTrips,
+  tripTag,
+  tripTitle,
+  type TripFile,
+} from "./trips";
 
 describe("isTripTag", () => {
   it("knows a trip tag and nothing else", () => {
@@ -224,10 +234,18 @@ describe("assembleItinerary", () => {
 });
 
 describe("departureAdvice", () => {
+  const firstAdvice = async (members: TripFile[]) => {
+    for (const leg of await memberLegs(members)) {
+      const advice = await departureAdvice(leg);
+      if (advice) {
+        return adviceText(advice);
+      }
+    }
+    return null;
+  };
+
   it("advises a domestic departure two hours ahead, from both legs' codes", async () => {
-    const legs = await assembleItinerary([flight()]);
-    const advice = await departureAdvice(legs);
-    expect(advice!.text).toBe("Domestic departure, so be at the airport by 07:40.");
+    expect(await firstAdvice([flight()])).toBe("Domestic departure, so be at the airport by 07:40.");
   });
 
   it("advises an international departure three hours ahead", async () => {
@@ -239,19 +257,19 @@ describe("departureAdvice", () => {
         event("2027-05-03", "Flight AQ 88 arrives LHR", { time: "12:45" }),
       ],
     };
-    const advice = await departureAdvice(await assembleItinerary([abroad]));
-    expect(advice!.text).toBe("International departure, so be at the airport by 15:30.");
+    expect(await firstAdvice([abroad])).toBe("International departure, so be at the airport by 15:30.");
   });
 
   it("stays quiet when the airports cannot be placed", async () => {
-    const legs = await assembleItinerary([
-      {
-        id: "f-x",
-        name: "x.txt",
-        facts: [event("2027-03-04", "Flight 1 departs QQQ", { time: "09:40" })],
-      },
-    ]);
-    expect(await departureAdvice(legs)).toBeNull();
+    expect(
+      await firstAdvice([
+        {
+          id: "f-x",
+          name: "x.txt",
+          facts: [event("2027-03-04", "Flight 1 departs QQQ", { time: "09:40" })],
+        },
+      ]),
+    ).toBeNull();
   });
 });
 

@@ -90,6 +90,38 @@ export function instantOf(day: string, time: string | undefined, zone: string): 
   }
 }
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** The device-local date of an instant, as an ISO day. */
+export function localDay(ms: number): string {
+  const at = new Date(ms);
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+}
+
+/** The device-local time of an instant, as HH:MM. */
+export function localTime(ms: number): string {
+  const at = new Date(ms);
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
+/** The date of an instant in a named zone, as an ISO day; the device's when the zone is unknown. */
+export function zonedDay(ms: number, zone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(ms);
+  } catch {
+    return localDay(ms);
+  }
+}
+
+/** The time of an instant in a named zone, as HH:MM; the device's when the zone is unknown. */
+export function zonedTime(ms: number, zone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(ms);
+  } catch {
+    return localTime(ms);
+  }
+}
+
 /** The zone a fact's printed time belongs to. */
 export async function zoneOf(fact: Fact, ctx: { tripZone?: string }): Promise<string> {
   if (fact.zone) {

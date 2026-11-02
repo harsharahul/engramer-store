@@ -16,9 +16,11 @@
 import { useEffect, useState } from "react";
 import type { FileEntry } from "../store";
 import {
+  adviceText,
   assembleItinerary,
   departureAdvice,
   factsFingerprint,
+  memberLegs,
   tripTitle,
   type ItineraryLeg,
 } from "../intel/trips";
@@ -157,9 +159,16 @@ export function TripCard(props: {
         return;
       }
       setLegs(all);
-      const tip = await departureAdvice(all);
+      let tip: { factId: string; text: string } | null = null;
+      for (const leg of await memberLegs(files)) {
+        const advice = await departureAdvice(leg);
+        if (advice) {
+          tip = { factId: leg.dep!.factId, text: adviceText(advice) };
+          break;
+        }
+      }
       if (!stale) {
-        setAdvice(tip ? { factId: tip.leg.factId, text: tip.text } : null);
+        setAdvice(tip);
       }
     });
     return () => {

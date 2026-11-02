@@ -62,7 +62,30 @@ const row = (id: string, kind: AgendaRow["kind"], day: string, time: string | un
 const LISBON: Trip = { tag: "trip:lisbon-2026-11", title: "Lisbon, Nov 2026", members: [], start: "2026-11-12", end: "2026-11-16" };
 const exactTrip = { tag: LISBON.tag, title: LISBON.title, name: "Lisbon", evidence: "exact" as const };
 const flight = (id: string, day: string, time: string, extra: Partial<AgendaRow> = {}) =>
-  row(id, "flight", day, time, { tag: "FLIGHT", trip: exactTrip, flight: { from: "SFO", to: "LIS", number: "TP 236", dep: time, arr: "14:05", plusDays: 1 }, ...extra });
+  row(id, "flight", day, time, {
+    tag: "FLIGHT",
+    trip: exactTrip,
+    flight: {
+      from: "SFO",
+      to: "LIS",
+      number: "TP 236",
+      dep: time,
+      arr: "14:05",
+      plusDays: 1,
+      leg: {
+        key: "Flight TP 236",
+        mode: "flight",
+        designator: "TP 236",
+        from: "SFO",
+        to: "LIS",
+        dep: { day, time, zone: "America/Los_Angeles", at: instantOf(day, time, "America/Los_Angeles"), code: "SFO", place: "SFO", factId: `${id}:dep` },
+        fileId: `f-${id}`,
+        factIds: [`${id}:dep`],
+        ask: false,
+      },
+    },
+    ...extra,
+  });
 
 function render(props: Partial<Parameters<typeof TimelineList>[0]> & { rows: AgendaRow[]; now: number }) {
   container = document.createElement("div");
