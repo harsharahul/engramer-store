@@ -32,7 +32,8 @@ function useNotices() {
   const account = useStore((s) => s.session?.email ?? "");
   // The same trips the Timeline and the Notices panel check.
   const trips = useTripWindows(coarseNow());
-  const keys = useMemo(() => noticeKeys([...files.values()], coarseNow(), trips), [files, trips]);
+  // No unseen keys until the trips are read, or the badge counts a check twice.
+  const keys = useMemo(() => (trips ? noticeKeys([...files.values()], coarseNow(), trips) : []), [files, trips]);
   const [seenTick, setSeenTick] = useState(0);
   useEffect(() => {
     const bump = () => setSeenTick((n) => n + 1);

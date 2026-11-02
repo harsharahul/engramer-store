@@ -1630,7 +1630,9 @@ export function Vault() {
   // several times.
   useEffect(() => {
     const account = store.session?.email;
-    if (!account) {
+    // Notifications wait for the trips too: one sent before them is sent again
+    // under the trip's own id.
+    if (!account || !tripWindows) {
       return;
     }
     const timer = setTimeout(() => {

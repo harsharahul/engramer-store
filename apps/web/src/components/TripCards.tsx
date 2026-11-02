@@ -23,25 +23,31 @@ const HOUR_MS = 3_600_000;
 /** How near a departure the boarding pass, or the wait for it, shows. */
 const PASS_HOURS = 48;
 
-/** A file's evidence blob, read once when asked for. */
-function useEvidence(fileId: string | undefined): FactEvidence[] | null {
+/**
+ * The airline's check-in link a departure's evidence holds, read once when
+ * the card can use it. Only the link is kept; the rest of the evidence (full
+ * references, passages) is never held in the page.
+ */
+function useCheckinLink(fileId: string | undefined, factId: string | undefined): string | undefined {
   const factEvidence = useStore((s) => s.factEvidence);
-  const [evidence, setEvidence] = useState<FactEvidence[] | null>(null);
+  const [link, setLink] = useState<string | undefined>(undefined);
   useEffect(() => {
     let stale = false;
-    setEvidence(null);
-    if (fileId) {
-      void factEvidence(fileId).then((read) => {
-        if (!stale) {
-          setEvidence(read);
-        }
-      });
+    setLink(undefined);
+    if (fileId && factId) {
+      void factEvidence(fileId)
+        .then((read: FactEvidence[]) => {
+          if (!stale) {
+            setLink(read.find((entry) => entry.id === factId)?.link);
+          }
+        })
+        .catch(() => {});
     }
     return () => {
       stale = true;
     };
-  }, [fileId, factEvidence]);
-  return evidence;
+  }, [fileId, factId, factEvidence]);
+  return link;
 }
 
 const nextDay = (iso: string) => new Date(Date.parse(`${iso}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
@@ -197,6 +203,10 @@ function Spend(props: { view: TripView; rows: readonly AgendaRow[]; title: strin
   const addToTrip = useStore((s) => s.addToTrip);
   const spend = tripSpend(props.view, props.rows);
   const waiting = spend.waiting;
+  // Nothing spent and nothing waiting: the card would only say "none".
+  if (spend.count === 0 && !waiting) {
+    return null;
+  }
   return (
     <Card title={props.title}>
       <Amounts sums={spend.sums} />
@@ -303,7 +313,8 @@ function Photos(props: { view: TripView; rows: readonly AgendaRow[]; onOpen(file
 
 function CheckIn(props: { moment: Moment; now: number; onInspect(fileId: string): void }) {
   const leg = props.moment.next;
-  const evidence = useEvidence(leg?.fileId);
+  const usable = leg?.dep !== undefined && props.moment.checkInOpens !== undefined;
+  const link = useCheckinLink(usable ? leg!.fileId : undefined, usable ? leg!.dep!.factId : undefined);
   if (!leg?.dep || props.moment.checkInOpens === undefined) {
     return null;
   }
@@ -311,7 +322,6 @@ function CheckIn(props: { moment: Moment; now: number; onInspect(fileId: string)
   const opensAt = `${zonedTime(opens, leg.dep.zone)}`;
   const opensOn = dayLabel(zonedDay(opens, leg.dep.zone));
   const open = props.now >= opens;
-  const link = evidence?.find((entry) => entry.id === leg.dep!.factId)?.link;
   return (
     <Card title={open ? "Check-in is open" : "Check-in"}>
       <div className="tln-title">
@@ -424,6 +434,9 @@ function Hotel(props: {
       : props.mode === "land"
         ? (view.stays.find((candidate) => candidate.checkIn?.day === landing?.arr?.day) ?? view.stays[0])
         : view.stays.at(-1);
+  // A reference revealed for one stay never shows under the next.
+  const shown = stay?.fileId;
+  useEffect(() => setRevealed(null), [shown]);
   // Directions need something to search for: an address, else a name.
   const place = stay?.address ?? (stay?.name ? `${stay.name}, ${view.city}` : undefined);
   const directions = place ? (

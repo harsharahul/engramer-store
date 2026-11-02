@@ -56,7 +56,12 @@ async function readViews(
  * The near trips' views. A caller that already holds the Timeline's rows
  * and plans passes them; any other surface gets them worked out here.
  */
-export function useTripViews(input: { files?: readonly RowFile[]; rows?: readonly AgendaRow[]; plans?: readonly TripPlan[]; now: number }): TripView[] {
+export function useTripViews(input: {
+  files?: readonly RowFile[];
+  rows?: readonly AgendaRow[];
+  plans?: readonly TripPlan[];
+  now: number;
+}): TripView[] | undefined {
   const stored = useStore((s) => s.files);
   const live = useMemo(
     () => (input.files ?? [...(stored?.values() ?? [])]).filter((file) => !file.trashed),
@@ -66,7 +71,8 @@ export function useTripViews(input: { files?: readonly RowFile[]; rows?: readonl
   const plans = input.plans ?? context.plans;
   const [home] = useSyncedSetting(homeCity);
   const today = localDay(input.now);
-  const [views, setViews] = useState<TripView[]>([]);
+  // Unknown until the first reading lands, so no surface acts on an empty list.
+  const [views, setViews] = useState<TripView[] | undefined>();
 
   useEffect(() => {
     let stale = false;
@@ -77,15 +83,26 @@ export function useTripViews(input: { files?: readonly RowFile[]; rows?: readonl
     } else {
       const key = `${factsFingerprint(live)}|${today}|${plans.map((plan) => plan.tag).join(",")}|${home ?? ""}`;
       if (shared?.key !== key) {
-        shared = { key, views: readViews(live, undefined, ctx, home, input.now) };
+        const views = readViews(live, undefined, ctx, home, input.now);
+        shared = { key, views };
+        // A failed reading is not kept: the next surface to ask reads again.
+        views.catch(() => {
+          if (shared?.views === views) {
+            shared = null;
+          }
+        });
       }
       pending = shared.views;
     }
-    void pending.then((read) => {
-      if (!stale) {
-        setViews(read);
-      }
-    });
+    // A failed reading leaves the views unknown, so nothing is said from it.
+    void pending.then(
+      (read) => {
+        if (!stale) {
+          setViews(read);
+        }
+      },
+      () => undefined,
+    );
     return () => {
       stale = true;
     };
@@ -97,7 +114,7 @@ export function useTripViews(input: { files?: readonly RowFile[]; rows?: readonl
 }
 
 /** The near trips as the checks read them: for the bell, its badge and its notifications. */
-export function useTripWindows(now: number, files?: readonly RowFile[]): TripWindow[] {
+export function useTripWindows(now: number, files?: readonly RowFile[]): TripWindow[] | undefined {
   const views = useTripViews({ now, ...(files ? { files } : {}) });
-  return useMemo(() => views.map(windowOf), [views]);
+  return useMemo(() => views?.map(windowOf), [views]);
 }

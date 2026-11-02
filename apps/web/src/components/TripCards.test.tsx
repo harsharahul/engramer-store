@@ -454,3 +454,23 @@ describe("every value opens its source", () => {
     expect(card("Staying")!.querySelector("a")).toBeNull();
   });
 });
+
+describe("cards that would say nothing", () => {
+  it("nothing spent and nothing waiting shows no spend card", async () => {
+    const unpaid = lisbonFiles()
+      .filter((member) => member.id !== "receipt")
+      .map((member) => (member.id === "museum" ? { ...member, facts: member.facts.filter((fact) => fact.kind !== "amount") } : member));
+    mount(PLANNING, await lisbonTrip(unpaid));
+    expect([...container.querySelectorAll(".tln-hd")].map((hd) => hd.textContent)).not.toContain("Spent so far");
+  });
+
+  it("a departure with no time reads no evidence for a check-in it cannot have", async () => {
+    const factEvidence = vi.fn(async () => []);
+    useStore.setState({ factEvidence });
+    const untimed = lisbonFiles().map((member) =>
+      member.id !== "booking" ? member : { ...member, facts: member.facts.map(({ time: _time, ...fact }) => fact) },
+    );
+    mount(instantOf("2026-11-11", "09:00", LA), await lisbonTrip(untimed));
+    expect(factEvidence).not.toHaveBeenCalled();
+  });
+});
