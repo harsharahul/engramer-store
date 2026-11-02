@@ -14,7 +14,7 @@ import { isTripCurrent, itemsOf, tripsOf } from "./intel/agenda";
 import { describeFact } from "./intel/describe";
 import { duplicatesByDigest } from "./intel/duplicates";
 import type { Fact } from "./intel/facts";
-import { insightsFor, type Severity } from "./intel/insights";
+import { insightsFor, type Severity, type TripWindow } from "./intel/insights";
 
 export interface NoticeFile {
   id: string;
@@ -40,7 +40,7 @@ export interface Notice {
 }
 
 /** One stable key per item the notice center shows. */
-export function noticeKeys(files: readonly NoticeFile[], now: number): string[] {
+export function noticeKeys(files: readonly NoticeFile[], now: number, trips?: readonly TripWindow[]): string[] {
   const live = files.filter((file) => !file.trashed);
   const keys: string[] = [];
   for (const trip of tripsOf(live)) {
@@ -51,7 +51,7 @@ export function noticeKeys(files: readonly NoticeFile[], now: number): string[] 
   for (const { file, fact } of itemsOf(live, now, { name: "coming-up" })) {
     keys.push(`fact:${file.id}:${fact.id}`);
   }
-  for (const insight of insightsFor(live, now)) {
+  for (const insight of insightsFor(live, now, trips)) {
     keys.push(`insight:${insight.id}`);
   }
   for (const group of duplicatesByDigest(live)) {
@@ -61,7 +61,7 @@ export function noticeKeys(files: readonly NoticeFile[], now: number): string[] 
 }
 
 /** The items worth a system notification: dated, and close. */
-export function dueNotices(files: readonly NoticeFile[], now: number): Notice[] {
+export function dueNotices(files: readonly NoticeFile[], now: number, trips?: readonly TripWindow[]): Notice[] {
   const live = files.filter((file) => !file.trashed);
   const notices: Notice[] = itemsOf(live, now, { name: "coming-up" })
     .filter((entry) => entry.days <= DUE_DAYS)
@@ -72,7 +72,7 @@ export function dueNotices(files: readonly NoticeFile[], now: number): Notice[] 
       fileId: file.id,
       severity: days < 0 ? "overdue" : "soon",
     }));
-  for (const insight of insightsFor(live, now)) {
+  for (const insight of insightsFor(live, now, trips)) {
     if (insight.severity === "info") {
       continue;
     }

@@ -179,3 +179,13 @@ describe("the Everyday hero", () => {
     expect(onTurnOnDates).toHaveBeenCalled();
   });
 });
+
+describe("the ordinary day counts down only to confirmed times", () => {
+  it("a date nobody has said yes to gets no countdown today", () => {
+    const maybe = row("Dentist", "event", "2026-09-08", "16:00", { ask: true, factIds: ["event:dentist"] });
+    render(true, "San Francisco", everydayOf([maybe], [], NOW));
+    const today = [...container.querySelectorAll(".tln-trow")].find((el) => el.textContent?.includes("Dentist"))!;
+    expect(today.textContent).not.toContain("in ");
+    expect(today.textContent).toContain("not confirmed");
+  });
+});

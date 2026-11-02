@@ -16,6 +16,7 @@ import { isDated, isTracked, type FactEvidence } from "../intel/facts";
 import { isTripCurrent, itemsOf, tripsOf } from "../intel/agenda";
 import { basisLabel, describeFact, shown, whenLabel } from "../intel/describe";
 import { insightsFor, type Insight } from "../intel/insights";
+import { useTripWindows } from "./useTripViews";
 import { duplicatesByDigest } from "../intel/duplicates";
 import { factToCalendar } from "../intel/ics";
 import { triggerDownload } from "../download";
@@ -55,11 +56,18 @@ export function LibraryIntel(props: {
   const [said, setSaid] = useState<string | null>(null);
   const now = Date.now();
   const live = props.files.filter((file) => !file.trashed);
+  // The trips the Timeline's hero checks, so the two say the same thing.
+  const tripWindows = useTripWindows(now, props.files);
 
-  const insights = insightsFor(
-    live.map((file) => ({ id: file.id, name: file.name, facts: file.facts })),
-    now,
-  ).filter((insight) => !hidden.has(insight.id));
+  // Until the trips are read, a trip's checks would be told as plain ones and
+  // then again under the trip, so nothing is told yet.
+  const insights = tripWindows
+    ? insightsFor(
+        live.map((file) => ({ id: file.id, name: file.name, facts: file.facts })),
+        now,
+        tripWindows,
+      ).filter((insight) => !hidden.has(insight.id))
+    : [];
 
   // A rule that already speaks about a file says it better than a bare date
   // would, so the date is not repeated underneath it. Saying the same thing

@@ -125,6 +125,7 @@ import { hasAgenda } from "../intel/agenda";
 import { extractText } from "../intel/extract";
 import { HeadsUp, TripMirror } from "./HeadsUp";
 import { TimelineView } from "./TimelineView";
+import { useTripWindows } from "./useTripViews";
 import { openOn, shouldOpenOnTimeline } from "../timelineprefs";
 import { extension, fileKind, formatBytes } from "../format";
 import { albumTitle, albumsFrom, type Album } from "../albums";
@@ -654,6 +655,8 @@ export function Vault() {
     () => [...store.files.values()].filter((f) => !f.trashed),
     [store.files],
   );
+  // Notifications read the same trips the Timeline and the bell check.
+  const tripWindows = useTripWindows(Date.now());
 
   const categoryCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1627,18 +1630,20 @@ export function Vault() {
   // several times.
   useEffect(() => {
     const account = store.session?.email;
-    if (!account) {
+    // Notifications wait for the trips too: one sent before them is sent again
+    // under the trip's own id.
+    if (!account || !tripWindows) {
       return;
     }
     const timer = setTimeout(() => {
-      void notifyDue(account, dueNotices(liveFiles, Date.now())).then((sent) => {
+      void notifyDue(account, dueNotices(liveFiles, Date.now(), tripWindows)).then((sent) => {
         if (sent > 0) {
           diag("notices", `${sent} notification${sent === 1 ? "" : "s"} sent`);
         }
       });
     }, 3000);
     return () => clearTimeout(timer);
-  }, [liveFiles, store.session?.email]);
+  }, [liveFiles, tripWindows, store.session?.email]);
 
   const stopAsk = useCallback(() => {
     askAbort.current?.abort();

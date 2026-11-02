@@ -140,3 +140,31 @@ describe("newDue and notified", () => {
     expect(newDue(due, loadNotified("b@example.com"))).toHaveLength(due.length);
   });
 });
+
+describe("the bell reads the trips the Timeline reads", () => {
+  it("the bell's passport note matches the hero's", async () => {
+    const { tripChecks } = await import("./intel/insights");
+    const window = {
+      tag: "trip:lisbon-2026-11",
+      start: "2026-11-12",
+      end: "2026-11-16",
+      international: true,
+      memberIds: [],
+      stays: [],
+      overnightLegs: [],
+    };
+    const passport = {
+      id: "pp",
+      name: "passport.pdf",
+      trashed: false,
+      createdAt: 0,
+      tags: [],
+      facts: [{ id: "expiry:2027-03-01", kind: "expiry" as const, document: "passport" as const, value: "2027-03-01", source: "mrz" as const, confidence: 1, accepted: "exact" as const }],
+    };
+    const now = Date.UTC(2026, 9, 26);
+    const hero = tripChecks(window, [passport], now).find((check) => check.ruleId === "passport-short-for-trip")!;
+    const bell = dueNotices([passport], now, [window]).find((notice) => notice.key.startsWith("insight:passport-short-for-trip"))!;
+    expect(bell.title).toBe(hero.title);
+    expect(noticeKeys([passport], now, [window])).toContain(bell.key);
+  });
+});

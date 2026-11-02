@@ -227,3 +227,23 @@ describe("what a trip does not say", () => {
     expect(posterOf(momentOf([stay], now), now, LA)!.cap).toBe("until you leave");
   });
 });
+
+describe("between connections", () => {
+  it("a connection gets no leave-by: the traveller is already airside", async () => {
+    const files = [
+      email("booking", "2026-10-01", [
+        exact("event", "2026-11-12", "Flight AA 10 departs SFO", { time: "08:00" }),
+        exact("event", "2026-11-12", "Flight AA 10 arrives JFK", { time: "16:30" }),
+        exact("event", "2026-11-12", "Flight TP 202 departs JFK", { time: "18:30" }),
+        exact("event", "2026-11-13", "Flight TP 202 arrives LIS", { time: "06:40" }),
+        exact("event", "2026-11-16", "Flight TP 201 departs LIS", { time: "11:00" }),
+        exact("event", "2026-11-16", "Flight TP 201 arrives SFO", { time: "15:00" }),
+      ]),
+      email("hotel", "2026-10-02", hotel()),
+    ];
+    const view = (await lisbonTrip(files)).view;
+    const moment = momentOf([view], at("2026-11-12", "17:00", "America/New_York"));
+    expect(moment.kind).toBe("travel");
+    expect(moment.leaveBy).toBeUndefined();
+  });
+});

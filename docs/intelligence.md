@@ -424,6 +424,34 @@ month has paid and still owes per currency, never converted. The poster
 shows the home city (set in Profile, otherwise the city most journeys start
 from) with its local time and a sky for the hour.
 
+**What a fact is about.** Every reader says what each date is, not only
+when: a departure or an arrival (with its carrier, number and airports), a
+check-in or check-out (with the place and, from booking data, its address),
+a pick-up, the start or end of an event. Booking data, boarding passes,
+invites and the on-device model all state it the same way, so a guesthouse
+booked by a plain email becomes a stay like any hotel once you say yes, and
+a boarding pass joins the flight it was issued for. Each printed time is
+read in its own place's zone: the offset the sender printed, else its
+airport's, else the trip's destination's. The label stays the document's
+own words, and facts stored before this was read keep their meaning from
+those words, so nothing is read again.
+
+**The Timeline follows your trip.** From a month before a trip, the
+Timeline's hero becomes that trip, through seven moments: Planning (the
+countdown, the trip, its checks, what has been spent), Soon (when check-in
+opens, the boarding pass to come, what is ready), Travel day (when to leave
+for the airport, three hours before an international departure and two
+before a domestic one, the boarding pass, the landing against check-in), In
+the air (the flight's progress from its two times, read offline), Staying
+(the night of your stay, the hotel with its reference behind Reveal, today
+in the destination, the flight home), Last day (check out by, leave by),
+and Back home for three days (a recap, the photos from those days, what the
+trip cost). The destination is where the journey stays longest, never a
+hub it changes planes at; day and night counts follow the destination's
+calendar. A date nobody has said yes to sets no time, and a trip flown out
+to with no known way back never says Welcome back. The trip's checks are
+the same ones the bell gives, so the two never disagree.
+
 **Finding connections without a shared reference** is the one place a model
 enters, and only on request. A small zero-shot entity extractor (GLiNER,
 about 180MB, staged by the same script as the semantic-search model and

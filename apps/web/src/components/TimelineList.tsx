@@ -13,7 +13,10 @@ import { dayLabel, money } from "../intel/everyday";
 import { keepOutOfTrip, rememberTripDismissal } from "../intel/trips";
 import { useStore, type FileEntry } from "../store";
 import { usePhotoThumb } from "../thumbs";
-import { Clock } from "./Clock";
+import { Clock, Until } from "./Clock";
+
+/** How near a departure the list marks its stored boarding pass. */
+const PASS_HOURS = 30;
 import { Button } from "./ui/button";
 
 export type TimelineFilter = "all" | "trips" | "bills" | "dates";
@@ -230,6 +233,7 @@ export function TimelineList(props: {
       <TimelineRow
         key={row.id}
         row={row}
+        now={props.now}
         inTrip={tripOn(row.day) !== undefined}
         start={starts.has(row.id)}
         end={ends.has(row.id)}
@@ -278,6 +282,25 @@ export function TimelineList(props: {
 }
 
 /** A photo's thumbnail, or a soft gradient while it loads or when it has none. */
+/** A flight as an airport board shows it: codes, times, the service on the track, and the plane when it is in the air. */
+export function Board(props: { from: string; to: string; dep?: string; arr?: string; number: string; plusDays: number; progress?: number }) {
+  return (
+    <div className="tln-board">
+      <b>{props.from}</b>
+      <span className="tln-tm">{props.dep ?? ""}</span>
+      <span className="tln-track">
+        <span>{props.number}</span>
+        {props.progress !== undefined && <i className="tln-plane" style={{ left: `${Math.round(props.progress * 100)}%` }} />}
+      </span>
+      <b>{props.to}</b>
+      <span className="tln-tm">
+        {props.arr ?? ""}
+        {props.plusDays > 0 && <sup>+{props.plusDays}</sup>}
+      </span>
+    </div>
+  );
+}
+
 export function Tile(props: { file?: FileEntry; index: number; more?: number; onOpen(): void }) {
   const { ref, thumb } = usePhotoThumb<HTMLButtonElement>(
     props.file ?? { id: `tile-${props.index}`, key: new Uint8Array(0), hasThumb: false },
@@ -301,6 +324,7 @@ export function Tile(props: { file?: FileEntry; index: number; more?: number; on
 
 function TimelineRow(props: {
   row: AgendaRow;
+  now: number;
   inTrip: boolean;
   start: boolean;
   end: boolean;
@@ -322,6 +346,11 @@ function TimelineRow(props: {
     event.stopPropagation();
     act();
   };
+  // A flight is in the air between its two printed instants; its boarding
+  // pass is marked from the day before.
+  const leg = row.flight?.leg;
+  const flying = Boolean(leg?.dep?.time && leg.arr?.time && leg.dep.at <= props.now && props.now < leg.arr.at);
+  const passSoon = Boolean(row.flight?.passFileId && leg?.dep && leg.dep.at > props.now && leg.dep.at - props.now <= PASS_HOURS * 3_600_000);
   const classes = [
     "tln-row",
     `tln-k-${row.kind}`,
@@ -376,22 +405,19 @@ function TimelineRow(props: {
           <span className="tln-tag">{row.proposal && props.kept ? "TRIP" : row.tag}</span>
           <span className="tln-chips">
             {row.trip?.evidence === "exact" && <span className="tln-chip tln-chip-trip">{row.trip.name.toUpperCase()}</span>}
+            {passSoon && <span className="tln-chip tln-chip-pass">PASS</span>}
             <span className="tln-chip">{row.source}</span>
           </span>
         </div>
         {row.flight ? (
-          <div className="tln-board">
-            <b>{row.flight.from}</b>
-            <span className="tln-tm">{row.flight.dep ?? ""}</span>
-            <span className="tln-track">
-              <span>{row.flight.number}</span>
-            </span>
-            <b>{row.flight.to}</b>
-            <span className="tln-tm">
-              {row.flight.arr ?? ""}
-              {row.flight.plusDays > 0 && <sup>+{row.flight.plusDays}</sup>}
-            </span>
-          </div>
+          <>
+            <Board {...row.flight} {...(flying ? { progress: (props.now - leg!.dep!.at) / (leg!.arr!.at - leg!.dep!.at) } : {})} />
+            {flying && (
+              <div className="tln-inair">
+                In the air · lands in <Until at={leg!.arr!.at} />
+              </div>
+            )}
+          </>
         ) : (
           <div className="tln-evrow">
             <div>

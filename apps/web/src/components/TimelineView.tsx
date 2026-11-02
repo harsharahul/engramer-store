@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { homeCityGuess, tripsOf } from "../intel/agenda";
 import { localDay, rowsOf, type AgendaRow } from "../intel/agendarows";
 import { everydayOf } from "../intel/everyday";
+import { momentOf } from "../intel/moments";
 import { assembleTripsEnabled } from "../intel/trips";
 import { useStore, type FileEntry } from "../store";
 import { homeCity } from "../timelineprefs";
@@ -17,6 +18,7 @@ import { TimelineHero } from "./TimelineHero";
 import { TimelineList, type TimelineFilter } from "./TimelineList";
 import { useFindConnections } from "./useFindConnections";
 import { useTripPlans } from "./useTripPlans";
+import { useTripViews } from "./useTripViews";
 import { Button } from "./ui/button";
 
 const FILTERS: { key: TimelineFilter; label: string }[] = [
@@ -126,6 +128,11 @@ export function TimelineView(props: {
   }, [props.files]);
   const home = setHome ?? guess ?? zoneCity();
 
+  // The hero follows a near trip through its moments; otherwise it is the ordinary day.
+  // Rows go in only once read: an empty first list would draw a trip with no legs.
+  const views = useTripViews({ ...(loaded ? { rows } : {}), plans, now });
+  const moment = useMemo(() => (views ? momentOf(views, now) : undefined), [views, now]);
+
   // The Month view opens at its top, wherever the list was scrolled.
   useEffect(() => {
     if (mode === "month" && scroller.current) {
@@ -144,6 +151,9 @@ export function TimelineView(props: {
       <aside className="tln-side">
         <TimelineHero
           everyday={everyday}
+          moment={moment}
+          rows={rows}
+          files={props.files}
           homeCity={home}
           now={now}
           factsOn={props.factsOn}

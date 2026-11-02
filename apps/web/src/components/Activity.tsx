@@ -4,6 +4,7 @@ import { progressLabel, unreadCount } from "../activity";
 import { formatDate } from "../format";
 import { loadSeen, markSeen, noticeKeys, NOTICES_SEEN_EVENT, noticeEvents, unseenCount } from "../notices";
 import { LibraryIntel } from "./FactsPanel";
+import { useTripWindows } from "./useTripViews";
 import { InboxGlyph, XGlyph } from "./Icon";
 import { Button } from "./ui/button";
 import { IconButton } from "./ui/icon-button";
@@ -29,7 +30,10 @@ function coarseNow(): number {
 function useNotices() {
   const files = useStore((s) => s.files);
   const account = useStore((s) => s.session?.email ?? "");
-  const keys = useMemo(() => noticeKeys([...files.values()], coarseNow()), [files]);
+  // The same trips the Timeline and the Notices panel check.
+  const trips = useTripWindows(coarseNow());
+  // No unseen keys until the trips are read, or the badge counts a check twice.
+  const keys = useMemo(() => (trips ? noticeKeys([...files.values()], coarseNow(), trips) : []), [files, trips]);
   const [seenTick, setSeenTick] = useState(0);
   useEffect(() => {
     const bump = () => setSeenTick((n) => n + 1);

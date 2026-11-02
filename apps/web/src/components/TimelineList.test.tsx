@@ -301,3 +301,42 @@ describe("the timeline list", () => {
     expect(decided(ACCOUNT, "dismissedTrips").has("anchor:chicago-hotel")).toBe(true);
   });
 });
+
+describe("flights on the list during a trip", () => {
+  // In Lisbon, where this device is: TP 236 leaves San Francisco at 02:10 on 13 Nov and lands at 14:05.
+  const leaves = Date.UTC(2026, 10, 13, 2, 10);
+  const lands = Date.UTC(2026, 10, 13, 14, 5);
+  const outbound = (): AgendaRow => {
+    const base = flight("out", "2026-11-12", "18:10", { endDay: "2026-11-13", endTime: "14:05" });
+    return {
+      ...base,
+      flight: {
+        ...base.flight!,
+        passFileId: "pass",
+        leg: {
+          ...base.flight!.leg,
+          dep: { ...base.flight!.leg.dep!, at: leaves },
+          arr: { day: "2026-11-13", time: "14:05", zone: "Europe/Lisbon", at: lands, code: "LIS", place: "LIS", factId: "out:arr" },
+        },
+      },
+    };
+  };
+
+  it("a flight with its pass shows PASS from a day before", () => {
+    render({ now: leaves - 31 * 3_600_000, rows: [outbound()] });
+    expect(container.querySelector(".tln-chip-pass")).toBeNull();
+    act(() => root.unmount());
+    container.remove();
+    render({ now: leaves - 26 * 3_600_000, rows: [outbound()] });
+    expect(container.querySelector('[data-id="out"] .tln-chip-pass')!.textContent).toBe("PASS");
+  });
+
+  it("a flight in the air says when it lands", () => {
+    const now = Date.UTC(2026, 10, 13, 6, 0);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    render({ now, rows: [outbound()] });
+    expect(container.querySelector('[data-id="out"] .tln-inair')!.textContent).toBe("In the air · lands in 8 h 05 m");
+    expect((container.querySelector('[data-id="out"] .tln-plane') as HTMLElement).style.left).toBe("32%");
+  });
+});

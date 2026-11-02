@@ -7,10 +7,16 @@
 import { useEffect, useState } from "react";
 import { localDay, localTime, zonedDay, zonedTime } from "../intel/agendarows";
 import { airportForCity } from "../intel/airports";
-import { dayLabel, money, skyOf, type Everyday, type Money } from "../intel/everyday";
+import { dayLabel, money, skyOf, type Everyday } from "../intel/everyday";
 import type { AgendaRow } from "../intel/agendarows";
 import { useStore, type FileEntry } from "../store";
+import { deviceZone } from "../intel/instants";
+import { countryName, posterOf, type Moment } from "../intel/moments";
 import { Clock, Until } from "./Clock";
+import type { FactfulFile } from "../intel/insights";
+import { Amounts, Card } from "./TimelineCard";
+import { TripCards } from "./TripCards";
+import { TripPoster } from "./TripPoster";
 import { Tile } from "./TimelineList";
 import { Button } from "./ui/button";
 
@@ -20,48 +26,19 @@ const MEMORY_TILES = 6;
 /** "1 receipt", "2 receipts". */
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 /** Countries the poster names by their short form, as people say them. */
-const SHORT_COUNTRIES: Record<string, string> = { US: "USA", GB: "UK", AE: "UAE" };
-
 function countryOf(code: string): { country?: string } {
-  if (SHORT_COUNTRIES[code]) {
-    return { country: SHORT_COUNTRIES[code] };
-  }
-  try {
-    const name = new Intl.DisplayNames(["en"], { type: "region" }).of(code);
-    return name ? { country: name } : {};
-  } catch {
-    return {};
-  }
+  const name = countryName(code);
+  return name ? { country: name } : {};
 }
 const shortDay = (iso: string) => dayLabel(iso).split(" ").slice(0, 2).join(" ");
 
-function Amounts(props: { sums: Money[] }) {
-  if (props.sums.length === 0) {
-    return <div className="tln-money">none</div>;
-  }
-  return (
-    <div className="tln-money">
-      {props.sums.map((sum) => (
-        <div key={sum.currency}>
-          <small>{sum.currency}</small>
-          <b>{money(sum).slice(sum.currency.length + 1)}</b>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Card(props: { title: string; tone?: "yes" | "dashed"; children: React.ReactNode }) {
-  return (
-    <section className={`tln-card${props.tone ? ` tln-card-${props.tone}` : ""}`}>
-      <div className="tln-hd">{props.title}</div>
-      {props.children}
-    </section>
-  );
-}
-
 export function TimelineHero(props: {
   everyday: Everyday;
+  /** Where a near trip stands; the ordinary day when absent or "everyday". */
+  moment?: Moment;
+  rows?: readonly AgendaRow[];
+  /** The library, for the trip's checks. */
+  files?: readonly FactfulFile[];
   homeCity: string;
   now: number;
   factsOn: boolean;
@@ -95,6 +72,30 @@ export function TimelineHero(props: {
   const sky = skyOf(posterHour);
   const today = localDay(props.now);
   const yes = everyday.needsYes;
+
+  const moment = props.moment;
+  if (moment && moment.kind !== "everyday" && moment.trip) {
+    const view = moment.trip;
+    const photos = (props.rows ?? [])
+      .filter((row) => row.kind === "photos" && row.day >= view.start && row.day <= view.end)
+      .reduce((sum, row) => sum + row.fileIds.length, 0);
+    const poster = posterOf(moment, props.now, home ?? deviceZone(), { photos });
+    return (
+      <div className="tln-hero">
+        {poster && <TripPoster poster={poster} />}
+        <TripCards
+          moment={moment}
+          rows={props.rows ?? []}
+          files={props.files ?? []}
+          now={props.now}
+          onInspect={props.onInspect}
+          onOpen={props.onOpen}
+          onToast={props.onToast}
+          {...(props.fileOf ? { fileOf: props.fileOf } : {})}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="tln-hero">
@@ -144,6 +145,8 @@ export function TimelineHero(props: {
                     </span>
                     {row.past ? (
                       <span className="tln-faint">{row.kind === "bill" ? "paid" : "done"}</span>
+                    ) : row.ask ? (
+                      <span className="tln-faint">not confirmed</span>
                     ) : row.time ? (
                       <span className="tln-soon">
                         in <Until at={row.at} />

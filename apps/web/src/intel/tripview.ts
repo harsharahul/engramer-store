@@ -243,6 +243,7 @@ export function windowOf(view: TripView): TripWindow {
       name: stay.name,
       ...(stay.checkIn ? { checkIn: { day: stay.checkIn.day, ...(stay.checkIn.time ? { time: stay.checkIn.time } : {}) } } : {}),
       ...(stay.checkOut ? { checkOut: { day: stay.checkOut.day } } : {}),
+      fileId: stay.fileId,
     })),
     // Every night between leaving and landing, two across the date line.
     overnightLegs: view.legs.flatMap((leg) => {

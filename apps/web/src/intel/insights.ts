@@ -65,7 +65,8 @@ export interface TripWindow {
   memberIds: string[];
   /** Landing at the destination. */
   firstArrival?: { day: string; time?: string };
-  stays: { name: string; checkIn?: { day: string; time?: string }; checkOut?: { day: string } }[];
+  /** Each stay, with the file that books it, which its check lines open. */
+  stays: { name: string; checkIn?: { day: string; time?: string }; checkOut?: { day: string }; fileId?: string }[];
   /** Days whose night is spent on a plane. */
   overnightLegs: string[];
 }
@@ -405,9 +406,12 @@ const RULES: Rule[] = [
       if (nights.length === 0) {
         return [];
       }
+      const source = window.stays.find((stay) => stay.fileId)?.fileId;
+      const opens = source ? { fileId: source } : {};
       if (open.length > 0) {
         return [
           {
+            // Nothing booked is the point, so there is no file to open.
             state: "note",
             severity: "info",
             title: `${nightsWord(open.length)} ${open.length === 1 ? "has" : "have"} no stay stored`,
@@ -424,7 +428,7 @@ const RULES: Rule[] = [
             return stay.name ? `${nightsWord(count)} at ${stay.name}` : `${nightsWord(count)} booked`;
           }),
       ];
-      return [{ state: "ok", title: "Every night has a place to sleep", text: parts.join(", then ") }];
+      return [{ state: "ok", ...opens, title: "Every night has a place to sleep", text: parts.join(", then ") }];
     },
     run(files, now, held) {
       return confirmedSpans(files, now, held).flatMap((span) => {
@@ -463,6 +467,7 @@ const RULES: Rule[] = [
         {
           state: "note",
           severity: "info",
+          ...(stay.fileId ? { fileId: stay.fileId } : {}),
           title: `You land at ${landing.time}; check-in opens at ${stay.checkIn.time}`,
           text: stay.name ? `At ${stay.name}, on ${dayMonth(landing.day)}.` : `On ${dayMonth(landing.day)}.`,
         },
