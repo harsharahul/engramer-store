@@ -74,6 +74,43 @@ describe("legsOf", () => {
     ]);
   });
 
+  it("a flight that lands at an earlier printed clock than it left is still one leg", async () => {
+    // Tokyo 17:00 to Los Angeles 11:00 the same printed day, eleven hours later.
+    const [leg, ...rest] = await legsOf(
+      entries("pacific", [
+        exact("2026-11-12", "Flight NH 6 departs HND", { time: "17:00", zone: "+09:00" }),
+        exact("2026-11-12", "Flight NH 6 arrives LAX", { time: "11:00", zone: "-08:00" }),
+      ]),
+    );
+    expect(rest).toEqual([]);
+    expect(leg).toMatchObject({ from: "HND", to: "LAX" });
+    expect(leg!.arr!.at - leg!.dep!.at).toBe(11 * 3_600_000);
+  });
+
+  it("a flight that lands at the same printed clock it left is still one leg", async () => {
+    // Helsinki 08:00 to Stockholm 08:00, an hour later.
+    const [leg, ...rest] = await legsOf(
+      entries("baltic", [
+        exact("2026-11-12", "Flight AY 641 arrives ARN", { time: "08:00", zone: "+01:00" }),
+        exact("2026-11-12", "Flight AY 641 departs HEL", { time: "08:00", zone: "+02:00" }),
+      ]),
+    );
+    expect(rest).toEqual([]);
+    expect(leg).toMatchObject({ from: "HEL", to: "ARN" });
+  });
+
+  it("legs of one reservation pair by it whatever their printed order", async () => {
+    const said = (role: "depart" | "arrive", code: string, reservation: number) =>
+      ({ role, mode: "flight", carrier: "NH", number: "6", code, reservation }) as const;
+    const legs = await legsOf(
+      entries("pacific", [
+        exact("2026-11-12", "Flight NH 6 departs HND", { time: "17:00", zone: "+09:00", subject: said("depart", "HND", 0) }),
+        exact("2026-11-12", "Flight NH 6 arrives LAX", { time: "11:00", zone: "-08:00", subject: said("arrive", "LAX", 0) }),
+      ]),
+    );
+    expect(legs.map((leg) => [leg.from, leg.to])).toEqual([["HND", "LAX"]]);
+  });
+
   it("a boarding pass for a booked flight joins that flight", async () => {
     const legs = await legsOf([...booking(), ...entries("pass", [pass("2026-11-12")], true)]);
     expect(legs).toHaveLength(2);

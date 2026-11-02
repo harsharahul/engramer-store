@@ -55,6 +55,7 @@ interface Held {
   fact: Fact;
   ask: boolean;
   subject: Subject & { mode: Mode };
+  stop: Stop;
 }
 
 interface Draft {
@@ -83,49 +84,7 @@ export async function legsOf(
   entries: readonly DatedEntry[],
   tripZoneOf: (fileId: string) => Promise<string | undefined> = async () => undefined,
 ): Promise<Leg[]> {
-  const groups = new Map<string, { fileId: string; key: string; held: Held[] }>();
-  for (const { fileId, fact, ask } of entries) {
-    const subject = fact.kind === "event" ? subjectOf(fact) : undefined;
-    if (!isLegEnd(subject)) {
-      continue;
-    }
-    const key = keyOf(subject);
-    const group = groups.get(`${fileId}|${key}`) ?? { fileId, key, held: [] };
-    group.held.push({ fact, ask, subject });
-    groups.set(`${fileId}|${key}`, group);
-  }
-
-  const drafts: Draft[] = [];
-  for (const { fileId, key, held } of groups.values()) {
-    held.sort(
-      (a, b) =>
-        `${a.fact.value} ${a.fact.time ?? ""}`.localeCompare(`${b.fact.value} ${b.fact.time ?? ""}`) ||
-        a.fact.id.localeCompare(b.fact.id),
-    );
-    const mine: Draft[] = [];
-    let latest: Draft | undefined;
-    for (const item of held) {
-      if (item.subject.role === "depart") {
-        latest = { fileId, key, departs: item, ask: item.ask };
-        mine.push(latest);
-        continue;
-      }
-      const reservation = item.subject.reservation;
-      const mate =
-        (reservation !== undefined
-          ? mine.find((draft) => !draft.arrives && draft.departs?.subject.reservation === reservation)
-          : undefined) ?? (latest && !latest.arrives ? latest : undefined);
-      if (mate) {
-        mate.arrives = item;
-        mate.ask ||= item.ask;
-      } else {
-        mine.push({ fileId, key, arrives: item, ask: item.ask });
-      }
-    }
-    drafts.push(...mine);
-  }
-
-  const stop = async (fileId: string, { fact, subject }: Held): Promise<Stop> => {
+  const stopOf = async (fileId: string, fact: Fact, subject: Subject): Promise<Stop> => {
     const zone = await zoneOf(fact, { tripZone: await tripZoneOf(fileId) });
     return {
       day: fact.value,
@@ -137,6 +96,64 @@ export async function legsOf(
       factId: fact.id,
     };
   };
+
+  const groups = new Map<string, { fileId: string; key: string; held: Held[] }>();
+  for (const { fileId, fact, ask } of entries) {
+    const subject = fact.kind === "event" ? subjectOf(fact) : undefined;
+    if (!isLegEnd(subject)) {
+      continue;
+    }
+    const key = keyOf(subject);
+    const group = groups.get(`${fileId}|${key}`) ?? { fileId, key, held: [] };
+    group.held.push({ fact, ask, subject, stop: await stopOf(fileId, fact, subject) });
+    groups.set(`${fileId}|${key}`, group);
+  }
+
+  const drafts: Draft[] = [];
+  for (const { fileId, key, held } of groups.values()) {
+    // Ends of one reservation belong together, whatever their printed order.
+    const slots = new Map<number, { departs?: Held; arrives?: Held }>();
+    const loose: Held[] = [];
+    for (const item of held) {
+      const reservation = item.subject.reservation;
+      const side = item.subject.role === "depart" ? "departs" : "arrives";
+      const slot = reservation === undefined ? undefined : (slots.get(reservation) ?? {});
+      if (!slot || slot[side]) {
+        loose.push(item);
+        continue;
+      }
+      slot[side] = item;
+      slots.set(reservation!, slot);
+    }
+    for (const slot of slots.values()) {
+      if (slot.departs && slot.arrives) {
+        drafts.push({ fileId, key, departs: slot.departs, arrives: slot.arrives, ask: slot.departs.ask || slot.arrives.ask });
+      } else {
+        loose.push((slot.departs ?? slot.arrives)!);
+      }
+    }
+    // The rest pair in real time: each departure with the next arrival after
+    // it. Printed clocks cannot order them: an eastbound Pacific flight lands
+    // at an earlier printed clock than it left.
+    loose.sort(
+      (a, b) =>
+        a.stop.at - b.stop.at ||
+        (a.subject.role === b.subject.role ? 0 : a.subject.role === "depart" ? -1 : 1) ||
+        a.fact.id.localeCompare(b.fact.id),
+    );
+    let latest: Draft | undefined;
+    for (const item of loose) {
+      if (item.subject.role === "depart") {
+        latest = { fileId, key, departs: item, ask: item.ask };
+        drafts.push(latest);
+      } else if (latest && !latest.arrives) {
+        latest.arrives = item;
+        latest.ask ||= item.ask;
+      } else {
+        drafts.push({ fileId, key, arrives: item, ask: item.ask });
+      }
+    }
+  }
 
   const legs: Leg[] = [];
   const passes = new Set<Leg>();
@@ -150,8 +167,8 @@ export async function legsOf(
       from: nameOf(leaving),
       // A boarding pass names both ends on its one departure.
       to: draft.arrives ? nameOf(draft.arrives.subject) : (arrivalCode(leaving) ?? ""),
-      ...(draft.departs ? { dep: await stop(draft.fileId, draft.departs) } : {}),
-      ...(draft.arrives ? { arr: await stop(draft.fileId, draft.arrives) } : {}),
+      ...(draft.departs ? { dep: draft.departs.stop } : {}),
+      ...(draft.arrives ? { arr: draft.arrives.stop } : {}),
       fileId: draft.fileId,
       factIds: [draft.departs?.fact.id, draft.arrives?.fact.id].filter((id): id is string => id !== undefined),
       ask: draft.ask,
