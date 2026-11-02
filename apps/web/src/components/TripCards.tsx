@@ -11,7 +11,7 @@ import type { FactEvidence } from "../intel/facts";
 import { tripChecks, type Check, type FactfulFile } from "../intel/insights";
 import { zonedDay, zonedTime } from "../intel/instants";
 import type { Leg } from "../intel/legs";
-import { rangeLabel, type Moment } from "../intel/moments";
+import { journeyOf, rangeLabel, type Moment } from "../intel/moments";
 import { comingUp, tripSpend, windowOf, type Stay, type TripView } from "../intel/tripview";
 import { useStore, type FileEntry } from "../store";
 import { Until } from "./Clock";
@@ -49,8 +49,12 @@ const mapsUrl = (place: string) => `https://maps.apple.com/?q=${encodeURICompone
 
 /** The leg that lands at the trip's destination. */
 function landingOf(view: TripView): Leg | undefined {
-  return view.legs.find((leg) => leg.arr && leg.arr.code !== undefined && leg.arr.code === view.code) ?? view.legs.find((leg) => leg.arr);
+  return journeyOf(view).arrival;
 }
+
+/** "Flight", "Train": how a leg travels, for its card's words. */
+const modeWord = (leg: Leg) => leg.mode[0]!.toUpperCase() + leg.mode.slice(1);
+const plusDays = (leg: Leg) => (leg.dep && leg.arr ? dayNumber(leg.arr.day) - dayNumber(leg.dep.day) : 0);
 
 const PHOTO_TILES = 6;
 const BOOKED_SHOWN = 3;
@@ -83,8 +87,7 @@ export interface TripCardProps {
 
 function TheTrip(props: { view: TripView; onInspect(fileId: string): void }) {
   const { view } = props;
-  const out = view.legs.find((leg) => leg.dep);
-  const back = view.legs.length > 1 ? view.legs.at(-1) : undefined;
+  const { outbound: out, homeward: back } = journeyOf(view);
   const flights = [
     out?.dep?.time ? `${named(out)} out ${weekday(out.dep.day)} ${out.dep.time}` : "",
     back?.dep?.time ? `${named(back)} home ${weekday(back.dep.day)} ${back.dep.time}` : "",
@@ -101,7 +104,7 @@ function TheTrip(props: { view: TripView; onInspect(fileId: string): void }) {
       <div className="tln-kv tln-kv-gap">
         {flights.length > 0 && (
           <>
-            <span>Flights</span>
+            <span>{view.legs.every((leg) => leg.mode === "flight") ? "Flights" : "Journeys"}</span>
             <div>{flights.join(" · ")}</div>
           </>
         )}
@@ -219,7 +222,7 @@ function WelcomeBack(props: { view: TripView }) {
   const { view } = props;
   const stats: [number, string][] = [
     [dayNumber(view.end) - dayNumber(view.start) + 1, "day"],
-    [view.legs.length, "flight"],
+    [view.legs.length, view.legs.every((leg) => leg.mode === "flight") ? "flight" : "journey"],
     [view.stays.reduce((sum, stay) => sum + stay.nights, 0), "night"],
     [view.booked.length, "booking"],
   ];
@@ -303,6 +306,10 @@ function CheckIn(props: { moment: Moment; now: number; onInspect(fileId: string)
 
 function BoardingPass(props: { leg: Leg | undefined; now: number; onOpen(fileId: string): void }) {
   const leg = props.leg;
+  // Only a flight has a boarding pass to wait for.
+  if (leg?.mode !== "flight") {
+    return null;
+  }
   if (!leg?.dep || leg.dep.at <= props.now || leg.dep.at - props.now > PASS_HOURS * HOUR_MS) {
     return null;
   }
@@ -351,9 +358,10 @@ function BoardingPass(props: { leg: Leg | undefined; now: number; onOpen(fileId:
   );
 }
 
-function LeaveBy(props: { moment: Moment }) {
+function LeaveBy(props: { moment: Moment; now: number }) {
   const leave = props.moment.leaveBy;
-  if (!leave) {
+  // Once the time to leave has passed, the card has nothing left to say.
+  if (!leave || leave.at <= props.now) {
     return null;
   }
   return (
@@ -370,6 +378,7 @@ function Hotel(props: {
   mode: "stay" | "land" | "out";
   moment: Moment;
   files: readonly FactfulFile[];
+  now: number;
   onInspect(fileId: string): void;
 }) {
   const view = props.moment.trip!;
@@ -395,7 +404,7 @@ function Hotel(props: {
 
   if (props.mode === "out") {
     const out = stay?.checkOut;
-    if (!stay || !out?.time) {
+    if (!stay || !out?.time || out.at <= props.now) {
       return null;
     }
     return (
@@ -520,7 +529,7 @@ function InTheAir(props: { moment: Moment }) {
   const lands = leg.arr!.code ? (view.cities[leg.arr!.code] ?? leg.to) : leg.to;
   return (
     <Card title="In the air" aside={named(leg)}>
-      <Board from={leg.from} to={leg.to} dep={leg.dep?.time} arr={leg.arr!.time} number={leg.designator} plusDays={0} progress={progress} />
+      <Board from={leg.from} to={leg.to} dep={leg.dep?.time} arr={leg.arr!.time} number={leg.designator} plusDays={plusDays(leg)} progress={progress} />
       <div className="tln-prog">
         <div className="tln-prog-fill" style={{ width: `${Math.round(progress * 100)}%` }} />
       </div>
@@ -541,8 +550,8 @@ function FlightHome(props: { moment: Moment; onInspect(fileId: string): void }) 
   const leave = props.moment.leaveBy;
   const opens = props.moment.checkInOpens;
   return (
-    <Card title="Flight home" aside={dayLabel(leg.dep.day)}>
-      <Board from={leg.from} to={leg.to} dep={leg.dep.time} arr={leg.arr?.time} number={leg.designator} plusDays={0} />
+    <Card title={`${modeWord(leg)} home`} aside={dayLabel(leg.dep.day)}>
+      <Board from={leg.from} to={leg.to} dep={leg.dep.time} arr={leg.arr?.time} number={leg.designator} plusDays={plusDays(leg)} />
       <div className="tln-kv tln-kv-gap">
         {leave && (
           <>
@@ -641,30 +650,39 @@ export function TripCards(props: TripCardProps) {
     case "travel":
       return (
         <>
-          <LeaveBy moment={props.moment} />
+          <LeaveBy moment={props.moment} now={props.now} />
           <BoardingPass leg={props.moment.next} now={props.now} onOpen={props.onOpen} />
-          <Hotel mode="land" moment={props.moment} files={props.files} onInspect={props.onInspect} />
+          <Hotel mode="land" moment={props.moment} files={props.files} now={props.now} onInspect={props.onInspect} />
         </>
       );
-    case "air":
+    case "air": {
+      // On the way out, the landing and the destination's tomorrow; on the way home, the flight alone.
+      const flying = props.moment.flying?.leg;
+      const arrival = journeyOf(view).arrival;
+      const outward = flying !== undefined && arrival?.arr !== undefined && flying.dep !== undefined && flying.dep.at < arrival.arr.at;
       return (
         <>
           <InTheAir moment={props.moment} />
-          <Hotel mode="land" moment={props.moment} files={props.files} onInspect={props.onInspect} />
-          <DestinationDay
-            title={`Tomorrow in ${view.city}`}
-            day={nextDay(zonedDay(props.now, view.zone))}
-            rows={props.rows}
-            now={props.now}
-            onInspect={props.onInspect}
-          />
+          {outward && (
+            <>
+              <Hotel mode="land" moment={props.moment} files={props.files} now={props.now} onInspect={props.onInspect} />
+              <DestinationDay
+                title={`Tomorrow in ${view.city}`}
+                day={nextDay(zonedDay(props.now, view.zone))}
+                rows={props.rows}
+                now={props.now}
+                onInspect={props.onInspect}
+              />
+            </>
+          )}
         </>
       );
+    }
     case "staying": {
       const today = zonedDay(props.now, view.zone);
       return (
         <>
-          <Hotel mode="stay" moment={props.moment} files={props.files} onInspect={props.onInspect} />
+          <Hotel mode="stay" moment={props.moment} files={props.files} now={props.now} onInspect={props.onInspect} />
           <DestinationDay title={`Today · ${dayLabel(today)}`} day={today} rows={props.rows} now={props.now} onInspect={props.onInspect} />
           <FlightHome moment={props.moment} onInspect={props.onInspect} />
           {spent("Spent so far")}
@@ -674,8 +692,8 @@ export function TripCards(props: TripCardProps) {
     case "last":
       return (
         <>
-          <Hotel mode="out" moment={props.moment} files={props.files} onInspect={props.onInspect} />
-          <LeaveBy moment={props.moment} />
+          <Hotel mode="out" moment={props.moment} files={props.files} now={props.now} onInspect={props.onInspect} />
+          <LeaveBy moment={props.moment} now={props.now} />
           <BoardingPass leg={props.moment.next} now={props.now} onOpen={props.onOpen} />
           {spent("Spent on this trip")}
         </>

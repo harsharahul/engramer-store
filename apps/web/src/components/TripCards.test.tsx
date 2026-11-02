@@ -4,7 +4,7 @@ process.env.TZ = "America/Los_Angeles";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { email, exact, file, lisbonFiles, lisbonTrip, TAG } from "../intel/__fixtures__/lisbon";
+import { email, exact, file, hotel, lisbonFiles, lisbonTrip, TAG } from "../intel/__fixtures__/lisbon";
 import type { AgendaRow, RowFile } from "../intel/agendarows";
 import { instantOf } from "../intel/instants";
 import { momentOf } from "../intel/moments";
@@ -313,5 +313,74 @@ describe("the cards as the prototype draws them", () => {
     useStore.setState({ factEvidence: vi.fn(async () => []) });
     mount(instantOf("2026-11-14", "15:42", LIS));
     expect(kv(card("Staying")).Booking).toContain("…9C1D");
+  });
+});
+
+describe("the cards say only what is true now", () => {
+  const LIS = "Europe/Lisbon";
+  const headers = () => [...container.querySelectorAll(".tln-hd")].map((hd) => hd.firstChild?.textContent);
+  const connecting = () => [
+    email("booking", "2026-10-01", [
+      exact("event", "2026-11-12", "Flight AA 10 departs SFO", { time: "08:00" }),
+      exact("event", "2026-11-12", "Flight AA 10 arrives JFK", { time: "16:30" }),
+      exact("event", "2026-11-12", "Flight TP 202 departs JFK", { time: "18:30" }),
+      exact("event", "2026-11-13", "Flight TP 202 arrives LIS", { time: "06:40" }),
+      exact("event", "2026-11-16", "Flight TP 201 departs LIS", { time: "11:00" }),
+      exact("event", "2026-11-16", "Flight TP 201 arrives JFK", { time: "13:30" }),
+      exact("event", "2026-11-16", "Flight AA 11 departs JFK", { time: "15:30" }),
+      exact("event", "2026-11-16", "Flight AA 11 arrives SFO", { time: "19:00" }),
+      exact("identifier", "4F2K", "Confirmation number", { masked: "4F2K" }),
+    ]),
+    email("hotel", "2026-10-02", hotel()),
+  ];
+  const rail = () => [
+    email("tickets", "2026-10-01", [
+      exact("event", "2026-11-12", "Train IC 521 departs Porto Campanha", { time: "08:05" }),
+      exact("event", "2026-11-12", "Train IC 521 arrives Lisboa Santa Apolonia", { time: "10:55" }),
+      exact("event", "2026-11-16", "Train IC 530 departs Lisboa Santa Apolonia", { time: "17:00" }),
+      exact("event", "2026-11-16", "Train IC 530 arrives Porto Campanha", { time: "19:50" }),
+    ]),
+    email("hotel", "2026-10-02", hotel()),
+  ];
+
+  it("flying home shows no landing at the destination", () => {
+    useStore.setState({ factEvidence: vi.fn(async () => []) });
+    mount(instantOf("2026-11-16", "15:00", LIS));
+    expect(headers()).toEqual(["In the air"]);
+  });
+
+  it("a leave-by or check-out time already past is gone", () => {
+    useStore.setState({ factEvidence: vi.fn(async () => []) });
+    mount(instantOf("2026-11-12", "17:00", LA));
+    expect(headers()).not.toContain("Leave for SFO by");
+    act(() => root.unmount());
+    container.remove();
+    mount(instantOf("2026-11-16", "12:30", LIS));
+    expect(headers()).not.toContain("Check out by");
+    expect(headers()).not.toContain("Leave for LIS by");
+  });
+
+  it("the trip card names the first flight home", async () => {
+    const connected = await lisbonTrip(connecting());
+    mount(PLANNING, connected);
+    expect(kv(card("The trip")).Flights).toBe("AA 10 out Thu 08:00 · TP 201 home Mon 11:00");
+  });
+
+  it("a journey by train asks nothing about check-in or boarding passes", async () => {
+    useStore.setState({ factEvidence: vi.fn(async () => []) });
+    const byTrain = await lisbonTrip(rail(), [], true);
+    mount(instantOf("2026-11-11", "09:00", LIS), byTrain);
+    expect(headers()).not.toContain("Check-in");
+    expect(headers()).not.toContain("Boarding pass");
+    act(() => root.unmount());
+    container.remove();
+    mount(instantOf("2026-11-14", "12:00", LIS), byTrain);
+    expect(headers()).toContain("Train home");
+  });
+
+  it("a flight that lands the next day shows +1 on the hero", () => {
+    useStore.setState({ factEvidence: vi.fn(async () => []) });
+    mount(instantOf("2026-11-13", "06:00", LIS));
+    expect(card("In the air")!.querySelector(".tln-tm sup")!.textContent).toBe("+1");
   });
 });

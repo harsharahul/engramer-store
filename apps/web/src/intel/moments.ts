@@ -50,12 +50,23 @@ interface Shape {
   lastStay?: Stay;
 }
 
-function shapeOf(view: TripView): Shape {
+/**
+ * A trip's journey: the first leg out, the leg that lands at the
+ * destination, and the first leg that leaves it again. The poster, the
+ * moments and the cards all read the journey from here.
+ */
+export function journeyOf(view: TripView): { outbound?: Leg; arrival?: Leg; homeward?: Leg } {
   const legs = view.legs;
   const outbound = legs.find((leg) => leg.dep);
   const arrival = legs.find((leg) => leg.arr && leg.arr.code !== undefined && leg.arr.code === view.code) ?? legs.find((leg) => leg.arr);
   // The way home starts with the first leg that leaves the destination.
   const homeward = arrival?.arr ? legs.find((leg) => leg !== arrival && leg.dep && leg.dep.at >= arrival.arr!.at) : undefined;
+  return { ...(outbound ? { outbound } : {}), ...(arrival ? { arrival } : {}), ...(homeward ? { homeward } : {}) };
+}
+
+function shapeOf(view: TripView): Shape {
+  const legs = view.legs;
+  const { outbound, arrival, homeward } = journeyOf(view);
   const firstStay = view.stays[0];
   const lastStay = view.stays.at(-1);
   const last = legs.at(-1);
@@ -115,9 +126,16 @@ export function momentOf(views: readonly TripView[], now: number): Moment {
     const advice = leg ? view.leaveBy[view.legs.indexOf(leg)] : null;
     return advice && leg?.dep?.code ? { leaveBy: { ...advice, code: leg.dep.code } } : {};
   };
-  // A departure with no printed time has no check-in hour and no countdown.
-  const departing = (leg: Leg | undefined) =>
-    leg?.dep ? { next: leg, ...(leg.dep.time ? { checkInOpens: leg.dep.at - 24 * HOUR } : {}), ...leave(leg) } : {};
+  // A departure with no printed time has no check-in hour and no countdown;
+  // only a flight has an online check-in to open.
+  const departing = (leg: Leg | undefined, leaving = true) =>
+    leg?.dep
+      ? {
+          next: leg,
+          ...(leg.dep.time && leg.mode === "flight" ? { checkInOpens: leg.dep.at - 24 * HOUR } : {}),
+          ...(leaving ? leave(leg) : {}),
+        }
+      : {};
   const dayCount = () => {
     const of = dayNumber(view.end) - dayNumber(view.start) + 1;
     const n = Math.min(Math.max(dayNumber(destDay) - dayNumber(view.start) + 1, 1), of);
@@ -146,8 +164,8 @@ export function momentOf(views: readonly TripView[], now: number): Moment {
   }
   const arrivalAt = shape.arrival?.arr?.at;
   if (outbound?.dep && arrivalAt !== undefined && now >= leaves(outbound.dep) && now < arrivalAt) {
-    // Between connections on the way out.
-    return { kind: "travel", ...base, ...departing(view.legs.find((leg) => leg.dep && leg.dep.at > now)) };
+    // Between connections on the way out: already airside, so no leave-by.
+    return { kind: "travel", ...base, ...departing(view.legs.find((leg) => leg.dep && leg.dep.at > now), false) };
   }
   if (!outbound && shape.firstStay?.checkIn && now < shape.firstStay.checkIn.at && destDay === shape.firstStay.checkIn.day) {
     return { kind: "travel", ...base };
