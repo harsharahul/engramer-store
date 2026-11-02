@@ -72,6 +72,8 @@ export function TimelineList(props: {
   onInspect(fileId: string): void;
   onOpen(fileId: string): void;
   onToast(text: string): void;
+  /** Opens a trip's page. */
+  onOpenTrip?(tag: string): void;
   fileOf?(id: string): FileEntry | undefined;
   /** The file open in the details pane, whose row is marked. */
   selectedFileId?: string;
@@ -243,6 +245,7 @@ export function TimelineList(props: {
         fileOf={props.fileOf}
         onInspect={() => (row.kind === "photos" ? props.onOpen(row.fileIds[0]!) : props.onInspect(row.fileIds[0]!))}
         onOpenFile={props.onOpen}
+        {...(props.onOpenTrip ? { onOpenTrip: props.onOpenTrip } : {})}
         onAdd={() => {
           void addToTrip([row.fileIds[0]!], row.trip!.tag);
           props.onToast(`Added to ${row.trip!.name}. The trip total is updated.`);
@@ -334,6 +337,7 @@ function TimelineRow(props: {
   fileOf?(id: string): FileEntry | undefined;
   onInspect(): void;
   onOpenFile(id: string): void;
+  onOpenTrip?(tag: string): void;
   onAdd(): void;
   onNo(): void;
   onConfirm(): void;
@@ -404,7 +408,19 @@ function TimelineRow(props: {
         <div className="tln-evtop">
           <span className="tln-tag">{row.proposal && props.kept ? "TRIP" : row.tag}</span>
           <span className="tln-chips">
-            {row.trip?.evidence === "exact" && <span className="tln-chip tln-chip-trip">{row.trip.name.toUpperCase()}</span>}
+            {row.trip?.evidence === "exact" &&
+              (props.onOpenTrip ? (
+                <button
+                  type="button"
+                  className="tln-chip tln-chip-trip"
+                  title={`Open ${row.trip.name}`}
+                  onClick={stop(() => props.onOpenTrip!(row.trip!.tag))}
+                >
+                  {row.trip.name.toUpperCase()}
+                </button>
+              ) : (
+                <span className="tln-chip tln-chip-trip">{row.trip.name.toUpperCase()}</span>
+              ))}
             {passSoon && <span className="tln-chip tln-chip-pass">PASS</span>}
             <span className="tln-chip">{row.source}</span>
           </span>

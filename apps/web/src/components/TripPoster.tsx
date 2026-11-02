@@ -4,14 +4,29 @@
  * only lays them out, with the clock and any countdown ticking in place.
  */
 
+import type { KeyboardEvent } from "react";
 import type { Poster } from "../intel/moments";
 import { Clock, Until } from "./Clock";
 
-export function TripPoster(props: { poster: Poster }) {
-  const { poster } = props;
+export function TripPoster(props: { poster: Poster; /** Opens the trip's page. */ onOpen?(): void }) {
+  const { poster, onOpen } = props;
   const sky = poster.sky;
+  const opens = onOpen
+    ? {
+        role: "button",
+        tabIndex: 0,
+        title: "Open the trip",
+        onClick: onOpen,
+        onKeyDown: (event: KeyboardEvent) => {
+          if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+            event.preventDefault();
+            onOpen();
+          }
+        },
+      }
+    : {};
   return (
-    <div className="tln-poster">
+    <div className={`tln-poster${onOpen ? " tln-poster-opens" : ""}`} {...opens}>
       <div className={`tln-sky tln-sky-${sky}${sky === "night" ? " tln-stars" : ""}`} />
       {poster.code && <div className="tln-wm">{poster.code}</div>}
       <div className="tln-pin">

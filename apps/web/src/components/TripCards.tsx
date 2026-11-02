@@ -88,6 +88,8 @@ export interface TripCardProps {
   onInspect(fileId: string): void;
   onOpen(fileId: string): void;
   onToast(text: string): void;
+  /** Opens a trip's page. */
+  onOpenTrip?(tag: string): void;
   fileOf?(id: string): FileEntry | undefined;
 }
 
@@ -259,7 +261,7 @@ function ComingUp(props: { rows: AgendaRow[]; onInspect(fileId: string): void })
   );
 }
 
-function WelcomeBack(props: { view: TripView }) {
+function WelcomeBack(props: { view: TripView; onOpenTrip?(tag: string): void }) {
   const { view } = props;
   const stats: [number, string][] = [
     [dayNumber(view.end) - dayNumber(view.start) + 1, "day"],
@@ -282,6 +284,13 @@ function WelcomeBack(props: { view: TripView }) {
             </div>
           ))}
       </div>
+      {props.onOpenTrip && (
+        <div className="tln-actions">
+          <Button size="xs" variant="secondary" onClick={() => props.onOpenTrip!(view.tag)}>
+            Open trip
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -700,7 +709,7 @@ export function TripCards(props: TripCardProps) {
     case "home":
       return (
         <>
-          <WelcomeBack view={view} />
+          <WelcomeBack view={view} {...(props.onOpenTrip ? { onOpenTrip: props.onOpenTrip } : {})} />
           <Photos view={view} rows={props.rows} onOpen={props.onOpen} {...(props.fileOf ? { fileOf: props.fileOf } : {})} />
           {spent("Spent on this trip")}
           {next}

@@ -18,6 +18,7 @@ let root: Root;
 const onInspect = vi.fn();
 const onOpen = vi.fn();
 const onToast = vi.fn();
+const onOpenTrip = vi.fn();
 const addToTrip = vi.fn(async () => {});
 
 const passport = file("passport", [exact("expiry", "2029-03-20", "Date of expiry", { document: "passport", source: "mrz" })]);
@@ -56,7 +57,16 @@ function mount(now: number, of = trip) {
   root = createRoot(container);
   act(() =>
     root.render(
-      <TripCards moment={momentOf([of.view], now)} rows={of.rows} files={of.files} now={now} onInspect={onInspect} onOpen={onOpen} onToast={onToast} />,
+      <TripCards
+        moment={momentOf([of.view], now)}
+        rows={of.rows}
+        files={of.files}
+        now={now}
+        onInspect={onInspect}
+        onOpen={onOpen}
+        onToast={onToast}
+        onOpenTrip={onOpenTrip}
+      />,
     ),
   );
 }
@@ -126,6 +136,13 @@ describe("the trip's cards while planning", () => {
 });
 
 describe("the trip's cards back home", () => {
+  it("Welcome back opens the trip", () => {
+    mount(HOME);
+    const open = [...card("Welcome back")!.querySelectorAll("button")].find((b) => b.textContent === "Open trip")!;
+    act(() => open.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(onOpenTrip).toHaveBeenCalledWith(trip.view.tag);
+  });
+
   it("back home shows the recap and the photos", () => {
     mount(HOME);
     expect([...container.querySelectorAll(".tln-hd")].map((hd) => hd.textContent)).toEqual([

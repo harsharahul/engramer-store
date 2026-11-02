@@ -18,7 +18,7 @@ import { TimelineHero } from "./TimelineHero";
 import { TimelineList, type TimelineFilter } from "./TimelineList";
 import { useFindConnections } from "./useFindConnections";
 import { useTripPlans } from "./useTripPlans";
-import { useTripViews } from "./useTripViews";
+import { useTripView, useTripViews } from "./useTripViews";
 import { Button } from "./ui/button";
 
 const FILTERS: { key: TimelineFilter; label: string }[] = [
@@ -43,11 +43,16 @@ function zoneCity(): string {
 export function TimelineView(props: {
   files: FileEntry[];
   factsOn: boolean;
-  focus?: { day?: string; now?: boolean; nonce: number };
+  /** A day, now, or a trip's page asked for from elsewhere; a new nonce asks again. */
+  focus?: { day?: string; now?: boolean; trip?: string; nonce: number };
   onInspect(fileId: string): void;
   onOpen(fileId: string): void;
   onToast(text: string): void;
   onTurnOnDates(): void;
+  /** Opens a trip's page; the list stays where it is behind it. */
+  onOpenTrip?(tag: string): void;
+  /** Closes the trip's page. */
+  onCloseTrip?(): void;
   /** The file open in the details pane, marked on the list. */
   selectedFileId?: string;
 }) {
@@ -72,9 +77,10 @@ export function TimelineView(props: {
     setScrollTo((held) => ({ ...target, nonce: held.nonce + 1 }));
   };
 
-  // A request from elsewhere: Go to now, or a date opened from Notices.
+  // A request from elsewhere: Go to now, or a date opened from Notices. A
+  // trip's page opens over the list and leaves it where it was.
   useEffect(() => {
-    if (props.focus) {
+    if (props.focus && !props.focus.trip) {
       go(props.focus);
     }
     // Only a new request moves the view.
@@ -133,6 +139,18 @@ export function TimelineView(props: {
   const views = useTripViews({ ...(loaded ? { rows } : {}), plans, now });
   const moment = useMemo(() => (views ? momentOf(views, now) : undefined), [views, now]);
 
+  // The trip whose page is open, near or far. A trip taken apart meanwhile
+  // (here or on another device) closes its page.
+  const tripTag = props.focus?.trip;
+  const tripView = useTripView(tripTag, { ...(loaded ? { rows } : {}), plans, now });
+  useEffect(() => {
+    if (tripTag && tripView === null) {
+      props.onCloseTrip?.();
+    }
+    // Only a trip that turns out not to exist closes the page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripTag, tripView]);
+
   // The Month view opens at its top, wherever the list was scrolled.
   useEffect(() => {
     if (mode === "month" && scroller.current) {
@@ -161,6 +179,7 @@ export function TimelineView(props: {
           onOpen={props.onOpen}
           onToast={props.onToast}
           onTurnOnDates={props.onTurnOnDates}
+          {...(props.onOpenTrip ? { onOpenTrip: props.onOpenTrip } : {})}
           fileOf={(id) => storeFiles.get(id)}
         />
       </aside>
@@ -216,6 +235,7 @@ export function TimelineView(props: {
               onInspect={props.onInspect}
               onOpen={props.onOpen}
               onToast={props.onToast}
+              {...(props.onOpenTrip ? { onOpenTrip: props.onOpenTrip } : {})}
               fileOf={(id) => storeFiles.get(id)}
               {...(props.selectedFileId ? { selectedFileId: props.selectedFileId } : {})}
             />

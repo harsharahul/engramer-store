@@ -237,8 +237,8 @@ type View =
   | { kind: "shared" }
   | { kind: "shared-with-me" }
   | { kind: "profile" }
-  /** The place for time; `day` opens a date, a new `nonce` asks for it again. */
-  | { kind: "timeline"; day?: string; now?: boolean; nonce?: number }
+  /** The place for time; `day` opens a date, `trip` a trip's page, a new `nonce` asks again. */
+  | { kind: "timeline"; day?: string; now?: boolean; trip?: string; nonce?: number }
   | { kind: "category"; name: string }
   | { kind: "photos" }
   | { kind: "album"; tag: string };
@@ -1004,6 +1004,13 @@ export function Vault() {
     setQuery("");
     setDrawerOpen(false);
     setView({ kind: "album", tag });
+  };
+
+  /** A trip's page, over the Timeline, from anywhere that names the trip. */
+  const openTrip = (tag: string) => {
+    setQuery("");
+    setDrawerOpen(false);
+    setView({ kind: "timeline", trip: tag, nonce: Date.now() });
   };
 
   const addSelectionToAlbum = (ids: string[], tag: string) => {
@@ -3166,7 +3173,17 @@ export function Vault() {
             <TimelineView
               files={liveFiles}
               factsOn={factsOn}
-              {...(view.nonce !== undefined ? { focus: { ...(view.day ? { day: view.day } : { now: true }), nonce: view.nonce } } : {})}
+              {...(view.nonce !== undefined
+                ? {
+                    focus: {
+                      ...(view.trip ? { trip: view.trip } : view.day ? { day: view.day } : { now: true }),
+                      nonce: view.nonce,
+                    },
+                  }
+                : {})}
+              onOpenTrip={openTrip}
+              // Closing keeps the Timeline as it is: no day, no nonce, no scroll.
+              onCloseTrip={() => setView({ kind: "timeline" })}
               {...(detailsFile && plan.details !== "hidden" ? { selectedFileId: detailsFile.id } : {})}
               onInspect={inspect}
               onOpen={openFile}
@@ -3359,6 +3376,12 @@ export function Vault() {
             }}
             onAddToAlbum={(id) => setAlbumPickerIds([id])}
             onToast={showToast}
+            onOpenTrip={(tag) => {
+              if (isMobile) {
+                setDetailsSheet(false);
+              }
+              openTrip(tag);
+            }}
             onClose={() => {
               diag("details", "closed: the close button");
               if (isMobile) {

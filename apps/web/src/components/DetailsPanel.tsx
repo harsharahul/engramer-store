@@ -53,6 +53,8 @@ export function DetailsPanel(props: {
   onOpenAlbum: (tag: string) => void;
   onAddToAlbum: (id: string) => void;
   onToast: (message: string) => void;
+  /** Opens a trip's page. */
+  onOpenTrip?: (tag: string) => void;
   onClose: () => void;
 }) {
   const { file } = props;
@@ -296,7 +298,7 @@ export function DetailsPanel(props: {
 
       <FileFacts file={file} />
 
-      <TripSection file={file} onToast={props.onToast} />
+      <TripSection file={file} onToast={props.onToast} {...(props.onOpenTrip ? { onOpenTrip: props.onOpenTrip } : {})} />
 
       {file.tags.some((t) => isAlbumTag(t)) && (
         <div className="details-tags">

@@ -47,6 +47,8 @@ export function TimelineHero(props: {
   onOpen(fileId: string): void;
   onToast(text: string): void;
   onTurnOnDates(): void;
+  /** Opens a trip's page. */
+  onOpenTrip?(tag: string): void;
   fileOf?(id: string): FileEntry | undefined;
 }) {
   const resolveFacts = useStore((s) => s.resolveFacts);
@@ -83,7 +85,7 @@ export function TimelineHero(props: {
     const poster = posterOf(moment, props.now, home ?? deviceZone(), { photos, ...(homePlace ? { homePlace } : {}) });
     return (
       <div className="tln-hero">
-        {poster && <TripPoster poster={poster} />}
+        {poster && <TripPoster poster={poster} {...(props.onOpenTrip ? { onOpen: () => props.onOpenTrip!(view.tag) } : {})} />}
         <TripCards
           moment={moment}
           rows={props.rows ?? []}
@@ -92,6 +94,7 @@ export function TimelineHero(props: {
           onInspect={props.onInspect}
           onOpen={props.onOpen}
           onToast={props.onToast}
+          {...(props.onOpenTrip ? { onOpenTrip: props.onOpenTrip } : {})}
           {...(props.fileOf ? { fileOf: props.fileOf } : {})}
         />
       </div>

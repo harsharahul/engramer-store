@@ -13,6 +13,7 @@ let root: Root;
 const leaveTrip = vi.fn(async () => {});
 const addToTrip = vi.fn(async () => {});
 const onToast = vi.fn();
+const onOpenTrip = vi.fn();
 
 beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -91,7 +92,7 @@ async function render(id: string) {
   document.body.appendChild(container);
   root = createRoot(container);
   const file = useStore.getState().files.get(id)!;
-  act(() => root.render(<TripSection file={file} onToast={onToast} />));
+  act(() => root.render(<TripSection file={file} onToast={onToast} onOpenTrip={onOpenTrip} />));
   await act(async () => {
     await import("../intel/tables/airports.json");
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -106,6 +107,12 @@ const click = (label: RegExp) => {
 };
 
 describe("the Trip section", () => {
+  it("Part of Lisbon opens the trip", async () => {
+    await render("hotel");
+    click(/^Lisbon$/);
+    expect(onOpenTrip).toHaveBeenCalledWith(`trip:lisbon-${year}-11`);
+  });
+
   it("an assembled file says so and can leave", async () => {
     await render("hotel");
     expect(container.textContent).toContain("Part of Lisbon");
