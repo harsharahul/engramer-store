@@ -4,16 +4,53 @@
  * the file it came from.
  */
 
-import { dayLabel, money } from "../intel/everyday";
+import { useEffect, useState } from "react";
+import { dayLabel, durationLabel, money } from "../intel/everyday";
 import type { AgendaRow } from "../intel/agendarows";
+import type { FactEvidence } from "../intel/facts";
 import { tripChecks, type Check, type FactfulFile } from "../intel/insights";
+import { zonedDay, zonedTime } from "../intel/instants";
 import type { Leg } from "../intel/legs";
 import { rangeLabel, type Moment } from "../intel/moments";
-import { comingUp, tripSpend, windowOf, type TripView } from "../intel/tripview";
+import { comingUp, tripSpend, windowOf, type Stay, type TripView } from "../intel/tripview";
 import { useStore, type FileEntry } from "../store";
+import { Until } from "./Clock";
 import { Amounts, Card } from "./TimelineCard";
-import { Tile } from "./TimelineList";
+import { Board, Tile } from "./TimelineList";
 import { Button } from "./ui/button";
+
+const HOUR_MS = 3_600_000;
+/** How near a departure the boarding pass, or the wait for it, shows. */
+const PASS_HOURS = 48;
+
+/** A file's evidence blob, read once when asked for. */
+function useEvidence(fileId: string | undefined): FactEvidence[] | null {
+  const factEvidence = useStore((s) => s.factEvidence);
+  const [evidence, setEvidence] = useState<FactEvidence[] | null>(null);
+  useEffect(() => {
+    let stale = false;
+    setEvidence(null);
+    if (fileId) {
+      void factEvidence(fileId).then((read) => {
+        if (!stale) {
+          setEvidence(read);
+        }
+      });
+    }
+    return () => {
+      stale = true;
+    };
+  }, [fileId, factEvidence]);
+  return evidence;
+}
+
+const nextDay = (iso: string) => new Date(Date.parse(`${iso}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+const mapsUrl = (place: string) => `https://maps.apple.com/?q=${encodeURIComponent(place)}`;
+
+/** The leg that lands at the trip's destination. */
+function landingOf(view: TripView): Leg | undefined {
+  return view.legs.find((leg) => leg.arr && leg.arr.code !== undefined && leg.arr.code === view.code) ?? view.legs.find((leg) => leg.arr);
+}
 
 const PHOTO_TILES = 6;
 const BOOKED_SHOWN = 3;
@@ -230,6 +267,338 @@ function Photos(props: { view: TripView; rows: readonly AgendaRow[]; onOpen(file
   );
 }
 
+function CheckIn(props: { moment: Moment; now: number; onInspect(fileId: string): void }) {
+  const leg = props.moment.next;
+  const evidence = useEvidence(leg?.fileId);
+  if (!leg?.dep || props.moment.checkInOpens === undefined) {
+    return null;
+  }
+  const opens = props.moment.checkInOpens;
+  const opensAt = `${zonedTime(opens, leg.dep.zone)}`;
+  const opensOn = dayLabel(zonedDay(opens, leg.dep.zone));
+  const open = props.now >= opens;
+  const link = evidence?.find((entry) => entry.id === leg.dep!.factId)?.link;
+  return (
+    <Card title={open ? "Check-in is open" : "Check-in"}>
+      <div className="tln-title">
+        {open ? `${named(leg)} · ${dayLabel(leg.dep.day)}${leg.dep.time ? ` ${leg.dep.time}` : ""}` : `Opens ${opensOn} at ${opensAt}`}
+      </div>
+      <div className="tln-muted">
+        Online check-in usually opens 24 hours before departure.{open ? ` It opened at ${opensAt} on ${opensOn}.` : ""}
+      </div>
+      <div className="tln-actions">
+        {link ? (
+          <Button size="xs" nativeButton={false} render={<a href={link} target="_blank" rel="noreferrer" />}>
+            Check in
+          </Button>
+        ) : (
+          <Button size="xs" variant="secondary" onClick={() => props.onInspect(leg.fileId)}>
+            Open booking
+          </Button>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function BoardingPass(props: { leg: Leg | undefined; now: number; onOpen(fileId: string): void }) {
+  const leg = props.leg;
+  if (!leg?.dep || leg.dep.at <= props.now || leg.dep.at - props.now > PASS_HOURS * HOUR_MS) {
+    return null;
+  }
+  if (!leg.passFileId) {
+    return (
+      <Card title="Boarding pass" tone="dashed">
+        <div className="tln-muted">It arrives in your mail after check-in, and shows up here on its own.</div>
+      </Card>
+    );
+  }
+  const cells = [
+    ["Boarding", leg.boardingTime],
+    ["Gate", leg.gate],
+    ["Seat", leg.seat],
+  ].filter((cell): cell is [string, string] => cell[1] !== undefined);
+  return (
+    <Card title="Boarding pass">
+      <div className="tln-pmini">
+        <div className="tln-pmini-head">
+          <span>BOARDING PASS</span>
+          <span>
+            {named(leg)} · {dayLabel(leg.dep.day)}
+          </span>
+        </div>
+        <div className="tln-pmini-route">
+          <b>{leg.from}</b>
+          <i />
+          <b>{leg.to}</b>
+        </div>
+        {cells.length > 0 && (
+          <div className="tln-kv tln-pmini-cells">
+            {cells.map(([name, value]) => (
+              <span key={name} className="tln-pmini-cell">
+                {name}
+              </span>
+            )).flatMap((label, i) => [label, <b key={`${cells[i]![0]}:v`}>{cells[i]![1]}</b>])}
+          </div>
+        )}
+      </div>
+      <div className="tln-actions">
+        <Button size="xs" onClick={() => props.onOpen(leg.passFileId!)}>
+          Show pass
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function LeaveBy(props: { moment: Moment }) {
+  const leave = props.moment.leaveBy;
+  if (!leave) {
+    return null;
+  }
+  return (
+    <Card title={`Leave for ${leave.code} by`}>
+      <div className="tln-big-local">{zonedTime(leave.at, leave.zone)}</div>
+      <div className="tln-muted">
+        in <Until at={leave.at} /> · {leave.hours} hours before {leave.international ? "an international" : "a domestic"} departure
+      </div>
+    </Card>
+  );
+}
+
+function Hotel(props: {
+  mode: "stay" | "land" | "out";
+  moment: Moment;
+  files: readonly FactfulFile[];
+  onInspect(fileId: string): void;
+}) {
+  const view = props.moment.trip!;
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const factEvidence = useStore((s) => s.factEvidence);
+  const landing = landingOf(view);
+  const stay: Stay | undefined =
+    props.mode === "stay"
+      ? (props.moment.night?.stay ?? view.stays[0])
+      : props.mode === "land"
+        ? (view.stays.find((candidate) => candidate.checkIn?.day === landing?.arr?.day) ?? view.stays[0])
+        : view.stays.at(-1);
+  const directions = stay ? (
+    <Button size="xs" variant="secondary" nativeButton={false} render={<a href={mapsUrl(stay.address ?? `${stay.name}, ${view.city}`)} target="_blank" rel="noreferrer" />}>
+      Directions
+    </Button>
+  ) : null;
+  const confirmation = stay ? (
+    <Button size="xs" onClick={() => props.onInspect(stay.fileId)}>
+      Open confirmation
+    </Button>
+  ) : null;
+
+  if (props.mode === "out") {
+    const out = stay?.checkOut;
+    if (!stay || !out?.time) {
+      return null;
+    }
+    return (
+      <Card title="Check out by">
+        <div className="tln-big-local">{out.time}</div>
+        <div className="tln-muted">
+          in <Until at={out.at} />
+          {stay.name ? ` · ${stay.name}` : ""}
+        </div>
+        <div className="tln-actions">{confirmation}</div>
+      </Card>
+    );
+  }
+
+  if (props.mode === "land") {
+    const arr = landing?.arr;
+    const checkIn = stay?.checkIn;
+    if (!arr && !checkIn) {
+      return null;
+    }
+    const landingLine = arr?.time
+      ? checkIn?.time && arr.at < checkIn.at
+        ? `${arr.time} · ${durationLabel(checkIn.at - arr.at)} before check-in opens`
+        : checkIn?.time
+          ? `${arr.time} · after check-in opens`
+          : arr.time
+      : undefined;
+    return (
+      <Card title="When you land">
+        <div className="tln-kv">
+          {checkIn && (
+            <>
+              <span>Check-in</span>
+              <span>
+                {dayLabel(checkIn.day)}
+                {checkIn.time ? ` · from ${checkIn.time}` : ""}
+              </span>
+            </>
+          )}
+          {landingLine && (
+            <>
+              <span>Landing</span>
+              <span>{landingLine}</span>
+            </>
+          )}
+        </div>
+        {stay && (
+          <div className="tln-actions">
+            {confirmation}
+            {directions}
+          </div>
+        )}
+      </Card>
+    );
+  }
+
+  if (!stay) {
+    return null;
+  }
+  const reference = stay.refFactId
+    ? props.files.flatMap((file) => file.facts).find((fact) => fact.id === stay.refFactId)
+    : undefined;
+  const night = props.moment.night;
+  return (
+    <Card title="Staying" {...(night ? { aside: `Night ${night.n} of ${night.of}` } : {})} className="tln-card-stay">
+      {stay.name && <div className="tln-title">{stay.name}</div>}
+      {stay.address && <div className="tln-muted">{stay.address}</div>}
+      <div className="tln-kv tln-kv-gap">
+        {stay.checkOut && (
+          <>
+            <span>Check-out</span>
+            <span>
+              {dayLabel(stay.checkOut.day)}
+              {stay.checkOut.time ? ` · ${stay.checkOut.time}` : ""}
+            </span>
+          </>
+        )}
+        {reference && (
+          <>
+            <span>Booking</span>
+            <span>
+              <span className="tln-mono">{revealed ?? `••••${reference.masked ?? reference.value}`}</span>{" "}
+              {revealed ? (
+                <Button size="xs" variant="link" onClick={() => setRevealed(null)}>
+                  Hide
+                </Button>
+              ) : (
+                <Button
+                  size="xs"
+                  variant="link"
+                  onClick={async () => {
+                    const full = (await factEvidence(stay.fileId)).find((entry) => entry.id === reference.id)?.full;
+                    if (full) {
+                      setRevealed(full);
+                    }
+                  }}
+                >
+                  Reveal
+                </Button>
+              )}
+            </span>
+          </>
+        )}
+      </div>
+      <div className="tln-actions">
+        {confirmation}
+        {directions}
+      </div>
+    </Card>
+  );
+}
+
+function InTheAir(props: { moment: Moment }) {
+  const flying = props.moment.flying;
+  const view = props.moment.trip!;
+  if (!flying?.leg.arr) {
+    return null;
+  }
+  const { leg, progress } = flying;
+  const lands = leg.arr!.code ? (view.cities[leg.arr!.code] ?? leg.to) : leg.to;
+  return (
+    <Card title="In the air" aside={named(leg)}>
+      <Board from={leg.from} to={leg.to} dep={leg.dep?.time} arr={leg.arr!.time} number={leg.designator} plusDays={0} progress={progress} />
+      <div className="tln-prog">
+        <div className="tln-prog-fill" style={{ width: `${Math.round(progress * 100)}%` }} />
+      </div>
+      <div className="tln-muted">
+        Lands {leg.arr!.time ? `${leg.arr!.time} ` : ""}
+        {lands} time · in <Until at={leg.arr!.at} />
+      </div>
+      <div className="tln-faint">Works offline. Everything on this screen is on this device.</div>
+    </Card>
+  );
+}
+
+function FlightHome(props: { moment: Moment; onInspect(fileId: string): void }) {
+  const leg = props.moment.next;
+  if (!leg?.dep) {
+    return null;
+  }
+  const leave = props.moment.leaveBy;
+  const opens = props.moment.checkInOpens;
+  return (
+    <Card title="Flight home" aside={dayLabel(leg.dep.day)}>
+      <Board from={leg.from} to={leg.to} dep={leg.dep.time} arr={leg.arr?.time} number={leg.designator} plusDays={0} />
+      <div className="tln-kv tln-kv-gap">
+        {leave && (
+          <>
+            <span>Leave by</span>
+            <span>
+              {zonedTime(leave.at, leave.zone)} · {leave.hours} hours before departure
+            </span>
+          </>
+        )}
+        {opens !== undefined && (
+          <>
+            <span>Check-in</span>
+            <span>
+              opens {weekday(zonedDay(opens, leg.dep.zone))} {zonedTime(opens, leg.dep.zone)}
+            </span>
+          </>
+        )}
+      </div>
+      <div className="tln-actions">
+        <Button size="xs" variant="secondary" onClick={() => props.onInspect(leg.fileId)}>
+          Open booking
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function DestinationDay(props: { title: string; day: string; rows: readonly AgendaRow[]; now: number; onInspect(fileId: string): void }) {
+  const rows = props.rows.filter((row) => row.day === props.day && row.kind !== "photos" && row.kind !== "trip");
+  if (rows.length === 0) {
+    return null;
+  }
+  return (
+    <Card title={props.title}>
+      <div className="tln-tlist">
+        {rows.map((row) => (
+          <button key={row.id} type="button" className={`tln-trow${row.past ? " tln-done" : ""}`} onClick={() => props.onInspect(row.fileIds[0]!)}>
+            <span className="tln-mono">{row.time ?? ""}</span>
+            <span>
+              {row.title}
+              {row.amount && <span className="tln-faint"> {money(row.amount)}</span>}
+            </span>
+            {row.past ? (
+              <span className="tln-faint">done</span>
+            ) : row.at > props.now ? (
+              <span className="tln-soon">
+                in <Until at={row.at} />
+              </span>
+            ) : (
+              <span className="tln-soon">now</span>
+            )}
+          </button>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 /** The cards for where the trip stands. */
 export function TripCards(props: TripCardProps) {
   const view = props.moment.trip;
@@ -256,6 +625,57 @@ export function TripCards(props: TripCardProps) {
           <Photos view={view} rows={props.rows} onOpen={props.onOpen} {...(props.fileOf ? { fileOf: props.fileOf } : {})} />
           {spent("Spent on this trip")}
           {next}
+        </>
+      );
+    case "soon":
+      return (
+        <>
+          <CheckIn moment={props.moment} now={props.now} onInspect={props.onInspect} />
+          <BoardingPass leg={props.moment.next} now={props.now} onOpen={props.onOpen} />
+          <Checks title="Ready for this trip" checks={checks()} onInspect={props.onInspect} />
+          <TheTrip view={view} onInspect={props.onInspect} />
+        </>
+      );
+    case "travel":
+      return (
+        <>
+          <LeaveBy moment={props.moment} />
+          <BoardingPass leg={props.moment.next} now={props.now} onOpen={props.onOpen} />
+          <Hotel mode="land" moment={props.moment} files={props.files} onInspect={props.onInspect} />
+        </>
+      );
+    case "air":
+      return (
+        <>
+          <InTheAir moment={props.moment} />
+          <Hotel mode="land" moment={props.moment} files={props.files} onInspect={props.onInspect} />
+          <DestinationDay
+            title={`Tomorrow in ${view.city}`}
+            day={nextDay(zonedDay(props.now, view.zone))}
+            rows={props.rows}
+            now={props.now}
+            onInspect={props.onInspect}
+          />
+        </>
+      );
+    case "staying": {
+      const today = zonedDay(props.now, view.zone);
+      return (
+        <>
+          <Hotel mode="stay" moment={props.moment} files={props.files} onInspect={props.onInspect} />
+          <DestinationDay title={`Today · ${dayLabel(today)}`} day={today} rows={props.rows} now={props.now} onInspect={props.onInspect} />
+          <FlightHome moment={props.moment} onInspect={props.onInspect} />
+          {spent("Spent so far")}
+        </>
+      );
+    }
+    case "last":
+      return (
+        <>
+          <Hotel mode="out" moment={props.moment} files={props.files} onInspect={props.onInspect} />
+          <LeaveBy moment={props.moment} />
+          <BoardingPass leg={props.moment.next} now={props.now} onOpen={props.onOpen} />
+          {spent("Spent on this trip")}
         </>
       );
     default:

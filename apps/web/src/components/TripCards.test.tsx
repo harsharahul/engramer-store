@@ -149,3 +149,144 @@ describe("the trip's cards back home", () => {
     expect(onOpen).toHaveBeenCalledWith("photo0");
   });
 });
+
+describe("the trip's cards from soon to the last day", () => {
+  const LIS = "Europe/Lisbon";
+  const pass = file("pass", [
+    { id: "event:pass", kind: "event", document: "boarding-pass", value: "2026-11-12", label: "Flight TP 236 SFO to LIS", source: "barcode", confidence: 0.6 },
+  ]);
+  const seated = () =>
+    lisbonFiles().map((member) =>
+      member.id !== "booking"
+        ? member
+        : {
+            ...member,
+            facts: member.facts.map((fact) =>
+              fact.label === "Flight TP 236 departs SFO"
+                ? { ...fact, subject: { role: "depart" as const, mode: "flight" as const, carrier: "TP", number: "236", code: "SFO", seat: "14A", gate: "B12", boardingTime: "17:20" } }
+                : fact,
+            ),
+          },
+    );
+  let withPass: typeof trip;
+  let seatedTrip: typeof trip;
+  let oneWay: typeof trip;
+  beforeAll(async () => {
+    withPass = await lisbonTrip(lisbonFiles(), [pass]);
+    seatedTrip = await lisbonTrip(seated(), [pass]);
+    oneWay = await lisbonTrip(
+      lisbonFiles().map((member) => (member.id === "booking" ? { ...member, facts: member.facts.filter((fact) => !/TP 237/.test(fact.label ?? "")) } : member)),
+      [],
+      true,
+    );
+  });
+  const headers = () => [...container.querySelectorAll(".tln-hd")].map((hd) => hd.firstChild?.textContent);
+  const evidence = (rows: { id: string; full?: string; link?: string }[]) => vi.fn(async () => rows);
+
+  it("soon shows check-in, the boarding pass to come, what is ready and the trip", () => {
+    useStore.setState({ factEvidence: evidence([]) });
+    mount(instantOf("2026-11-11", "09:30", LA));
+    expect(headers()).toEqual(["Check-in", "Boarding pass", "Ready for this trip", "The trip"]);
+    const checkIn = card("Check-in")!;
+    expect(checkIn.querySelector(".tln-title")!.textContent).toBe("Opens Wed 11 Nov at 18:10");
+    expect(checkIn.textContent).toContain("Online check-in usually opens 24 hours before departure.");
+    expect(card("Boarding pass")!.textContent).toContain("It arrives in your mail after check-in, and shows up here on its own.");
+  });
+
+  it("once check-in opens the card says so", () => {
+    useStore.setState({ factEvidence: evidence([]) });
+    mount(instantOf("2026-11-11", "19:00", LA));
+    const open = card("Check-in is open")!;
+    expect(open.querySelector(".tln-title")!.textContent).toBe("TP 236 · Thu 12 Nov 18:10");
+    expect(open.textContent).toContain("It opened at 18:10 on Wed 11 Nov.");
+    click([...open.querySelectorAll("button")].find((button) => button.textContent === "Open booking"));
+    expect(onInspect).toHaveBeenLastCalledWith("booking");
+  });
+
+  it("travel day shows when to leave, the boarding pass and the landing", () => {
+    useStore.setState({ factEvidence: evidence([]) });
+    mount(instantOf("2026-11-12", "13:30", LA), withPass);
+    expect(headers()).toEqual(["Leave for SFO by", "Boarding pass", "When you land"]);
+    const leave = card("Leave for SFO by")!;
+    expect(leave.querySelector(".tln-big-local")!.textContent).toBe("15:10");
+    expect(leave.textContent).toContain("in 1 h 40 m · 3 hours before an international departure");
+    expect(kv(card("When you land"))).toEqual({ "Check-in": "Fri 13 Nov · from 15:00", Landing: "14:05 · 55 min before check-in opens" });
+  });
+
+  it("Show pass opens the stored pass", () => {
+    useStore.setState({ factEvidence: evidence([]) });
+    mount(instantOf("2026-11-12", "13:30", LA), withPass);
+    const mini = card("Boarding pass")!.querySelector(".tln-pmini")!;
+    expect(mini.textContent).toContain("BOARDING PASS");
+    expect(mini.textContent).toContain("TP 236 · Thu 12 Nov");
+    expect(mini.querySelector(".tln-pmini-cells")).toBeNull();
+    click([...card("Boarding pass")!.querySelectorAll("button")].find((button) => button.textContent === "Show pass"));
+    expect(onOpen).toHaveBeenCalledWith("pass");
+  });
+
+  it("seat and gate show only when the booking gives them", () => {
+    useStore.setState({ factEvidence: evidence([]) });
+    mount(instantOf("2026-11-12", "13:30", LA), seatedTrip);
+    expect(kv(card("Boarding pass")!.querySelector(".tln-pmini-cells") ?? undefined)).toEqual({ Boarding: "17:20", Gate: "B12", Seat: "14A" });
+  });
+
+  it("in the air shows the flight's progress, the landing and tomorrow in the city", () => {
+    useStore.setState({ factEvidence: evidence([]) });
+    mount(instantOf("2026-11-13", "06:00", LIS));
+    expect(headers()).toEqual(["In the air", "When you land", "Tomorrow in Lisbon"]);
+    const air = card("In the air")!;
+    expect(air.querySelector(".tln-hd-aside")!.textContent).toBe("TP 236");
+    expect(air.textContent).toContain("Lands 14:05 Lisbon time · in 8 h 05 m");
+    expect(air.textContent).toContain("Works offline. Everything on this screen is on this device.");
+    expect((air.querySelector(".tln-prog-fill") as HTMLElement).style.width).toBe("32%");
+    expect(card("Tomorrow in Lisbon")!.textContent).toContain("Museu do Azulejo");
+  });
+
+  it("staying shows the stay, today in the city, the flight home and the spend", () => {
+    useStore.setState({ factEvidence: evidence([]) });
+    mount(instantOf("2026-11-14", "15:42", LIS));
+    expect(headers()).toEqual(["Staying", "Today · Sat 14 Nov", "Flight home", "Spent so far"]);
+    const stay = card("Staying")!;
+    expect(stay.querySelector(".tln-hd-aside")!.textContent).toBe("Night 2 of 3");
+    expect(stay.querySelector(".tln-title")!.textContent).toBe("Casa do Rio");
+    expect(kv(stay)).toMatchObject({ "Check-out": "Mon 16 Nov · 11:00" });
+    expect(stay.querySelector("a")!.getAttribute("href")).toBe("https://maps.apple.com/?q=Casa%20do%20Rio%2C%20Lisbon");
+    click([...stay.querySelectorAll("button")].find((button) => button.textContent === "Open confirmation"));
+    expect(onInspect).toHaveBeenLastCalledWith("hotel");
+    expect(card("Today · Sat 14 Nov")!.textContent).toContain("Fado night");
+    const home = card("Flight home")!;
+    expect(home.querySelector(".tln-hd-aside")!.textContent).toBe("Mon 16 Nov");
+    expect(kv(home)).toEqual({ "Leave by": "10:20 · 3 hours before departure", "Check-in": "opens Sun 13:20" });
+  });
+
+  it("Reveal shows the full booking reference and Hide masks it again", async () => {
+    const reference = trip.files.find((member) => member.id === "hotel")!.facts.find((fact) => fact.kind === "identifier")!;
+    useStore.setState({ factEvidence: evidence([{ id: reference.id, full: "CR-7741-9C1D" }]) });
+    mount(instantOf("2026-11-14", "15:42", LIS));
+    const stay = () => card("Staying")!;
+    expect(kv(stay()).Booking).toContain("••••9C1D");
+    await act(async () => {
+      [...stay().querySelectorAll("button")].find((button) => button.textContent === "Reveal")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(kv(stay()).Booking).toContain("CR-7741-9C1D");
+    click([...stay().querySelectorAll("button")].find((button) => button.textContent === "Hide"));
+    expect(kv(stay()).Booking).toContain("••••9C1D");
+  });
+
+  it("the last day shows check-out, when to leave and what the trip cost", () => {
+    useStore.setState({ factEvidence: evidence([]) });
+    mount(instantOf("2026-11-16", "08:30", LIS));
+    expect(headers()).toEqual(["Check out by", "Leave for LIS by", "Boarding pass", "Spent on this trip"]);
+    const out = card("Check out by")!;
+    expect(out.querySelector(".tln-big-local")!.textContent).toBe("11:00");
+    expect(out.textContent).toContain("in 2 h 30 m · Casa do Rio");
+    expect(card("Leave for LIS by")!.querySelector(".tln-big-local")!.textContent).toBe("10:20");
+  });
+
+  it("no return flight, no flight home card", () => {
+    useStore.setState({ factEvidence: evidence([]) });
+    mount(instantOf("2026-11-14", "15:42", LIS), oneWay);
+    expect(headers()).not.toContain("Flight home");
+    expect(headers()[0]).toBe("Staying");
+  });
+});

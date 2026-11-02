@@ -278,6 +278,25 @@ export function TimelineList(props: {
 }
 
 /** A photo's thumbnail, or a soft gradient while it loads or when it has none. */
+/** A flight as an airport board shows it: codes, times, the service on the track, and the plane when it is in the air. */
+export function Board(props: { from: string; to: string; dep?: string; arr?: string; number: string; plusDays: number; progress?: number }) {
+  return (
+    <div className="tln-board">
+      <b>{props.from}</b>
+      <span className="tln-tm">{props.dep ?? ""}</span>
+      <span className="tln-track">
+        <span>{props.number}</span>
+        {props.progress !== undefined && <i className="tln-plane" style={{ left: `${Math.round(props.progress * 100)}%` }} />}
+      </span>
+      <b>{props.to}</b>
+      <span className="tln-tm">
+        {props.arr ?? ""}
+        {props.plusDays > 0 && <sup>+{props.plusDays}</sup>}
+      </span>
+    </div>
+  );
+}
+
 export function Tile(props: { file?: FileEntry; index: number; more?: number; onOpen(): void }) {
   const { ref, thumb } = usePhotoThumb<HTMLButtonElement>(
     props.file ?? { id: `tile-${props.index}`, key: new Uint8Array(0), hasThumb: false },
@@ -380,18 +399,7 @@ function TimelineRow(props: {
           </span>
         </div>
         {row.flight ? (
-          <div className="tln-board">
-            <b>{row.flight.from}</b>
-            <span className="tln-tm">{row.flight.dep ?? ""}</span>
-            <span className="tln-track">
-              <span>{row.flight.number}</span>
-            </span>
-            <b>{row.flight.to}</b>
-            <span className="tln-tm">
-              {row.flight.arr ?? ""}
-              {row.flight.plusDays > 0 && <sup>+{row.flight.plusDays}</sup>}
-            </span>
-          </div>
+          <Board {...row.flight} />
         ) : (
           <div className="tln-evrow">
             <div>
