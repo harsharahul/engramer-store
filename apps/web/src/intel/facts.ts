@@ -519,10 +519,25 @@ export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
     if (!prior) {
       if (!confirmedValues.has(`${fact.kind}:${fact.value}`)) {
         merged.set(fact.id, fact);
+        continue;
+      }
+      // The owner already said this date under other words. What the same
+      // reader now says it is still applies to the owner's fact.
+      const owned = [...merged.values()].find(
+        (other) =>
+          other.confirmed && !other.subject && other.kind === fact.kind && other.value === fact.value && other.time === fact.time,
+      );
+      if (owned) {
+        merged.set(owned.id, withSubjectFrom(owned, fact));
       }
       continue;
     }
-    if (prior.confirmed || prior.dismissed) {
+    if (prior.dismissed) {
+      continue;
+    }
+    if (prior.confirmed) {
+      // The owner's answer stands; only the reader's statement of meaning moves.
+      merged.set(fact.id, withSubjectFrom(prior, fact));
       continue;
     }
     merged.set(fact.id, withSubjectFrom(pick(prior, fact), fact));

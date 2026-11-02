@@ -430,6 +430,25 @@ describe("subjects across stores and rescans", () => {
     expect(out).toMatchObject({ confirmed: true, digest: "d2", subject });
   });
 
+  it("a confirmed fact gains its subject from a re-read by the same reader, and stays the owner's", () => {
+    const said = (over: Partial<Fact> = {}): Fact =>
+      fact({ id: "event:2026-11-13 room ready 15:00", kind: "event", document: "hotel-booking", value: "2026-11-13", time: "15:00", label: "Room ready", source: "model", confidence: 0.45, ...over });
+    const subject = { role: "check-in" as const, place: "Casa Azulejo" };
+    const [out] = mergeFacts([said({ confirmed: true })], [said({ subject })]);
+    expect(out).toMatchObject({ confirmed: true, subject });
+    // A different reader's words never become the owner's fact's meaning.
+    const [kept] = mergeFacts([said({ confirmed: true })], [said({ subject, source: "label" })]);
+    expect(kept!.subject).toBeUndefined();
+  });
+
+  it("a relabelled re-read lends its subject to the confirmed fact of the same date", () => {
+    const confirmed = fact({ id: "event:2026-11-13 room ready 15:00", kind: "event", document: "hotel-booking", value: "2026-11-13", time: "15:00", label: "Room ready", source: "model", confidence: 0.45, confirmed: true });
+    const relabelled = { ...confirmed, id: "event:2026-11-13 check-in 15:00", label: "Check-in", confirmed: undefined, subject: { role: "check-in" as const, place: "Casa Azulejo" } };
+    const merged = mergeFacts([confirmed], [relabelled]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ id: confirmed.id, confirmed: true, subject: { role: "check-in", place: "Casa Azulejo" } });
+  });
+
   it("a fresh reading adds its subject to the stored fact", () => {
     const subject = { role: "check-in" as const, place: "Casa do Rio", reservation: 0 };
     const [out] = mergeFacts([checkIn({ accepted: "exact" })], [checkIn({ subject })]);
