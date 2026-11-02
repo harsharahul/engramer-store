@@ -98,3 +98,10 @@ describe("one reading of what a fact is about", () => {
     ).toEqual([]);
   });
 });
+
+describe("one way to read a printed time", () => {
+  it("turns a printed time into an instant only in intel/instants.ts", () => {
+    // A day and a clock joined into a Date reads the clock as this device's.
+    expect(offenders([/(?:new Date|Date\.parse)\([^)]*\}T\$\{/], [join("intel", "instants.ts")])).toEqual([]);
+  });
+});

@@ -395,3 +395,16 @@ describe("rows read what each date is", () => {
     expect(rows.filter((row) => row.kind === "stay").map((row) => row.title)).toEqual(["Check in · Casa Azulejo", "Check out · Casa Azulejo"]);
   });
 });
+
+describe("rows carry real instants", () => {
+  it("a flight row starts and ends at the instants of its own airports", async () => {
+    const [out] = await rowsOf([flights()], none, NOW);
+    expect(out!.at).toBe(Date.UTC(2026, 10, 13, 2, 10)); // 18:10 in San Francisco
+    expect(out!.endAt).toBe(Date.UTC(2026, 10, 13, 14, 5)); // 14:05 in Lisbon
+  });
+
+  it("a hotel in a trip takes the trip's destination zone", async () => {
+    const rows = await rowsOf([hotel({ tags: ["trip:lisbon-2026-11"] })], none, NOW);
+    expect(rows.map((row) => row.at)).toEqual([Date.UTC(2026, 10, 13, 15, 0), Date.UTC(2026, 10, 16, 11, 0)]);
+  });
+});

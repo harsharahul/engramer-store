@@ -8,6 +8,7 @@ import { decided } from "../decisions";
 import type { Trip } from "../intel/agenda";
 import type { AgendaRow } from "../intel/agendarows";
 import type { TripPlan } from "../intel/agenda";
+import { deviceZone, instantOf } from "../intel/instants";
 import { isEmptySpace } from "../marquee";
 import { useStore } from "../store";
 import { TimelineList } from "./TimelineList";
@@ -50,6 +51,7 @@ const row = (id: string, kind: AgendaRow["kind"], day: string, time: string | un
   kind,
   tag: kind.toUpperCase(),
   day,
+  at: instantOf(day, time, deviceZone()),
   ...(time ? { time } : {}),
   title: id,
   source: "EMAIL",

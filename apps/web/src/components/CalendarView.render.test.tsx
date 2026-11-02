@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Trip } from "../intel/agenda";
 import type { AgendaRow } from "../intel/agendarows";
+import { deviceZone, instantOf } from "../intel/instants";
 import { CalendarView } from "./CalendarView";
 
 let container: HTMLDivElement;
@@ -21,6 +22,7 @@ afterEach(() => {
 const row = (id: string, kind: AgendaRow["kind"], day: string, title: string): AgendaRow => ({
   id,
   kind,
+  at: instantOf(day, undefined, deviceZone()),
   tag: kind.toUpperCase(),
   day,
   title,
