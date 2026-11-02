@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { email, exact, file, hotel, lisbonFiles, lisbonTrip, PLANNING_NOW as NOW, TAG } from "./__fixtures__/lisbon";
+import { email, exact, file, flights, hotel, lisbonFiles, lisbonTrip, PLANNING_NOW as NOW, TAG } from "./__fixtures__/lisbon";
 import { tripsOf } from "./agenda";
 import { rowsOf } from "./agendarows";
+import type { Fact } from "./facts";
 import { comingUp, tripSpend, tripViewOf, windowOf } from "./tripview";
 
 describe("tripViewOf", () => {
@@ -137,5 +138,54 @@ describe("the trip's own days", () => {
     const dinner = file("farewell", [exact("event", "2026-11-11", "Farewell dinner", { document: "dining", time: "19:00" })]);
     const { view } = await lisbonTrip([...lisbonFiles(), dinner], [], true);
     expect([view.start, view.end]).toEqual(["2026-11-12", "2026-11-16"]);
+  });
+});
+
+describe("stays, duplicates and amounts", () => {
+  const said = (value: string, time: string, subject: Fact["subject"], label: string): Fact => ({
+    id: `event:${value} ${label.toLowerCase()} ${time}`,
+    kind: "event",
+    document: "hotel-booking",
+    value,
+    time,
+    label,
+    source: "model",
+    confidence: 0.45,
+    confirmed: true,
+    subject,
+  });
+
+  it("a stay the model read pairs even when the check-out names no place", async () => {
+    const guesthouse = email("guesthouse", "2026-10-02", [
+      said("2026-11-13", "15:00", { role: "check-in", place: "Casa Azulejo Guesthouse" }, "Room ready"),
+      said("2026-11-16", "11:00", { role: "check-out" }, "Key at the desk"),
+    ]);
+    const files = [...lisbonFiles().filter((member) => member.id !== "hotel"), guesthouse];
+    const { view } = await lisbonTrip(files, [], true);
+    expect(view.stays.map((stay) => [stay.name, stay.nights])).toEqual([["Casa Azulejo Guesthouse", 3]]);
+  });
+
+  it("a booking told twice reads once", async () => {
+    const reminder = email("reminder", "2026-11-10", hotel());
+    const change = email("change", "2026-10-20", flights());
+    const { view } = await lisbonTrip([...lisbonFiles(), reminder, change], [], true);
+    expect(view.legs.map((leg) => leg.designator)).toEqual(["TP 236", "TP 237"]);
+    expect(view.stays.map((stay) => stay.name)).toEqual(["Casa do Rio"]);
+  });
+
+  it("a ticket for several days counts once", async () => {
+    const pass = file("citypass", [
+      exact("event", "2026-11-14", "City pass", { document: "event-ticket", time: "09:00" }),
+      exact("event", "2026-11-15", "City pass", { document: "event-ticket", time: "09:00" }),
+      exact("amount", "40.00", undefined, { unit: "EUR", document: "event-ticket" }),
+    ]);
+    const { view, rows } = await lisbonTrip([...lisbonFiles(), pass], [], true);
+    expect(tripSpend(view, rows).sums).toEqual([{ currency: "EUR", value: "154.00" }]);
+  });
+
+  it("coming up skips dates that wait for a yes", async () => {
+    const maybe = file("maybe", [{ id: "event:maybe", kind: "event", document: "other", value: "2026-11-20", time: "09:30", label: "Dentist", source: "label", confidence: 0.7 }]);
+    const { view, rows } = await lisbonTrip(lisbonFiles(), [maybe]);
+    expect(comingUp(rows, view, NOW, 3).map((row) => row.title)).not.toContain("Dentist");
   });
 });

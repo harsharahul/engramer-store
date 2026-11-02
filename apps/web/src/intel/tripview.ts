@@ -122,22 +122,31 @@ function staysOf(rows: readonly AgendaRow[], facts: ReadonlyMap<string, { fact: 
       stays.push({ name, ...(subject.address ? { address: subject.address } : {}), checkIn: stop, nights: 0, fileId: found.file.id, ...(reservation !== undefined ? { reservation } : {}) });
       continue;
     }
-    const open = [...stays]
-      .reverse()
-      .find(
-        (stay) =>
-          !stay.checkOut &&
-          stay.name.toLowerCase() === name.toLowerCase() &&
-          (stay.reservation === undefined || reservation === undefined || stay.reservation === reservation),
-      );
+    // A check-out closes the stay its own booking opened, first; else one of
+    // the same name, where a missing name matches any.
+    const fits = (stay: Stay & { reservation?: number }) =>
+      !stay.checkOut && (stay.reservation === undefined || reservation === undefined || stay.reservation === reservation);
+    const sameName = (stay: Stay) => !stay.name || !name || stay.name.toLowerCase() === name.toLowerCase();
+    const open =
+      [...stays].reverse().find((stay) => fits(stay) && stay.fileId === found.file.id) ??
+      [...stays].reverse().find((stay) => fits(stay) && sameName(stay));
     if (open) {
       open.checkOut = stop;
       open.nights = open.checkIn ? dayNumber(stop.day) - dayNumber(open.checkIn.day) : 0;
+      if (!open.name && name) {
+        open.name = name;
+      }
     } else {
       stays.push({ name, ...(subject.address ? { address: subject.address } : {}), checkOut: stop, nights: 0, fileId: found.file.id, ...(reservation !== undefined ? { reservation } : {}) });
     }
   }
-  return stays.map(({ reservation, ...stay }) => {
+  // A reminder email books nothing new: one stay per place and dates.
+  const seen = new Set<string>();
+  const once = stays.filter((stay) => {
+    const key = `${stay.name.toLowerCase()}|${stay.checkIn?.day ?? ""}|${stay.checkOut?.day ?? ""}`;
+    return seen.has(key) ? false : (seen.add(key), true);
+  });
+  return once.map(({ reservation, ...stay }) => {
     const file = facts.get(stay.checkIn?.factId ?? stay.checkOut?.factId ?? "")?.file;
     const reference = file?.facts.find((fact) => {
       const said = subjectOf(fact);
@@ -155,9 +164,15 @@ export async function tripViewOf(
 ): Promise<TripView> {
   const members = new Set(trip.members.map((file) => file.id));
   const mine = rows.filter((row) => row.kind !== "trip" && !row.ask && row.fileIds.some((id) => members.has(id))).sort(byTime);
+  // A booking change repeats the same flights: one leg per service and moment.
+  const flown = new Set<string>();
   const legs = mine
     .flatMap((row) => (row.kind === "flight" && row.flight ? [row.flight.leg] : []))
-    .sort((a, b) => (a.dep ?? a.arr)!.at - (b.dep ?? b.arr)!.at);
+    .sort((a, b) => (a.dep ?? a.arr)!.at - (b.dep ?? b.arr)!.at)
+    .filter((leg) => {
+      const key = `${leg.key}|${(leg.dep ?? leg.arr)!.at}`;
+      return flown.has(key) ? false : (flown.add(key), true);
+    });
   const facts = new Map(trip.members.flatMap((file) => file.facts.map((fact) => [fact.id, { fact, file }] as const)));
 
   const airport = await destinationOf(trip, legs, opts.plan);
@@ -235,9 +250,14 @@ export function windowOf(view: TripView): TripWindow {
 /** What the trip cost so far: exact amounts per currency, and one receipt that only shares its dates. */
 export function tripSpend(view: TripView, rows: readonly AgendaRow[]): { sums: Money[]; count: number; waiting?: AgendaRow } {
   const members = new Set(view.memberIds);
-  const spent = rows.filter(
-    (row) => !row.ask && row.amount && (row.kind === "bill" || row.kind === "event") && row.fileIds.some((id) => members.has(id)),
-  );
+  // A ticket's price shows on each of its days; it was paid once.
+  const paid = new Set<string>();
+  const spent = rows.filter((row) => {
+    if (row.ask || !row.amount || (row.kind !== "bill" && row.kind !== "event") || !row.fileIds.some((id) => members.has(id))) {
+      return false;
+    }
+    return paid.has(row.fileIds[0]!) ? false : (paid.add(row.fileIds[0]!), true);
+  });
   const waiting = rows.find(
     (row) => row.kind === "bill" && row.trip?.tag === view.tag && row.trip.evidence === "weak" && row.day >= view.start && row.day <= view.end,
   );
@@ -248,7 +268,7 @@ export function tripSpend(view: TripView, rows: readonly AgendaRow[]): { sums: M
 export function comingUp(rows: readonly AgendaRow[], view: TripView | undefined, now: number, count: number): AgendaRow[] {
   const members = new Set(view?.memberIds ?? []);
   return rows
-    .filter((row) => row.at > now && row.kind !== "photos" && row.kind !== "trip" && !row.fileIds.some((id) => members.has(id)))
+    .filter((row) => row.at > now && !row.ask && row.kind !== "photos" && row.kind !== "trip" && !row.fileIds.some((id) => members.has(id)))
     .sort(byTime)
     .slice(0, count);
 }
