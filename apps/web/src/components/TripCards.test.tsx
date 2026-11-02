@@ -19,6 +19,7 @@ const onInspect = vi.fn();
 const onOpen = vi.fn();
 const onToast = vi.fn();
 const onOpenTrip = vi.fn();
+const onOpenPhotos = vi.fn();
 const addToTrip = vi.fn(async () => {});
 
 const passport = file("passport", [exact("expiry", "2029-03-20", "Date of expiry", { document: "passport", source: "mrz" })]);
@@ -66,6 +67,7 @@ function mount(now: number, of = trip) {
         onOpen={onOpen}
         onToast={onToast}
         onOpenTrip={onOpenTrip}
+        onOpenPhotos={onOpenPhotos}
       />,
     ),
   );
@@ -136,6 +138,13 @@ describe("the trip's cards while planning", () => {
 });
 
 describe("the trip's cards back home", () => {
+  it("Open album opens the photos of the trip's days", () => {
+    mount(HOME);
+    const open = [...card("7 photos")!.querySelectorAll("button")].find((b) => b.textContent === "Open album")!;
+    act(() => open.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(onOpenPhotos).toHaveBeenCalledWith("2026-11-12", "2026-11-16", "Lisbon · 12-16 Nov");
+  });
+
   it("Welcome back opens the trip", () => {
     mount(HOME);
     const open = [...card("Welcome back")!.querySelectorAll("button")].find((b) => b.textContent === "Open trip")!;

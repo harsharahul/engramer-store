@@ -55,6 +55,8 @@ export function TimelineView(props: {
   onOpenTrip?(tag: string): void;
   /** Closes the trip's page. */
   onCloseTrip?(): void;
+  /** Opens the photos of a span of days, as an album of them. */
+  onOpenPhotos?(from: string, to: string, title: string): void;
   /** The file open in the details pane, marked on the list. */
   selectedFileId?: string;
 }) {
@@ -182,6 +184,7 @@ export function TimelineView(props: {
           onToast={props.onToast}
           onTurnOnDates={props.onTurnOnDates}
           {...(props.onOpenTrip ? { onOpenTrip: props.onOpenTrip } : {})}
+          {...(props.onOpenPhotos ? { onOpenPhotos: props.onOpenPhotos } : {})}
           fileOf={(id) => storeFiles.get(id)}
         />
       </aside>

@@ -49,6 +49,8 @@ export function TimelineHero(props: {
   onTurnOnDates(): void;
   /** Opens a trip's page. */
   onOpenTrip?(tag: string): void;
+  /** Opens the photos of a span of days. */
+  onOpenPhotos?(from: string, to: string, title: string): void;
   fileOf?(id: string): FileEntry | undefined;
 }) {
   const resolveFacts = useStore((s) => s.resolveFacts);
@@ -95,6 +97,7 @@ export function TimelineHero(props: {
           onOpen={props.onOpen}
           onToast={props.onToast}
           {...(props.onOpenTrip ? { onOpenTrip: props.onOpenTrip } : {})}
+          {...(props.onOpenPhotos ? { onOpenPhotos: props.onOpenPhotos } : {})}
           {...(props.fileOf ? { fileOf: props.fileOf } : {})}
         />
       </div>

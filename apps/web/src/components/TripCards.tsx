@@ -90,6 +90,8 @@ export interface TripCardProps {
   onToast(text: string): void;
   /** Opens a trip's page. */
   onOpenTrip?(tag: string): void;
+  /** Opens the photos taken from `from` to `to`, titled `title`. */
+  onOpenPhotos?(from: string, to: string, title: string): void;
   fileOf?(id: string): FileEntry | undefined;
 }
 
@@ -344,7 +346,13 @@ function WelcomeBack(props: { view: TripView; onOpenTrip?(tag: string): void }) 
   );
 }
 
-function Photos(props: { view: TripView; rows: readonly AgendaRow[]; onOpen(fileId: string): void; fileOf?(id: string): FileEntry | undefined }) {
+function Photos(props: {
+  view: TripView;
+  rows: readonly AgendaRow[];
+  onOpen(fileId: string): void;
+  onOpenPhotos?(from: string, to: string, title: string): void;
+  fileOf?(id: string): FileEntry | undefined;
+}) {
   const ids = props.rows
     .filter((row) => row.kind === "photos" && row.day >= props.view.start && row.day <= props.view.end)
     .flatMap((row) => row.fileIds);
@@ -365,6 +373,17 @@ function Photos(props: { view: TripView; rows: readonly AgendaRow[]; onOpen(file
           />
         ))}
       </div>
+      {props.onOpenPhotos && (
+        <div className="tln-actions">
+          <Button
+            size="xs"
+            variant="secondary"
+            onClick={() => props.onOpenPhotos!(props.view.start, props.view.end, `${props.view.city} · ${rangeLabel(props.view.start, props.view.end, false)}`)}
+          >
+            Open album
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -759,7 +778,13 @@ export function TripCards(props: TripCardProps) {
       return (
         <>
           <WelcomeBack view={view} {...(props.onOpenTrip ? { onOpenTrip: props.onOpenTrip } : {})} />
-          <Photos view={view} rows={props.rows} onOpen={props.onOpen} {...(props.fileOf ? { fileOf: props.fileOf } : {})} />
+          <Photos
+            view={view}
+            rows={props.rows}
+            onOpen={props.onOpen}
+            {...(props.onOpenPhotos ? { onOpenPhotos: props.onOpenPhotos } : {})}
+            {...(props.fileOf ? { fileOf: props.fileOf } : {})}
+          />
           {spent("Spent on this trip")}
           {next}
         </>

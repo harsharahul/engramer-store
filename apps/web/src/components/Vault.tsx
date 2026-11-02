@@ -132,6 +132,7 @@ import { albumTitle, albumsFrom, type Album } from "../albums";
 import { orderCollections } from "../sidebar";
 import { Popover, PopoverContent } from "./ui/popover";
 import { Button } from "./ui/button";
+import { photosInDays } from "../intel/agendarows";
 import { IconButton } from "./ui/icon-button";
 import { folderActivity } from "../folderactivity";
 import { PhotoGrid } from "./PhotoGrid";
@@ -240,7 +241,8 @@ type View =
   /** The place for time; `day` opens a date, `trip` a trip's page, a new `nonce` asks again. */
   | { kind: "timeline"; day?: string; now?: boolean; trip?: string; nonce?: number }
   | { kind: "category"; name: string }
-  | { kind: "photos" }
+  /** `days` limits Photos to a span of days, such as a trip's: the album of those days. */
+  | { kind: "photos"; days?: { from: string; to: string; title: string } }
   | { kind: "album"; tag: string };
 
 const CATEGORY_ORDER = [
@@ -779,6 +781,12 @@ export function Vault() {
         files = liveFiles.filter((f) => !f.shared && (f.category ?? "Other") === view.name);
         break;
       case "photos": {
+        // A span of days counts its photos by the Timeline's own rule, so
+        // the album holds exactly what the trip's card counted.
+        if (view.days) {
+          files = photosInDays(liveFiles, view.days.from, view.days.to).filter((f) => !photosFavOnly || f.favorite);
+          break;
+        }
         // The timeline shows everything the camera made, wherever it lives.
         files = liveFiles.filter((f) => {
           const kind = fileKind(f.mime, f.name);
@@ -2524,7 +2532,7 @@ export function Vault() {
               : view.kind === "profile"
                 ? "Profile"
                 : view.kind === "photos"
-                  ? "Photos"
+                  ? (view.days?.title ?? "Photos")
                   : view.kind === "album"
                     ? albumTitle(view.tag)
                     : "Trash";
@@ -3038,6 +3046,11 @@ export function Vault() {
           </div>
           {showViewControls && (
             <div className="view-controls">
+              {view.kind === "photos" && view.days && (
+                <Button size="sm" variant="secondary" onClick={() => setView({ kind: "photos" })}>
+                  All photos
+                </Button>
+              )}
               {(view.kind === "photos" || view.kind === "album") && (
                 <div className="seg">
                   <button className={photosFavOnly ? "" : "active"} onClick={() => setPhotosFavOnly(false)}>
@@ -3182,6 +3195,10 @@ export function Vault() {
                   }
                 : {})}
               onOpenTrip={openTrip}
+              onOpenPhotos={(from, to, title) => {
+                setQuery("");
+                setView({ kind: "photos", days: { from, to, title } });
+              }}
               // Closing keeps the Timeline as it is: no day, no nonce, no scroll.
               onCloseTrip={() => setView({ kind: "timeline" })}
               {...(detailsFile && plan.details !== "hidden" ? { selectedFileId: detailsFile.id } : {})}
@@ -3285,7 +3302,7 @@ export function Vault() {
               // Albums are content as well as places: the Photos place
               // carries a shelf of them, so they are reachable without the
               // sidebar at all (IA §4.6).
-              albums={view.kind === "photos" ? albumCovers : undefined}
+              albums={view.kind === "photos" && !view.days ? albumCovers : undefined}
               onOpenAlbum={openAlbum}
               onNewAlbum={() => {
                 setSelectMode(true);
