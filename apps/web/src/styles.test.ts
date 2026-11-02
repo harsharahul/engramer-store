@@ -83,6 +83,22 @@ describe("the Timeline scrolls at every width", () => {
     expect(rule).toMatch(/overflow-y:\s*auto/);
     expect(rule).toMatch(/padding-bottom:/);
   });
+
+  it("fills the phone screen with a trip's page, clear of the bars and under the sheet", () => {
+    const tier = (name: string) => Number(new RegExp(`--z-${name}:\\s*(-?\\d+);`).exec(APP_CSS)![1]);
+    // The tab bar, the details sheet and the More drawer all stay over the page.
+    expect(tier("page")).toBeLessThan(tier("pane"));
+    expect(tier("page")).toBeLessThan(tier("sheet"));
+    const phone = mediaBlocks(CSS).filter(([condition]) => /max-width:\s*760px/.test(condition));
+    const rule = phone
+      .flatMap(([, body]) => [...body.matchAll(/(?:^|\n)\s*\.tln-trip\s*\{([^}]*)\}/g)])
+      .map((match) => match[1]!)
+      .join(";");
+    // Fixed to the screen, so a page opened far down the list starts at its top.
+    expect(rule).toMatch(/position:\s*fixed/);
+    expect(rule).toMatch(/top:\s*var\(--topbar-h/);
+    expect(rule).toMatch(/padding:[^;]*var\(--tabbar-h/);
+  });
 });
 
 /**
