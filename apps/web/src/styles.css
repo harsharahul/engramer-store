@@ -6006,7 +6006,9 @@ button.tln-check {
   cursor: pointer;
 }
 /* The way back sits in the poster's top line but is a control, not a label:
-   full opacity, the UI face, white on the sky in either theme. */
+   full opacity, the UI face, white on the sky in either theme. The button's
+   variant colours its text from the theme in the utilities layer, which
+   outranks this one, so the sky's white is marked important. */
 .tln-ptop:has(.tln-glassb) {
   opacity: 1;
 }
@@ -6014,14 +6016,13 @@ button.tln-check {
   font: 600 12.5px var(--font-ui);
   letter-spacing: normal;
   text-transform: none;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #fff !important;
+  background: rgba(255, 255, 255, 0.2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.34);
   backdrop-filter: blur(8px);
 }
 .tln-poster .tln-glassb:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.3) !important;
 }
 .tln-tp-grid {
   display: grid;
