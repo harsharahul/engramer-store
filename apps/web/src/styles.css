@@ -5106,6 +5106,28 @@ span.item-menu {
   .tln-list {
     padding: 0 14px 40px;
   }
+  /* The hero's cards swipe card by card, the next one peeking, with a dot each. */
+  .tln-cards {
+    flex-direction: row;
+    gap: 10px;
+    margin: 0 -16px;
+    padding: 0 16px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+  .tln-cards::-webkit-scrollbar {
+    display: none;
+  }
+  .tln-cards > .tln-card {
+    flex: 0 0 318px;
+    scroll-snap-align: center;
+  }
+  .tln-dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+  }
 }
 
 /* ----- the Timeline's list ----- */
@@ -5986,6 +6008,34 @@ button.tln-check {
   .tln-big-local {
     font-size: 36px;
   }
+}
+
+/* ----- the hero's cards: a column here, a swiping row on a phone ----- */
+
+.tln-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tln-dots {
+  display: none;
+}
+.tln-dot {
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--hairline-strong);
+  cursor: pointer;
+}
+.tln-dot.tln-on {
+  background: var(--paper);
+}
+/* Show earlier moves the scroller itself; a browser's own anchoring would move it twice. */
+.tln-scroll,
+.content.content-timeline {
+  overflow-anchor: none;
 }
 
 /* ----- a trip's page, over the Timeline ----- */
