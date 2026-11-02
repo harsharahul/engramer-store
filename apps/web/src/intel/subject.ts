@@ -255,6 +255,10 @@ function fromLabel(fact: Fact): Subject | undefined {
       ...stop(leg[4]!),
     };
   }
+  // An invite's end repeats its summary: "Check-in: Casa do Rio ends" is an end.
+  if (ENDS.test(label)) {
+    return { role: "end" };
+  }
   const stay = STAY.exec(label);
   if (stay) {
     return { role: stay[1]!.toLowerCase() === "in" ? "check-in" : "check-out", ...named(stay[2]) };
@@ -269,9 +273,6 @@ function fromLabel(fact: Fact): Subject | undefined {
   }
   if (fact.document === "delivery") {
     return { role: /opens/i.test(label) ? "opens" : "by" };
-  }
-  if (ENDS.test(label)) {
-    return { role: "end" };
   }
   if (DEPARTS.test(label)) {
     return { role: "depart" };

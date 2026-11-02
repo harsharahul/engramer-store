@@ -10,7 +10,7 @@
 
 import { isRealDate } from "./dates";
 import { MAX_FACTS_PER_FILE, factId, type DocumentKind, type Fact } from "./facts";
-import { cleanSubject } from "./subject";
+import { cleanSubject, subjectOf } from "./subject";
 
 const LABEL_MAX = 60;
 /** A zone name longer than this is not one; it would only bloat synced metadata. */
@@ -112,8 +112,7 @@ function eventFacts(event: Map<string, Property>): Fact[] {
   const document: DocumentKind = TICKETED.test(summary) ? "event-ticket" : "other";
   const place = unescapeText(event.get("LOCATION")?.value ?? "");
   const fact = (at: NonNullable<ReturnType<typeof stamp>>, label: string, role: "start" | "end"): Fact => {
-    const subject = cleanSubject({ role, place });
-    return {
+    const read: Fact = {
       id: factId("event", `${at.value} ${label.toLowerCase()}`),
       kind: "event",
       document,
@@ -121,10 +120,16 @@ function eventFacts(event: Map<string, Property>): Fact[] {
       ...(at.time ? { time: at.time } : {}),
       ...(at.zone ? { zone: at.zone } : {}),
       label,
-      ...(subject ? { subject } : {}),
       source: "ics",
       confidence: 1,
     };
+    // A summary that already says what it is ("Check-in: Casa do Rio") keeps
+    // that meaning; the location then reads as its address.
+    const said = role === "start" ? subjectOf(read) : undefined;
+    const subject = said
+      ? cleanSubject({ ...said, ...(said.place ? { address: place } : { place }) })
+      : cleanSubject({ role, place });
+    return subject ? { ...read, subject } : read;
   };
   const facts = [fact(start, summary, "start")];
   const end = event.get("DTEND") && stamp(event.get("DTEND")!);

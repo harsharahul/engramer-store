@@ -121,3 +121,10 @@ describe("designatorOf", () => {
     expect(designatorOf({ role: "check-in", place: "Casa do Rio" })).toBeUndefined();
   });
 });
+
+describe("ends", () => {
+  it("an end that names a check-in is an end", () => {
+    expect(subjectOf(event("Check-in: Casa do Rio ends", { source: "ics" }))).toEqual({ role: "end" });
+    expect(subjectOf(event("Table at Taberna da Rua ends", { source: "ics" }))).toEqual({ role: "end" });
+  });
+});
