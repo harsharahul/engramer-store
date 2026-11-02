@@ -150,3 +150,28 @@ describe("a trip's own shape", () => {
     expect(moment).toMatchObject({ kind: "staying", day: { n: 4, of: 5 }, night: { n: 3, of: 3 } });
   });
 });
+
+describe("the way home", () => {
+  it("the flight home is the first leg that leaves the destination", async () => {
+    const files = lisbonFiles().map((member) =>
+      member.id !== "booking"
+        ? member
+        : {
+            ...member,
+            facts: [
+              ...member.facts.filter((fact) => !/TP 237/.test(fact.label ?? "")),
+              exact("event", "2026-11-16", "Flight TP 201 departs LIS", { time: "10:00" }),
+              exact("event", "2026-11-16", "Flight TP 201 arrives JFK", { time: "12:40" }),
+              exact("event", "2026-11-16", "Flight AA 11 departs JFK", { time: "17:00" }),
+              exact("event", "2026-11-16", "Flight AA 11 arrives SFO", { time: "20:30" }),
+            ],
+          },
+    );
+    const view = (await lisbonTrip(files)).view;
+    const now = at("2026-11-16", "07:00", LIS);
+    const moment = momentOf([view], now);
+    expect(moment).toMatchObject({ kind: "last", leaveBy: { code: "LIS", at: Date.UTC(2026, 10, 16, 7, 0) } });
+    expect(moment.next!.designator).toBe("TP 201");
+    expect(posterOf(moment, now, LA)!.cap).toBe("flight home at 10:00");
+  });
+});

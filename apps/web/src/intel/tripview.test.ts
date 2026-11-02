@@ -93,3 +93,41 @@ describe("comingUp", () => {
     expect(comingUp(rows, undefined, NOW, 2).map((row) => row.title)).toEqual(["San Francisco to Lisbon", "Check in · Casa do Rio"]);
   });
 });
+
+describe("where a trip goes", () => {
+  const connecting = () => [
+    email("booking", "2026-10-01", [
+      exact("event", "2026-11-12", "Flight AA 10 departs SFO", { time: "08:00" }),
+      exact("event", "2026-11-12", "Flight AA 10 arrives JFK", { time: "16:30" }),
+      exact("event", "2026-11-12", "Flight TP 202 departs JFK", { time: "18:30" }),
+      exact("event", "2026-11-13", "Flight TP 202 arrives LIS", { time: "06:40" }),
+      exact("event", "2026-11-16", "Flight TP 201 departs LIS", { time: "11:00" }),
+      exact("event", "2026-11-16", "Flight TP 201 arrives JFK", { time: "13:30" }),
+      exact("event", "2026-11-16", "Flight AA 11 departs JFK", { time: "15:30" }),
+      exact("event", "2026-11-16", "Flight AA 11 arrives SFO", { time: "19:00" }),
+      exact("identifier", "4F2K", "Confirmation number", { masked: "4F2K" }),
+    ]),
+    email("hotel", "2026-10-02", hotel()),
+  ];
+
+  it("a connecting trip's destination is where it stays, not where it changes planes", async () => {
+    const { view, plan } = await lisbonTrip(connecting());
+    expect(plan.destination).toBe("Lisbon");
+    expect(view).toMatchObject({ city: "Lisbon", code: "LIS", zone: "Europe/Lisbon" });
+  });
+
+  it("a trip to a city whose name several airports share takes no wrong airport", async () => {
+    const files = [
+      email("hotel", "2026-10-02", [
+        exact("event", "2026-11-14", "Check-in: Harbour View", { document: "hotel-booking", time: "15:00", zone: "+11:00" }),
+        exact("event", "2026-11-18", "Check-out: Harbour View", { document: "hotel-booking", time: "10:00", zone: "+11:00" }),
+      ], { tags: ["trip:sydney-2026-11"] }),
+      file("ferry", [exact("event", "2026-11-15", "Ferry to Manly", { time: "11:00", zone: "+11:00" })], { tags: ["trip:sydney-2026-11"] }),
+    ];
+    const rows = await rowsOf(files, { plans: [], dismissed: new Set(), excluded: new Set(), assembling: true }, NOW);
+    const view = await tripViewOf(tripsOf(files)[0]!, rows, {});
+    expect(view.code).not.toBe("YQY");
+    expect(view.zone).toBe("+11:00");
+    expect(view.stays[0]!.checkIn!.at).toBe(Date.UTC(2026, 10, 14, 4, 0));
+  });
+});

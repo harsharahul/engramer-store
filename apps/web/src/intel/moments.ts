@@ -54,7 +54,8 @@ function shapeOf(view: TripView): Shape {
   const legs = view.legs;
   const outbound = legs.find((leg) => leg.dep);
   const arrival = legs.find((leg) => leg.arr && leg.arr.code !== undefined && leg.arr.code === view.code) ?? legs.find((leg) => leg.arr);
-  const homeward = arrival?.arr ? [...legs].reverse().find((leg) => leg.dep && leg.dep.at >= arrival.arr!.at) : undefined;
+  // The way home starts with the first leg that leaves the destination.
+  const homeward = arrival?.arr ? legs.find((leg) => leg !== arrival && leg.dep && leg.dep.at >= arrival.arr!.at) : undefined;
   const firstStay = view.stays[0];
   const lastStay = view.stays.at(-1);
   const last = legs.at(-1);

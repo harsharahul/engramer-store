@@ -279,19 +279,39 @@ export async function legPlaces(
     (a, b) => `${a.value} ${a.time ?? ""}`.localeCompare(`${b.value} ${b.time ?? ""}`) || a.id.localeCompare(b.id),
   );
   const city = async (code: string | undefined) => (code ? (await lookupAirport(code))?.city : undefined);
+  // Printed minutes are enough to tell a stay of days from a change of planes.
+  const minuteOf = (fact: Fact) => dayOf(fact.value) * 1440 + (fact.time ? Number(fact.time.slice(0, 2)) * 60 + Number(fact.time.slice(3, 5)) : 0);
   let from: string | undefined;
   let to: string | undefined;
-  const arrivals: string[] = [];
+  const arrivals: { city: string; at: number }[] = [];
+  const departures: number[] = [];
   for (const fact of ordered) {
     const subject = subjectOf(fact);
     from ??= await city(departureCode(subject));
+    if (subject?.role === "depart") {
+      departures.push(minuteOf(fact));
+    }
     const arrived = await city(arrivalCode(subject));
     if (arrived) {
-      arrivals.push(arrived);
+      arrivals.push({ city: arrived, at: minuteOf(fact) });
       to = arrived;
     }
   }
-  const destination = commonest(arrivals.filter((place) => place !== from));
+  // The destination is where the journey stays longest before leaving again,
+  // never the hub where it changes planes, however often it passes through.
+  let destination: string | undefined;
+  let longest = -1;
+  for (const stop of arrivals) {
+    if (stop.city === from) {
+      continue;
+    }
+    const next = departures.find((at) => at > stop.at);
+    const stay = next === undefined ? Number.POSITIVE_INFINITY : next - stop.at;
+    if (stay > longest) {
+      longest = stay;
+      destination = stop.city;
+    }
+  }
   return {
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),

@@ -9,7 +9,7 @@
  */
 import type { Trip, TripPlan } from "./agenda";
 import type { AgendaRow, RowFile } from "./agendarows";
-import { airportForCity, lookupAirport, type Airport } from "./airports";
+import { lookupAirport, placeForCity, plainCity, type Airport } from "./airports";
 import { sum, type Money } from "./everyday";
 import type { Fact } from "./facts";
 import type { TripWindow } from "./insights";
@@ -63,17 +63,40 @@ const CODE = /^[A-Z]{3}$/;
 const dayNumber = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / 86_400_000;
 const byTime = (a: AgendaRow, b: AgendaRow) => a.at - b.at || a.id.localeCompare(b.id);
 
-async function destinationOf(trip: Trip<RowFile>, legs: readonly Leg[], plan: TripPlan | undefined): Promise<Airport | null> {
-  // The plan's destination is the commonest arrival away from home, which a
-  // connecting flight's first stop is not.
-  const named = plan?.destination ? await airportForCity(plan.destination) : null;
-  if (named) {
-    return named;
+/**
+ * Where the trip goes: the airport the legs stay at longest before leaving
+ * again, never a hub where they only change planes. With no legs to say,
+ * the trip's city name, and only as far as that name is unambiguous.
+ */
+async function destinationOf(
+  trip: Trip<RowFile>,
+  legs: readonly Leg[],
+  plan: TripPlan | undefined,
+): Promise<{ city: string; code?: string; country?: string; zone?: string } | null> {
+  const origin = legs.find((leg) => leg.dep)?.dep?.code;
+  let landed: Leg | undefined;
+  let longest = -1;
+  for (const leg of legs) {
+    const code = leg.arr?.code ?? (CODE.test(leg.to) ? leg.to : undefined);
+    if (!code || code === origin) {
+      continue;
+    }
+    const arrivedAt = leg.arr?.at ?? leg.dep?.at ?? 0;
+    const next = legs.find((other) => other.dep && other.dep.at > arrivedAt);
+    const stay = next ? next.dep!.at - arrivedAt : Number.POSITIVE_INFINITY;
+    if (stay > longest) {
+      longest = stay;
+      landed = leg;
+    }
   }
-  const first = legs[0];
-  const code = first?.arr?.code ?? (first && CODE.test(first.to) ? first.to : undefined);
-  const landed = code ? await lookupAirport(code) : null;
-  return landed ?? (await airportForCity(tripTitle(trip.tag).split(",")[0]!));
+  const code = landed ? (landed.arr?.code ?? landed.to) : undefined;
+  const airport: Airport | null = code ? await lookupAirport(code) : null;
+  if (airport) {
+    return { ...airport, city: plainCity(airport.city) };
+  }
+  const city = plan?.destination ?? tripTitle(trip.tag).split(",")[0]!;
+  const place = await placeForCity(city);
+  return { city, ...(place ?? {}) };
 }
 
 async function crossesBorder(leg: Leg): Promise<boolean> {
@@ -138,11 +161,13 @@ export async function tripViewOf(
   const facts = new Map(trip.members.flatMap((file) => file.facts.map((fact) => [fact.id, { fact, file }] as const)));
 
   const airport = await destinationOf(trip, legs, opts.plan);
-  const zone = airport?.zone ?? deviceZone();
+  // A stay's own printed zone speaks for the place when its name could not.
+  const printed = [...facts.values()].find(({ fact }) => fact.zone && subjectOf(fact)?.role === "check-in")?.fact.zone;
+  const zone = airport?.zone ?? printed ?? deviceZone();
   const stays = staysOf(mine.filter((row) => row.kind === "stay"), facts, zone);
   const international =
     (await Promise.all(legs.map(crossesBorder))).some(Boolean) ||
-    (opts.homeCountry !== undefined && airport !== null && airport.country !== opts.homeCountry);
+    (opts.homeCountry !== undefined && airport?.country !== undefined && airport.country !== opts.homeCountry);
 
   const firsts = [legs[0] && (legs[0].dep ?? legs[0].arr)!.day, stays[0] && (stays[0].checkIn ?? stays[0].checkOut)!.day, trip.start];
   const lastLeg = legs.at(-1);
@@ -166,7 +191,8 @@ export async function tripViewOf(
     tag: trip.tag,
     title: opts.plan?.title ?? tripTitle(trip.tag),
     city,
-    ...(airport ? { code: airport.code, country: airport.country } : {}),
+    ...(airport?.code ? { code: airport.code } : {}),
+    ...(airport?.country ? { country: airport.country } : {}),
     zone,
     start: days(firsts)[0] ?? "",
     end: days(lasts).at(-1) ?? "",
