@@ -132,6 +132,19 @@ describe("the timeline list", () => {
     expect(container.querySelector('[data-id="out"]')!.textContent).toContain("LISBON");
   });
 
+  it("a booking already begun in its own zone sits above the now line", () => {
+    // 20:00 in Tokyo was 11:00 here; at 15:42 it has begun, though its printed clock is later.
+    const now = new Date("2026-11-14T15:42:00").getTime();
+    render({
+      now,
+      rows: [
+        row("tokyo", "event", "2026-11-14", "20:00", { at: instantOf("2026-11-14", "20:00", "Asia/Tokyo"), past: true }),
+        row("dinner", "event", "2026-11-14", "21:00"),
+      ],
+    });
+    expect(order(".tln-row, .tln-now").map((el) => el.getAttribute("data-id") ?? "now")).toEqual(["tokyo", "now", "dinner"]);
+  });
+
   it("quiet days and past rows", () => {
     const now = new Date("2026-09-08T08:40:00").getTime();
     render({ now, rows: [row("rent", "bill", "2026-09-01", "09:00", { past: true }), row("dinner", "event", "2026-09-08", "19:30")] });

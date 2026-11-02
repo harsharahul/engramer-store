@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Trip } from "../intel/agenda";
-import { localDay, localTime, type AgendaRow } from "../intel/agendarows";
+import { localDay, type AgendaRow } from "../intel/agendarows";
 import { dayLabel, money } from "../intel/everyday";
 import { keepOutOfTrip, rememberTripDismissal } from "../intel/trips";
 import { useStore, type FileEntry } from "../store";
@@ -122,7 +122,6 @@ export function TimelineList(props: {
   };
 
   const today = localDay(props.now);
-  const clock = localTime(props.now);
   // A day asked for further back than the window widens the window to it,
   // and the window stays that wide.
   const reach = useRef<string | undefined>(undefined);
@@ -178,7 +177,8 @@ export function TimelineList(props: {
 
   let previous: string | undefined;
   for (const row of visible) {
-    const later = row.day > today || (row.day === today && row.time !== undefined && row.time > clock);
+    // Today's timed rows meet the now line at their real instant, as "past" does.
+    const later = row.day > today || (row.day === today && row.time !== undefined && row.at > props.now);
     if (row.day !== previous) {
       if (later && row.day > today) {
         placeNow();
