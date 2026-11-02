@@ -12,7 +12,16 @@ describe("readingFactsSchema", () => {
     expect(readingFactsSchema.facts.maxItems).toBe(6);
     const item = readingFactsSchema.facts.items!;
     expect(item.type).toBe("object");
-    expect(Object.keys((item as { properties: object }).properties).sort()).toEqual(["kind", "label", "time", "value"]);
+    expect(Object.keys((item as { properties: object }).properties).sort()).toEqual([
+      "kind",
+      "label",
+      "mode",
+      "number",
+      "place",
+      "role",
+      "time",
+      "value",
+    ]);
   });
 });
 
@@ -74,5 +83,55 @@ describe("proposedFacts", () => {
     expect(proposedFacts({ document: "other", facts: many }, "2026-10-01 ".repeat(1)).length).toBeLessThanOrEqual(6);
     expect(proposedFacts(null, text)).toEqual([]);
     expect(proposedFacts({ facts: "nope" }, text)).toEqual([]);
+  });
+});
+
+describe("what the model says a date is", () => {
+  const guesthouse =
+    "Hi! Your room at Casa Azulejo is confirmed. Check-in Friday 13 November 2026 from 15:00, check-out Monday 16 November 2026 by 11:00. Your train IC 521 arrives at Santa Apolonia at 14:10 on 13 November.";
+
+  it("a model reading of a guesthouse email gives check-in and check-out with the place", () => {
+    const facts = proposedFacts(
+      {
+        document: "hotel-booking",
+        facts: [
+          { kind: "event", label: "Check-in", value: "2026-11-13", time: "15:00", role: "check-in", place: "Casa Azulejo" },
+          { kind: "event", label: "Check-out", value: "2026-11-16", time: "11:00", role: "check-out", place: "Casa Azulejo" },
+          { kind: "event", label: "Train arrives", value: "2026-11-13", time: "14:10", role: "arrive", mode: "train", number: "IC 521", place: "Santa Apolonia" },
+        ],
+      },
+      guesthouse,
+    );
+    expect(facts.map((f) => f.subject)).toEqual([
+      { role: "check-in", place: "Casa Azulejo" },
+      { role: "check-out", place: "Casa Azulejo" },
+      { role: "arrive", mode: "train", carrier: "IC", number: "521", place: "Santa Apolonia" },
+    ]);
+    // The identity is the reading's words, as before: an earlier yes still applies.
+    expect(facts[0]!.id).toBe("event:2026-11-13 check-in 15:00");
+  });
+
+  it("a place the text does not contain is dropped and the date is kept", () => {
+    const [fact] = proposedFacts(
+      { document: "hotel-booking", facts: [{ kind: "event", label: "Check-in", value: "2026-11-13", role: "check-in", place: "Hotel Imaginario", number: "TP 999" }] },
+      guesthouse,
+    );
+    expect(fact!.value).toBe("2026-11-13");
+    expect(fact!.subject).toEqual({ role: "check-in" });
+  });
+
+  it("an unknown role is dropped and the date is kept", () => {
+    const facts = proposedFacts(
+      {
+        document: "hotel-booking",
+        facts: [
+          { kind: "event", label: "Check-in", value: "2026-11-13", role: "teleport", place: "Casa Azulejo" },
+          { kind: "event", label: "Check-out", value: "2026-11-16", role: "other" },
+        ],
+      },
+      guesthouse,
+    );
+    expect(facts.map((f) => f.value)).toEqual(["2026-11-13", "2026-11-16"]);
+    expect(facts.map((f) => f.subject)).toEqual([undefined, undefined]);
   });
 });

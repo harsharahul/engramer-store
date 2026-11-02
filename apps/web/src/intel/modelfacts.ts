@@ -9,8 +9,9 @@
  */
 
 import { isRealDate } from "./dates";
-import { factId, groundFacts, type DocumentKind, type Fact, type FactKind } from "./facts";
+import { factId, groundFacts, isStated, type DocumentKind, type Fact, type FactKind } from "./facts";
 import type { JsonSchemaProperty } from "./assistant";
+import { cleanSubject, type Subject } from "./subject";
 
 /** Every document kind the facts vocabulary knows, in its own order. */
 export const DOCUMENT_KINDS: readonly DocumentKind[] = [
@@ -39,6 +40,34 @@ export const DOCUMENT_KINDS: readonly DocumentKind[] = [
  * are never asked for; a reference number does not belong in a proposal. */
 const PROPOSABLE_KINDS: readonly FactKind[] = ["expiry", "due", "issued", "event", "amount"];
 
+/** What the model may say a date is; "other" says nothing. */
+const ROLES = ["check-in", "check-out", "depart", "arrive", "start", "end", "other"] as const;
+const MODES = ["flight", "train", "bus", "boat"] as const;
+/** A printed service number: "AQ 214", "IC 521", "214". */
+const SERVICE = /^(?:([A-Z0-9]{2,3})\s*)?(\d{1,4}[A-Z]?)$/;
+
+/**
+ * What the model says a date is about, keeping only what the document's own
+ * text states: a place or number it does not contain is left out, the role
+ * and the date stand.
+ */
+function subjectFrom(proposal: Record<string, unknown>, text: string): Subject | undefined {
+  const role = typeof proposal["role"] === "string" ? proposal["role"] : "";
+  if (!(ROLES as readonly string[]).includes(role) || role === "other") {
+    return undefined;
+  }
+  const stated = (value: unknown) =>
+    typeof value === "string" && value.trim() && isStated(value.trim(), text) ? value.trim() : undefined;
+  const service = SERVICE.exec(stated(proposal["number"]) ?? "");
+  return cleanSubject({
+    role,
+    mode: proposal["mode"],
+    carrier: service?.[1],
+    number: service?.[2],
+    place: stated(proposal["place"]),
+  });
+}
+
 /** Below every rule-based tier, above nothing: a proposal is a lead. */
 export const MODEL_CONFIDENCE = 0.45;
 const MAX_PROPOSALS = 6;
@@ -65,9 +94,13 @@ export const readingFactsSchema: { document: EnumProperty; facts: ArrayProperty 
         label: { type: "string", description: "The document's own words for it, such as Valid until" },
         value: { type: "string", description: "The date as YYYY-MM-DD, or the amount as a plain decimal" },
         time: { type: "string", description: "For an event, the time as HH:MM, otherwise empty" },
+        role: { type: "string", enum: [...ROLES], description: "What the date is: check-in, check-out, depart, arrive, start, end, or other" },
+        mode: { type: "string", enum: [...MODES, ""], description: "For a departure or arrival: flight, train, bus or boat, otherwise empty" },
+        place: { type: "string", description: "The hotel, station, airport or venue exactly as printed, otherwise empty" },
+        number: { type: "string", description: "A flight or train number exactly as printed, such as AQ 214, otherwise empty" },
       },
       required: ["kind", "label", "value"],
-      order: ["kind", "label", "value", "time"],
+      order: ["kind", "label", "value", "time", "role", "mode", "place", "number"],
     },
   },
 };
@@ -120,6 +153,7 @@ export function proposedFacts(raw: unknown, text: string): Fact[] {
       continue;
     }
     seen.add(id);
+    const subject = kind === "event" ? subjectFrom(item as Record<string, unknown>, text) : undefined;
     typed.push({
       id,
       kind: kind as FactKind,
@@ -127,6 +161,7 @@ export function proposedFacts(raw: unknown, text: string): Fact[] {
       value,
       ...(label ? { label } : {}),
       ...(time ? { time } : {}),
+      ...(subject ? { subject } : {}),
       source: "model",
       confidence: MODEL_CONFIDENCE,
     });

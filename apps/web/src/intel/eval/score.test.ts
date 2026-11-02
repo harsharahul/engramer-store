@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Fact } from "../facts";
 import { EMAIL_MIME } from "../../mail/kind";
 import { EVAL_CASES } from "./cases";
-import { factCases, kindCases, scoreKinds, scoreReader, type EvalCase } from "./score";
+import { factCases, kindCases, scoreKinds, scoreReader, scoreRoles, type EvalCase } from "./score";
 
 const evalCase = (id: string, expected: EvalCase["expected"], mailKind?: string): EvalCase => ({
   id,
@@ -85,5 +85,28 @@ describe("which cases score which task", () => {
     const emails = EVAL_CASES.filter((c) => c.mime === EMAIL_MIME);
     expect(kindCases(EVAL_CASES).map((c) => c.id)).toEqual(emails.map((c) => c.id));
     expect(EVAL_CASES.filter((c) => c.mailKind !== undefined && c.mime !== EMAIL_MIME).map((c) => c.id)).toEqual([]);
+  });
+});
+
+describe("scoreRoles", () => {
+  it("roles are scored against the expected role of each date found", async () => {
+    const cases = [
+      evalCase("stay", [
+        { kind: "event", value: "2027-04-08", time: "15:00", role: "check-in" },
+        { kind: "event", value: "2027-04-12", time: "11:00", role: "check-out" },
+      ]),
+    ];
+    const score = await scoreRoles(cases, async () => [
+      { ...fact("event", "2027-04-08", "15:00"), label: "Room ready", subject: { role: "check-in" } },
+      // The right date with the wrong role counts against precision.
+      { ...fact("event", "2027-04-12", "11:00"), label: "Key at reception", subject: { role: "check-in" } },
+    ]);
+    expect(score).toEqual({ precision: 0.5, recall: 0.5, offered: 2, expected: 2 });
+  });
+
+  it("a role the label states counts like a stated one, as the app reads it", async () => {
+    const cases = [evalCase("stay", [{ kind: "event", value: "2027-04-08", role: "check-in" }])];
+    const score = await scoreRoles(cases, async () => [{ ...fact("event", "2027-04-08"), label: "Check-in" }]);
+    expect(score).toEqual({ precision: 1, recall: 1, offered: 1, expected: 1 });
   });
 });

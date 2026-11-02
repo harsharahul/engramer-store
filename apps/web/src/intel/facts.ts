@@ -433,6 +433,12 @@ function normalize(text: string): string {
   return text.toLowerCase().replace(/[\s.,/\\_:-]+/g, "");
 }
 
+/** Whether the document states this phrase, by the same measure dates are grounded with. */
+export function isStated(phrase: string, source: string): boolean {
+  const wanted = normalize(phrase);
+  return wanted.length > 0 && normalize(source).includes(wanted);
+}
+
 /**
  * The two ways a time is written, and deliberately not a third.
  *
