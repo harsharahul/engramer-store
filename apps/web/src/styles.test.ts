@@ -99,6 +99,29 @@ describe("the Timeline scrolls at every width", () => {
     expect(rule).toMatch(/top:\s*var\(--topbar-h/);
     expect(rule).toMatch(/padding:[^;]*var\(--tabbar-h/);
   });
+
+  it("lets each phone rule for the hero's cards and the trip page come after the rule it overrides", () => {
+    // Same specificity, so the later rule wins: a base rule written after the
+    // phone block silently undid the swiping cards and the fixed trip page.
+    const at = (selector: string, inPhone: boolean) => {
+      const phone = mediaBlocks(CSS).filter(([condition]) => /max-width:\s*760px/.test(condition));
+      const source = `(?:^|\\n)\\s*${selector.replace(/[.>]/g, "\\$&")}\\s*\\{`;
+      const pattern = new RegExp(source, "g");
+      if (inPhone) {
+        const block = phone.find(([, body]) => new RegExp(source).test(body));
+        return block ? CSS.indexOf(block[1]) : -1;
+      }
+      // The base rule: the match that sits in no media block.
+      const blocks = mediaBlocks(CSS).map(([, body]) => [CSS.indexOf(body), CSS.indexOf(body) + body.length]);
+      return [...CSS.matchAll(pattern)].map((m) => m.index!).find((i) => !blocks.some(([s, e]) => i >= s! && i < e!)) ?? -1;
+    };
+    for (const selector of [".tln-cards", ".tln-dots", ".tln-trip", ".tln-tp-grid", ".tln-srcgrid"]) {
+      const base = at(selector, false);
+      const phone = at(selector, true);
+      expect(base, `${selector} base rule`).toBeGreaterThan(-1);
+      expect(phone, `${selector} phone rule`).toBeGreaterThan(base);
+    }
+  });
 });
 
 /**
