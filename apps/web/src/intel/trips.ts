@@ -149,6 +149,12 @@ async function memberOf(file: TripFile, extra: ReadonlySet<string>): Promise<Mem
   };
 }
 
+/** Whether one file's own journeys leave a place, reach another, and come back. */
+async function roundJourney(member: Member): Promise<boolean> {
+  const { from, to, destination } = await legPlaces(member.events);
+  return from !== undefined && from === to && destination !== undefined;
+}
+
 export interface TravelSpan {
   start: string;
   end: string;
@@ -337,7 +343,9 @@ export async function suggestTrips(
   const nowDay = now / 86_400_000;
   const suggestions: TripSuggestion[] = [];
   for (const cluster of clusters) {
-    if (cluster.members.length < 2) {
+    // One document is a trip only when it books the way out and the way back
+    // itself, as a single airline or agency email often does.
+    if (cluster.members.length < 2 && !(await roundJourney(cluster.members[0]!))) {
       continue;
     }
     // A thousand old documents hold many past trips; none is a suggestion.

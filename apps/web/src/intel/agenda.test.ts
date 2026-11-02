@@ -456,3 +456,15 @@ describe("trips read what each date is", () => {
     expect(await homeCityGuess([pass({ confirmed: true })])).toBe("San Francisco");
   });
 });
+
+describe("a trip in one email", () => {
+  it("one email that books the flights out and back is a trip of its own", async () => {
+    const plan = only(await planTrips([doc("booking", [...flights(), reference("4F2K", "Confirmation number")])], NOW));
+    expect(plan).toMatchObject({ anchorId: "booking", destination: "Lisbon", start: "2026-11-12", end: "2026-11-16" });
+    expect(plan.exact.get("booking")).toBe("booking");
+  });
+
+  it("a one-way flight alone is not a trip", async () => {
+    expect(await planTrips([doc("booking", flights().slice(0, 2))], NOW)).toEqual([]);
+  });
+});
