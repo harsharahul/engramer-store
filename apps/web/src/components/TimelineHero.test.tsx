@@ -66,7 +66,7 @@ const september = () =>
     NOW,
   );
 
-function render(factsOn = true, homeCity = "San Francisco", everyday: Everyday = september()) {
+function render(factsOn = true, homeCity = "San Francisco", everyday: Everyday = september(), now = NOW) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -75,7 +75,7 @@ function render(factsOn = true, homeCity = "San Francisco", everyday: Everyday =
       <TimelineHero
         everyday={everyday}
         homeCity={homeCity}
-        now={NOW}
+        now={now}
         factsOn={factsOn}
         onInspect={() => {}}
         onOpen={() => {}}
@@ -109,6 +109,14 @@ describe("the Everyday hero", () => {
     expect(poster.textContent).toContain("1 later today · 3 this week");
     expect(poster.textContent).toContain("San Francisco");
     expect(poster.textContent).toContain("Tue 8 Sep · 08:40 in San Francisco");
+    expect(container.querySelector(".tln-sky")!.classList.contains("tln-sky-day")).toBe(true);
+  });
+
+  it("the home poster's sky is home's sun", async () => {
+    // 17:30 in San Francisco on 8 Sep: the hour alone says dusk, but the sun
+    // sets at 19:29 there, so it is still day.
+    render(true, "San Francisco", september(), Date.parse("2026-09-08T17:30:00-07:00"));
+    await settle();
     expect(container.querySelector(".tln-sky")!.classList.contains("tln-sky-day")).toBe(true);
   });
 

@@ -35,8 +35,16 @@ describe("the moments of one trip", () => {
       big: "17 days",
       cap: "until you fly",
       meta: "Portugal · Mon 26 Oct · 17:00 in Lisbon",
-      skyHour: 17,
+      sky: "dusk",
     });
+  });
+
+  it("the poster's sky is the destination's sun", () => {
+    // On 2 Nov the sun sets in Lisbon at about 17:34, so at 19:30 it is night
+    // there, where the hour alone would still say dusk.
+    const now = at("2026-11-02", "19:30", LIS);
+    expect(lisbon.place?.lat).toBeCloseTo(38.77, 1);
+    expect(posterOf(momentOf([lisbon], now), now, LA)!.sky).toBe("night");
   });
 
   it("11 Nov 09:30 is soon, tomorrow, TP 236 in 1 d 8 h", () => {
@@ -50,7 +58,7 @@ describe("the moments of one trip", () => {
     const now = at("2026-11-12", "13:30", LA);
     const moment = momentOf([lisbon], now);
     expect(moment).toMatchObject({ kind: "travel", leaveBy: { at: Date.UTC(2026, 10, 12, 23, 10), zone: LA, code: "SFO", hours: 3, international: true } });
-    expect(posterOf(moment, now, LA)).toMatchObject({ top: "Travel day", big: "Today", cap: "TP 236 departs 18:10", meta: "Portugal · Thu 12 Nov · 21:30 in Lisbon", skyHour: 21 });
+    expect(posterOf(moment, now, LA)).toMatchObject({ top: "Travel day", big: "Today", cap: "TP 236 departs 18:10", meta: "Portugal · Thu 12 Nov · 21:30 in Lisbon", sky: "night" });
   });
 
   it("13 Nov 06:00 Lisbon is in the air, about a third of the way, lands 14:05 Lisbon time", () => {
@@ -59,7 +67,7 @@ describe("the moments of one trip", () => {
     expect(moment.kind).toBe("air");
     expect(moment.flying!.leg.designator).toBe("TP 236");
     expect(moment.flying!.progress).toBeCloseTo(0.322, 2);
-    expect(posterOf(moment, now, LA)).toMatchObject({ top: "TP 236 · SFO to LIS", big: "In the air", cap: "lands 14:05 Lisbon time", skyHour: 6 });
+    expect(posterOf(moment, now, LA)).toMatchObject({ top: "TP 236 · SFO to LIS", big: "In the air", cap: "lands 14:05 Lisbon time", sky: "dawn" });
   });
 
   it("14 Nov 15:42 Lisbon is staying, day 3 of 5, night 2 of 3 at Casa do Rio", () => {
@@ -91,8 +99,10 @@ describe("the moments of one trip", () => {
       big: "Welcome back",
       cap: "5 days in Lisbon",
       meta: "Portugal · 12-16 Nov 2026 · 23 photos",
-      skyHour: 19,
+      sky: "dusk",
     });
+    // Back home, the sky is home's: San Francisco's sun set before 17:00.
+    expect(posterOf(moment, now, LA, { photos: 23, homePlace: { lat: 37.62, lon: -122.38 } })!.sky).toBe("night");
   });
 
   it("22 Nov is everyday again", () => {

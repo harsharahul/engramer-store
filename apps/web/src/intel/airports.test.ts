@@ -1,8 +1,33 @@
+import { statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { airportForCity, lookupAirport } from "./airports";
 import rows from "./tables/airports.json";
 
 describe("lookupAirport", () => {
+  it("an airport carries where it is", async () => {
+    const lis = await lookupAirport("LIS");
+    expect(lis?.lat).toBeCloseTo(38.77, 1);
+    expect(lis?.lon).toBeCloseTo(-9.13, 1);
+    const sfo = await lookupAirport("SFO");
+    expect(sfo?.lat).toBeCloseTo(37.62, 1);
+    expect(sfo?.lon).toBeCloseTo(-122.38, 1);
+  });
+
+  it("a code bookings already name stays known after the data is rebuilt", async () => {
+    // Renamed upstream (PBI is listed as DJT now) or no longer scheduled:
+    // past and future bookings still say these codes.
+    expect(await lookupAirport("PBI")).toMatchObject({ city: "West Palm Beach", zone: "America/New_York" });
+    expect((await lookupAirport("PBI"))?.lat).toBeCloseTo(26.68, 1);
+    for (const code of ["LWO", "DKR", "LAD", "LBG"]) {
+      expect(await lookupAirport(code)).not.toBeNull();
+    }
+  });
+
+  it("the airports table stays small enough to load on a phone", () => {
+    expect(statSync(fileURLToPath(new URL("./tables/airports.json", import.meta.url))).size).toBeLessThan(260_000);
+  });
+
   it("names the city and zone for a code", async () => {
     expect(await lookupAirport("JFK")).toMatchObject({
       city: "New York",

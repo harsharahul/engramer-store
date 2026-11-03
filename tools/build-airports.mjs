@@ -11,18 +11,25 @@
  *  - mwgg/Airports airports.json (MIT): IANA timezones, keyed by ICAO.
  *    https://github.com/mwgg/Airports
  *
- * Usage: node tools/build-airports.mjs <ourairports.csv> <mwgg-airports.json>
+ * Usage: node tools/build-airports.mjs <ourairports.csv> <mwgg-airports.json> [previous-airports.json]
  *
- * Writes apps/web/src/intel/tables/airports.json as [iata, city, country, zone]
- * tuples, sorted by code, scheduled-service airports only. A row without a
- * timezone or a city is dropped: a code the table cannot place is worse than
- * a code it does not know.
+ * With the previous table, every code it knew stays known, even when the
+ * airport has since lost its scheduled service or been renamed (bookings
+ * already stored still name it): its position comes from the airport's row,
+ * found by code or by a former code listed in its keywords.
+ *
+ * Writes apps/web/src/intel/tables/airports.json as [iata, city, country, zone,
+ * lat, lon] tuples, sorted by code, scheduled-service airports only, with
+ * coordinates to two decimals (about a kilometre, enough to draw a route and
+ * work out the sun). A row without a timezone, a city or a position is
+ * dropped: a code the table cannot place is worse than a code it does not
+ * know.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const [csvPath, tzPath] = process.argv.slice(2);
+const [csvPath, tzPath, previousPath] = process.argv.slice(2);
 if (!csvPath || !tzPath) {
   console.error("usage: build-airports.mjs <ourairports.csv> <mwgg-airports.json>");
   process.exit(1);
@@ -64,6 +71,10 @@ const TYPE = col("type");
 const SCHED = col("scheduled_service");
 const CITY = col("municipality");
 const COUNTRY = col("iso_country");
+const LAT = col("latitude_deg");
+const LON = col("longitude_deg");
+const KEYWORDS = col("keywords");
+const round = (n) => Math.round(n * 100) / 100;
 
 const zones = new Map();
 const fallbackCities = new Map();
@@ -98,8 +109,52 @@ for (const line of lines.slice(1)) {
   if (!city) {
     continue;
   }
+  const lat = Number.parseFloat(fields[LAT] ?? "");
+  const lon = Number.parseFloat(fields[LON] ?? "");
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    continue;
+  }
   seen.add(iata);
-  rows.push([iata, city, fields[COUNTRY]?.trim() ?? "", zone]);
+  rows.push([iata, city, fields[COUNTRY]?.trim() ?? "", zone, round(lat), round(lon)]);
+}
+
+if (previousPath) {
+  // Where each code is now: its own row, else the row that lists it as a former code.
+  const byCode = new Map();
+  const byKeyword = new Map();
+  for (const line of lines.slice(1)) {
+    if (!line.trim()) {
+      continue;
+    }
+    const fields = parseCsvLine(line);
+    const iata = fields[IATA]?.trim().toUpperCase();
+    if (iata && !byCode.has(iata)) {
+      byCode.set(iata, fields);
+    }
+    for (const token of (fields[KEYWORDS] ?? "").split(/[,\s]+/)) {
+      if (/^[A-Z]{3}$/.test(token) && !byKeyword.has(token)) {
+        byKeyword.set(token, fields);
+      }
+    }
+  }
+  const kept = [];
+  const lost = [];
+  for (const [code, city, country, zone, lat, lon] of JSON.parse(readFileSync(previousPath, "utf8"))) {
+    if (seen.has(code)) {
+      continue;
+    }
+    const fields = byCode.get(code) ?? byKeyword.get(code);
+    const la = lat ?? Number.parseFloat(fields?.[LAT] ?? "");
+    const lo = lon ?? Number.parseFloat(fields?.[LON] ?? "");
+    if (!Number.isFinite(la) || !Number.isFinite(lo)) {
+      lost.push(code);
+      continue;
+    }
+    seen.add(code);
+    rows.push([code, city, country, zone, round(la), round(lo)]);
+    kept.push(code);
+  }
+  console.log(`kept ${kept.length} codes the previous table knew; lost: ${lost.join(" ") || "none"}`);
 }
 rows.sort((a, b) => a[0].localeCompare(b[0]));
 

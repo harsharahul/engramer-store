@@ -8,12 +8,12 @@
  * the trip is not part of it.
  */
 import type { Trip, TripPlan } from "./agenda";
-import type { AgendaRow, RowFile } from "./agendarows";
-import { lookupAirport, placeForCity, plainCity, type Airport } from "./airports";
+import { photoDayOf, sourceOf, type AgendaRow, type RowFile } from "./agendarows";
+import { lookupAirport, placeForCity, plainCity, type Airport, type LatLon } from "./airports";
 import { sum, type Money } from "./everyday";
 import type { Fact } from "./facts";
 import type { TripWindow } from "./insights";
-import { deviceZone } from "./instants";
+import { deviceZone, localDay } from "./instants";
 import type { Leg, Stop } from "./legs";
 import { subjectOf } from "./subject";
 import { departureAdvice, tripTitle } from "./trips";
@@ -55,6 +55,10 @@ export interface TripView {
   leaveBy: (Advice | null)[];
   /** The city each airport code the legs name is in. */
   cities: Record<string, string>;
+  /** Where each airport code the legs name is, from the airport table. */
+  coords: Record<string, LatLon>;
+  /** Where the destination is, when its airport is known. */
+  place?: LatLon;
 }
 
 export type Advice = NonNullable<Awaited<ReturnType<typeof departureAdvice>>>;
@@ -201,11 +205,15 @@ export async function tripViewOf(
     sources[isEmailRecord(file.name, file.mime) ? "email" : file.mime === "application/pdf" ? "pdf" : "other"]++;
   }
   const city = airport?.city ?? opts.plan?.destination ?? tripTitle(trip.tag).split(",")[0]!;
+  // Only an airport the table knows has a position; a city named by the tag alone has none.
+  const destination = airport?.code ? await lookupAirport(airport.code) : null;
   const cities: Record<string, string> = {};
+  const coords: Record<string, LatLon> = {};
   for (const code of new Set(legs.flatMap((leg) => [leg.dep?.code, leg.arr?.code, CODE.test(leg.to) ? leg.to : undefined]))) {
     const place = code ? await lookupAirport(code) : null;
     if (place) {
       cities[code!] = place.city;
+      coords[code!] = { lat: place.lat, lon: place.lon };
     }
   }
   return {
@@ -226,6 +234,8 @@ export async function tripViewOf(
     exact: opts.plan?.anchorId !== undefined,
     leaveBy: await Promise.all(legs.map(departureAdvice)),
     cities,
+    coords,
+    ...(destination ? { place: { lat: destination.lat, lon: destination.lon } } : {}),
   };
 }
 
@@ -257,7 +267,10 @@ export function windowOf(view: TripView): TripWindow {
 }
 
 /** What the trip cost so far: exact amounts per currency, and one receipt that only shares its dates. */
-export function tripSpend(view: TripView, rows: readonly AgendaRow[]): { sums: Money[]; count: number; waiting?: AgendaRow } {
+export function tripSpend(
+  view: TripView,
+  rows: readonly AgendaRow[],
+): { sums: Money[]; count: number; bills: AgendaRow[]; waiting?: AgendaRow } {
   const members = new Set(view.memberIds);
   // A ticket's price shows on each of its days; it was paid once.
   const paid = new Set<string>();
@@ -270,7 +283,40 @@ export function tripSpend(view: TripView, rows: readonly AgendaRow[]): { sums: M
   const waiting = rows.find(
     (row) => row.kind === "bill" && row.trip?.tag === view.tag && row.trip.evidence === "weak" && row.day >= view.start && row.day <= view.end,
   );
-  return { sums: sum(spent), count: spent.length, ...(waiting ? { waiting } : {}) };
+  return { sums: sum(spent), count: spent.length, bills: spent, ...(waiting ? { waiting } : {}) };
+}
+
+/** One tile of "Everything for this trip": a member file, as the trip page names it. */
+export interface SourceTile {
+  fileId: string;
+  chip: string;
+  title: string;
+  day: string;
+}
+
+/**
+ * Every member of the trip once, in day order: a booking by the route it
+ * flies, any other file by its first row in the trip, else by its subject
+ * or name.
+ */
+export function tripSources(view: TripView, rows: readonly AgendaRow[], fileOf: (id: string) => RowFile | undefined): SourceTile[] {
+  const tiles: SourceTile[] = [];
+  for (const id of view.memberIds) {
+    const file = fileOf(id);
+    if (!file || file.trashed) {
+      continue;
+    }
+    const flown = view.legs.find((leg) => leg.fileId === id);
+    const row = rows.filter((candidate) => candidate.fileIds.includes(id)).sort(byTime)[0];
+    const day = flown?.dep?.day ?? row?.day ?? localDay(file.mail?.date ?? file.mtime);
+    tiles.push({
+      fileId: id,
+      chip: photoDayOf(file) ? "PHOTOS" : sourceOf(file),
+      title: flown ? `${flown.from} to ${flown.to}` : (row?.title ?? file.mail?.subject ?? file.name),
+      day,
+    });
+  }
+  return tiles.sort((a, b) => a.day.localeCompare(b.day) || a.title.localeCompare(b.title));
 }
 
 /** The next rows after now that are not this trip's, photos or questions. */

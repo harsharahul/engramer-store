@@ -10,7 +10,9 @@
 import { dayLabel, durationLabel } from "./everyday";
 import { instantOf, zonedDay, zonedTime } from "./instants";
 import type { Leg, Stop } from "./legs";
+import { skyOf, type Sky } from "./sun";
 import type { Advice, Stay, TripView } from "./tripview";
+import type { LatLon } from "./airports";
 
 export type MomentKind = "everyday" | "planning" | "soon" | "travel" | "air" | "staying" | "last" | "home";
 
@@ -214,7 +216,8 @@ export interface Poster {
   clockZone?: string;
   tail?: string;
   meta: string;
-  skyHour: number;
+  /** The sky over the poster's city at this moment, by its sun when known. */
+  sky: Sky;
 }
 
 const SHORT_COUNTRIES: Record<string, string> = { US: "USA", GB: "UK", AE: "UAE" };
@@ -250,14 +253,20 @@ const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 const named = (leg: Leg) => leg.designator || `Your ${leg.mode}`;
 
 /** The poster's words for a trip moment; null for the ordinary day. */
-export function posterOf(moment: Moment, now: number, homeZone: string, opts: { photos?: number } = {}): Poster | null {
+export function posterOf(
+  moment: Moment,
+  now: number,
+  homeZone: string,
+  opts: { photos?: number; homePlace?: LatLon } = {},
+): Poster | null {
   const view = moment.trip;
   if (moment.kind === "everyday" || !view) {
     return null;
   }
   const home = moment.kind === "home";
   const country = countryName(view.country);
-  const skyHour = Number(zonedTime(now, home ? homeZone : view.zone).slice(0, 2));
+  // Back home, the sky is home's; otherwise the destination's.
+  const sky = home ? skyOf(now, homeZone, opts.homePlace) : skyOf(now, view.zone, view.place);
   const place = { city: view.city, code: view.code ?? "" };
   const lead = home
     ? [country, rangeLabel(view.start, view.end), opts.photos ? count(opts.photos, "photo") : undefined].filter(Boolean).join(" · ")
@@ -274,7 +283,7 @@ export function posterOf(moment: Moment, now: number, homeZone: string, opts: { 
     cap: cap || `in ${view.city}`,
     ...(until ? { until } : {}),
     ...meta,
-    skyHour,
+    sky,
   });
   const homeBy = (leg: Leg) => (leg.mode === "flight" ? "flight" : leg.mode);
 

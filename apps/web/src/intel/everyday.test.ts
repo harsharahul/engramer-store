@@ -6,7 +6,7 @@ import type { Trip } from "./agenda";
 import { rowsOf, type AgendaRow, type RowFile } from "./agendarows";
 import type { Fact } from "./facts";
 import { deviceZone, instantOf } from "./instants";
-import { dayLabel, durationLabel, everydayOf, money, skyOf } from "./everyday";
+import { dayLabel, durationLabel, everydayOf, money } from "./everyday";
 
 const NOW = Date.UTC(2026, 8, 8, 15, 40); // Tue 8 Sep 2026, 08:40 PDT
 
@@ -108,9 +108,5 @@ describe("the words the cards use", () => {
     expect(durationLabel(-5)).toBe("0 min");
     expect(money({ currency: "EUR", value: "1184" })).toBe("EUR 1,184.00");
     expect(dayLabel("2026-09-08")).toBe("Tue 8 Sep");
-  });
-
-  it("the sky follows the hour", () => {
-    expect([4, 6, 8, 16, 17, 21].map(skyOf)).toEqual(["night", "dawn", "day", "day", "dusk", "night"]);
   });
 });

@@ -95,7 +95,29 @@ export { localDay, localTime, zonedDay, zonedTime } from "./instants";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const dayNumber = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / 86_400_000;
 
-function sourceOf(file: RowFile): AgendaRow["source"] {
+/**
+ * The day a photo or video counts on, or undefined for a file that is not
+ * one: a receipt photo is a document, and a shared file is someone else's.
+ * The one rule for the Timeline's photo rows, the hero's Photos card and an
+ * album of a trip's days, so all three count the same files. The day is the
+ * one the file was saved, until capture dates are read.
+ */
+export function photoDayOf(file: RowFile): string | undefined {
+  if (file.shared || file.category === "Receipts" || !(file.mime.startsWith("image/") || file.mime.startsWith("video/"))) {
+    return undefined;
+  }
+  return localDay(file.mtime);
+}
+
+/** The photos taken from `from` to `to`, both days included. */
+export function photosInDays<T extends RowFile>(files: readonly T[], from: string, to: string): T[] {
+  return files.filter((file) => {
+    const day = photoDayOf(file);
+    return day !== undefined && day >= from && day <= to;
+  });
+}
+
+export function sourceOf(file: RowFile): AgendaRow["source"] {
   if (isEmailRecord(file.name, file.mime)) {
     return "EMAIL";
   }
@@ -366,8 +388,8 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
   const photosByDay = new Map<string, RowFile[]>();
   const threads = new Map<string, RowFile[]>();
   for (const file of live) {
-    if (!file.shared && (file.mime.startsWith("image/") || file.mime.startsWith("video/")) && file.category !== "Receipts") {
-      const day = localDay(file.mtime);
+    const day = photoDayOf(file);
+    if (day) {
       const held = photosByDay.get(day) ?? [];
       held.push(file);
       photosByDay.set(day, held);

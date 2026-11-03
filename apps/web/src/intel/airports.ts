@@ -1,5 +1,5 @@
 /**
- * The offline airport table: code to city, country and zone.
+ * The offline airport table: code to city, country, zone and position.
  *
  * A departure time is local to its airport, so turning one into an instant
  * needs the airport's zone, and resolving "JFK" to New York is what lets a
@@ -9,14 +9,20 @@
  * so the main bundle stays lean.
  */
 
-export interface Airport {
+/** A point on the globe, in degrees. */
+export interface LatLon {
+  lat: number;
+  lon: number;
+}
+
+export interface Airport extends LatLon {
   code: string;
   city: string;
   country: string;
   zone: string;
 }
 
-type Row = [code: string, city: string, country: string, zone: string];
+type Row = [code: string, city: string, country: string, zone: string, lat: number, lon: number];
 
 let tablePromise: Promise<Map<string, Airport>> | null = null;
 
@@ -25,8 +31,8 @@ function table(): Promise<Map<string, Airport>> {
     tablePromise = import("./tables/airports.json").then((mod) => {
       const rows = (mod.default ?? mod) as Row[];
       const map = new Map<string, Airport>();
-      for (const [code, city, country, zone] of rows) {
-        map.set(code, { code, city, country, zone });
+      for (const [code, city, country, zone, lat, lon] of rows) {
+        map.set(code, { code, city, country, zone, lat, lon });
       }
       return map;
     });

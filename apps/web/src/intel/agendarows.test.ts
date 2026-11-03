@@ -3,7 +3,7 @@ process.env.TZ = "America/Los_Angeles";
 
 import { describe, expect, it } from "vitest";
 import { planTrips } from "./agenda";
-import { localDay, localTime, rowsOf, type AgendaRow, type RowContext, type RowFile } from "./agendarows";
+import { localDay, localTime, photoDayOf, photosInDays, rowsOf, type AgendaRow, type RowContext, type RowFile } from "./agendarows";
 import { withExactAcceptance, type Fact } from "./facts";
 
 const EMAIL = "application/vnd.engram.email+json";
@@ -406,5 +406,26 @@ describe("rows carry real instants", () => {
   it("a hotel in a trip takes the trip's destination zone", async () => {
     const rows = await rowsOf([hotel({ tags: ["trip:lisbon-2026-11"] })], none, NOW);
     expect(rows.map((row) => row.at)).toEqual([Date.UTC(2026, 10, 13, 15, 0), Date.UTC(2026, 10, 16, 11, 0)]);
+  });
+});
+
+describe("photo days", () => {
+  const image = (id: string, extra: Partial<RowFile> = {}): RowFile => ({
+    id,
+    name: `${id}.jpg`,
+    mime: "image/jpeg",
+    mtime: Date.parse("2026-11-14T10:00:00Z"),
+    tags: [],
+    facts: [],
+    trashed: false,
+    ...extra,
+  });
+
+  it("a photo's day is one rule for the timeline and its albums", () => {
+    expect(photoDayOf(image("beach"))).toBe(localDay(Date.parse("2026-11-14T10:00:00Z")));
+    expect(photoDayOf(image("taxi", { category: "Receipts" }))).toBeUndefined();
+    expect(photoDayOf(image("shared", { shared: true }))).toBeUndefined();
+    expect(photoDayOf({ ...image("doc"), name: "doc.pdf", mime: "application/pdf" })).toBeUndefined();
+    expect(photosInDays([image("a"), image("b", { mtime: Date.parse("2026-12-01T10:00:00Z") })], "2026-11-12", "2026-11-16").map((f) => f.id)).toEqual(["a"]);
   });
 });
