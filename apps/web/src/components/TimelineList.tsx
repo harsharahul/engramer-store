@@ -6,7 +6,7 @@
  * account's decisions, and nothing is written on render.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Trip } from "../intel/agenda";
 import { localDay, type AgendaRow } from "../intel/agendarows";
 import { dayLabel, money } from "../intel/everyday";
@@ -62,6 +62,17 @@ function prefersReducedMotion(): boolean {
     : false;
 }
 
+/** The nearest ancestor that scrolls: the list's own on the Mac, the page's on a phone. */
+function scrollerOf(el: HTMLElement | null): HTMLElement | null {
+  for (let parent = el?.parentElement ?? null; parent; parent = parent.parentElement) {
+    const overflow = getComputedStyle(parent).overflowY;
+    if (overflow === "auto" || overflow === "scroll") {
+      return parent;
+    }
+  }
+  return null;
+}
+
 export function TimelineList(props: {
   rows: AgendaRow[];
   trips: Trip[];
@@ -83,6 +94,22 @@ export function TimelineList(props: {
   const resolveFacts = useStore((s) => s.resolveFacts);
   const confirmTrip = useStore((s) => s.confirmTrip);
   const [earlier, setEarlier] = useState(0);
+  // Earlier rows arrive above what is on screen; the scroller moves down by
+  // their height, so the rows read before the press stay where they were.
+  const list = useRef<HTMLDivElement>(null);
+  const held = useRef<{ scroller: HTMLElement; height: number } | null>(null);
+  const showEarlier = () => {
+    const scroller = scrollerOf(list.current);
+    held.current = scroller ? { scroller, height: scroller.scrollHeight } : null;
+    setEarlier((n) => n + 1);
+  };
+  useLayoutEffect(() => {
+    const anchor = held.current;
+    if (anchor) {
+      anchor.scroller.scrollTop += anchor.scroller.scrollHeight - anchor.height;
+      held.current = null;
+    }
+  }, [earlier]);
   const [keptTrips, setKeptTrips] = useState<ReadonlySet<string>>(new Set());
   const [refused, setRefused] = useState<ReadonlySet<string>>(new Set());
   // Refusals waiting out their Undo, written when the time is up or the list closes.
@@ -271,10 +298,10 @@ export function TimelineList(props: {
   placeNow();
 
   return (
-    <div className="tln-list">
+    <div ref={list} className="tln-list">
       {hidden > 0 && (
         <div className="tln-earlier">
-          <Button size="xs" variant="secondary" onClick={() => setEarlier((n) => n + 1)}>
+          <Button size="xs" variant="secondary" onClick={showEarlier}>
             Show earlier · {hidden}
           </Button>
         </div>

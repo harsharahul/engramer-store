@@ -218,6 +218,38 @@ describe("the timeline list", () => {
     expect(text()).not.toContain("Show earlier");
   });
 
+  it("Show earlier keeps the rows on screen where they were", () => {
+    const now = new Date("2026-09-08T08:40:00").getTime();
+    // The list inside its scroller, as on the Timeline.
+    const scroller = document.createElement("div");
+    scroller.style.overflowY = "auto";
+    document.body.appendChild(scroller);
+    container = document.createElement("div");
+    scroller.appendChild(container);
+    root = createRoot(container);
+    // The earlier rows add 600px above what is on screen.
+    let reads = 0;
+    Object.defineProperty(scroller, "scrollHeight", { get: () => (reads++ === 0 ? 1000 : 1600) });
+    scroller.scrollTop = 50;
+    act(() =>
+      root.render(
+        <TimelineList
+          trips={[]}
+          homeCity="San Francisco"
+          filter="all"
+          now={now}
+          rows={[row("old", "bill", "2026-07-01", "09:00", { past: true }), row("today", "event", "2026-09-08", "19:30")]}
+          onInspect={onInspect}
+          onOpen={() => {}}
+          onToast={onToast}
+        />,
+      ),
+    );
+    click(/Show earlier/);
+    expect(scroller.scrollTop).toBe(650);
+    scroller.remove();
+  });
+
   it("filters keep trips, bills or dates", () => {
     const now = new Date("2026-09-08T08:40:00").getTime();
     const rows = [

@@ -133,6 +133,7 @@ import { orderCollections } from "../sidebar";
 import { Popover, PopoverContent } from "./ui/popover";
 import { Button } from "./ui/button";
 import { photosInDays } from "../intel/agendarows";
+import { PhoneTabs } from "./PhoneTabs";
 import { IconButton } from "./ui/icon-button";
 import { folderActivity } from "../folderactivity";
 import { PhotoGrid } from "./PhotoGrid";
@@ -2852,6 +2853,14 @@ export function Vault() {
           <div className="grow" />
           {isMobile && !phoneSearch && (
             <div className={capsule}>
+              {/* Notices: the bell has the same place on the phone as on the Mac. */}
+              <ActivityBell
+                open={activityOpen}
+                onToggle={() => {
+                  setDrawerOpen(false);
+                  setActivityOpen((open) => !open);
+                }}
+              />
               <IconButton size="md" className={capsuleIcon} label="Add" title="Add to your vault" onClick={openAddSheet}>
                 <PlusGlyph size={18} />
               </IconButton>
@@ -3414,72 +3423,61 @@ export function Vault() {
           />
         )}
 
-      {/* The phone's places, per IA §6: Files, Photos, Search, Notices,
-          More. Tabs are places, never actions: Add lives in the top bar. */}
-      <nav className="tabbar">
-        <button
-          className={`tab${view.kind === "folder" && !drawerOpen && !activityOpen ? " active" : ""}`}
-          onClick={() => {
-            setQuery("");
-            setPhoneSearchOpen(false);
-            setDrawerOpen(false);
-            setActivityOpen(false);
-            setView({ kind: "folder", id: null });
-          }}
-        >
-          <FolderGlyph size={19} />
-          <span>Files</span>
-        </button>
-        <button
-          className={`tab${view.kind === "photos" && !drawerOpen && !activityOpen ? " active" : ""}`}
-          onClick={() => {
-            setQuery("");
-            setPhoneSearchOpen(false);
-            setDrawerOpen(false);
-            setActivityOpen(false);
-            setView({ kind: "photos" });
-          }}
-        >
-          <PhotoGlyph size={19} />
-          <span>Photos</span>
-        </button>
-        <button
-          className={`tab${searchFocused || searching ? " active" : ""}`}
-          onClick={() => {
-            setDrawerOpen(false);
-            setActivityOpen(false);
-            setPhoneSearchOpen(true);
-            searchInput.current?.focus();
-          }}
-        >
-          <SearchGlyph size={19} />
-          <span>Search</span>
-        </button>
-        <button
-          className={`tab${activityOpen ? " active" : ""}`}
-          onClick={() => {
-            setDrawerOpen(false);
-            setActivityOpen((open) => !open);
-          }}
-        >
-          <InboxGlyph size={19} />
-          <span>Notices</span>
-        </button>
-        <button
-          className={`tab${drawerOpen ? " active" : ""}`}
-          onClick={() => {
-            // The drawer and the details sheet never stack.
-            if (detailsSheet) {
-              diag("details", "closed: the More drawer opened");
-            }
-            setDetailsSheet(false);
-            setDrawerOpen(true);
-          }}
-        >
-          <MenuGlyph size={19} />
-          <span>More</span>
-        </button>
-      </nav>
+      {/* The phone's places, per IA §5: Timeline, Files, Photos, Search,
+          More. Add and the Notices bell live in the top bar. */}
+      <PhoneTabs
+        active={
+          searchFocused || searching
+            ? "search"
+            : drawerOpen
+              ? "more"
+              : activityOpen
+                ? null
+                : view.kind === "timeline"
+                  ? "timeline"
+                  : view.kind === "folder"
+                    ? "files"
+                    : view.kind === "photos"
+                      ? "photos"
+                      : null
+        }
+        onTimeline={() => {
+          setQuery("");
+          setPhoneSearchOpen(false);
+          setDrawerOpen(false);
+          setActivityOpen(false);
+          // At now, with any trip page closed.
+          setView({ kind: "timeline", now: true, nonce: Date.now() });
+        }}
+        onFiles={() => {
+          setQuery("");
+          setPhoneSearchOpen(false);
+          setDrawerOpen(false);
+          setActivityOpen(false);
+          setView({ kind: "folder", id: null });
+        }}
+        onPhotos={() => {
+          setQuery("");
+          setPhoneSearchOpen(false);
+          setDrawerOpen(false);
+          setActivityOpen(false);
+          setView({ kind: "photos" });
+        }}
+        onSearch={() => {
+          setDrawerOpen(false);
+          setActivityOpen(false);
+          setPhoneSearchOpen(true);
+          searchInput.current?.focus();
+        }}
+        onMore={() => {
+          // The drawer and the details sheet never stack.
+          if (detailsSheet) {
+            diag("details", "closed: the More drawer opened");
+          }
+          setDetailsSheet(false);
+          setDrawerOpen(true);
+        }}
+      />
 
       {/* One stacked column holds every phone-bottom overlay so they never
           overlap; see .bottom-stack in styles.css. */}

@@ -82,7 +82,7 @@ describe("the trip poster", () => {
 });
 
 describe("the hero follows the moment", () => {
-  const hero = (now: number, views: TripView[]) => (
+  const hero = (now: number, views: TripView[], extra: { onOpenTrip?: (tag: string) => void } = {}) => (
     <TimelineHero
       everyday={everydayOf([], [], now)}
       moment={momentOf(views, now)}
@@ -94,6 +94,7 @@ describe("the hero follows the moment", () => {
       onOpen={() => {}}
       onToast={() => {}}
       onTurnOnDates={() => {}}
+      {...extra}
     />
   );
 
@@ -122,6 +123,13 @@ describe("the hero follows the moment", () => {
     act(() => poster.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     act(() => poster.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
     expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it("the poster that opens a trip is named by the trip, not by its ticking clock", () => {
+    useStore.setState({ resolveFacts: vi.fn(async () => {}) });
+    const now = instantOf("2026-11-14", "15:42", LIS);
+    mount(hero(now, [lisbon], { onOpenTrip: () => {} }), now);
+    expect(container.querySelector('.tln-poster[role="button"]')!.getAttribute("aria-label")).toBe("Open the Lisbon trip");
   });
 
   it("the ordinary day's poster opens nothing", () => {

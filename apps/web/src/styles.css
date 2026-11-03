@@ -5027,6 +5027,8 @@ span.item-menu {
 }
 
 .tln-view {
+  /* Positioned: a trip's page lies over it. */
+  position: relative;
   display: grid;
   grid-template-columns: minmax(320px, 452px) 1fr;
   height: 100%;
@@ -5061,9 +5063,6 @@ span.item-menu {
 .tln-bar-end {
   display: flex;
   align-items: center;
-  gap: 4px;
-}
-.tln-bar-end {
   gap: 8px;
   margin-left: auto;
 }
@@ -5120,6 +5119,7 @@ span.item-menu {
   display: grid;
   grid-template-columns: 52px 26px 1fr;
   gap: 0 10px;
+  height: 34px;
 }
 .tln-dayh {
   position: sticky;
@@ -5473,9 +5473,6 @@ span.item-menu {
   100% {
     box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
   }
-}
-.tln-gap {
-  height: 34px;
 }
 .tln-gap span {
   align-self: center;
@@ -5988,11 +5985,37 @@ button.tln-check {
   }
 }
 
+/* ----- the hero's cards: a column here, a swiping row on a phone ----- */
+
+.tln-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.tln-dots {
+  display: none;
+}
+/* The carousel's dots: their own class, apart from the now marker's .tln-dot. */
+.tln-cdot {
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--hairline-strong);
+  cursor: pointer;
+}
+.tln-cdot.tln-on {
+  background: var(--paper);
+}
+/* Show earlier moves the scroller itself; a browser's own anchoring would move it twice. */
+.tln-scroll,
+.content.content-timeline {
+  overflow-anchor: none;
+}
+
 /* ----- a trip's page, over the Timeline ----- */
 
-.tln-view {
-  position: relative;
-}
 .tln-trip {
   position: absolute;
   inset: 0;
@@ -6077,6 +6100,69 @@ button.tln-check {
   border: 1px solid var(--hairline);
   border-radius: 10px;
   cursor: pointer;
+}
+
+/* On a phone. This block comes after the rules above on purpose: at equal
+   specificity the later rule wins, and a base rule after it would undo it. */
+@media (max-width: 760px) {
+  /* The hero's cards swipe card by card, the next one peeking, with a dot each. */
+  .tln-cards {
+    flex-direction: row;
+    gap: 10px;
+    margin: 0 -16px;
+    padding: 0 16px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+  .tln-cards::-webkit-scrollbar {
+    display: none;
+  }
+  .tln-cards > .tln-card {
+    flex: 0 0 318px;
+    scroll-snap-align: center;
+  }
+  .tln-dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+  }
+  /* A trip's page fills the screen between the top bar and the tab bar, so
+     it starts at its top however far down the list it was opened, and the
+     list keeps its place behind it. */
+  .tln-trip {
+    position: fixed;
+    /* The top bar sits below the status bar's inset; the page starts below both. */
+    top: calc(env(safe-area-inset-top, 0px) + var(--topbar-h, 65px));
+    right: 0;
+    bottom: 0;
+    left: 0;
+    padding: 4px 14px calc(var(--tabbar-h, 74px) + 30px + env(safe-area-inset-bottom));
+  }
+  .tln-trip .tln-pin {
+    min-height: 172px;
+  }
+  .tln-trip .tln-city {
+    font-size: 40px;
+  }
+  .tln-trip .tln-city.tln-long {
+    font-size: 30px;
+  }
+  .tln-trip .tln-wm {
+    font-size: 120px;
+  }
+  .tln-trip .tln-big {
+    font-size: 24px;
+  }
+  .tln-tp-grid {
+    grid-template-columns: 1fr;
+  }
+  .tln-span2 {
+    grid-column: auto;
+  }
+  .tln-srcgrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 /* ----- the Timeline's Month view ----- */

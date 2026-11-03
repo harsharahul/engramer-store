@@ -23,6 +23,8 @@ export function TripPoster(props: {
         role: "button",
         tabIndex: 0,
         title: "Open the trip",
+        // Named by the trip: its own text holds a ticking clock and countdown.
+        "aria-label": `Open the ${poster.city} trip`,
         onClick: onOpen,
         onKeyDown: (event: KeyboardEvent) => {
           if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {

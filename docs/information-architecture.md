@@ -126,13 +126,13 @@ Files and Photos on iOS 26 (a floating tab bar with a search tab).
   sidebar back.
 - **iPad and wide phone, 700 px and wider.** The Mac layout with the
   sidebar as a drawer that starts open.
-- **iPhone.** Five tabs, the iOS 26 shape: Files, Photos, Search,
-  Notices, More. Tabs are places, never actions, so Add is the plus in
+- **iPhone.** Five tabs, the iOS 26 shape: Timeline, Files, Photos,
+  Search, More. Tabs are places, never actions, so Add is the plus in
   the top bar as in Files and Photos. Search is a tab because finding is
   a primary job here, the convention Photos, Files and the App Store
-  follow. Notices is a tab so the bell has the same footprint on the
-  phone as on the Mac. More is the sidebar as a list: Recent, Favorites,
-  Shared, Trash, Albums, Library, Profile.
+  follow. Notices sits in the top bar, as on the Mac: the bell beside
+  Add. More is the sidebar as a list: Recent, Favorites, Shared, Trash,
+  Albums, Library, Profile.
 - **Collections are content too.** The Photos place carries an albums
   shelf above the months, so an album is reachable without the sidebar
   at all, on the Mac and on the phone alike.
