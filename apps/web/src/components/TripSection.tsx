@@ -10,7 +10,7 @@ import { useStore, type FileEntry } from "../store";
 import { useTripPlans } from "./useTripPlans";
 import { Button } from "./ui/button";
 
-export function TripSection(props: { file: FileEntry; onToast(text: string): void }) {
+export function TripSection(props: { file: FileEntry; onToast(text: string): void; /** Opens a trip's page. */ onOpenTrip?(tag: string): void }) {
   const { file } = props;
   const files = useStore((s) => s.files);
   const leaveTrip = useStore((s) => s.leaveTrip);
@@ -29,7 +29,15 @@ export function TripSection(props: { file: FileEntry; onToast(text: string): voi
         <span className="details-label">Trip</span>
         <div className="details-trip-body">
           <div>
-            Part of <b>{name}</b> {exact && <span className="tln-evb tln-evb-exact">EXACT</span>}
+            Part of{" "}
+            {props.onOpenTrip ? (
+              <Button size="xs" variant="link" className="details-trip-link" onClick={() => props.onOpenTrip!(tag)}>
+                {name}
+              </Button>
+            ) : (
+              <b>{name}</b>
+            )}{" "}
+            {exact && <span className="tln-evb tln-evb-exact">EXACT</span>}
           </div>
           <div className="details-trip-why">
             {exact ? "Exact evidence, so it joined the trip on its own." : "You added it to this trip."}

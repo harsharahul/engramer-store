@@ -428,4 +428,23 @@ describe("photo days", () => {
     expect(photoDayOf({ ...image("doc"), name: "doc.pdf", mime: "application/pdf" })).toBeUndefined();
     expect(photosInDays([image("a"), image("b", { mtime: Date.parse("2026-12-01T10:00:00Z") })], "2026-11-12", "2026-11-16").map((f) => f.id)).toEqual(["a"]);
   });
+
+  it("the album holds exactly the photos the card counts", async () => {
+    // A month of photos at odd hours, with receipt photos and a shared one mixed in.
+    let seed = 7;
+    const next = () => (seed = (seed * 48271) % 2147483647) / 2147483647;
+    const library: RowFile[] = Array.from({ length: 60 }, (_, i) =>
+      image(`p${i}`, {
+        mtime: Date.parse("2026-11-01T00:00:00Z") + Math.floor(next() * 30 * 86_400_000),
+        ...(i % 11 === 0 ? { category: "Receipts" } : {}),
+        ...(i % 17 === 0 ? { shared: true } : {}),
+      }),
+    );
+    const rows = await rowsOf(library, none, NOW);
+    const counted = rows
+      .filter((row) => row.kind === "photos" && row.day >= "2026-11-12" && row.day <= "2026-11-16")
+      .reduce((sum, row) => sum + row.fileIds.length, 0);
+    expect(counted).toBeGreaterThan(0);
+    expect(photosInDays(library, "2026-11-12", "2026-11-16")).toHaveLength(counted);
+  });
 });

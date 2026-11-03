@@ -88,6 +88,10 @@ export interface TripCardProps {
   onInspect(fileId: string): void;
   onOpen(fileId: string): void;
   onToast(text: string): void;
+  /** Opens a trip's page. */
+  onOpenTrip?(tag: string): void;
+  /** Opens the photos taken from `from` to `to`, titled `title`. */
+  onOpenPhotos?(from: string, to: string, title: string): void;
   fileOf?(id: string): FileEntry | undefined;
 }
 
@@ -173,7 +177,15 @@ export function Checks(props: { title: string; checks: Check[]; onInspect(fileId
   }
   return (
     <Card title={props.title}>
-      <div className="tln-clist">
+      <CheckLines checks={props.checks} onInspect={props.onInspect} />
+    </Card>
+  );
+}
+
+/** A trip's check lines, each opening the file it is about: the hero's card and the trip page share them. */
+export function CheckLines(props: { checks: Check[]; onInspect(fileId: string): void }) {
+  return (
+    <div className="tln-clist">
         {props.checks.map((check) => {
           const body = (
             <>
@@ -194,18 +206,65 @@ export function Checks(props: { title: string; checks: Check[]; onInspect(fileId
             </div>
           );
         })}
-      </div>
-    </Card>
+    </div>
   );
 }
 
-function Spend(props: { view: TripView; rows: readonly AgendaRow[]; title: string; onToast(text: string): void; onInspect(fileId: string): void }) {
+/**
+ * What the trip cost, per currency and never converted. The hero says how
+ * many receipts it read; the trip page (`page`) lists each bill instead.
+ */
+export function Spend(props: {
+  view: TripView;
+  rows: readonly AgendaRow[];
+  title: string;
+  page?: boolean;
+  onToast(text: string): void;
+  onInspect(fileId: string): void;
+}) {
   const addToTrip = useStore((s) => s.addToTrip);
   const spend = tripSpend(props.view, props.rows);
   const waiting = spend.waiting;
   // Nothing spent and nothing waiting: the card would only say "none".
   if (spend.count === 0 && !waiting) {
     return null;
+  }
+  const add = () => {
+    void addToTrip(waiting!.fileIds, props.view.tag);
+    props.onToast(`Added to ${props.view.city}. The trip total is updated.`);
+  };
+  if (props.page) {
+    return (
+      <Card title={props.title} aside="never converted" className="tln-span2">
+        <Amounts sums={spend.sums} />
+        {spend.bills.length > 0 && (
+          <div className="tln-tlist">
+            {spend.bills.map((bill) => (
+              <button key={bill.id} type="button" className="tln-trow tln-bill" onClick={() => props.onInspect(bill.fileIds[0]!)}>
+                <span className="tln-mono">{shortDay(bill.day)}</span>
+                <span>{bill.title}</span>
+                <span className="tln-mono">{bill.amount ? money(bill.amount) : ""}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {waiting && (
+          <div className="tln-suggest">
+            <span>
+              Waiting for you:{" "}
+              <button type="button" className="tln-link" onClick={() => props.onInspect(waiting.fileIds[0]!)}>
+                {waiting.title}
+                {waiting.amount ? ` ${money(waiting.amount)}` : ""}
+              </button>
+              , only the date matches.
+            </span>
+            <Button size="xs" onClick={add}>
+              Add
+            </Button>
+          </div>
+        )}
+      </Card>
+    );
   }
   return (
     <Card title={props.title}>
@@ -222,13 +281,7 @@ function Spend(props: { view: TripView; rows: readonly AgendaRow[]; title: strin
               {waiting.amount ? ` ${money(waiting.amount)}` : ""}
             </button>
           </span>
-          <Button
-            size="xs"
-            onClick={() => {
-              void addToTrip(waiting.fileIds, props.view.tag);
-              props.onToast(`Added to ${props.view.city}. The trip total is updated.`);
-            }}
-          >
+          <Button size="xs" onClick={add}>
             Add to trip
           </Button>
         </div>
@@ -259,7 +312,7 @@ function ComingUp(props: { rows: AgendaRow[]; onInspect(fileId: string): void })
   );
 }
 
-function WelcomeBack(props: { view: TripView }) {
+function WelcomeBack(props: { view: TripView; onOpenTrip?(tag: string): void }) {
   const { view } = props;
   const stats: [number, string][] = [
     [dayNumber(view.end) - dayNumber(view.start) + 1, "day"],
@@ -282,11 +335,24 @@ function WelcomeBack(props: { view: TripView }) {
             </div>
           ))}
       </div>
+      {props.onOpenTrip && (
+        <div className="tln-actions">
+          <Button size="xs" variant="secondary" onClick={() => props.onOpenTrip!(view.tag)}>
+            Open trip
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }
 
-function Photos(props: { view: TripView; rows: readonly AgendaRow[]; onOpen(fileId: string): void; fileOf?(id: string): FileEntry | undefined }) {
+function Photos(props: {
+  view: TripView;
+  rows: readonly AgendaRow[];
+  onOpen(fileId: string): void;
+  onOpenPhotos?(from: string, to: string, title: string): void;
+  fileOf?(id: string): FileEntry | undefined;
+}) {
   const ids = props.rows
     .filter((row) => row.kind === "photos" && row.day >= props.view.start && row.day <= props.view.end)
     .flatMap((row) => row.fileIds);
@@ -307,6 +373,17 @@ function Photos(props: { view: TripView; rows: readonly AgendaRow[]; onOpen(file
           />
         ))}
       </div>
+      {props.onOpenPhotos && (
+        <div className="tln-actions">
+          <Button
+            size="xs"
+            variant="secondary"
+            onClick={() => props.onOpenPhotos!(props.view.start, props.view.end, `${props.view.city} · ${rangeLabel(props.view.start, props.view.end, false)}`)}
+          >
+            Open album
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -700,8 +777,14 @@ export function TripCards(props: TripCardProps) {
     case "home":
       return (
         <>
-          <WelcomeBack view={view} />
-          <Photos view={view} rows={props.rows} onOpen={props.onOpen} {...(props.fileOf ? { fileOf: props.fileOf } : {})} />
+          <WelcomeBack view={view} {...(props.onOpenTrip ? { onOpenTrip: props.onOpenTrip } : {})} />
+          <Photos
+            view={view}
+            rows={props.rows}
+            onOpen={props.onOpen}
+            {...(props.onOpenPhotos ? { onOpenPhotos: props.onOpenPhotos } : {})}
+            {...(props.fileOf ? { fileOf: props.fileOf } : {})}
+          />
           {spent("Spent on this trip")}
           {next}
         </>

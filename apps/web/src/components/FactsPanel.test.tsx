@@ -63,11 +63,13 @@ const file = (id: string, name: string, facts: Fact[], tags: string[] = []): Fil
     updatedAt: 0,
   }) as FileEntry;
 
-function render(files: FileEntry[]) {
+const onOpenTrip = vi.fn();
+
+function render(files: FileEntry[], openTrip?: (tag: string) => void) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root.render(<LibraryIntel files={files} onOpen={() => {}} />));
+  act(() => root.render(<LibraryIntel files={files} onOpen={() => {}} {...(openTrip ? { onOpenTrip: openTrip } : {})} />));
 }
 
 describe("the Notices panel", () => {
@@ -94,23 +96,29 @@ describe("the Notices panel", () => {
       file("b", "Boarding pass.pdf", [], ["trip:lisbon-2026-11"]),
     ]);
     await act(async () => {});
-    expect(container.querySelectorAll(".trip-card")).toHaveLength(1);
-    expect(container.querySelector(".trip-card h4")?.textContent).toContain("Lisbon, Nov 2026");
+    const lines = container.querySelectorAll(".intel-trip");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.textContent).toMatch(/^Lisbon, Nov 2026 · /);
     expect(container.textContent).not.toContain("Coming up");
   });
 
-  it("an assembled trip says how it came together and can be undone", async () => {
+  it("the bell lists each trip once and opens its page", async () => {
+    const tag = "trip:lisbon-2026-11";
+    render([file("a", "Flights.pdf", [], [tag]), file("b", "Casa do Rio.pdf", [], [tag])], onOpenTrip);
+    await act(async () => {});
+    const line = container.querySelector<HTMLButtonElement>("button.intel-trip")!;
+    act(() => line.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(onOpenTrip).toHaveBeenCalledWith(tag);
+    // Taking a trip apart lives on its page, not in the bell.
+    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Not a trip")).toBe(false);
+  });
+
+  it("an assembled trip says it was found in your mail", async () => {
     const tag = "trip:lisbon-2026-11";
     decide("a@example.com", "assembledTrips", [`${tag}|a`, `${tag}|b`]);
     render([file("a", "Flights.pdf", [], [tag]), file("b", "Casa do Rio.pdf", [], [tag])]);
     await act(async () => {});
-    expect(container.textContent).toContain("Exact evidence, so this trip came together on its own.");
-    const undo = [...container.querySelectorAll("button")].find((b) => b.textContent === "Not a trip")!;
-    await act(async () => {
-      undo.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(undoTrip).toHaveBeenCalledWith(tag);
-    expect(container.textContent).toContain("Dismissed. It will not come back.");
+    expect(container.querySelector(".intel-trip")!.textContent).toContain("Found in your mail");
   });
 
   it("a trip grouped by hand before still reads as the owner's when the assembler adds to it", async () => {
@@ -119,19 +127,17 @@ describe("the Notices panel", () => {
     decide("a@example.com", "assembledTrips", [`${tag}|b`]);
     render([file("a", "Flights.pdf", [], [tag]), file("b", "Casa do Rio.pdf", [], [tag])]);
     await act(async () => {});
-    expect(container.textContent).not.toContain("came together on its own");
-    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Not a trip")).toBe(false);
+    expect(container.textContent).not.toContain("Found in your mail");
   });
 
-  it("a trip the owner kept shows neither", async () => {
+  it("a trip the owner kept reads as theirs", async () => {
     const tag = "trip:lisbon-2026-11";
     decide("a@example.com", "assembledTrips", [`${tag}|a`]);
     decide("a@example.com", "ownedTrips", [tag]);
     render([file("a", "Flights.pdf", [], [tag]), file("b", "Casa do Rio.pdf", [], [tag])]);
     await act(async () => {});
-    expect(container.querySelectorAll(".trip-card")).toHaveLength(1);
-    expect(container.textContent).not.toContain("came together on its own");
-    expect([...container.querySelectorAll("button")].some((b) => b.textContent === "Not a trip")).toBe(false);
+    expect(container.querySelectorAll(".intel-trip")).toHaveLength(1);
+    expect(container.textContent).not.toContain("Found in your mail");
   });
 
   it("a Coming up row opens its day", () => {
@@ -159,7 +165,7 @@ describe("the Notices panel", () => {
     };
     render([file("a", "Rome flights.pdf", [back], ["trip:rome-2024-05"])]);
     await act(async () => {});
-    expect(container.querySelectorAll(".trip-card")).toHaveLength(0);
+    expect(container.querySelectorAll(".intel-trip")).toHaveLength(0);
     expect(container.textContent).toContain("Nothing needs your attention.");
   });
 });

@@ -6,6 +6,15 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Added
+- **A page for every trip.** Any trip opens from its poster, a row's trip
+  chip, the details pane or the bell: the route drawn on the device with no
+  map service, the itinerary, what is booked and the trip's checks, the
+  cost bill by bill, and every document in it. Export to calendar saves the
+  whole trip as one file, Not a trip takes it apart after asking once, and
+  Open album shows the photos from the trip's days.
+- **The poster's sky follows the sun.** Sunrise and sunset are worked out
+  on the device from the airport's position, at home and at the
+  destination.
 - **The Timeline follows your trip.** From a month before you fly, the
   Timeline's hero becomes the trip: the countdown, what to check, when to
   leave for the airport, your boarding pass and hotel on the day, progress

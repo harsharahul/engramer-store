@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { homeCityGuess, tripsOf, type TripPlan } from "../intel/agenda";
+import { homeCityGuess, tripsOf, type Trip, type TripPlan } from "../intel/agenda";
 import { rowsOf, type AgendaRow, type RowFile } from "../intel/agendarows";
 import { placeForCity } from "../intel/airports";
 import { localDay } from "../intel/instants";
@@ -36,7 +36,21 @@ async function readViews(
   const from = localDay(Date.parse(`${today}T12:00:00Z`) - (BACK_HOME_DAYS + 1) * DAY_MS);
   const to = localDay(Date.parse(`${today}T12:00:00Z`) + (PLANNING_DAYS + 1) * DAY_MS);
   const near = tripsOf(live).filter((trip) => trip.start !== undefined && trip.end !== undefined && trip.end >= from && trip.start <= to);
-  if (near.length === 0) {
+  return viewsOf(near, live, rows, context, home, now);
+}
+
+type ViewContext = { plans: readonly TripPlan[]; dismissed: Set<string>; excluded: Set<string> };
+
+/** Trips read into views, with home (for whether each leaves the country) worked out once. */
+async function viewsOf(
+  trips: readonly Trip<RowFile>[],
+  live: readonly RowFile[],
+  rows: readonly AgendaRow[] | undefined,
+  context: ViewContext,
+  home: string | undefined,
+  now: number,
+): Promise<TripView[]> {
+  if (trips.length === 0) {
     return [];
   }
   const read =
@@ -45,11 +59,56 @@ async function readViews(
   const city = home ?? (await homeCityGuess(live));
   const homeCountry = city ? (await placeForCity(city))?.country : undefined;
   return Promise.all(
-    near.map((trip) => {
+    trips.map((trip) => {
       const plan = context.plans.find((candidate) => candidate.tag === trip.tag);
       return tripViewOf(trip, read, { ...(plan ? { plan } : {}), ...(homeCountry ? { homeCountry } : {}) });
     }),
   );
+}
+
+/**
+ * One trip's view, near or far, past or future: what its page shows.
+ * Undefined while it is read, null when no file carries the tag (the trip
+ * was taken apart, perhaps on another device).
+ */
+export function useTripView(
+  tag: string | undefined,
+  input: { rows?: readonly AgendaRow[]; plans?: readonly TripPlan[]; now: number },
+): TripView | null | undefined {
+  const stored = useStore((s) => s.files);
+  const live = useMemo(() => [...(stored?.values() ?? [])].filter((file) => !file.trashed), [stored]);
+  const context = useTripPlans();
+  const plans = input.plans ?? context.plans;
+  const [home] = useSyncedSetting(homeCity);
+  const [view, setView] = useState<{ tag: string; view: TripView | null } | undefined>();
+
+  useEffect(() => {
+    if (!tag) {
+      return;
+    }
+    let stale = false;
+    const trip = tripsOf(live).find((candidate) => candidate.tag === tag);
+    const reading = trip
+      ? viewsOf([trip], live, input.rows, { plans, dismissed: context.dismissed, excluded: context.excluded }, home, input.now).then(
+          (views) => views[0] ?? null,
+        )
+      : Promise.resolve(null);
+    void reading.then(
+      (read) => {
+        if (!stale) {
+          setView({ tag, view: read });
+        }
+      },
+      () => undefined,
+    );
+    return () => {
+      stale = true;
+    };
+    // Rows stand for the library and the minute; plans and home for the rest.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tag, live, input.rows, plans, home]);
+
+  return tag && view?.tag === tag ? view.view : undefined;
 }
 
 /**

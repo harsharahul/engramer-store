@@ -72,23 +72,34 @@ async function settle() {
   });
 }
 
-async function render(focus?: { day?: string; now?: boolean; nonce: number }, list: FileEntry[] = files) {
+type Focus = { day?: string; now?: boolean; trip?: string; nonce: number };
+const onCloseTrip = vi.fn();
+
+const view = (focus: Focus | undefined, list: FileEntry[]) => (
+  <TimelineView
+    files={list}
+    factsOn
+    {...(focus ? { focus } : {})}
+    onInspect={() => {}}
+    onOpen={() => {}}
+    onToast={() => {}}
+    onTurnOnDates={() => {}}
+    onOpenTrip={() => {}}
+    onCloseTrip={onCloseTrip}
+  />
+);
+
+async function render(focus?: Focus, list: FileEntry[] = files) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() =>
-    root.render(
-      <TimelineView
-        files={list}
-        factsOn
-        {...(focus ? { focus } : {})}
-        onInspect={() => {}}
-        onOpen={() => {}}
-        onToast={() => {}}
-        onTurnOnDates={() => {}}
-      />,
-    ),
-  );
+  act(() => root.render(view(focus, list)));
+  await settle();
+}
+
+/** The same Timeline asked for something new, as Vault does when the view changes. */
+async function rerender(focus?: Focus, list: FileEntry[] = files) {
+  act(() => root.render(view(focus, list)));
   await settle();
 }
 
@@ -160,5 +171,31 @@ describe("the Timeline during a trip", () => {
     expect(container.querySelector(".tln-ptop")?.textContent).toBe("You are here");
     expect(container.querySelector(".tln-big")?.textContent).toBe("Day 3 of 5");
     expect(container.querySelector(".tln-cap")?.textContent).toBe("Night 2 of 3 at Casa do Rio");
+  });
+
+  it("a trip that no longer exists closes its page", async () => {
+    onCloseTrip.mockClear();
+    await render({ trip: "trip:gone-2026-01", nonce: 1 });
+    expect(onCloseTrip).toHaveBeenCalledTimes(1);
+    expect(container.querySelector(".tln-trip")).toBeNull();
+  });
+
+  it("the list behind an open trip page is out of reach", async () => {
+    const trip = lisbonFiles().map((file) => ({ ...entry(file.id, file.facts), name: file.name, mime: file.mime, tags: [TAG] }));
+    useStore.setState({ files: new Map(trip.map((file) => [file.id, file])) });
+    await render({ trip: TAG, nonce: 1 }, trip);
+    expect(container.querySelector(".tln-trip")).not.toBeNull();
+    expect(container.querySelector(".tln-side")!.hasAttribute("inert")).toBe(true);
+    expect(container.querySelector(".tln-main")!.hasAttribute("inert")).toBe(true);
+  });
+
+  it("opening and closing a trip leaves the list where it was", async () => {
+    const trip = lisbonFiles().map((file) => ({ ...entry(file.id, file.facts), name: file.name, mime: file.mime, tags: [TAG] }));
+    useStore.setState({ files: new Map(trip.map((file) => [file.id, file])) });
+    await render(undefined, trip);
+    const before = scrolled.mock.calls.length;
+    await rerender({ trip: TAG, nonce: 2 }, trip);
+    await rerender(undefined, trip);
+    expect(scrolled.mock.calls.length).toBe(before);
   });
 });

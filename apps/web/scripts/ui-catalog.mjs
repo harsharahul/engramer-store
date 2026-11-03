@@ -453,6 +453,21 @@ const STATES = [
       await page.waitForTimeout(600);
     },
   },
+  {
+    name: "timeline-trip",
+    run: async (page) => {
+      await toRoot(page);
+      await nav(page, "Timeline");
+      await page.waitForTimeout(1200);
+      // The fixture's trip, opened from its first trip chip on the list.
+      await page.locator("button.tln-chip-trip").first().click({ timeout: 5000 });
+      await page.waitForTimeout(800);
+      return async () => {
+        await page.getByRole("button", { name: "Back to Timeline" }).click({ timeout: 5000 });
+        await page.waitForTimeout(400);
+      };
+    },
+  },
   { name: "favorites", run: async (page) => { await toRoot(page); await nav(page, "Favorites"); await page.waitForTimeout(900); } },
   { name: "shared", run: async (page) => { await toRoot(page); await nav(page, "Shared"); await page.waitForTimeout(900); } },
   { name: "trash", run: async (page) => { await toRoot(page); await nav(page, "Trash"); await page.waitForTimeout(900); } },

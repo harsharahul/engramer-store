@@ -519,9 +519,10 @@ interface StoreState {
    */
   confirmTrip: (plan: TripPlan) => Promise<void>;
   /**
-   * Not a trip: takes away the tags the assembler wrote, never one the
-   * owner added, and records the refusal so the trip never comes back.
-   * Answers how many files changed.
+   * Not a trip, the owner's own refusal from the trip's page: takes the
+   * trip's tag off every member, including the files the owner added, and
+   * records the refusal first so the trip never comes back. Answers how
+   * many files changed.
    */
   undoTrip: (tag: string) => Promise<number>;
   /** Takes files out of a trip for good: the assembler never puts them back. */
@@ -2947,11 +2948,9 @@ export const useStore = create<StoreState>((set, get) => {
       // before it reaches this trip, and skips it.
       const plan = (await planTrips(live, Date.now())).find((candidate) => candidate.tag === tag);
       decide(account, "dismissedTrips", plan ? plan.dismissKeys : [tag]);
-      if (decided(account, "ownedTrips").has(tag)) {
-        return 0;
-      }
-      const assembled = decided(account, "assembledTrips");
-      const ids = live.filter((file) => file.tags.includes(tag) && assembled.has(`${tag}|${file.id}`)).map((file) => file.id);
+      // The owner refusing the trip is the owner's own word: every member
+      // leaves it, the ones they added as well as the assembler's.
+      const ids = live.filter((file) => file.tags.includes(tag)).map((file) => file.id);
       const { done } = await get().patchFilesMeta(ids, (file) =>
         file.tags.includes(tag) ? { tags: file.tags.filter((t) => t !== tag) } : null,
       );

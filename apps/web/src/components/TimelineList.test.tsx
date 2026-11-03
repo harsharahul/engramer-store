@@ -22,6 +22,7 @@ const resolveFacts = vi.fn(async () => {});
 const confirmTrip = vi.fn(async () => {});
 const onToast = vi.fn();
 const onInspect = vi.fn();
+const onOpenTrip = vi.fn();
 
 beforeAll(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -93,7 +94,16 @@ function render(props: Partial<Parameters<typeof TimelineList>[0]> & { rows: Age
   root = createRoot(container);
   act(() =>
     root.render(
-      <TimelineList trips={[]} homeCity="San Francisco" filter="all" onInspect={onInspect} onOpen={() => {}} onToast={onToast} {...props} />,
+      <TimelineList
+        trips={[]}
+        homeCity="San Francisco"
+        filter="all"
+        onInspect={onInspect}
+        onOpen={() => {}}
+        onToast={onToast}
+        onOpenTrip={onOpenTrip}
+        {...props}
+      />,
     ),
   );
 }
@@ -108,6 +118,17 @@ const click = (label: RegExp) => {
 };
 
 describe("the timeline list", () => {
+  it("a row's trip chip opens the trip, not the row", () => {
+    onInspect.mockClear();
+    onOpenTrip.mockClear();
+    render({ rows: [flight("out", "2026-11-12", "18:10")], trips: [LISBON], now: Date.UTC(2026, 9, 26, 17) });
+    const chip = container.querySelector<HTMLButtonElement>("button.tln-chip-trip")!;
+    expect(chip.textContent).toBe("LISBON");
+    act(() => chip.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(onOpenTrip).toHaveBeenCalledWith(LISBON.tag);
+    expect(onInspect).not.toHaveBeenCalled();
+  });
+
   it("days, the now line and the trip band read as designed", () => {
     const now = new Date("2026-11-14T15:42:00").getTime();
     render({

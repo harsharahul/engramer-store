@@ -112,4 +112,22 @@ describe("the hero follows the moment", () => {
     expect(text(".tln-ptop")).toBe("Today");
     expect(text(".tln-big")).toBe("Tuesday");
   });
+
+  it("the poster opens its trip", () => {
+    const now = instantOf("2026-11-14", "15:42", LIS);
+    const onOpen = vi.fn();
+    mount(<TripPoster poster={posterOf(momentOf([lisbon], now), now, LA)!} onOpen={onOpen} />, now);
+    const poster = container.querySelector(".tln-poster")!;
+    expect(poster.getAttribute("role")).toBe("button");
+    act(() => poster.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    act(() => poster.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(onOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it("the ordinary day's poster opens nothing", () => {
+    useStore.setState({ resolveFacts: vi.fn(async () => {}) });
+    const now = instantOf("2026-12-01", "08:40", LA);
+    mount(hero(now, [lisbon]), now);
+    expect(container.querySelector('.tln-poster[role="button"]')).toBeNull();
+  });
 });

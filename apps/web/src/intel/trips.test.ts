@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { withExactAcceptance, type Fact } from "./facts";
 import {
   adviceText,
-  assembleItinerary,
   departureAdvice,
   isTripTag,
   memberLegs,
@@ -205,31 +204,6 @@ describe("suggestTrips", () => {
     const b = await suggestTrips([hotel(), flight()], NOW);
     expect(a[0]!.id).toBe(b[0]!.id);
     expect(tripTag(a[0]!)).toBe("trip:new-york-2027-03");
-  });
-});
-
-describe("assembleItinerary", () => {
-  it("sorts the legs as printed and speaks in city names", async () => {
-    const legs = await assembleItinerary([hotel(), flight()]);
-    expect(legs.map((leg) => leg.kind)).toEqual(["flight", "stay", "flight", "stay"]);
-    expect(legs[0]!.title).toContain("San Francisco (SFO)");
-    expect(legs[2]!.title).toContain("New York (JFK)");
-    expect(legs.map((leg) => leg.at)).toEqual([
-      "2027-03-04",
-      "2027-03-04",
-      "2027-03-04",
-      "2027-03-09",
-    ]);
-    expect(legs[1]).toMatchObject({ time: "15:00", fileId: "f-hotel" });
-  });
-
-  it("keeps unconfirmed soft events out of the itinerary too", async () => {
-    const padded: TripFile = {
-      ...flight(),
-      facts: [...flight().facts, event("2027-03-06", "Arrival", { source: "label", confidence: 0.7 })],
-    };
-    const legs = await assembleItinerary([padded]);
-    expect(legs.some((leg) => leg.title === "Arrival")).toBe(false);
   });
 });
 

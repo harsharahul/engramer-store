@@ -60,6 +60,7 @@
   --z-behind: -1; /* drag image parked behind the page */
   --z-raised: 2; /* badges and covers on card art */
   --z-sticky: 5; /* sticky section headers, the selection band */
+  --z-page: 10; /* a page over its place: the trip page */
   --z-toolbar: 50; /* the toolbar row and its capsules */
   --z-pane: 200; /* floating panes: expanded rail, details overlay, tab bar */
   --z-sheet: 210; /* the phone details sheet */

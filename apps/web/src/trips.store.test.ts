@@ -221,22 +221,25 @@ describe("tagging a trip", () => {
     expect(writes).toEqual({ patches: 2, batches: 1 });
   });
 
-  it("Not a trip removes what the assembler wrote and nothing the owner added", async () => {
+  it("Not a trip takes the whole trip apart, the owner's additions too", async () => {
+    // The owner refusing the trip is the owner's own word, so what they
+    // added leaves with what the assembler wrote.
     library([flight({ tags: [TAG] }), hotel({ tags: [TAG] })]);
     decide(ACCOUNT, "assembledTrips", [`${TAG}|flight`]);
-    expect(await useStore.getState().undoTrip(TAG)).toBe(1);
+    expect(await useStore.getState().undoTrip(TAG)).toBe(2);
     expect(file("flight").tags).not.toContain(TAG);
-    expect(file("hotel").tags).toContain(TAG);
+    expect(file("hotel").tags).not.toContain(TAG);
     expect(decided(ACCOUNT, "dismissedTrips")).toEqual(new Set([TAG, "anchor:flight"]));
   });
 
-  it("Not a trip on a trip the owner kept removes nothing", async () => {
+  it("Not a trip takes apart a trip the owner made too", async () => {
     library([flight({ tags: [TAG] }), hotel({ tags: [TAG] })]);
     decide(ACCOUNT, "assembledTrips", [`${TAG}|flight`, `${TAG}|hotel`]);
     decide(ACCOUNT, "ownedTrips", [TAG]);
-    expect(await useStore.getState().undoTrip(TAG)).toBe(0);
-    expect(file("flight").tags).toContain(TAG);
-    expect(writes.patches).toBe(0);
+    expect(await useStore.getState().undoTrip(TAG)).toBe(2);
+    expect(file("flight").tags).not.toContain(TAG);
+    expect(file("hotel").tags).not.toContain(TAG);
+    expect(decided(ACCOUNT, "dismissedTrips").has(TAG)).toBe(true);
   });
 
   it("Group as never puts back a file the owner took out", async () => {
