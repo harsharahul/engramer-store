@@ -6137,7 +6137,8 @@ button.tln-check {
      list keeps its place behind it. */
   .tln-trip {
     position: fixed;
-    top: var(--topbar-h, 65px);
+    /* The top bar sits below the status bar's inset; the page starts below both. */
+    top: calc(env(safe-area-inset-top, 0px) + var(--topbar-h, 65px));
     right: 0;
     bottom: 0;
     left: 0;

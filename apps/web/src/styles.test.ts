@@ -96,7 +96,8 @@ describe("the Timeline scrolls at every width", () => {
       .join(";");
     // Fixed to the screen, so a page opened far down the list starts at its top.
     expect(rule).toMatch(/position:\s*fixed/);
-    expect(rule).toMatch(/top:\s*var\(--topbar-h/);
+    // Below the top bar, which itself sits below the status bar's inset.
+    expect(rule).toMatch(/top:\s*calc\(env\(safe-area-inset-top[^)]*\)\s*\+\s*var\(--topbar-h/);
     expect(rule).toMatch(/padding:[^;]*var\(--tabbar-h/);
   });
 

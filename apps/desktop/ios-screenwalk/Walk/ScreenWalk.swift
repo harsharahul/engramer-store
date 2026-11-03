@@ -93,15 +93,20 @@ final class ScreenWalk: XCTestCase {
       if tab("Timeline") {
         pause(2.5)
         shot("timeline")
-        let cards = web.otherElements.matching(NSPredicate(format: "label ENDSWITH %@", "trip")).firstMatch
-        if cards.waitForExistence(timeout: 3) {
-          cards.swipeLeft()
+        // The first hero card's heading; a swipe on it moves the row.
+        let card = web.staticTexts["The trip"].exists ? web.staticTexts["The trip"] : web.staticTexts["Today"]
+        if card.waitForExistence(timeout: 3) {
+          card.swipeLeft()
           pause(1)
           shot("timeline-card-2")
         } else {
           note("no hero card row to swipe")
         }
-        if tapAny("LISBON") {
+        // The poster opens the trip; it sits at the top of the Timeline.
+        web.swipeDown()
+        web.swipeDown()
+        pause(1)
+        if tapAny("Open the Lisbon trip") || tapAny("LISBON") {
           pause(2)
           shot("trip-page")
           web.swipeUp()
@@ -113,6 +118,10 @@ final class ScreenWalk: XCTestCase {
             shot("trip-page-details")
             dismissSheet()
           }
+          // The way back is on the poster, at the top of the page.
+          web.swipeDown()
+          web.swipeDown()
+          pause(0.5)
           tapAny("Back to Timeline")
           pause(1)
         }
