@@ -5,6 +5,8 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-11-02
+
 ### Added
 - **A page for every trip.** Any trip opens from its poster, a row's trip
   chip, the details pane or the bell: the route drawn on the device with no
