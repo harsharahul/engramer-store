@@ -5063,6 +5063,10 @@ span.item-menu {
 .tln-bar-end {
   display: flex;
   align-items: center;
+  gap: 4px;
+}
+/* Only the bar's end (Find connections, Now) is pushed to the right. */
+.tln-bar-end {
   gap: 8px;
   margin-left: auto;
 }
@@ -5119,7 +5123,6 @@ span.item-menu {
   display: grid;
   grid-template-columns: 52px 26px 1fr;
   gap: 0 10px;
-  height: 34px;
 }
 .tln-dayh {
   position: sticky;
@@ -5473,6 +5476,10 @@ span.item-menu {
   100% {
     box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
   }
+}
+/* A quiet-days gap is a fixed strip; the rows it shares a grid with are not. */
+.tln-gap {
+  height: 34px;
 }
 .tln-gap span {
   align-self: center;

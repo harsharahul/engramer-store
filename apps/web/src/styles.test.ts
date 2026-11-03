@@ -101,9 +101,8 @@ describe("the Timeline scrolls at every width", () => {
     expect(rule).toMatch(/padding:[^;]*var\(--tabbar-h/);
   });
 
-  it("gives each Timeline class one rule outside media queries", () => {
-    // Two base rules for one class let the later silently restyle the
-    // earlier's element: the carousel's dots once shrank the now marker.
+  /** The stylesheet outside media queries, as its rules: the full selector list and the body. */
+  const baseRules = () => {
     let base = "";
     let from = 0;
     for (const [, body] of mediaBlocks(CSS)) {
@@ -113,11 +112,40 @@ describe("the Timeline scrolls at every width", () => {
       from = at + body.length + 1;
     }
     base += CSS.slice(from);
+    return [...base.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+      selectors: m[1]!.split(",").map((s) => s.trim()),
+      body: m[2]!,
+    }));
+  };
+
+  it("gives each Timeline class one rule outside media queries", () => {
+    // Two rules for one class alone let the later silently restyle the
+    // earlier's element: the carousel's dots once shrank the now marker.
+    // A class inside a grouped selector is that group's, not a rule of its own.
     const seen = new Map<string, number>();
-    for (const match of base.matchAll(/(?:^|\n)(\.tln-[a-z0-9-]+)\s*\{/g)) {
-      seen.set(match[1]!, (seen.get(match[1]!) ?? 0) + 1);
+    for (const { selectors } of baseRules()) {
+      if (selectors.length === 1 && /^\.tln-[a-z0-9-]+$/.test(selectors[0]!)) {
+        seen.set(selectors[0]!, (seen.get(selectors[0]!) ?? 0) + 1);
+      }
     }
     expect([...seen].filter(([, n]) => n > 1).map(([selector]) => selector)).toEqual([]);
+  });
+
+  it("keeps the view bar's switch and filters where they sit", () => {
+    // Only the bar's end (Find connections, Now) is pushed to the right.
+    const pushed = baseRules().filter(
+      ({ selectors, body }) => selectors.some((s) => s === ".tln-seg" || s === ".tln-filters") && /margin-left:\s*auto/.test(body),
+    );
+    expect(pushed.map(({ selectors }) => selectors.join(", "))).toEqual([]);
+  });
+
+  it("lets a Timeline row be as tall as what it holds", () => {
+    // A fixed height on the rows' shared rule once stacked every card on the
+    // next. (The now line and a quiet-days gap are fixed strips by design.)
+    const fixed = baseRules().filter(
+      ({ selectors, body }) => selectors.some((s) => s === ".tln-row" || s === ".tln-dayh") && /(?:^|[;\s])height:/.test(body),
+    );
+    expect(fixed.map(({ selectors }) => selectors.join(", "))).toEqual([]);
   });
 
   it("lets each phone rule for the hero's cards and the trip page come after the rule it overrides", () => {

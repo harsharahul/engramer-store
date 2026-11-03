@@ -5,6 +5,14 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+## [0.60.1] - 2026-11-02
+
+### Fixed
+- **Timeline rows are as tall as their cards again.** In 0.60.0 every row
+  on the Timeline's list took a fixed height, so each card spilled over
+  the next, and the Timeline/Month switch and the filters were pushed to
+  the right of the view bar. Both are back as they were.
+
 ## [0.60.0] - 2026-11-02
 
 ### Added
