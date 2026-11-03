@@ -5027,6 +5027,8 @@ span.item-menu {
 }
 
 .tln-view {
+  /* Positioned: a trip's page lies over it. */
+  position: relative;
   display: grid;
   grid-template-columns: minmax(320px, 452px) 1fr;
   height: 100%;
@@ -5061,9 +5063,6 @@ span.item-menu {
 .tln-bar-end {
   display: flex;
   align-items: center;
-  gap: 4px;
-}
-.tln-bar-end {
   gap: 8px;
   margin-left: auto;
 }
@@ -5120,6 +5119,7 @@ span.item-menu {
   display: grid;
   grid-template-columns: 52px 26px 1fr;
   gap: 0 10px;
+  height: 34px;
 }
 .tln-dayh {
   position: sticky;
@@ -5473,9 +5473,6 @@ span.item-menu {
   100% {
     box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
   }
-}
-.tln-gap {
-  height: 34px;
 }
 .tln-gap span {
   align-self: center;
@@ -5998,7 +5995,8 @@ button.tln-check {
 .tln-dots {
   display: none;
 }
-.tln-dot {
+/* The carousel's dots: their own class, apart from the now marker's .tln-dot. */
+.tln-cdot {
   width: 6px;
   height: 6px;
   padding: 0;
@@ -6007,7 +6005,7 @@ button.tln-check {
   background: var(--hairline-strong);
   cursor: pointer;
 }
-.tln-dot.tln-on {
+.tln-cdot.tln-on {
   background: var(--paper);
 }
 /* Show earlier moves the scroller itself; a browser's own anchoring would move it twice. */
@@ -6018,9 +6016,6 @@ button.tln-check {
 
 /* ----- a trip's page, over the Timeline ----- */
 
-.tln-view {
-  position: relative;
-}
 .tln-trip {
   position: absolute;
   inset: 0;

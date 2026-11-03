@@ -64,7 +64,7 @@ export function Carousel(props: { label: string; children: ReactNode }) {
             <button
               key={index}
               type="button"
-              className={`tln-dot${index === active ? " tln-on" : ""}`}
+              className={`tln-cdot${index === active ? " tln-on" : ""}`}
               aria-label={`Card ${index + 1} of ${count}`}
               {...(index === active ? { "aria-current": "true" as const } : {})}
               onClick={() => go(index)}

@@ -101,6 +101,25 @@ describe("the Timeline scrolls at every width", () => {
     expect(rule).toMatch(/padding:[^;]*var\(--tabbar-h/);
   });
 
+  it("gives each Timeline class one rule outside media queries", () => {
+    // Two base rules for one class let the later silently restyle the
+    // earlier's element: the carousel's dots once shrank the now marker.
+    let base = "";
+    let from = 0;
+    for (const [, body] of mediaBlocks(CSS)) {
+      const at = CSS.indexOf(body, from);
+      const open = CSS.lastIndexOf("@media", at);
+      base += CSS.slice(from, open);
+      from = at + body.length + 1;
+    }
+    base += CSS.slice(from);
+    const seen = new Map<string, number>();
+    for (const match of base.matchAll(/(?:^|\n)(\.tln-[a-z0-9-]+)\s*\{/g)) {
+      seen.set(match[1]!, (seen.get(match[1]!) ?? 0) + 1);
+    }
+    expect([...seen].filter(([, n]) => n > 1).map(([selector]) => selector)).toEqual([]);
+  });
+
   it("lets each phone rule for the hero's cards and the trip page come after the rule it overrides", () => {
     // Same specificity, so the later rule wins: a base rule written after the
     // phone block silently undid the swiping cards and the fixed trip page.
