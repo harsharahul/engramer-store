@@ -11,7 +11,7 @@
  */
 
 import { type DocumentKind, type Fact, factId, maskTail } from "./facts";
-import { parseDate, parseTime } from "./dates";
+import { parseDate, parseTime, type ParsedDate } from "./dates";
 import type { Role } from "./subject";
 
 /** How far past a label to look for its date. */
@@ -127,13 +127,22 @@ function windowAfter(text: string, from: number): string {
  * next label, and so does that line's clock. Only a label with no date on
  * its own line reads on, for a value printed below it or wrapped over lines.
  */
-function claimed(window: string): { date: NonNullable<ReturnType<typeof parseDate>>; time: string | null } | null {
-  const own = window.split("\n", 1)[0]!;
+function claimed(window: string, writtenAt?: number): { date: ParsedDate; time: string | null } | null {
+  const [own = "", next = ""] = window.split("\n");
   const onLine = parseDate(own);
   if (onLine) {
     return { date: onLine, time: parseTime(own) };
   }
-  const below = parseDate(window);
+  // In a message, a month and a day with no year on the label's own line
+  // are the label's date. One whose year only wrapped onto the next line
+  // ("12 March" / "2029") still states its year, and that comes first.
+  if (writtenAt !== undefined && !/^\s*\d{4}\b/.test(next)) {
+    const undated = parseDate(own, { writtenAt });
+    if (undated) {
+      return { date: undated, time: parseTime(own) };
+    }
+  }
+  const below = parseDate(window, writtenAt === undefined ? undefined : { writtenAt });
   return below ? { date: below, time: parseTime(window) } : null;
 }
 
@@ -144,13 +153,20 @@ function windowBefore(text: string, to: number): string {
 }
 
 /** Dates that a document labelled, which is the only kind worth trusting. */
-export function labelledFacts(text: string): Fact[] {
+export function labelledFacts(text: string, writtenAt?: number): Fact[] {
+  // How sure a date is: one that could be read two ways, or whose year the
+  // message did not print, is a question for the owner.
+  const sureness = (parsed: ParsedDate) => ({
+    confidence: parsed.ambiguous || parsed.assumedYear ? 0.5 : 0.7,
+    ...(parsed.ambiguous ? { ambiguous: true } : {}),
+    ...(parsed.assumedYear ? { assumedYear: true } : {}),
+  });
   const document = guessDocumentKind(text);
   const byId = new Map<string, Fact>();
   for (const { kind, labels, label } of KINDS) {
     labels.lastIndex = 0;
     for (let match = labels.exec(text); match; match = labels.exec(text)) {
-      const parsed = claimed(windowAfter(text, match.index + match[0].length))?.date;
+      const parsed = claimed(windowAfter(text, match.index + match[0].length), writtenAt)?.date;
       if (!parsed) {
         continue;
       }
@@ -168,8 +184,7 @@ export function labelledFacts(text: string): Fact[] {
         // A date that could be read two ways is worth less than one that
         // could not, and the difference is what the confirmation card asks
         // about rather than something to resolve here.
-        confidence: parsed.ambiguous ? 0.5 : 0.7,
-        ...(parsed.ambiguous ? { ambiguous: true } : {}),
+        ...sureness(parsed),
       });
     }
   }
@@ -180,11 +195,11 @@ export function labelledFacts(text: string): Fact[] {
     words.labels.lastIndex = 0;
     for (let match = words.labels.exec(text); match; match = words.labels.exec(text)) {
       const after = windowAfter(text, match.index + match[0].length);
-      const ahead = claimed(after);
+      const ahead = claimed(after, writtenAt);
       // A poster prints the date first: with none ahead, the label's own
       // line is read backwards, and the clock is whichever side has one.
       const before = !ahead && words.lookBack ? windowBefore(text, match.index) : "";
-      const parsed = ahead?.date ?? (before ? parseDate(before) : null);
+      const parsed = ahead?.date ?? (before ? parseDate(before, writtenAt === undefined ? undefined : { writtenAt }) : null);
       if (!parsed) {
         continue;
       }
@@ -205,8 +220,7 @@ export function labelledFacts(text: string): Fact[] {
         ...(time ? { time } : {}),
         ...(words.role ? { subject: { role: words.role } } : {}),
         source: "label",
-        confidence: parsed.ambiguous ? 0.5 : 0.7,
-        ...(parsed.ambiguous ? { ambiguous: true } : {}),
+        ...sureness(parsed),
       });
     }
   }

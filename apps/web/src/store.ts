@@ -1433,9 +1433,12 @@ export const useStore = create<StoreState>((set, get) => {
     if (!factsEnabled()) {
       return null;
     }
-    const found = await scanForFacts({ name: file.name, mime: file.mime, text }).catch(
-      () => null,
-    );
+    const found = await scanForFacts({
+      name: file.name,
+      mime: file.mime,
+      text,
+      ...(file.mail ? { writtenAt: file.mail.date } : {}),
+    }).catch(() => null);
     if (!found) {
       return null;
     }
@@ -3851,7 +3854,12 @@ export const useStore = create<StoreState>((set, get) => {
             opts?.onOutcome?.(file.id, true);
             continue;
           }
-          const scanned = await scanForFacts({ name: file.name, mime: file.mime, text });
+          const scanned = await scanForFacts({
+            name: file.name,
+            mime: file.mime,
+            text,
+            ...(file.mail ? { writtenAt: file.mail.date } : {}),
+          });
           if (scanned.facts.length === 0) {
             opts?.onOutcome?.(file.id, true);
             continue;

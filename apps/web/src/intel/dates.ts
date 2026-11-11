@@ -23,6 +23,16 @@ export interface ParsedDate {
   iso: string;
   /** The digits could be read two ways and the document did not say which. */
   ambiguous: boolean;
+  /** The text printed no year: this is the next such day after it was written. */
+  assumedYear?: true;
+}
+
+/** What a reader may know about the text beyond its words. */
+export interface DateContext {
+  /** The issuer's convention for numeric dates, where it is known. */
+  order?: DateOrder;
+  /** When the text was written (a message's own date). Only with this is a date with no year read. */
+  writtenAt?: number;
 }
 
 const MONTHS = [
@@ -45,8 +55,18 @@ const ISO = /\b(\d{4})-(\d{2})-(\d{2})\b/;
 // benefits statement prints "Benefit End Date: 2027 October 19". A named month and a
 // four-digit year leave nothing to misread.
 const YEAR_FIRST_NAMED = /\b(\d{4})\s+([A-Za-z]{3,9})\.?\s+(\d{1,2})\b/;
-const DAY_FIRST_NAMED = /\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{2,4})\b/;
-const MONTH_FIRST_NAMED = /\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{2,4})\b/;
+// A number followed by a colon is a clock, never a year: "November 12, 10:30"
+// names no year, and reading one out of its hour would say 2010.
+const DAY_FIRST_NAMED = /\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{2,4})\b(?!:\d)/;
+const MONTH_FIRST_NAMED = /\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{2,4})\b(?!:\d)/;
+// A month and a day with no year, as a message writes them ("Thursday,
+// November 12", "Thu 12 Nov"). The month is capitalised and is a month's
+// whole name or its usual short form; the weekday, when written, is kept so
+// it can be checked against the day.
+const WEEKDAY = "(?:(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\\.?,?\\s+)?";
+const MONTH_DAY = new RegExp(`\\b${WEEKDAY}([A-Z][a-z]{2,8})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?![\\d/:-]|\\.\\d)`, "g");
+const DAY_MONTH = new RegExp(`\\b${WEEKDAY}(\\d{1,2})(?:st|nd|rd|th)?\\s+([A-Z][a-z]{2,8})\\b`, "g");
+const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 // Year-first numeric only reads one way: nobody writes year, day, month.
 const YEAR_FIRST_NUMERIC = /\b(\d{4})[/.](\d{1,2})[/.](\d{1,2})\b/;
 const NUMERIC = /\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})\b/;
@@ -81,6 +101,37 @@ function monthFromName(word: string): number | null {
  * into the 2nd of March, which would silently move a deadline rather than
  * report that the document could not be read.
  */
+/** A month written out or in its usual short form ("Nov", "Sept"), and nothing that only starts like one. */
+function monthExactly(word: string): number | null {
+  const lower = word.toLowerCase();
+  const index = MONTHS.findIndex((month) => lower === month || lower === month.slice(0, 3) || (month === "september" && lower === "sept"));
+  return index === -1 ? null : index + 1;
+}
+
+/**
+ * The first day with this month and number on or after the day the text was
+ * written, when that is at most eleven months on: a day just past is last
+ * week's, not next year's. The sender's day may be a day behind this
+ * clock's, so the day before counts as the day it was written.
+ */
+function nextSuchDay(month: number, day: number, weekday: string | undefined, writtenAt: number): string | null {
+  const written = new Date(writtenAt);
+  const from = Date.UTC(written.getUTCFullYear(), written.getUTCMonth(), written.getUTCDate() - 1);
+  const until = Date.UTC(written.getUTCFullYear(), written.getUTCMonth() + 11, written.getUTCDate());
+  for (const year of [written.getUTCFullYear() - 1, written.getUTCFullYear(), written.getUTCFullYear() + 1]) {
+    const iso = build(year, month, day);
+    const at = Date.UTC(year, month - 1, day);
+    if (!iso || at < from) {
+      continue;
+    }
+    if (at > until) {
+      return null;
+    }
+    return weekday === undefined || WEEKDAYS[new Date(at).getUTCDay()] === weekday.toLowerCase() ? iso : null;
+  }
+  return null;
+}
+
 function build(year: number, month: number, day: number): string | null {
   if (!Number.isFinite(year) || month < 1 || month > 12 || day < 1 || day > 31) {
     return null;
@@ -108,10 +159,43 @@ function underOrder(a: string, b: string, c: string, order: DateOrder): string |
  * only falls back to inference if that reading produces a date that does not
  * exist, so a malformed field cannot be turned into a plausible wrong answer.
  */
-export function parseDate(text: string, order?: DateOrder): ParsedDate | null {
+export function parseDate(text: string, given?: DateOrder | DateContext): ParsedDate | null {
   if (!text) {
     return null;
   }
+  const context: DateContext = typeof given === "string" ? { order: given } : (given ?? {});
+  return datedIn(text, context.order) ?? (context.writtenAt === undefined ? null : undatedIn(text, context.writtenAt));
+}
+
+/** A month and a day with no year, read against when the text was written. */
+function undatedIn(text: string, writtenAt: number): ParsedDate | null {
+  // The first of each form whose word really is a month ("Thu 12" is not).
+  const found: { at: number; weekday: string | undefined; month: number; day: number }[] = [];
+  for (const match of text.matchAll(MONTH_DAY)) {
+    const month = monthExactly(match[2]!);
+    if (month !== null) {
+      found.push({ at: match.index, weekday: match[1], month, day: Number(match[3]) });
+      break;
+    }
+  }
+  for (const match of text.matchAll(DAY_MONTH)) {
+    const month = monthExactly(match[3]!);
+    if (month !== null) {
+      found.push({ at: match.index, weekday: match[1], month, day: Number(match[2]) });
+      break;
+    }
+  }
+  // Whichever stands first in the text is the one the words before it mean.
+  const first = found.sort((a, b) => a.at - b.at)[0];
+  if (!first) {
+    return null;
+  }
+  const iso = nextSuchDay(first.month, first.day, first.weekday, writtenAt);
+  return iso ? { iso, ambiguous: false, assumedYear: true } : null;
+}
+
+/** A date that states its year. */
+function datedIn(text: string, order?: DateOrder): ParsedDate | null {
 
   const iso = ISO.exec(text);
   if (iso) {

@@ -661,13 +661,19 @@ export async function analyzeFile(
       /\.(?:html?|eml|ics)$/i.test(file.name);
     // An email record keeps the sender's HTML inside it; that is the
     // markup the reader wants, not the record's JSON.
-    const raw = isEmailRecord(file.name, file.type)
+    const record = isEmailRecord(file.name, file.type)
       ? await withDeadline(file.text(), ANALYSIS_DEADLINE_MS, signal)
-          .then((json) => (json === undefined ? undefined : parseEmailRecord(json)?.html))
+          .then((json) => (json === undefined ? undefined : parseEmailRecord(json)))
           .catch(() => undefined)
+      : undefined;
+    const raw = isEmailRecord(file.name, file.type)
+      ? record?.html
       : keepsMarkup
         ? await withDeadline(file.text(), ANALYSIS_DEADLINE_MS, signal).catch(() => undefined)
         : undefined;
+    // A message says when it was written; a date in it with no year is read
+    // against that day. No other file can say.
+    const writtenAt = record && Number.isFinite(record.date) && record.date > 0 ? record.date : undefined;
     const found = await withDeadline(
       scanForFacts({
         name: file.name,
@@ -676,6 +682,7 @@ export async function analyzeFile(
         ...(raw !== undefined ? { raw } : {}),
         ...(barcodeSource ? { file: barcodeSource } : {}),
         storedAt: file.lastModified || Date.now(),
+        ...(writtenAt !== undefined ? { writtenAt } : {}),
       }),
       ANALYSIS_DEADLINE_MS * 2,
       signal,

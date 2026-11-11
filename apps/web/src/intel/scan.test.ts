@@ -211,6 +211,30 @@ describe("scanForFacts", () => {
     expect(events[0]!.source).toBe("jsonld");
   });
 
+  it("a date with no year is read in mail, from when the mail was written, and nowhere else", async () => {
+    const text = "Your order has shipped.\nArriving Thursday, November 12";
+    const mail = await scanForFacts({ name: "Shipped.email", mime: "application/vnd.engram.email+json", text, writtenAt: Date.parse("2026-11-09T12:00:00Z") });
+    expect(mail.facts.filter((f) => f.kind === "event")).toEqual([expect.objectContaining({ value: "2026-11-12", assumedYear: true, confidence: 0.5 })]);
+    expect(mail.facts.find((f) => f.kind === "event")!.accepted).toBeUndefined();
+    // The same words in a stored letter: no telling which year they mean.
+    const letter = await scanForFacts({ ...base, text });
+    expect(letter.facts.filter((f) => ["event", "due", "expiry", "dated"].includes(f.kind))).toEqual([]);
+  });
+
+  it("a date written with an ordinal survives the whole scan", async () => {
+    const read = async (text: string) => (await scanForFacts({ ...base, text })).facts.filter((f) => f.kind === "expiry").map((f) => f.value);
+    expect(await read("Valid until November 12th, 2026")).toEqual(["2026-11-12"]);
+    expect(await read("Valid until 2nd March 2027")).toEqual(["2027-03-02"]);
+  });
+
+  it("a date written with a short month name survives the whole scan", async () => {
+    const read = async (text: string) => (await scanForFacts({ ...base, text })).facts.filter((f) => f.kind === "expiry" || f.kind === "event").map((f) => [f.value, f.time]);
+    expect(await read("Valid until 14 Nov 2026")).toEqual([["2026-11-14", undefined]]);
+    expect(await read("Valid until Nov 14, 2026")).toEqual([["2026-11-14", undefined]]);
+    expect(await read("Valid until 4 Sept. 2026")).toEqual([["2026-09-04", undefined]]);
+    expect(await read("Sat 14 Nov 2026, doors 7:00 PM")).toEqual([["2026-11-14", "19:00"]]);
+  });
+
   it("a bill's amount due is one fact, named, not a second unlabelled copy", async () => {
     const out = await scanForFacts({ ...base, text: "Water bill\nAmount due $84.20\nDue date: November 20, 2026" });
     expect(out.facts.filter((f) => f.kind === "amount")).toEqual([

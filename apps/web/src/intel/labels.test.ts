@@ -224,6 +224,39 @@ describe("travel vocabulary", () => {
   });
 });
 
+describe("dates with no year, in mail", () => {
+  const WRITTEN = Date.parse("2026-11-09T12:00:00Z"); // Monday 9 Nov 2026
+
+  it("a shipping message's arrival day is read from the message's date", () => {
+    const [fact] = labelledFacts("Your order has shipped.\nArriving Thursday, November 12", WRITTEN);
+    expect(fact).toMatchObject({ kind: "event", value: "2026-11-12", label: "Delivery expected by", document: "delivery", confidence: 0.5, assumedYear: true, source: "label" });
+    expect(fact!.ambiguous).toBeUndefined();
+  });
+
+  it("a due date and a doors time with no year are read the same way", () => {
+    expect(labelledFacts("Please reply by Friday, November 13.", WRITTEN)[0]).toMatchObject({ kind: "due", value: "2026-11-13", confidence: 0.5, assumedYear: true });
+    expect(labelledFacts("Sat 14 Nov, doors 7:00 PM", WRITTEN)[0]).toMatchObject({ kind: "event", value: "2026-11-14", time: "19:00", assumedYear: true });
+  });
+
+  it("without the message's date, a date with no year is not read", () => {
+    expect(labelledFacts("Your order has shipped.\nArriving Thursday, November 12")).toEqual([]);
+  });
+
+  it("a date wrapped over two lines keeps the year it states", () => {
+    expect(labelledFacts("Valid until 12 March\n2029", WRITTEN)[0]).toMatchObject({ kind: "expiry", value: "2029-03-12", confidence: 0.7 });
+    expect(labelledFacts("Valid until 12 March\n2029", WRITTEN)[0]!.assumedYear).toBeUndefined();
+  });
+
+  it("a date with no year on the label's line is the label's, not a full date on the line below", () => {
+    expect(labelledFacts("Please reply by Friday, November 13.\nSent 2026-11-09", WRITTEN).map((f) => [f.kind, f.value])).toEqual([["due", "2026-11-13"]]);
+  });
+
+  it("a date that states its year is as sure as ever", () => {
+    expect(labelledFacts("Please reply by November 13, 2026.", WRITTEN)[0]).toMatchObject({ value: "2026-11-13", confidence: 0.7 });
+    expect(labelledFacts("Please reply by November 13, 2026.", WRITTEN)[0]!.assumedYear).toBeUndefined();
+  });
+});
+
 describe("the amount a bill asks for", () => {
   const due = (text: string) => labelledFacts(text).filter((f) => f.kind === "amount");
 

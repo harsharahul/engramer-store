@@ -131,6 +131,12 @@ export interface Fact {
   confidence: number;
   /** The date could be read two ways and the document did not say which. */
   ambiguous?: boolean;
+  /**
+   * The document printed no year for this date: it is the next such day
+   * after the message was written. It stays a question until the owner
+   * answers, whoever else reads the same day.
+   */
+  assumedYear?: boolean;
   /** Pinned by the owner. Never overwritten by a later scan. */
   confirmed?: boolean;
   /**
@@ -430,7 +436,7 @@ export function groundFacts(facts: Fact[], source: string): Fact[] {
     if (EXACT_SOURCES.has(fact.source)) {
       return true;
     }
-    if (!renderings(fact).some((form) => haystack.includes(normalize(form)))) {
+    if (!(fact.assumedYear ? statesMonthDay(fact.value, source) : renderings(fact).some((form) => haystack.includes(normalize(form))))) {
       return false;
     }
     // A time has to be found too. A fact carrying the right date and a time
@@ -442,6 +448,26 @@ export function groundFacts(facts: Fact[], source: string): Fact[] {
     }
     return true;
   });
+}
+
+/** The ways a month is written: its name, its first three letters, and Sept. */
+function monthForms(name: string): string[] {
+  return [...new Set([name, name.slice(0, 3), ...(name === "september" ? ["sept"] : [])])];
+}
+
+/**
+ * Whether the document writes this month and day with no year ("November
+ * 12", "Thu 12 Nov", "Nov. 12th"). Read as a date in the text itself, so the
+ * 12th is never found in "November 120" or in the 2nd.
+ */
+function statesMonthDay(isoDate: string, source: string): boolean {
+  const parts = /^\d{4}-(\d{2})-(\d{2})$/.exec(isoDate);
+  if (!parts) {
+    return false;
+  }
+  const month = `(?:${monthForms(MONTHS[Number(parts[1]) - 1]!).join("|")})\\.?`;
+  const day = `0?${Number(parts[2])}(?:st|nd|rd|th)?`;
+  return new RegExp(`\\b${month}\\s+${day}\\b(?!\\d)|(?<!\\d)\\b${day}\\s+${month}(?![a-z])`, "i").test(source);
 }
 
 /**
@@ -491,10 +517,11 @@ function renderings(fact: Fact): string[] {
     return [fact.value];
   }
   const [, year, month, day] = iso as unknown as [string, string, string, string];
-  const name = MONTHS[Number(month) - 1]!;
   const d = String(Number(day));
   const m = String(Number(month));
   const yy = year.slice(2);
+  const tens = Number(day) % 100;
+  const th = tens >= 11 && tens <= 13 ? "th" : (["th", "st", "nd", "rd"][Number(day) % 10] ?? "th");
   return [
     `${month}/${day}/${year}`,
     `${day}/${month}/${year}`,
@@ -504,20 +531,26 @@ function renderings(fact: Fact): string[] {
     `${day}/${month}/${yy}`,
     `${year}-${month}-${day}`,
     `${year}${month}${day}`,
-    // Written months, with the day both bare and zero-padded: documents
-    // print "April 2" and "April 02" interchangeably, and a fact discarded
-    // because of a leading zero would be grounding failing at its own job.
-    `${day} ${name} ${year}`,
-    `${d} ${name} ${year}`,
-    `${name} ${d} ${year}`,
-    `${name} ${day} ${year}`,
-    // The year-first written form some documents use.
-    `${year} ${name} ${d}`,
-    `${year} ${name} ${day}`,
-    // A month and a year with no day: how cards and some permits print an
-    // expiry. Looser than the rest on purpose, because refusing to ground a
-    // real month-and-year expiry would be the worse failure.
-    `${name} ${year}`,
+    // Written months, as the name or its short form ("14 Nov 2026" is how
+    // most mail writes a date), with the day bare, zero-padded and as an
+    // ordinal: documents print "April 2", "April 02" and "April 2nd"
+    // interchangeably, and a fact discarded because of how its day is
+    // written would be grounding failing at its own job.
+    ...monthForms(MONTHS[Number(month) - 1]!).flatMap((name) => [
+      `${day} ${name} ${year}`,
+      `${d} ${name} ${year}`,
+      `${d}${th} ${name} ${year}`,
+      `${name} ${d} ${year}`,
+      `${name} ${day} ${year}`,
+      `${name} ${d}${th} ${year}`,
+      // The year-first written form some documents use.
+      `${year} ${name} ${d}`,
+      `${year} ${name} ${day}`,
+      // A month and a year with no day: how cards and some permits print an
+      // expiry. Looser than the rest on purpose, because refusing to ground a
+      // real month-and-year expiry would be the worse failure.
+      `${name} ${year}`,
+    ]),
   ];
 }
 
@@ -643,7 +676,10 @@ function pick(prior: Fact, fact: Fact): Fact {
     GROUNDED_READERS.has(fact.source) &&
     prior.source !== fact.source &&
     !prior.ambiguous &&
-    !fact.ambiguous
+    !fact.ambiguous &&
+    // Nor does a second reader settle which year a date with none means.
+    !prior.assumedYear &&
+    !fact.assumedYear
   ) {
     const names = [...new Set([...readers(prior), ...readers(fact)])].sort();
     return { ...winner, accepted: winner.accepted ?? "agreement", reader: names.join(" + ") };

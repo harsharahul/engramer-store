@@ -466,6 +466,33 @@ describe("email records and the reservation reader", () => {
     await analyzeFile(file);
     expect(scanForFacts).toHaveBeenCalledWith(expect.objectContaining({ raw: html }));
   });
+
+  it("an email record tells the reader when it was written, and no other file does", async () => {
+    const { scanForFacts } = await import("./intel/scan");
+    const { analyzeFile } = await import("./transfer");
+    vi.mocked(scanForFacts).mockClear();
+    const record = {
+      v: 1,
+      messageId: "<b3@example.com>",
+      date: Date.UTC(2026, 10, 9, 12),
+      from: { name: "Example Shop", address: "shop@example.com" },
+      to: ["guest@example.com"],
+      cc: [],
+      subject: "Your order has shipped",
+      headers: "",
+      text: "Your order has shipped. Arriving Thursday, November 12",
+      inline: [],
+      attachments: [],
+      source: { kind: "import", label: "export.mbox" },
+    };
+    await analyzeFile(new File([JSON.stringify(record)], "Your order has shipped.email", { type: "application/vnd.engram.email+json" }));
+    expect(scanForFacts).toHaveBeenCalledWith(expect.objectContaining({ writtenAt: Date.UTC(2026, 10, 9, 12) }));
+
+    vi.mocked(scanForFacts).mockClear();
+    await analyzeFile(new File(["Your order has shipped. Arriving Thursday, November 12"], "note.txt", { type: "text/plain" }));
+    expect(scanForFacts).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(scanForFacts).mock.calls[0]![0]).not.toHaveProperty("writtenAt");
+  });
 });
 
 describe("calendar invites and the scanner", () => {
