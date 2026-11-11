@@ -544,8 +544,20 @@ export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
   }
   // The cap has to drop the weakest rather than whichever arrived last.
   return resolveSlots([...merged.values()])
-    .sort((a, b) => b.confidence - a.confidence || a.value.localeCompare(b.value))
+    .sort((a, b) => b.confidence - a.confidence || capRank(a) - capRank(b) || a.value.localeCompare(b.value))
     .slice(0, MAX_FACTS_PER_FILE);
+}
+
+/**
+ * What the cap keeps first among exact readings: a date makes a row, a
+ * reference links one file to another, and a price only adds to them. Softer
+ * readings keep the order they had; their confidence already ranks them.
+ */
+function capRank(fact: Fact): number {
+  if (fact.confidence < 1) {
+    return 0;
+  }
+  return fact.kind === "amount" ? 2 : fact.kind === "identifier" ? 1 : 0;
 }
 
 /** Kinds a document states once: two different readings of one disagree. */

@@ -140,6 +140,20 @@ describe("one trip, from raw mail to the poster's words", () => {
     expect(spend.count).toBe(2);
   });
 
+  it("one package email spends its flights and its hotel, and a later copy of it adds nothing", async () => {
+    const packaged = file("package", await booking(mail.PACKAGE_PRICED));
+    const changed = { ...file("changed", await booking(mail.PACKAGE_PRICED)), mail: { subject: "Your schedule has changed", from: "Sender", date: Date.UTC(2026, 9, 20) } };
+    for (const files of [[packaged], [packaged, changed]]) {
+      const { view: lisbon, rows } = await view(files);
+      const spend = tripSpend(lisbon, rows);
+      expect([...spend.sums].sort((a, b) => a.currency.localeCompare(b.currency))).toEqual([
+        { currency: "EUR", value: "652.00" },
+        { currency: "USD", value: "1184.00" },
+      ]);
+      expect(spend.count).toBe(2);
+    }
+  });
+
   it("the booked trip's poster reads right at every moment", async () => {
     const { view: lisbon } = await view([file("booking", await booking(mail.BOOKING_WITH_HOTEL)), file("pass", pass(), false)]);
     const words = (day: string, time: string, zone: string) => {

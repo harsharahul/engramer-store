@@ -255,6 +255,13 @@ describe("mergeFacts", () => {
     expect(merged.length).toBeLessThanOrEqual(12);
     expect(merged[0]!.confidence).toBe(1);
   });
+
+  it("among weak readings, the limit still keeps amounts before reference numbers", () => {
+    // Harvested from a long receipt: what was paid matters more than its codes.
+    const codes = Array.from({ length: 14 }, (_, i) => fact({ id: `identifier:AB${i}`, kind: "identifier", value: `AB${i}0000`, source: "pattern", confidence: 0.3 }));
+    const paid = fact({ id: "amount:410.00", kind: "amount", value: "410.00", unit: "USD", source: "pattern", confidence: 0.3 });
+    expect(mergeFacts([], [...codes, paid]).some((kept) => kept.kind === "amount")).toBe(true);
+  });
 });
 
 describe("isTracked", () => {
