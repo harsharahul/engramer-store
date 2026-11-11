@@ -107,8 +107,7 @@ describe("scanForFacts", () => {
       (await scanForFacts({ name: "Your trip.email", mime: "application/vnd.engram.email+json", raw: `<html><script type="application/ld+json">${JSON.stringify(nodes)}</script></html>` })).facts;
     const count = (facts: { kind: string }[], kind: string) => facts.filter((f) => f.kind === kind).length;
 
-    it("a long itinerary keeps every date and reference before any price", async () => {
-      // Four legs and a hotel: ten dates, two references and two prices, two more than a file carries.
+    it("four legs and a hotel keep every date, reference and price", async () => {
       const facts = await scan([
         leg("236", "SFO", "JFK", "2026-11-12", "1184.00"),
         leg("237", "JFK", "LIS", "2026-11-13", "1184.00"),
@@ -116,7 +115,22 @@ describe("scanForFacts", () => {
         leg("239", "JFK", "SFO", "2026-11-17", "1184.00"),
         hotel,
       ]);
-      expect([count(facts, "event"), count(facts, "identifier"), count(facts, "amount")]).toEqual([10, 2, 0]);
+      expect([count(facts, "event"), count(facts, "identifier"), count(facts, "amount")]).toEqual([10, 2, 2]);
+    });
+
+    it("past thirty-two exact facts, dates are kept first, then references, then prices", async () => {
+      // Fourteen legs and a hotel: thirty dates, two references and two prices.
+      const legs = Array.from({ length: 14 }, (_, i) => leg(String(300 + i), "SFO", "LIS", `2026-10-${String(i + 1).padStart(2, "0")}`, "1184.00"));
+      const facts = await scan([...legs, hotel]);
+      expect([count(facts, "event"), count(facts, "identifier"), count(facts, "amount")]).toEqual([30, 2, 0]);
+    });
+
+    it("the codes printed around a booking are still held to twelve", async () => {
+      const raw = `<html><script type="application/ld+json">${JSON.stringify([leg("236", "SFO", "LIS", "2026-11-12", "1184.00"), hotel])}</script></html>`;
+      const text = Array.from({ length: 40 }, (_, i) => `Ref AB${i}00000${i}`).join("\n");
+      const { facts } = await scanForFacts({ name: "Your trip.email", mime: "application/vnd.engram.email+json", raw, text });
+      expect(facts.filter((f) => f.confidence === 1)).toHaveLength(8);
+      expect(facts.filter((f) => f.confidence < 1)).toHaveLength(12);
     });
 
     it("a booking that fits keeps its prices too", async () => {
