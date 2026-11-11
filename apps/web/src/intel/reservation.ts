@@ -290,11 +290,43 @@ function factsOf(res: Node, reservation: number): ReadFact[] {
   return facts;
 }
 
+/**
+ * A price as written, read one way or not at all. A number is itself. Text is
+ * a plain decimal ("1184.5"), one with thousands commas ("1,184.50"), or the
+ * form with a decimal comma ("148,50", "1.184,00"). Text that could be read
+ * two ways ("1.184") or carries anything else states no price: a wrong price
+ * counts without a yes, and that is worse than none.
+ */
+function priceOf(price: unknown): number | undefined {
+  if (typeof price === "number") {
+    return price;
+  }
+  const text = typeof price === "string" ? price.trim() : "";
+  if (/^\d+(?:\.\d{1,2})?$/.test(text)) {
+    return Number(text);
+  }
+  if (/^\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?$/.test(text)) {
+    return Number(text.replace(/,/g, ""));
+  }
+  if (/^\d+,\d{2}$/.test(text)) {
+    return Number(text.replace(",", "."));
+  }
+  if (/^\d{1,3}(?:\.\d{3})+,\d{2}$/.test(text)) {
+    return Number(text.replace(/\./g, "").replace(",", "."));
+  }
+  return undefined;
+}
+
 /** A price and its currency as an amount's value and unit; nothing when either is missing or the price is not above zero. */
 function moneyOf(price: unknown, currency: unknown): { value: string; unit: string } | undefined {
-  const amount = Number(String(price ?? "").replace(/,/g, ""));
+  const amount = priceOf(price);
   const unit = str(currency);
-  return Number.isFinite(amount) && amount > 0 && unit ? { value: amount.toFixed(2), unit: unit.toUpperCase() } : undefined;
+  return amount !== undefined && Number.isFinite(amount) && amount > 0 && unit ? { value: amount.toFixed(2), unit: unit.toUpperCase() } : undefined;
+}
+
+/** An order that was cancelled or sent back: nothing was bought and nothing is on its way. */
+function undone(order: Node | undefined): boolean {
+  return /Order(?:Cancelled|Returned)$/.test(str(order?.["orderStatus"]) ?? "");
 }
 
 /** A bill's due date, amount and number, or a parcel's delivery window. */
@@ -302,6 +334,9 @@ function billingFactsOf(node: Node): Fact[] {
   const type = (str(node["@type"]) ?? "").replace(/^.*[:/]/, "");
   const invoice = type === "Invoice";
   const order = type === "Order";
+  if (undone(order ? node : record(node["partOfOrder"]))) {
+    return [];
+  }
   // The parcels this node states: its own window, or each delivery an order carries.
   const carried = node["orderDelivery"];
   const parcels: Node[] = order
@@ -344,7 +379,9 @@ function billingFactsOf(node: Node): Fact[] {
       confidence: 1,
     });
   };
-  const identifier = (value: string | undefined, label: string) => {
+  // An order's or an invoice's own number names one purchase; an account or
+  // a parcel's tracking number does not, and says so by saying nothing.
+  const identifier = (value: string | undefined, label: string, role?: "purchase") => {
     if (value) {
       facts.push({
         id: factId("identifier", value),
@@ -352,6 +389,7 @@ function billingFactsOf(node: Node): Fact[] {
         document,
         value,
         label,
+        ...(role ? { subject: { role } } : {}),
         source: "jsonld",
         confidence: 1,
       });
@@ -361,7 +399,7 @@ function billingFactsOf(node: Node): Fact[] {
     dated("due", node["paymentDueDate"] ?? node["paymentDue"], "Payment due");
     const due = record(node["totalPaymentDue"]);
     amount(moneyOf(due?.["price"] ?? due?.["value"], due?.["priceCurrency"] ?? due?.["currency"]), "Amount due");
-    identifier(str(node["confirmationNumber"]) ?? str(node["identifier"]), "Invoice number");
+    identifier(str(node["confirmationNumber"]) ?? str(node["identifier"]), "Invoice number", "purchase");
     identifier(str(node["accountId"]), "Account number");
   }
   if (order) {
@@ -369,7 +407,7 @@ function billingFactsOf(node: Node): Fact[] {
     // Several offers are line items, and adding them up would be a guess.
     const offer = record(node["acceptedOffer"]);
     amount(moneyOf(node["price"], node["priceCurrency"]) ?? (offer ? moneyOf(offer["price"], offer["priceCurrency"]) : undefined), "Order total");
-    identifier(str(node["orderNumber"]), "Order number");
+    identifier(str(node["orderNumber"]), "Order number", "purchase");
   }
   for (const parcel of parcels) {
     dated("event", parcel["expectedArrivalFrom"], "Delivery window opens", "opens");

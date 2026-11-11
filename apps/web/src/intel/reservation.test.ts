@@ -293,6 +293,17 @@ describe("invoices and deliveries", () => {
     expect(facts.some((f) => f.kind === "event")).toBe(false);
   });
 
+  it("a cancelled or returned order states nothing: no bill, no parcel on its way", () => {
+    for (const status of ["http://schema.org/OrderCancelled", "https://schema.org/OrderReturned", "OrderCancelled"]) {
+      expect(structuredDataFacts(ld(order({ orderStatus: status, orderDelivery: parcel() }))), status).toEqual([]);
+    }
+    // A delivery that names a cancelled order is not on its way either.
+    const cancelled = { "@type": "Order", orderNumber: "EX-20391", orderStatus: "http://schema.org/OrderCancelled" };
+    expect(structuredDataFacts(ld(parcel({ partOfOrder: cancelled })))).toEqual([]);
+    // An order still on its way keeps everything.
+    expect(structuredDataFacts(ld(order({ orderStatus: "http://schema.org/OrderInTransit", orderDelivery: parcel() }))).length).toBeGreaterThan(2);
+  });
+
   it("an order priced only by its one offer takes that price, and one with no price states no amount", () => {
     const offered = structuredDataFacts(ld(order({ price: undefined, priceCurrency: undefined, acceptedOffer: { "@type": "Offer", price: "59.90", priceCurrency: "EUR" } })));
     expect(offered.find((f) => f.kind === "amount")).toMatchObject({ value: "59.90", unit: "EUR" });
@@ -495,6 +506,22 @@ describe("what a booking cost", () => {
     expect(amounts(all([flight(priced), flight(priced, "215", "2027-03-09")]))).toHaveLength(1);
     const two = amounts(all([flight({ totalPrice: "592.00", priceCurrency: "USD" }), flight({ totalPrice: "610.00", priceCurrency: "USD" }, "215", "2027-03-09")]));
     expect(two.map((f) => f.value)).toEqual(["592.00", "610.00"]);
+  });
+
+  it("a price with a decimal comma is read as written, never a hundred times larger", () => {
+    const eur = (totalPrice: unknown) => amounts(ld(flight({ totalPrice, priceCurrency: "EUR" }))).map((f) => f.value);
+    expect(eur("148,50")).toEqual(["148.50"]);
+    expect(eur("1.184,00")).toEqual(["1184.00"]);
+    expect(eur("1,18")).toEqual(["1.18"]);
+    expect(eur("1,184")).toEqual(["1184.00"]);
+    expect(eur("12,345,678.9")).toEqual(["12345678.90"]);
+  });
+
+  it("a price that could be read two ways, or is not a plain number, states no amount", () => {
+    const eur = (totalPrice: unknown) => amounts(ld(flight({ totalPrice, priceCurrency: "EUR" })));
+    for (const unclear of ["1.184", "148.505", "€148.00", "148.00 EUR", "1 184,00", "1e3", "-5.00", ""]) {
+      expect(eur(unclear), unclear).toEqual([]);
+    }
   });
 
   it("a price with no currency, or of zero, is not an amount", () => {
