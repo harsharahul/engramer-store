@@ -252,6 +252,61 @@ describe("invoices and deliveries", () => {
     expect(facts.find((f) => f.kind === "identifier")).toMatchObject({ value: "TRK99887766", label: "Tracking number" });
   });
 
+  const order = (extra: Record<string, unknown> = {}) => ({
+    "@type": "Order",
+    orderNumber: "EX-20391",
+    price: "148.00",
+    priceCurrency: "USD",
+    ...extra,
+  });
+  const parcel = (extra: Record<string, unknown> = {}) => ({
+    "@type": "ParcelDelivery",
+    trackingNumber: "TRK99887766",
+    expectedArrivalFrom: "2027-04-02T09:00:00-07:00",
+    expectedArrivalUntil: "2027-04-02T17:00:00-07:00",
+    ...extra,
+  });
+
+  it("an order gives its total, its number and its delivery", () => {
+    const facts = structuredDataFacts(ld(order({ orderDelivery: parcel() })));
+    expect(facts.find((f) => f.kind === "amount")).toMatchObject({ value: "148.00", unit: "USD", label: "Order total", source: "jsonld", confidence: 1, document: "delivery" });
+    expect(facts.filter((f) => f.kind === "identifier").map((f) => [f.label, f.value])).toEqual([
+      ["Order number", "EX-20391"],
+      ["Tracking number", "TRK99887766"],
+    ]);
+    expect(facts.filter((f) => f.kind === "event").map((f) => [f.label, f.time, f.document])).toEqual([
+      ["Delivery window opens", "09:00", "delivery"],
+      ["Delivery expected by", "17:00", "delivery"],
+    ]);
+  });
+
+  it("an order with several parcels reads each delivery", () => {
+    const facts = structuredDataFacts(
+      ld(order({ orderDelivery: [parcel(), parcel({ trackingNumber: "TRK11223344", expectedArrivalFrom: "2027-04-05T09:00:00-07:00", expectedArrivalUntil: "2027-04-05T17:00:00-07:00" })] })),
+    );
+    expect(facts.filter((f) => f.kind === "event").map((f) => f.value)).toEqual(["2027-04-02", "2027-04-02", "2027-04-05", "2027-04-05"]);
+  });
+
+  it("an order with no delivery is a receipt", () => {
+    const facts = structuredDataFacts(ld(order()));
+    expect(facts.find((f) => f.kind === "amount")).toMatchObject({ value: "148.00", document: "invoice", label: "Order total" });
+    expect(facts.some((f) => f.kind === "event")).toBe(false);
+  });
+
+  it("an order priced only by its one offer takes that price, and one with no price states no amount", () => {
+    const offered = structuredDataFacts(ld(order({ price: undefined, priceCurrency: undefined, acceptedOffer: { "@type": "Offer", price: "59.90", priceCurrency: "EUR" } })));
+    expect(offered.find((f) => f.kind === "amount")).toMatchObject({ value: "59.90", unit: "EUR" });
+    expect(structuredDataFacts(ld(order({ price: undefined }))).some((f) => f.kind === "amount")).toBe(false);
+  });
+
+  it("an order and a delivery that names it state each fact once", () => {
+    const raw = `<html><script type="application/ld+json">${JSON.stringify([order({ orderDelivery: parcel() }), parcel({ partOfOrder: { "@type": "Order", orderNumber: "EX-20391" } })])}</script></html>`;
+    const facts = structuredDataFacts(raw);
+    expect(facts.filter((f) => f.kind === "event")).toHaveLength(2);
+    expect(facts.filter((f) => f.kind === "identifier")).toHaveLength(2);
+    expect(facts.filter((f) => f.kind === "amount")).toHaveLength(1);
+  });
+
   it("refuses a due date that does not exist", () => {
     const facts = structuredDataFacts(ld({ "@type": "Invoice", paymentDueDate: "2027-02-31" }));
     expect(facts.filter((f) => f.kind === "due")).toEqual([]);

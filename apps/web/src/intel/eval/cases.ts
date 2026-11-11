@@ -220,6 +220,31 @@ export const EVAL_CASES: readonly EvalCase[] = [
     exact: true,
   },
   {
+    id: "order-lantern",
+    name: "Thanks for your order from Lantern Goods.email",
+    mime: EMAIL,
+    text: "Thanks for your order EX-20391. Order total: USD 148.00. It arrives on 9 April 2027 between 10:00 and 14:00.",
+    raw: ld({
+      "@type": "Order",
+      orderNumber: "EX-20391",
+      price: "148.00",
+      priceCurrency: "USD",
+      orderDelivery: {
+        "@type": "ParcelDelivery",
+        trackingNumber: "TRK55443322",
+        expectedArrivalFrom: "2027-04-09T10:00:00-07:00",
+        expectedArrivalUntil: "2027-04-09T14:00:00-07:00",
+      },
+    }),
+    expected: [
+      { kind: "event", value: "2027-04-09", time: "10:00" },
+      { kind: "event", value: "2027-04-09", time: "14:00" },
+      { kind: "amount", value: "148.00" },
+    ],
+    mailKind: "delivery",
+    exact: true,
+  },
+  {
     id: "invite-review",
     name: "invite.ics",
     mime: "text/calendar",

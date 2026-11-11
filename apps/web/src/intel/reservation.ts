@@ -23,8 +23,8 @@ const SCRIPT_BLOCK = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S
 const RESERVATION_TYPE =
   /(?:^|[^A-Za-z])(?:Flight|Lodging|RentalCar|Train|Bus|Boat|Event|FoodEstablishment)Reservation$/;
 
-/** Structured data a bill or a shipping notice carries about itself. */
-const BILLING_TYPE = /(?:^|[^A-Za-z])(?:Invoice|ParcelDelivery)$/;
+/** Structured data a bill, a shop order or a shipping notice carries about itself. */
+const BILLING_TYPE = /(?:^|[^A-Za-z])(?:Invoice|ParcelDelivery|Order)$/;
 
 type Node = Record<string, unknown>;
 
@@ -301,8 +301,31 @@ function moneyOf(price: unknown, currency: unknown): { value: string; unit: stri
 function billingFactsOf(node: Node): Fact[] {
   const type = (str(node["@type"]) ?? "").replace(/^.*[:/]/, "");
   const invoice = type === "Invoice";
-  const document: DocumentKind = invoice ? "invoice" : "delivery";
+  const order = type === "Order";
+  // The parcels this node states: its own window, or each delivery an order carries.
+  const carried = node["orderDelivery"];
+  const parcels: Node[] = order
+    ? (Array.isArray(carried) ? carried : [carried]).map(record).filter((parcel): parcel is Node => parcel !== undefined)
+    : invoice
+      ? []
+      : [node];
+  // An order with nothing on its way is a receipt.
+  const document: DocumentKind = parcels.length > 0 ? "delivery" : "invoice";
   const facts: Fact[] = [];
+  const amount = (total: { value: string; unit: string } | undefined, label: string) => {
+    if (total) {
+      facts.push({
+        id: factId("amount", total.value),
+        kind: "amount",
+        document,
+        value: total.value,
+        unit: total.unit,
+        label,
+        source: "jsonld",
+        confidence: 1,
+      });
+    }
+  };
   const dated = (kind: "due" | "event", stamp: unknown, label: string, role?: "opens" | "by") => {
     const at = when(stamp);
     if (!at) {
@@ -337,25 +360,21 @@ function billingFactsOf(node: Node): Fact[] {
   if (invoice) {
     dated("due", node["paymentDueDate"] ?? node["paymentDue"], "Payment due");
     const due = record(node["totalPaymentDue"]);
-    const total = moneyOf(due?.["price"] ?? due?.["value"], due?.["priceCurrency"] ?? due?.["currency"]);
-    if (total) {
-      facts.push({
-        id: factId("amount", total.value),
-        kind: "amount",
-        document,
-        value: total.value,
-        unit: total.unit,
-        label: "Amount due",
-        source: "jsonld",
-        confidence: 1,
-      });
-    }
+    amount(moneyOf(due?.["price"] ?? due?.["value"], due?.["priceCurrency"] ?? due?.["currency"]), "Amount due");
     identifier(str(node["confirmationNumber"]) ?? str(node["identifier"]), "Invoice number");
     identifier(str(node["accountId"]), "Account number");
-  } else {
-    dated("event", node["expectedArrivalFrom"], "Delivery window opens", "opens");
-    dated("event", node["expectedArrivalUntil"], "Delivery expected by", "by");
-    identifier(str(node["trackingNumber"]), "Tracking number");
+  }
+  if (order) {
+    // The order's own price is its total; one offer alone states it too.
+    // Several offers are line items, and adding them up would be a guess.
+    const offer = record(node["acceptedOffer"]);
+    amount(moneyOf(node["price"], node["priceCurrency"]) ?? (offer ? moneyOf(offer["price"], offer["priceCurrency"]) : undefined), "Order total");
+    identifier(str(node["orderNumber"]), "Order number");
+  }
+  for (const parcel of parcels) {
+    dated("event", parcel["expectedArrivalFrom"], "Delivery window opens", "opens");
+    dated("event", parcel["expectedArrivalUntil"], "Delivery expected by", "by");
+    identifier(str(parcel["trackingNumber"]), "Tracking number");
   }
   return facts;
 }

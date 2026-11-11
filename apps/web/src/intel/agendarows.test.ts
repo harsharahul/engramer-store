@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { planTrips } from "./agenda";
 import { localDay, localTime, photoDayOf, photosInDays, rowsOf, type AgendaRow, type RowContext, type RowFile } from "./agendarows";
 import { withExactAcceptance, type Fact } from "./facts";
+import { scanForFacts } from "./scan";
 
 const EMAIL = "application/vnd.engram.email+json";
 // Tue 8 Sep 2026, 08:40 in San Francisco.
@@ -95,6 +96,22 @@ describe("rowsOf", () => {
     const rows = await rowsOf([parcel], none, NOW);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: "parcel", tag: "DELIVERY", title: "Your order has shipped", sub: "Between 10:00 and 14:00", time: "10:00" });
+  });
+
+  it("a shop order is one parcel and one bill, read from the order itself", async () => {
+    // The shop's email as stored: an order with its delivery, and the same
+    // delivery stated again on its own, naming the order.
+    const parcel = { "@type": "ParcelDelivery", trackingNumber: "TRK99887766", expectedArrivalFrom: "2026-09-09T10:00:00-07:00", expectedArrivalUntil: "2026-09-09T14:00:00-07:00" };
+    const raw = `<html><script type="application/ld+json">${JSON.stringify([
+      { "@type": "Order", orderNumber: "EX-20391", price: "148.00", priceCurrency: "USD", orderDelivery: parcel },
+      { ...parcel, partOfOrder: { "@type": "Order", orderNumber: "EX-20391" } },
+    ])}</script></html>`;
+    const { facts } = await scanForFacts({ name: "Your order.email", mime: EMAIL, raw, text: "Thanks for your order." });
+    const rows = await rowsOf([email("order", "Your order has shipped", facts)], none, NOW);
+    expect(rows.map((row) => [row.kind, row.tag, row.day, row.amount?.value])).toEqual([
+      ["bill", "BILL", "2026-09-01", "148.00"],
+      ["parcel", "DELIVERY", "2026-09-09", undefined],
+    ]);
   });
 
   it("an event with a price is tickets, without one is booked", async () => {
