@@ -101,6 +101,20 @@ describe("swappedReading", () => {
   });
 });
 
+describe("a date written with dots", () => {
+  it("is day first, as the countries that write dates with dots write them", () => {
+    expect(parseDate("Zahlbar bis 12.11.2026")).toEqual({ iso: "2026-11-12", ambiguous: true });
+    expect(parseDate("03.04.2028")).toEqual({ iso: "2028-04-03", ambiguous: true });
+    expect(parseDate("30.11.2026")).toEqual({ iso: "2026-11-30", ambiguous: false });
+  });
+
+  it("leaves a date written with slashes or hyphens as it was read", () => {
+    expect(parseDate("03/04/2028")).toEqual({ iso: "2028-03-04", ambiguous: true });
+    expect(parseDate("03-04-2028")).toEqual({ iso: "2028-03-04", ambiguous: true });
+    expect(parseDate("12.25.2028")).toEqual({ iso: "2028-12-25", ambiguous: false });
+  });
+});
+
 describe("a date with no year", () => {
   const WRITTEN = Date.parse("2026-11-09T12:00:00Z"); // Monday 9 Nov 2026
   const at = { writtenAt: WRITTEN };

@@ -264,9 +264,12 @@ function datedIn(text: string, order?: DateOrder): ParsedDate | null {
     if (first > 12 && second > 12) {
       return null;
     }
-    // Both readings are possible. Month-first is produced so the confirmation
-    // card has something to show; the flag is what stops it being acted on.
-    const built = underOrder(a, b, c, "mdy") ?? underOrder(a, b, c, "dmy");
+    // Both readings are possible. One is produced so the confirmation card
+    // has something to show; the flag is what stops it being acted on. A
+    // date written with dots is day first, as the countries that write
+    // dates that way do; any other is month first.
+    const dotted = numeric[0].includes(".");
+    const built = underOrder(a, b, c, dotted ? "dmy" : "mdy") ?? underOrder(a, b, c, dotted ? "mdy" : "dmy");
     return built ? { iso: built, ambiguous: true } : null;
   }
 

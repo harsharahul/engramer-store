@@ -179,10 +179,18 @@ function flightOn(text: string, at: number, length: number): { carrier: string; 
 
 const dayAfter = (iso: string) => new Date(Date.parse(`${iso}T00:00:00Z`) + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-/** The same reach backwards, and never past the start of the label's own line. */
+/**
+ * The same reach backwards, never past the start of the label's own line
+ * and never out of its own sentence: a date before the last full stop
+ * belongs to another thought ("Doors open on November 27. Book your
+ * appointment" names no day for the appointment).
+ */
 function windowBefore(text: string, to: number): string {
   const line = text.lastIndexOf("\n", to - 1) + 1;
-  return text.slice(Math.max(line, to - WINDOW), to);
+  const reach = text.slice(Math.max(line, to - WINDOW), to);
+  const ends = [...reach.matchAll(/[.!?]\s+(?=[A-Z])/g)];
+  const last = ends[ends.length - 1];
+  return last ? reach.slice(last.index + last[0].length) : reach;
 }
 
 /** Dates that a document labelled, which is the only kind worth trusting. */
@@ -308,9 +316,11 @@ const FIELD_LINE = /^\s*([^:\n]{2,48}?)\s*:\s*(.+)$/;
  * Labels that are refused outright. Birth dates on the same principle as the
  * machine-readable-zone reader: nothing here needs one and it is the most
  * sensitive date a document carries. Print and generation stamps because
- * they describe the paper, not the obligation.
+ * they describe the paper, not the obligation. The Sent and Received lines
+ * of a forwarded or quoted message, because they date the mail, which is
+ * already known, and nothing in it.
  */
-const REFUSED_LABELS = /\b(birth|born|dob\b|print|generat|creat|download|scan)/i;
+const REFUSED_LABELS = /\b(birth|born|dob\b|print|generat|creat|download|scan)|^(?:sent|received)$/i;
 
 /**
  * Every labelled date in the document, with the label attached verbatim.

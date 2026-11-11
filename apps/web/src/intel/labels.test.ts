@@ -255,8 +255,29 @@ describe("more ways a deadline is written", () => {
   });
 });
 
+describe("a date before its label", () => {
+  const WRITTEN = Date.parse("2026-11-09T12:00:00Z");
+  const labels = (text: string) => labelledFacts(text, WRITTEN).map((f) => [f.label, f.value, f.time]);
+
+  it("belongs to the label only inside the label's own sentence", () => {
+    // A shop's flyer: the doors' day is not the day of an appointment nobody booked.
+    expect(labels("Doors open at 6 AM on November 27. Book your appointment for a free fitting.")).toEqual([["Doors", "2026-11-27", "06:00"]]);
+    expect(labels("Offer valid to 30 Nov 2026! Book an appointment today.").filter((f) => f[0] === "Appointment")).toEqual([]);
+  });
+
+  it("is still read on a poster's line, with a short weekday or month before it", () => {
+    expect(labels("Sat 14 Nov 2026, doors 7:00 PM")).toEqual([["Doors", "2026-11-14", "19:00"]]);
+    expect(labels("Sat. Nov. 14, 2026, doors 7:00 PM")).toEqual([["Doors", "2026-11-14", "19:00"]]);
+  });
+});
+
 describe("a field line", () => {
   const fields = (text: string) => structuralDatedFacts(text, new Set()).map((f) => [f.label, f.value]);
+
+  it("is not the header of a forwarded or quoted message", () => {
+    expect(fields("-----Original Message-----\nFrom: Pat Lee\nSent: Monday, November 9, 2026 10:15 AM\nTo: Team\nSubject: Schedule")).toEqual([]);
+    expect(fields("Received: 9 November 2026")).toEqual([]);
+  });
 
   it("is a label, a colon and a value", () => {
     expect(fields("Benefit End Date: 2027 October 19")).toEqual([["Benefit End Date", "2027-10-19"]]);
