@@ -225,6 +225,50 @@ describe("travel vocabulary", () => {
   });
 });
 
+describe("more ways a deadline is written", () => {
+  const read = (text: string) => labelledFacts(text).map((f) => [f.kind, f.value, f.label]);
+
+  it("a deadline, a book due back, and an answer wanted by a day are due", () => {
+    expect(read("Reminder: the filing deadline is 15 April 2028.")).toEqual([["due", "2028-04-15", "Deadline"]]);
+    expect(read("The book you borrowed is due back on 9 June 2027.")).toEqual([["due", "2027-06-09", "Due back on"]]);
+    expect(read("Let us know by 31 January 2028 whether you plan to renew.")).toEqual([["due", "2028-01-31", "Let us know by"]]);
+  });
+
+  it("the day a payment will be taken is due", () => {
+    expect(read("Your mobile bill is USD 38.25 and will be collected on 3 May 2027.")).toEqual([["due", "2027-05-03", "Will be collected on"]]);
+    expect(read("Your card will be charged on 1 July 2027.")).toEqual([["due", "2027-07-01", "Will be charged on"]]);
+  });
+
+  it("cover that ends, and a lease that ends on a day, expire then", () => {
+    expect(read("Limited warranty. Coverage ends 20 March 2028.")).toEqual([["expiry", "2028-03-20", undefined]]);
+    expect(read("Your lease ends on 31 March 2028.")).toEqual([["expiry", "2028-03-31", undefined]]);
+  });
+
+  it("an amount that is due on a day is the bill's amount", () => {
+    const facts = labelledFacts("A reminder that rent of USD 2,400.00 is due on 1 September 2027.");
+    expect(facts.map((f) => [f.kind, f.value, f.label])).toEqual([
+      ["due", "2027-09-01", undefined],
+      ["amount", "2400.00", "Amount due"],
+    ]);
+    // A fee that would be due under a condition is not the bill.
+    expect(labelledFacts("A late fee of $5.00 applies after the due date.").filter((f) => f.kind === "amount")).toEqual([]);
+  });
+});
+
+describe("a field line", () => {
+  const fields = (text: string) => structuralDatedFacts(text, new Set()).map((f) => [f.label, f.value]);
+
+  it("is a label, a colon and a value", () => {
+    expect(fields("Benefit End Date: 2027 October 19")).toEqual([["Benefit End Date", "2027-10-19"]]);
+    expect(fields("Row 12: 4 March 2027")).toEqual([["Row 12", "2027-03-04"]]);
+  });
+
+  it("is not a sentence that happens to hold a clock", () => {
+    expect(fields("Your room is ready for you from 15:00 on 8 April 2027.")).toEqual([]);
+    expect(fields("Doors at 19:30, show on 14 Nov 2026")).toEqual([]);
+  });
+});
+
 describe("a flight written in words", () => {
   const LINE = "Flight UA 123 departs SFO 10:15 AM on March 4, 2027, arrives JFK 6:45 PM";
   const flown = (text: string) => labelledFacts(text).map((f) => [f.value, f.time, f.label, f.subject]);

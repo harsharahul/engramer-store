@@ -21,13 +21,14 @@ const WINDOW = 60;
 const PARAGRAPH_BREAK = /\n[ \t]*\n/;
 
 const EXPIRY_LABELS =
-  /\b(?:date\s+of\s+expiry|expir(?:es|y|ation)(?:\s+date)?|valid\s+(?:until|through|thru|to)|renewal\s+date|good\s+through)\b/gi;
+  /\b(?:date\s+of\s+expiry|expir(?:es|y|ation)(?:\s+date)?|valid\s+(?:until|through|thru|to)|renewal\s+date|good\s+through|coverage\s+ends|ends\s+on)\b/gi;
 /** EXP as licences print it: the bare upper-case token, never the start of a word or a code. */
 const EXP_TOKEN = /(?<![A-Za-z0-9])EXP\.?(?![A-Za-z0-9])/g;
 const DUE_LABELS =
   /\b(?:payment\s+due|amount\s+due\s+by|due\s+date|due\s+on|pay\s+by)\b/gi;
 /** A date to act by. The document's own words say what the act is, so they are kept as the label. */
-const ACT_BY_LABELS = /\b(?:respond\s+by|reply\s+by|return\s+by|due\s+by|must\s+be\s+(?:received|paid)\s+by)\b/gi;
+const ACT_BY_LABELS =
+  /\b(?:respond\s+by|reply\s+by|return\s+by|due\s+by|due\s+back(?:\s+(?:on|by))?|let\s+us\s+know\s+by|must\s+be\s+(?:received|paid)\s+by|will\s+be\s+(?:collected|charged|debited|taken)\s+on|deadline)\b/gi;
 /** A renewal that charges: the day the money is taken. */
 const RENEWS_LABELS = /\b(?:(?:auto[- ]?)?renews\s+on|renewal\s+on|next\s+(?:billing|payment)\s+date)\b/gi;
 const ISSUED_LABELS = /\b(?:date\s+of\s+issue|issue\s+date|issued(?:\s+on)?)\b/gi;
@@ -326,7 +327,10 @@ export function structuralDatedFacts(text: string, claimed: ReadonlySet<string>)
   const byId = new Map<string, Fact>();
   for (const line of text.split(/\r?\n/)) {
     const field = FIELD_LINE.exec(line);
-    if (!field) {
+    // A colon between two digits is a clock's ("from 15:00 on 8 April"),
+    // and the words before it are a sentence, not a label.
+    const colon = line.indexOf(":");
+    if (!field || (/\d/.test(line[colon - 1] ?? "") && /\d/.test(line[colon + 1] ?? ""))) {
       continue;
     }
     const label = field[1]!.replace(/\s+/g, " ").trim();
@@ -387,7 +391,7 @@ function moneyIn(text: string): { value: string; unit: string }[] {
   return [...found].map(([value, unit]) => ({ value, unit }));
 }
 
-const AMOUNT_DUE_LINE = /\b(?:(?:amount|total|balance)\s+due|amount\s+payable)\b/i;
+const AMOUNT_DUE_LINE = /\b(?:(?:amount|total|balance)\s+due|amount\s+payable|(?:is|are)\s+due)\b/i;
 /** A statement's minimum is due as well as its balance: two answers to one question. */
 const MINIMUM = /\bmin(?:imum|\.)?\s/i;
 
