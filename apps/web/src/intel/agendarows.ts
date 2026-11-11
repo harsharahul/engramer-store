@@ -284,7 +284,9 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
         // Journeys are built below, across files, by the one leg builder.
         continue;
       }
-      if (fact.kind === "event" && fact.document === "delivery") {
+      // A parcel's own dates only: a message about an order can also book an
+      // appointment or a pick-up, and those are what they say they are.
+      if (fact.kind === "event" && fact.document === "delivery" && (subject?.role === "opens" || subject?.role === "by")) {
         const entry = deliveries.get(fact.value) ?? { ask: false };
         entry[subject?.role === "opens" ? "opens" : "by"] = fact;
         entry.ask ||= ask;

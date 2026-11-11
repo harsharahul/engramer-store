@@ -12,6 +12,7 @@
 
 import { type DocumentKind, type Fact, factId, maskTail } from "./facts";
 import { parseDate, parseTime } from "./dates";
+import type { Role } from "./subject";
 
 /** How far past a label to look for its date. */
 const WINDOW = 60;
@@ -20,9 +21,15 @@ const WINDOW = 60;
 const PARAGRAPH_BREAK = /\n[ \t]*\n/;
 
 const EXPIRY_LABELS =
-  /\b(?:date\s+of\s+expiry|expir(?:es|y|ation)(?:\s+date)?|valid\s+(?:until|through|to)|renewal\s+date|good\s+through)\b/gi;
+  /\b(?:date\s+of\s+expiry|expir(?:es|y|ation)(?:\s+date)?|valid\s+(?:until|through|thru|to)|renewal\s+date|good\s+through)\b/gi;
+/** EXP as licences print it: the bare upper-case token, never the start of a word or a code. */
+const EXP_TOKEN = /(?<![A-Za-z0-9])EXP\.?(?![A-Za-z0-9])/g;
 const DUE_LABELS =
   /\b(?:payment\s+due|amount\s+due\s+by|due\s+date|due\s+on|pay\s+by)\b/gi;
+/** A date to act by. The document's own words say what the act is, so they are kept as the label. */
+const ACT_BY_LABELS = /\b(?:respond\s+by|reply\s+by|return\s+by|due\s+by|must\s+be\s+(?:received|paid)\s+by)\b/gi;
+/** A renewal that charges: the day the money is taken. */
+const RENEWS_LABELS = /\b(?:(?:auto[- ]?)?renews\s+on|renewal\s+on|next\s+(?:billing|payment)\s+date)\b/gi;
 const ISSUED_LABELS = /\b(?:date\s+of\s+issue|issue\s+date|issued(?:\s+on)?)\b/gi;
 
 /**
@@ -32,11 +39,45 @@ const ISSUED_LABELS = /\b(?:date\s+of\s+issue|issue\s+date|issued(?:\s+on)?)\b/g
  */
 const EVENT_LABELS =
   /\b(?:check[- ]?in|check[- ]?out|departure|departs|boarding(?:\s+time)?(?!\s+pass)|arrival|arrives|pick[- ]?up|drop[- ]?off)\b/gi;
+/** Something that starts then. A poster prints the date first ("Sat 14 Nov, doors 7 PM"), so these also look back along their own line. */
+const START_LABELS = /\b(?:appointment|doors)\b/gi;
+/** A line that says it is a delivery, in any message. */
+const DELIVERY_LABELS = /\b(?:(?:estimated|expected)\s+delivery(?:\s+date)?|delivery\s+date|delivered\s+by)\b/gi;
+/** Words that mean a delivery only in a message about one: a flight arrives too. */
+const ARRIVING_LABELS = /\b(?:arriving|(?:should|will)\s+arrive)\b/gi;
 
-const KINDS: { kind: Fact["kind"]; labels: RegExp }[] = [
+const sentenceCase = (words: string) => {
+  const plain = words.replace(/\s+/g, " ").trim().toLowerCase();
+  return plain.charAt(0).toUpperCase() + plain.slice(1);
+};
+
+/** Order matters within a kind: the first label to claim a date keeps it. */
+const KINDS: { kind: Fact["kind"]; labels: RegExp; label?: (words: string) => string }[] = [
   { kind: "expiry", labels: EXPIRY_LABELS },
+  { kind: "expiry", labels: EXP_TOKEN },
   { kind: "due", labels: DUE_LABELS },
+  { kind: "due", labels: ACT_BY_LABELS, label: sentenceCase },
+  { kind: "due", labels: RENEWS_LABELS, label: () => "Renews" },
   { kind: "issued", labels: ISSUED_LABELS },
+];
+
+/**
+ * The words for a moment. A travel word keeps the document's wording and its
+ * meaning is read from it; the others state their label, what the date is,
+ * and for a delivery the kind of document the line makes it.
+ */
+const EVENTS: {
+  labels: RegExp;
+  label?: (words: string) => string;
+  role?: Role;
+  document?: DocumentKind;
+  lookBack?: boolean;
+  only?: DocumentKind;
+}[] = [
+  { labels: EVENT_LABELS },
+  { labels: START_LABELS, label: sentenceCase, role: "start", lookBack: true },
+  { labels: DELIVERY_LABELS, label: () => "Delivery expected by", role: "by", document: "delivery" },
+  { labels: ARRIVING_LABELS, label: () => "Delivery expected by", role: "by", document: "delivery", only: "delivery" },
 ];
 
 /**
@@ -59,6 +100,7 @@ const DOCUMENT_KINDS: { kind: DocumentKind; pattern: RegExp }[] = [
   { kind: "vehicle-registration", pattern: /\bvehicle\s+registration\b|\bregistration\s+certificate\b/i },
   { kind: "membership", pattern: /\bmembership\b|\bmember\s+since\b/i },
   { kind: "invoice", pattern: /\binvoice\b|\bbill\s+to\b/i },
+  { kind: "delivery", pattern: /\b(?:shipped|out\s+for\s+delivery|tracking\s+number|your\s+order)\b/i },
   { kind: "certification", pattern: /\bcertificat(?:e|ion)\b|\bdiploma\b/i },
 ];
 
@@ -79,14 +121,36 @@ function windowAfter(text: string, from: number): string {
   return brk ? slice.slice(0, brk.index) : slice;
 }
 
+/**
+ * The date a label claims from its window, and the clock beside it. Its own
+ * line comes first: a date further down, written another way, belongs to the
+ * next label, and so does that line's clock. Only a label with no date on
+ * its own line reads on, for a value printed below it or wrapped over lines.
+ */
+function claimed(window: string): { date: NonNullable<ReturnType<typeof parseDate>>; time: string | null } | null {
+  const own = window.split("\n", 1)[0]!;
+  const onLine = parseDate(own);
+  if (onLine) {
+    return { date: onLine, time: parseTime(own) };
+  }
+  const below = parseDate(window);
+  return below ? { date: below, time: parseTime(window) } : null;
+}
+
+/** The same reach backwards, and never past the start of the label's own line. */
+function windowBefore(text: string, to: number): string {
+  const line = text.lastIndexOf("\n", to - 1) + 1;
+  return text.slice(Math.max(line, to - WINDOW), to);
+}
+
 /** Dates that a document labelled, which is the only kind worth trusting. */
 export function labelledFacts(text: string): Fact[] {
   const document = guessDocumentKind(text);
   const byId = new Map<string, Fact>();
-  for (const { kind, labels } of KINDS) {
+  for (const { kind, labels, label } of KINDS) {
     labels.lastIndex = 0;
     for (let match = labels.exec(text); match; match = labels.exec(text)) {
-      const parsed = parseDate(windowAfter(text, match.index + match[0].length));
+      const parsed = claimed(windowAfter(text, match.index + match[0].length))?.date;
       if (!parsed) {
         continue;
       }
@@ -99,6 +163,7 @@ export function labelledFacts(text: string): Fact[] {
         kind,
         document,
         value: parsed.iso,
+        ...(label ? { label: label(match[0]) } : {}),
         source: "label",
         // A date that could be read two ways is worth less than one that
         // could not, and the difference is what the confirmation card asks
@@ -108,32 +173,42 @@ export function labelledFacts(text: string): Fact[] {
       });
     }
   }
-  EVENT_LABELS.lastIndex = 0;
-  for (let match = EVENT_LABELS.exec(text); match; match = EVENT_LABELS.exec(text)) {
-    const window = windowAfter(text, match.index + match[0].length);
-    const parsed = parseDate(window);
-    if (!parsed) {
+  for (const words of EVENTS) {
+    if (words.only && words.only !== document) {
       continue;
     }
-    const label = match[0].trim();
-    // The label joins the identity: a check-in and a check-out can share a
-    // day, and a date alone would collapse them into one fact.
-    const id = factId("event", `${parsed.iso} ${label.toLowerCase()}`);
-    if (byId.has(id)) {
-      continue;
+    words.labels.lastIndex = 0;
+    for (let match = words.labels.exec(text); match; match = words.labels.exec(text)) {
+      const after = windowAfter(text, match.index + match[0].length);
+      const ahead = claimed(after);
+      // A poster prints the date first: with none ahead, the label's own
+      // line is read backwards, and the clock is whichever side has one.
+      const before = !ahead && words.lookBack ? windowBefore(text, match.index) : "";
+      const parsed = ahead?.date ?? (before ? parseDate(before) : null);
+      if (!parsed) {
+        continue;
+      }
+      const label = words.label ? words.label(match[0]) : match[0].trim();
+      // The label joins the identity: a check-in and a check-out can share a
+      // day, and a date alone would collapse them into one fact.
+      const id = factId("event", `${parsed.iso} ${label.toLowerCase()}`);
+      if (byId.has(id)) {
+        continue;
+      }
+      const time = ahead ? ahead.time : (parseTime(after.split("\n", 1)[0]!) ?? parseTime(before));
+      byId.set(id, {
+        id,
+        kind: "event",
+        document: words.document ?? document,
+        value: parsed.iso,
+        label,
+        ...(time ? { time } : {}),
+        ...(words.role ? { subject: { role: words.role } } : {}),
+        source: "label",
+        confidence: parsed.ambiguous ? 0.5 : 0.7,
+        ...(parsed.ambiguous ? { ambiguous: true } : {}),
+      });
     }
-    const time = parseTime(window);
-    byId.set(id, {
-      id,
-      kind: "event",
-      document,
-      value: parsed.iso,
-      label,
-      ...(time ? { time } : {}),
-      source: "label",
-      confidence: parsed.ambiguous ? 0.5 : 0.7,
-      ...(parsed.ambiguous ? { ambiguous: true } : {}),
-    });
   }
   return [...byId.values()];
 }

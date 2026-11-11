@@ -223,3 +223,123 @@ describe("travel vocabulary", () => {
     expect(guessDocumentKind("Your flight itinerary")).toBe("itinerary");
   });
 });
+
+describe("how far a label reaches", () => {
+  const read = (text: string) => labelledFacts(text).map((f) => [f.label ?? f.kind, f.value, f.time]);
+
+  it("takes the date on its own line, not one written another way on the line below", () => {
+    expect(read("Appointment: December 8, 2026 at 2:30 PM\nPick-up: 9 December 2026 10:00")).toEqual([
+      ["Pick-up", "2026-12-09", "10:00"],
+      ["Appointment", "2026-12-08", "14:30"],
+    ]);
+    expect(read("Due date: November 20, 2026\nIssued 2026-11-01")).toEqual([
+      ["due", "2026-11-20", undefined],
+      ["issued", "2026-11-01", undefined],
+    ]);
+  });
+
+  it("a clock on the next label's line is not this label's", () => {
+    expect(read("Check-in: 4 March 2027\nCheck-out: 7 March 2027 11:00")).toEqual([
+      ["Check-in", "2027-03-04", undefined],
+      ["Check-out", "2027-03-07", "11:00"],
+    ]);
+  });
+
+  it("a label alone on its line still reads the value below it", () => {
+    expect(read("Departure\n4 March 2027 09:40")).toEqual([["Departure", "2027-03-04", "09:40"]]);
+  });
+
+  it("a date wrapped over two lines is still read", () => {
+    expect(read("Valid until 12 March\n2029")).toEqual([["expiry", "2029-03-12", undefined]]);
+  });
+});
+
+describe("words of ordinary life", () => {
+  const one = (text: string) => {
+    const facts = labelledFacts(text);
+    expect(facts, text).toHaveLength(1);
+    return facts[0]!;
+  };
+
+  it("EXP on a licence is its expiry", () => {
+    expect(one("DRIVER LICENSE\nDL D1234567\nEXP 08/15/2029")).toMatchObject({ kind: "expiry", value: "2029-08-15", document: "drivers-license", source: "label", confidence: 0.7 });
+    expect(one("Valid thru 15 August 2029")).toMatchObject({ kind: "expiry", value: "2029-08-15" });
+  });
+
+  it("EXP inside a word or a code, or before a card's month and year, reads nothing", () => {
+    for (const text of ["EXPRESS 08/15/2029", "EXP123 2029-08-15", "EXP 08/29", "exp 08/15/2029", "Expedited 08/15/2029"]) {
+      expect(labelledFacts(text), text).toEqual([]);
+    }
+  });
+
+  it("a date to respond, reply or return by is due, in the document's own words", () => {
+    expect(one("You must respond by January 15, 2027.")).toMatchObject({ kind: "due", value: "2027-01-15", label: "Respond by", source: "label", confidence: 0.7 });
+    expect(one("Please reply by 3 March 2027 to keep your place.")).toMatchObject({ kind: "due", value: "2027-03-03", label: "Reply by" });
+    expect(one("Books are due by 9 June 2027.")).toMatchObject({ kind: "due", value: "2027-06-09", label: "Due by" });
+    expect(one("Your form must be received by 30 April 2027.")).toMatchObject({ kind: "due", value: "2027-04-30", label: "Must be received by" });
+  });
+
+  it("a renewal that charges is due on the day it renews", () => {
+    expect(one("Your plan renews on December 1, 2026 for $9.99.")).toMatchObject({ kind: "due", value: "2026-12-01", label: "Renews", source: "label" });
+    expect(one("Next billing date: 18 October 2027")).toMatchObject({ kind: "due", value: "2027-10-18", label: "Renews" });
+    expect(one("Your subscription auto-renews on 18 October 2027.")).toMatchObject({ kind: "due", value: "2027-10-18", label: "Renews" });
+  });
+
+  it("an amount due by a date is still one plain due date", () => {
+    expect(one("Amount due by 20 November 2026")).toMatchObject({ kind: "due", value: "2026-11-20" });
+    expect(one("Amount due by 20 November 2026").label).toBeUndefined();
+  });
+
+  it("an appointment is an event that starts then", () => {
+    expect(one("Your appointment is on Tuesday, December 8, 2026 at 2:30 PM with Dr. Lee.")).toMatchObject({
+      kind: "event",
+      value: "2026-12-08",
+      time: "14:30",
+      label: "Appointment",
+      subject: { role: "start" },
+      source: "label",
+    });
+  });
+
+  it("doors after the date on the same line is the event's start", () => {
+    expect(one("Sat 14 Nov 2026, doors 7:00 PM")).toMatchObject({ kind: "event", value: "2026-11-14", time: "19:00", label: "Doors", subject: { role: "start" } });
+  });
+
+  it("a date on the line above is not the doors' date", () => {
+    expect(labelledFacts("Printed 14 Nov 2026\nDoors open at 7")).toEqual([]);
+  });
+
+  it("an estimated delivery is a parcel expected by that day", () => {
+    const fact = one("Your order has shipped.\nTracking number: 1Z999AA10123456784\nEstimated delivery: November 12, 2026");
+    expect(fact).toMatchObject({ kind: "event", value: "2026-11-12", label: "Delivery expected by", document: "delivery", subject: { role: "by" }, source: "label" });
+    // The line says it is a delivery, whatever else the message is called.
+    expect(one("INVOICE 2231\nExpected delivery date: 12 November 2026")).toMatchObject({ kind: "event", document: "delivery", subject: { role: "by" } });
+  });
+
+  it("arriving is a delivery only in a message about one", () => {
+    expect(one("Good news: your order has shipped and should arrive on 6 May 2027.")).toMatchObject({ kind: "event", value: "2027-05-06", label: "Delivery expected by", document: "delivery" });
+    expect(labelledFacts("Arriving 13 November 2026 at Lisbon airport.")).toEqual([]);
+  });
+
+  it("recognizes a shipping notice by kind, after an invoice", () => {
+    expect(guessDocumentKind("Your order has shipped")).toBe("delivery");
+    expect(guessDocumentKind("Out for delivery today")).toBe("delivery");
+    expect(guessDocumentKind("Tracking number 1Z999AA10123456784")).toBe("delivery");
+    expect(guessDocumentKind("INVOICE for your order")).toBe("invoice");
+  });
+
+  it("a newsletter that uses the new words asks for little and counts nothing", () => {
+    const filler = Array.from({ length: 120 }, (_, i) => `Our studio news, part ${i + 1}: new classes and a fresh menu.`).join(" ");
+    const text = [
+      filler,
+      "Book an appointment before 31 Dec 2026 and save.",
+      "Friday night: doors open at 7.",
+      "The sale ends Friday, and your coupon expires soon.",
+      "Reply by email if you have questions. Free delivery date changes may apply.",
+      filler,
+    ].join("\n");
+    const dated = labelledFacts(text).filter((fact) => ["expiry", "due", "event", "dated"].includes(fact.kind));
+    expect(dated.length).toBeLessThanOrEqual(2);
+    expect(dated.every((fact) => fact.accepted === undefined && !fact.confirmed && fact.confidence < 1)).toBe(true);
+  });
+});
