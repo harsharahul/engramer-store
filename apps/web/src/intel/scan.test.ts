@@ -211,6 +211,14 @@ describe("scanForFacts", () => {
     expect(events[0]!.source).toBe("jsonld");
   });
 
+  it("a bill's amount due is one fact, named, not a second unlabelled copy", async () => {
+    const out = await scanForFacts({ ...base, text: "Water bill\nAmount due $84.20\nDue date: November 20, 2026" });
+    expect(out.facts.filter((f) => f.kind === "amount")).toEqual([
+      expect.objectContaining({ value: "84.20", unit: "USD", label: "Amount due", source: "label", confidence: 0.7 }),
+    ]);
+    expect(out.facts.find((f) => f.kind === "amount")!.accepted).toBeUndefined();
+  });
+
   it("a check-in written as 3pm keeps its hour through the whole pipeline", async () => {
     const out = await scanForFacts({ ...base, text: "Harbor House\nCheck-in: 12 March 2027 from 3pm." });
     expect(out.facts.find((f) => f.kind === "event")).toMatchObject({ value: "2027-03-12", time: "15:00", label: "Check-in" });

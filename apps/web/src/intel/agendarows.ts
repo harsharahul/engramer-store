@@ -323,8 +323,19 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
         rows.push({ ...common, kind: "doc", tag: "DOCUMENT", title: label || "Document", sub: subOf(file), ...(basisOf(fact) === "confirmed" ? { confirmedByYou: true as const } : {}) });
       } else {
         const price = amountOf(file);
+        // A bill that still asks carries the amount it asks for, so one yes
+        // answers the date and the amount together. A date already answered
+        // does not lend its yes to an amount nobody confirmed.
+        const asked =
+          !price && ask && fact.kind === "due"
+            ? file.facts.find(
+                (candidate) =>
+                  candidate.kind === "amount" && candidate.unit && !candidate.dismissed && !isTracked(candidate) && candidate.label?.toLowerCase() === "amount due",
+              )
+            : undefined;
         rows.push({
           ...common,
+          ...(asked ? { factIds: [fact.id, asked.id], amount: { currency: asked.unit!, value: asked.value } } : {}),
           kind: "due",
           tag: "DUE",
           title: label || `${capitalised(documentLabel(fact.document))} ${fact.kind === "expiry" ? "expiring" : "due"}`,

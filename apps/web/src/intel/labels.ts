@@ -210,6 +210,10 @@ export function labelledFacts(text: string): Fact[] {
       });
     }
   }
+  const asked = amountDue(text, document);
+  if (asked) {
+    byId.set(asked.id, asked);
+  }
   return [...byId.values()];
 }
 
@@ -288,6 +292,48 @@ const CURRENCY_CODES = new Set([
 
 const SYMBOL_AMOUNT = /([$£€₹¥])\s?([\d,]+\.\d{2})/g;
 const CODE_AMOUNT = /\b([A-Z]{3})\s?([\d,]+\.\d{2})\b/g;
+
+/** Every amount a piece of text states with its currency, once per value. */
+function moneyIn(text: string): { value: string; unit: string }[] {
+  const found = new Map<string, string>();
+  for (const match of text.matchAll(SYMBOL_AMOUNT)) {
+    found.set(match[2]!.replace(/,/g, ""), SYMBOL_CURRENCY[match[1]!] ?? match[1]!);
+  }
+  for (const match of text.matchAll(CODE_AMOUNT)) {
+    if (CURRENCY_CODES.has(match[1]!)) {
+      found.set(match[2]!.replace(/,/g, ""), match[1]!);
+    }
+  }
+  return [...found].map(([value, unit]) => ({ value, unit }));
+}
+
+const AMOUNT_DUE_LINE = /\b(?:(?:amount|total|balance)\s+due|amount\s+payable)\b/i;
+/** A statement's minimum is due as well as its balance: two answers to one question. */
+const MINIMUM = /\bmin(?:imum|\.)?\s/i;
+
+/**
+ * The one amount a bill asks for: alone with its currency on a line that
+ * says it is due. A line with two amounts, two lines that disagree, or a
+ * minimum beside a balance name no single amount, and then none is stated.
+ */
+function amountDue(text: string, document: DocumentKind): Fact | undefined {
+  const stated = new Map<string, string>();
+  for (const line of text.split(/\r?\n/)) {
+    if (!AMOUNT_DUE_LINE.test(line)) {
+      continue;
+    }
+    const onLine = moneyIn(line);
+    if (onLine.length !== 1 || MINIMUM.test(line)) {
+      return undefined;
+    }
+    stated.set(onLine[0]!.value, onLine[0]!.unit);
+  }
+  if (stated.size !== 1) {
+    return undefined;
+  }
+  const [[value, unit]] = [...stated] as [[string, string]];
+  return { id: factId("amount", value), kind: "amount", document, value, unit, label: "Amount due", source: "label", confidence: 0.7 };
+}
 const TOKEN = /\b[A-Za-z0-9][A-Za-z0-9-]{5,}\b/g;
 // A date and a clock joined by T, as invites and mail headers write them
 // (20261201T140000Z, or the 2027-03-04T10 a colon cuts a longer one to):

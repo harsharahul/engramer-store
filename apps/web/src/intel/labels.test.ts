@@ -224,6 +224,34 @@ describe("travel vocabulary", () => {
   });
 });
 
+describe("the amount a bill asks for", () => {
+  const due = (text: string) => labelledFacts(text).filter((f) => f.kind === "amount");
+
+  it("the one amount on a line that says amount due is the bill's amount", () => {
+    expect(due("Amount due $84.20\nDue date: November 20, 2026")).toEqual([
+      expect.objectContaining({ id: "amount:84.20", value: "84.20", unit: "USD", label: "Amount due", source: "label", confidence: 0.7 }),
+    ]);
+    expect(due("Total due: EUR 1,250.50")[0]).toMatchObject({ value: "1250.50", unit: "EUR", label: "Amount due" });
+    expect(due("Balance due £12.00")[0]).toMatchObject({ value: "12.00", unit: "GBP" });
+    expect(due("Amount payable: USD 99.00")[0]).toMatchObject({ value: "99.00", unit: "USD" });
+    expect(due("Amount due $84.20\nTotal due: $84.20")).toHaveLength(1);
+  });
+
+  it("a statement with a minimum and a balance names no single amount", () => {
+    expect(due("Minimum payment due $35.00. New balance $1,240.18")).toEqual([]);
+    expect(due("Minimum amount due $35.00\nTotal amount due $1,240.18")).toEqual([]);
+  });
+
+  it("two amounts on the line, or two lines that disagree, name none", () => {
+    expect(due("Total due $84.20 (includes a late fee of $5.00)")).toEqual([]);
+    expect(due("Total due $84.20\nBalance due $100.00")).toEqual([]);
+  });
+
+  it("an amount with no line that says it is due is left to the harvest", () => {
+    expect(due("Subtotal $80.00\nTax $4.20\nPaid $84.20")).toEqual([]);
+  });
+});
+
 describe("how far a label reaches", () => {
   const read = (text: string) => labelledFacts(text).map((f) => [f.label ?? f.kind, f.value, f.time]);
 

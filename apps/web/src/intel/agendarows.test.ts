@@ -583,6 +583,36 @@ describe("plain words reach the Timeline", () => {
   };
   const shown = (rows: AgendaRow[]) => rows.map((row) => [row.kind, row.tag, row.title, row.day, row.time, row.ask ?? false]);
 
+  it("a bill that asks shows its amount, and one yes answers both", async () => {
+    const bill = await written("water", "Your water bill", "Water bill\nAmount due $84.20\nDue date: November 20, 2026");
+    const [row] = await rowsOf([bill], none, NOW);
+    expect(row).toMatchObject({ kind: "due", day: "2026-11-20", ask: true, amount: { currency: "USD", value: "84.20" } });
+    expect(row!.factIds).toEqual(["due:2026-11-20", "amount:84.20"]);
+    // After the yes, both count: the row no longer asks and keeps its amount.
+    const confirmed = { ...bill, facts: bill.facts.map((fact) => (row!.factIds!.includes(fact.id) ? { ...fact, confirmed: true } : fact)) };
+    const [after] = await rowsOf([confirmed], none, NOW);
+    expect(after).toMatchObject({ kind: "due", amount: { currency: "USD", value: "84.20" } });
+    expect(after!.ask).toBeUndefined();
+  });
+
+  it("a confirmed due date does not lend its yes to an amount nobody confirmed", async () => {
+    const bill = await written("water", "Your water bill", "Water bill\nAmount due $84.20\nDue date: November 20, 2026");
+    const dated = { ...bill, facts: bill.facts.map((fact) => (fact.kind === "due" ? { ...fact, confirmed: true } : fact)) };
+    const [row] = await rowsOf([dated], none, NOW);
+    expect(row!.amount).toBeUndefined();
+    expect(row!.factIds).toEqual(["due:2026-11-20"]);
+  });
+
+  it("the total is the amount a row shows, not the first amount in the file", async () => {
+    const order = email("order", "Your order", [
+      exact("due", "2026-09-20", "Payment due", { document: "invoice" }),
+      amount("12.00", "USD"),
+      amount("148.00", "USD", { label: "Order total" }),
+    ]);
+    const [row] = await rowsOf([order], none, NOW);
+    expect(row).toMatchObject({ kind: "due", amount: { currency: "USD", value: "148.00" } });
+  });
+
   it("an appointment and a renewal are rows that ask", async () => {
     const rows = await rowsOf(
       [
