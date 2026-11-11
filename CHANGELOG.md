@@ -5,6 +5,50 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Added
+- **Bookings and orders bring their prices.** A booking's price is read
+  with the booking and counts in a trip's spend, each in its own currency.
+  A shop order gives its total, its number and each delivery, so an order
+  that has shipped is one bill and one parcel on the Timeline.
+- **More of ordinary life is read from plain words.** Appointments and a
+  show's doors with their time, a plan that renews, a date to respond,
+  reply or return by, a deadline, the day a payment will be collected, an
+  estimated delivery, `EXP` on a licence, and a clock written "3pm". A
+  flight written in words keeps its number and airports and becomes one
+  flight row. A bill's row shows the amount it asks for, and one yes
+  answers the date and the amount. These readings wait for your yes, as
+  before.
+- **Dates with no year, in mail.** "Arriving Thursday, November 12" in a
+  message is read as the next such day after the message was written, and
+  asks before it counts.
+- **Trains, buses and boats say what they are.** Journey rows are tagged
+  by how you travel, and a train under way reads "On the way" and says
+  when it arrives.
+
+### Changed
+- **A file keeps a whole booking.** A file carries up to thirty-two facts,
+  twelve of them softer readings, so a package of flights and hotels
+  keeps all of its dates, references and prices.
+- **One purchase is one bill.** A booking restated by a later message, or
+  an order and its shipping notice, is billed once. An email that states
+  several totals (flights in one currency, a hotel in another) is a bill
+  for each.
+
+### Fixed
+- **A calendar invite shows your time.** An invite stated in UTC showed
+  its UTC clock; it now shows the day and time of the device.
+- **Dates written with a short month are kept.** "14 Nov 2026" and
+  "November 12th, 2026" were read and then dropped by the check against
+  the text.
+- **A price with a decimal comma is read as written**, and a cancelled
+  order shows no bill and no parcel.
+- **A label takes the date on its own line**, not one written another way
+  on the line below, and a check-in no longer takes the check-out's time.
+- **An hour is not a year.** "November 12, 10:30" is no longer read as a
+  date in 2010, and a sentence that holds a clock is not taken for a
+  labelled field.
+- **Timestamps are not offered as reference numbers.**
+
 ## [0.60.1] - 2026-11-02
 
 ### Fixed
