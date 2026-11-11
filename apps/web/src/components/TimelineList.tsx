@@ -457,7 +457,8 @@ function TimelineRow(props: {
             <Board {...row.flight} {...(flying ? { progress: (props.now - leg!.dep!.at) / (leg!.arr!.at - leg!.dep!.at) } : {})} />
             {flying && (
               <div className="tln-inair">
-                In the air · lands in <Until at={leg!.arr!.at} />
+                {leg!.mode === "flight" ? "In the air · lands in " : "On the way · arrives in "}
+                <Until at={leg!.arr!.at} />
               </div>
             )}
           </>

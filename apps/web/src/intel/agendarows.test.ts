@@ -98,6 +98,47 @@ describe("rowsOf", () => {
     expect(rows[0]).toMatchObject({ kind: "parcel", tag: "DELIVERY", title: "Your order has shipped", sub: "Between 10:00 and 14:00", time: "10:00" });
   });
 
+  it("a train, a bus and a boat are tagged as what they are", async () => {
+    const booked = async (id: string, type: string, trip: Record<string, unknown>) => {
+      const raw = `<html><script type="application/ld+json">${JSON.stringify({ "@type": type, reservationFor: trip })}</script></html>`;
+      const { facts } = await scanForFacts({ name: `${id}.email`, mime: EMAIL, raw, text: "Your tickets." });
+      return email(id, "Your tickets", facts);
+    };
+    const rows = await rowsOf(
+      [
+        flights(),
+        await booked("train", "TrainReservation", {
+          trainNumber: "IC 512",
+          departureStation: { name: "Central" },
+          arrivalStation: { name: "Seaside" },
+          departureTime: "2026-10-01T07:12:00+02:00",
+          arrivalTime: "2026-10-01T09:48:00+02:00",
+        }),
+        await booked("bus", "BusReservation", {
+          departureBusStop: { name: "Central Station" },
+          arrivalBusStop: { name: "Seaside" },
+          departureTime: "2026-10-02T08:15:00+02:00",
+          arrivalTime: "2026-10-02T11:40:00+02:00",
+        }),
+        await booked("boat", "BoatReservation", {
+          departureBoatTerminal: { name: "North Pier" },
+          arrivalBoatTerminal: { name: "Island Quay" },
+          departureTime: "2026-10-03T07:00:00+02:00",
+          arrivalTime: "2026-10-03T08:30:00+02:00",
+        }),
+      ],
+      none,
+      NOW,
+    );
+    expect(rows.map((row) => [row.kind, row.tag, row.day])).toEqual([
+      ["flight", "TRAIN", "2026-10-01"],
+      ["flight", "BUS", "2026-10-02"],
+      ["flight", "BOAT", "2026-10-03"],
+      ["flight", "FLIGHT", "2026-11-12"],
+      ["flight", "FLIGHT", "2026-11-16"],
+    ]);
+  });
+
   it("a shop order is one parcel and one bill, read from the order itself", async () => {
     // The shop's email as stored: an order with its delivery, and the same
     // delivery stated again on its own, naming the order.

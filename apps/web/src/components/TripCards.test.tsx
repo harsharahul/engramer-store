@@ -392,6 +392,16 @@ describe("the cards say only what is true now", () => {
     expect(kv(card("The trip")).Flights).toBe("AA 10 out Thu 08:00 · TP 201 home Mon 11:00");
   });
 
+  it("a train under way is on the way and says when it arrives", async () => {
+    useStore.setState({ factEvidence: vi.fn(async () => []) });
+    const byTrain = await lisbonTrip(rail(), [], true);
+    mount(instantOf("2026-11-12", "09:30", LIS), byTrain);
+    expect(headers().slice(0, 2)).toEqual(["On the way", "When you arrive"]);
+    // The fixture's hotel opens the day after this train arrives.
+    expect(kv(card("When you arrive")).Arrival).toBe("10:55 · 1 d 4 h before check-in opens");
+    expect(card("On the way")!.textContent).toContain("Arrives 10:55 · in 1 h 25 m");
+  });
+
   it("a journey by train asks nothing about check-in or boarding passes", async () => {
     useStore.setState({ factEvidence: vi.fn(async () => []) });
     const byTrain = await lisbonTrip(rail(), [], true);

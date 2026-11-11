@@ -61,6 +61,24 @@ describe("the moments of one trip", () => {
     expect(posterOf(moment, now, LA)).toMatchObject({ top: "Travel day", big: "Today", cap: "TP 236 departs 18:10", meta: "Portugal · Thu 12 Nov · 21:30 in Lisbon", sky: "night" });
   });
 
+  it("a train under way is on the way, not in the air", async () => {
+    const byTrain = await lisbonTrip(
+      [
+        email("tickets", "2026-10-01", [
+          exact("event", "2026-11-12", "Train IC 521 departs Porto Campanha", { time: "08:05" }),
+          exact("event", "2026-11-12", "Train IC 521 arrives Lisboa Santa Apolonia", { time: "10:55" }),
+        ]),
+        email("hotel", "2026-10-02", hotel()),
+      ],
+      [],
+      true,
+    );
+    const now = at("2026-11-12", "09:30", LIS);
+    const moment = momentOf([byTrain.view], now);
+    expect(moment.kind).toBe("air");
+    expect(posterOf(moment, now, LA)).toMatchObject({ big: "On the way", cap: "arrives 10:55" });
+  });
+
   it("13 Nov 06:00 Lisbon is in the air, about a third of the way, lands 14:05 Lisbon time", () => {
     const now = at("2026-11-13", "06:00", LIS);
     const moment = momentOf([lisbon], now);

@@ -313,8 +313,13 @@ export function posterOf(
     }
     case "air": {
       const leg = moment.flying!.leg;
+      const top = `${named(leg)} · ${leg.from} to ${leg.to}`;
+      // Only a flight is in the air and lands in another city's time.
+      if (leg.mode !== "flight") {
+        return words(top, "On the way", leg.arr!.time ? `arrives ${leg.arr!.time}` : `arrives at ${leg.to}`);
+      }
       const lands = leg.arr!.code ? (view.cities[leg.arr!.code] ?? leg.to) : leg.to;
-      return words(`${named(leg)} · ${leg.from} to ${leg.to}`, "In the air", leg.arr!.time ? `lands ${leg.arr!.time} ${lands} time` : `lands in ${lands}`);
+      return words(top, "In the air", leg.arr!.time ? `lands ${leg.arr!.time} ${lands} time` : `lands in ${lands}`);
     }
     case "staying": {
       const big = moment.day ? `Day ${moment.day.n} of ${moment.day.of}` : view.city;

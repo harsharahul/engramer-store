@@ -42,7 +42,7 @@ export interface RowTrip {
 export interface AgendaRow {
   id: string;
   kind: RowKind;
-  /** The label above the row: FLIGHT, STAY, BILL, DUE, TICKETS, BOOKED, DOCUMENT, DELIVERY, PHOTOS, TRIP?. */
+  /** The label above the row: FLIGHT (or TRAIN, BUS, BOAT), STAY, BILL, DUE, TICKETS, BOOKED, DOCUMENT, DELIVERY, PHOTOS, TRIP?. */
   tag: string;
   day: string;
   time?: string;
@@ -359,7 +359,8 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
       id: `flight:${file.id}:${leg.key}:${start.day} ${start.time ?? ""}`,
       factIds: leg.factIds,
       kind: "flight",
-      tag: "FLIGHT",
+      // The row says how you travel: FLIGHT, TRAIN, BUS or BOAT.
+      tag: leg.mode.toUpperCase(),
       day: start.day,
       ...(start.time ? { time: start.time } : {}),
       ...(leg.arr ? { endDay: leg.arr.day, ...(leg.arr.time ? { endTime: leg.arr.time } : {}) } : {}),
