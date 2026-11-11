@@ -155,6 +155,17 @@ describe("harvestFacts", () => {
   it("does not treat an ordinary word as a reference number", () => {
     expect(harvestFacts("thank you for your business")).toEqual([]);
   });
+
+  it("a timestamp is not a reference number", () => {
+    const text = "DTSTART;TZID=America/New_York:20261201T140000\nDTEND:20261201T150000Z\nSent 2027-03-04T10:15:00-08:00\nBooking ref ZK8Q2P";
+    expect(harvestFacts(text).filter((f) => f.kind === "identifier").map((f) => f.value)).toEqual(["ZK8Q2P"]);
+  });
+
+  it("a reference number that only looks a little like a timestamp is kept", () => {
+    // Eight digits and a T, but no clock after it.
+    const text = "Policy 20261201TX and order 2027-03-04TKT";
+    expect(harvestFacts(text).filter((f) => f.kind === "identifier").map((f) => f.value)).toEqual(["20261201TX", "2027-03-04TKT"]);
+  });
 });
 
 describe("guessDocumentKind", () => {
