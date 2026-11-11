@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { guessDocumentKind, harvestFacts, labelledFacts, structuralDatedFacts } from "./labels";
+import { subjectOf } from "./subject";
 
 describe("labelledFacts", () => {
   it("reads an expiry behind its label", () => {
@@ -221,6 +222,56 @@ describe("travel vocabulary", () => {
     expect(guessDocumentKind("Hotel Reservation. Confirmation number LRK-1")).toBe("hotel-booking");
     expect(guessDocumentKind("Car Rental Agreement")).toBe("car-rental");
     expect(guessDocumentKind("Your flight itinerary")).toBe("itinerary");
+  });
+});
+
+describe("a flight written in words", () => {
+  const LINE = "Flight UA 123 departs SFO 10:15 AM on March 4, 2027, arrives JFK 6:45 PM";
+  const flown = (text: string) => labelledFacts(text).map((f) => [f.value, f.time, f.label, f.subject]);
+
+  it("keeps its number, airports and both times", () => {
+    expect(flown(LINE)).toEqual([
+      ["2027-03-04", "10:15", "Flight UA 123 departs SFO", { role: "depart", mode: "flight", carrier: "UA", number: "123", code: "SFO" }],
+      ["2027-03-04", "18:45", "Flight UA 123 arrives JFK", { role: "arrive", mode: "flight", carrier: "UA", number: "123", code: "JFK" }],
+    ]);
+    expect(labelledFacts(LINE).every((f) => f.kind === "event" && f.source === "label" && f.confidence === 0.7 && f.accepted === undefined)).toBe(true);
+  });
+
+  it("a line with no flight number names no airport", () => {
+    const [fact] = labelledFacts("Departs LAX 10:15 AM on March 4, 2027");
+    expect(fact).toMatchObject({ kind: "event", value: "2027-03-04", time: "10:15", label: "Departs" });
+    expect(fact!.subject).toBeUndefined();
+    expect(subjectOf(fact!)).toEqual({ role: "depart" });
+  });
+
+  it("AM and PM are clocks, not airlines, unless the line says Flight", () => {
+    expect(labelledFacts("Departs 10:15 AM 12 March 2027 from SFO")[0]!.subject).toBeUndefined();
+    expect(flown("Flight AM 15 departs MEX 9:00 AM on March 4, 2027")).toEqual([
+      ["2027-03-04", "09:00", "Flight AM 15 departs MEX", { role: "depart", mode: "flight", carrier: "AM", number: "15", code: "MEX" }],
+    ]);
+  });
+
+  it("two flights on one day are two facts", () => {
+    expect(flown("Flight UA 123 departs SFO 7:00 AM on March 4, 2027\nFlight UA 456 departs DEN 1:30 PM on March 4, 2027").map((f) => f[2])).toEqual([
+      "Flight UA 123 departs SFO",
+      "Flight UA 456 departs DEN",
+    ]);
+  });
+
+  it("an arrival with its own date keeps it", () => {
+    expect(flown("Flight UA 900 departs SFO 10:10 PM on March 4, 2027, arrives JFK 6:45 AM on March 5, 2027").map((f) => [f[0], f[1]])).toEqual([
+      ["2027-03-04", "22:10"],
+      ["2027-03-05", "06:45"],
+    ]);
+  });
+
+  it("an arrival with no date and a clock before its departure's is not given the departure's day", () => {
+    expect(flown("Flight UA 900 departs SFO 10:10 PM on March 4, 2027, arrives JFK 6:45 AM").map((f) => f[2])).toEqual(["Flight UA 900 departs SFO"]);
+    // Unless the line says it is the next day.
+    expect(flown("Flight UA 900 departs SFO 10:10 PM on March 4, 2027, arrives JFK 6:45 AM +1").map((f) => [f[0], f[1]])).toEqual([
+      ["2027-03-04", "22:10"],
+      ["2027-03-05", "06:45"],
+    ]);
   });
 });
 

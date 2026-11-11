@@ -12,7 +12,7 @@
 
 import { type DocumentKind, type Fact, factId, maskTail } from "./facts";
 import { parseDate, parseTime, type ParsedDate } from "./dates";
-import type { Role } from "./subject";
+import { serviceOf, type Role, type Subject } from "./subject";
 
 /** How far past a label to look for its date. */
 const WINDOW = 60;
@@ -73,8 +73,10 @@ const EVENTS: {
   document?: DocumentKind;
   lookBack?: boolean;
   only?: DocumentKind;
+  /** Its departures and arrivals may belong to a flight the line names. */
+  travel?: boolean;
 }[] = [
-  { labels: EVENT_LABELS },
+  { labels: EVENT_LABELS, travel: true },
   { labels: START_LABELS, label: sentenceCase, role: "start", lookBack: true },
   { labels: DELIVERY_LABELS, label: () => "Delivery expected by", role: "by", document: "delivery" },
   { labels: ARRIVING_LABELS, label: () => "Delivery expected by", role: "by", document: "delivery", only: "delivery" },
@@ -146,6 +148,36 @@ function claimed(window: string, writtenAt?: number): { date: ParsedDate; time: 
   return below ? { date: below, time: parseTime(window) } : null;
 }
 
+// A flight's number as a line states it: after the word Flight ("Flight UA
+// 123", "flight no. U2 45"), or standing right before the label ("UA 123
+// departs"). The code is in capitals, and AM and PM before a label are a
+// clock's.
+const FLIGHT_NAMED = /\b(?:[Ff]light|FLIGHT|[Ff]lt\.?)\s*(?:[Nn]umber|[Nn]o\.?|#)?\s*([A-Z][A-Z0-9]|\d[A-Z])\s?(\d{1,4})\b(?!:)/;
+const FLIGHT_BEFORE = /\b(?!AM\b|PM\b)([A-Z][A-Z0-9]|\d[A-Z])\s?(\d{1,4})\s+$/;
+/** The airport a departure or an arrival names: three capitals right after the word. */
+const AIRPORT_NEXT = /^\s*(?::|from|at|in|to)?\s*([A-Z]{3})\b/;
+
+/**
+ * The flight a departure or arrival label belongs to, when its own line
+ * states one: the airline's code and number, and the airport right after
+ * the label. With no flight number on the line, capitals after the label
+ * are only a word, and no airport is named.
+ */
+function flightOn(text: string, at: number, length: number): { carrier: string; number: string; code: string; line: number } | undefined {
+  const line = text.lastIndexOf("\n", at - 1) + 1;
+  const stop = text.indexOf("\n", at);
+  const end = stop === -1 ? text.length : stop;
+  const stated = FLIGHT_NAMED.exec(text.slice(line, end)) ?? FLIGHT_BEFORE.exec(text.slice(line, at));
+  const code = AIRPORT_NEXT.exec(text.slice(at + length, end));
+  if (!stated || !code) {
+    return undefined;
+  }
+  const service = serviceOf(`${stated[1]} ${stated[2]}`);
+  return service.carrier && service.number ? { carrier: service.carrier, number: service.number, code: code[1]!, line } : undefined;
+}
+
+const dayAfter = (iso: string) => new Date(Date.parse(`${iso}T00:00:00Z`) + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
 /** The same reach backwards, and never past the start of the label's own line. */
 function windowBefore(text: string, to: number): string {
   const line = text.lastIndexOf("\n", to - 1) + 1;
@@ -188,6 +220,9 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
       });
     }
   }
+  // Each flight's departure, by its line: an arrival on the same line may
+  // have only a clock.
+  const departed = new Map<string, { date: ParsedDate; time: string | null }>();
   for (const words of EVENTS) {
     if (words.only && words.only !== document) {
       continue;
@@ -195,22 +230,53 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
     words.labels.lastIndex = 0;
     for (let match = words.labels.exec(text); match; match = words.labels.exec(text)) {
       const after = windowAfter(text, match.index + match[0].length);
-      const ahead = claimed(after, writtenAt);
-      // A poster prints the date first: with none ahead, the label's own
-      // line is read backwards, and the clock is whichever side has one.
-      const before = !ahead && words.lookBack ? windowBefore(text, match.index) : "";
-      const parsed = ahead?.date ?? (before ? parseDate(before, writtenAt === undefined ? undefined : { writtenAt }) : null);
+      const own = after.split("\n", 1)[0]!;
+      const end = !words.travel ? undefined : /^depart/i.test(match[0]) ? "depart" : /^arriv/i.test(match[0]) ? "arrive" : undefined;
+      const flight = end ? flightOn(text, match.index, match[0].length) : undefined;
+      const flown = flight ? `${flight.line}|${flight.carrier}|${flight.number}` : "";
+      let parsed: ParsedDate | null;
+      let time: string | null;
+      if (flight && end === "arrive" && !parseDate(own, writtenAt === undefined ? undefined : { writtenAt })) {
+        // An arrival that names no day of its own lands on its departure's
+        // day when its clock is the later one, or the day after when the
+        // line says so. Otherwise its day is not known, and the lines
+        // below are another matter: nothing is stated.
+        const left = departed.get(flown);
+        time = parseTime(own);
+        const nextDay = /\+\s?1\b|\bnext\s+day\b/i.test(own);
+        parsed = !left || !time ? null : nextDay ? { ...left.date, iso: dayAfter(left.date.iso) } : left.time && time > left.time ? left.date : null;
+      } else {
+        const ahead = claimed(after, writtenAt);
+        // A poster prints the date first: with none ahead, the label's own
+        // line is read backwards, and the clock is whichever side has one.
+        const before = !ahead && words.lookBack ? windowBefore(text, match.index) : "";
+        parsed = ahead?.date ?? (before ? parseDate(before, writtenAt === undefined ? undefined : { writtenAt }) : null);
+        time = ahead ? ahead.time : (parseTime(own) ?? parseTime(before));
+      }
       if (!parsed) {
         continue;
       }
-      const label = words.label ? words.label(match[0]) : match[0].trim();
+      // A flight is named as booking data names it, so two flights on one
+      // day stay two facts and a booking and its own words agree.
+      const label = flight
+        ? `Flight ${flight.carrier} ${flight.number} ${end === "depart" ? "departs" : "arrives"} ${flight.code}`
+        : words.label
+          ? words.label(match[0])
+          : match[0].trim();
       // The label joins the identity: a check-in and a check-out can share a
       // day, and a date alone would collapse them into one fact.
       const id = factId("event", `${parsed.iso} ${label.toLowerCase()}`);
       if (byId.has(id)) {
         continue;
       }
-      const time = ahead ? ahead.time : (parseTime(after.split("\n", 1)[0]!) ?? parseTime(before));
+      if (flight && end === "depart") {
+        departed.set(flown, { date: parsed, time });
+      }
+      const subject: Subject | undefined = flight
+        ? { role: end!, mode: "flight", carrier: flight.carrier, number: flight.number, code: flight.code }
+        : words.role
+          ? { role: words.role }
+          : undefined;
       byId.set(id, {
         id,
         kind: "event",
@@ -218,7 +284,7 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
         value: parsed.iso,
         label,
         ...(time ? { time } : {}),
-        ...(words.role ? { subject: { role: words.role } } : {}),
+        ...(subject ? { subject } : {}),
         source: "label",
         ...sureness(parsed),
       });
