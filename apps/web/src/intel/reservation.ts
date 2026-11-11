@@ -268,7 +268,33 @@ function factsOf(res: Node, reservation: number): ReadFact[] {
       confidence: 1,
     });
   }
+
+  // What the booking cost, when it says so with a currency. A total is often
+  // repeated on every leg; the same value is one fact (firstOfEach).
+  const priced = record(res["totalPrice"]);
+  const total = priced
+    ? moneyOf(priced["price"] ?? priced["value"], priced["priceCurrency"] ?? priced["currency"])
+    : moneyOf(res["totalPrice"] ?? res["price"], res["priceCurrency"]);
+  if (total) {
+    facts.push({
+      id: factId("amount", total.value),
+      kind: "amount",
+      document,
+      value: total.value,
+      unit: total.unit,
+      label: "Total",
+      source: "jsonld",
+      confidence: 1,
+    });
+  }
   return facts;
+}
+
+/** A price and its currency as an amount's value and unit; nothing when either is missing or the price is not above zero. */
+function moneyOf(price: unknown, currency: unknown): { value: string; unit: string } | undefined {
+  const amount = Number(String(price ?? "").replace(/,/g, ""));
+  const unit = str(currency);
+  return Number.isFinite(amount) && amount > 0 && unit ? { value: amount.toFixed(2), unit: unit.toUpperCase() } : undefined;
 }
 
 /** A bill's due date, amount and number, or a parcel's delivery window. */
@@ -310,17 +336,15 @@ function billingFactsOf(node: Node): Fact[] {
   };
   if (invoice) {
     dated("due", node["paymentDueDate"] ?? node["paymentDue"], "Payment due");
-    const total = record(node["totalPaymentDue"]);
-    const price = Number(String(total?.["price"] ?? total?.["value"] ?? "").replace(/,/g, ""));
-    const currency = str(total?.["priceCurrency"]) ?? str(total?.["currency"]);
-    if (Number.isFinite(price) && price > 0 && currency) {
-      const value = price.toFixed(2);
+    const due = record(node["totalPaymentDue"]);
+    const total = moneyOf(due?.["price"] ?? due?.["value"], due?.["priceCurrency"] ?? due?.["currency"]);
+    if (total) {
       facts.push({
-        id: factId("amount", value),
+        id: factId("amount", total.value),
         kind: "amount",
         document,
-        value,
-        unit: currency.toUpperCase(),
+        value: total.value,
+        unit: total.unit,
         label: "Amount due",
         source: "jsonld",
         confidence: 1,

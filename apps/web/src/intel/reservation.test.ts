@@ -403,3 +403,52 @@ describe("cancellations", () => {
     expect(reservationFacts(FLIGHT_HTML.replace('"reservationNumber": "ZK8Q2P",', '"reservationNumber": "ZK8Q2P", "reservationStatus": "ReservationConfirmed",'))).toHaveLength(3);
   });
 });
+
+describe("what a booking cost", () => {
+  const flight = (extra: Record<string, unknown> = {}, number = "214", day = "2027-03-04") => ({
+    "@type": "FlightReservation",
+    reservationNumber: "ZK8Q2P",
+    reservationFor: {
+      "@type": "Flight",
+      flightNumber: number,
+      airline: { iataCode: "AQ" },
+      departureAirport: { iataCode: "SFO" },
+      arrivalAirport: { iataCode: "JFK" },
+      departureTime: `${day}T09:40:00-08:00`,
+      arrivalTime: `${day}T18:05:00-05:00`,
+    },
+    ...extra,
+  });
+  const all = (nodes: unknown[]) => `<html><script type="application/ld+json">${JSON.stringify(nodes)}</script></html>`;
+  const amounts = (raw: string) => reservationFacts(raw).filter((f) => f.kind === "amount");
+
+  it("a booking's price is read as its total", () => {
+    expect(amounts(ld(flight({ totalPrice: "1184.00", priceCurrency: "USD" })))).toEqual([
+      expect.objectContaining({ value: "1184.00", unit: "USD", label: "Total", source: "jsonld", confidence: 1, document: "itinerary" }),
+    ]);
+  });
+
+  it("a price written as a number, with thousands commas, or nested with its currency reads the same", () => {
+    expect(amounts(ld(flight({ totalPrice: 1184, priceCurrency: "usd" })))[0]).toMatchObject({ value: "1184.00", unit: "USD" });
+    expect(amounts(ld(flight({ totalPrice: "1,184.50", priceCurrency: "USD" })))[0]).toMatchObject({ value: "1184.50" });
+    expect(amounts(ld(flight({ totalPrice: { "@type": "PriceSpecification", price: "652.00", priceCurrency: "EUR" } })))[0]).toMatchObject({ value: "652.00", unit: "EUR" });
+    expect(amounts(ld(flight({ price: "99.00", priceCurrency: "GBP" })))[0]).toMatchObject({ value: "99.00", unit: "GBP" });
+  });
+
+  it("a price repeated on each leg counts once, and two totals are both kept", () => {
+    const priced = { totalPrice: "1184.00", priceCurrency: "USD" };
+    expect(amounts(all([flight(priced), flight(priced, "215", "2027-03-09")]))).toHaveLength(1);
+    const two = amounts(all([flight({ totalPrice: "592.00", priceCurrency: "USD" }), flight({ totalPrice: "610.00", priceCurrency: "USD" }, "215", "2027-03-09")]));
+    expect(two.map((f) => f.value)).toEqual(["592.00", "610.00"]);
+  });
+
+  it("a price with no currency, or of zero, is not an amount", () => {
+    expect(amounts(ld(flight({ totalPrice: "1184.00" })))).toEqual([]);
+    expect(amounts(ld(flight({ totalPrice: "0", priceCurrency: "USD" })))).toEqual([]);
+    expect(amounts(ld(flight({ totalPrice: "free", priceCurrency: "USD" })))).toEqual([]);
+  });
+
+  it("a cancelled booking states no price", () => {
+    expect(amounts(ld(flight({ totalPrice: "1184.00", priceCurrency: "USD", reservationStatus: "ReservationCancelled" })))).toEqual([]);
+  });
+});
