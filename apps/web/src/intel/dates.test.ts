@@ -139,6 +139,26 @@ describe("parseTime", () => {
     expect(parseTime("no time here")).toBeNull();
     expect(parseTime("")).toBeNull();
   });
+
+  it("reads a clock written without a colon", () => {
+    expect([parseTime("from 3pm"), parseTime("by 11 am"), parseTime("doors 7 PM"), parseTime("at 12am"), parseTime("12 pm"), parseTime("5 p.m.")]).toEqual([
+      "15:00",
+      "11:00",
+      "19:00",
+      "00:00",
+      "12:00",
+      "17:00",
+    ]);
+  });
+
+  it("a bare number is not a clock", () => {
+    const not = ["room 3", "3 people", "15 March 2027", "10 Amsterdam", "2027 pm", "13 pm", "1.05 pm"];
+    expect(not.map((text) => parseTime(text))).toEqual(not.map(() => null));
+  });
+
+  it("a clock with a colon wins over one without", () => {
+    expect(parseTime("3pm show, doors 18:30")).toBe("18:30");
+  });
 });
 
 describe("daysUntil", () => {

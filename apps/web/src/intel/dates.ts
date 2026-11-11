@@ -234,6 +234,13 @@ export function swappedReading(isoDate: string): string | null {
  */
 const TIME = /\b(\d{1,2}):([0-5]\d)\s*([ap])\.?\s*m\.?/i;
 const TIME_24 = /\b([01]?\d|2[0-3]):([0-5]\d)\b/;
+/**
+ * A whole hour with its am or pm and no colon ("3pm", "11 am", "5 p.m.").
+ * The marker is what makes it a clock: a bare number never is. A number that
+ * ends a dotted or longer figure ("1.05 pm", "2027 pm") is left alone, and
+ * so is a word that only begins with the marker ("10 Amsterdam").
+ */
+const TIME_HOUR = /(?<![\d.:,])\b(\d{1,2})\s?([ap])\.?m(?![A-Za-z])/i;
 
 /**
  * A local time of day as "HH:MM".
@@ -260,6 +267,17 @@ export function parseTime(text: string): string | null {
   const plain = TIME_24.exec(text);
   if (plain) {
     return `${String(Number(plain[1])).padStart(2, "0")}:${plain[2]}`;
+  }
+  // Last, so a clock written with a colon always wins.
+  const hourOnly = TIME_HOUR.exec(text);
+  if (hourOnly) {
+    const raw = Number(hourOnly[1]);
+    if (raw < 1 || raw > 12) {
+      return null;
+    }
+    const pm = hourOnly[2]!.toLowerCase() === "p";
+    const hour = raw === 12 ? (pm ? 12 : 0) : pm ? raw + 12 : raw;
+    return `${String(hour).padStart(2, "0")}:00`;
   }
   return null;
 }

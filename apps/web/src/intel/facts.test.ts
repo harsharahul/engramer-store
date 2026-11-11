@@ -77,6 +77,20 @@ describe("groundFacts", () => {
     expect(groundFacts([flight], "Departs 12 March 2029 at 18:15")).toHaveLength(0);
   });
 
+  it("matches a whole hour the document wrote without a colon", () => {
+    const stay = fact({ kind: "event", time: "15:00" });
+    expect(groundFacts([stay], "Check-in 12 March 2029 from 3pm")).toHaveLength(1);
+    expect(groundFacts([stay], "Check-in 12 March 2029 from 3 p.m.")).toHaveLength(1);
+    expect(groundFacts([fact({ kind: "event", time: "00:00" })], "Ends 12 March 2029 at 12am")).toHaveLength(1);
+  });
+
+  it("does not find a whole hour in the tail of another clock", () => {
+    const stay = fact({ kind: "event", time: "15:00" });
+    expect(groundFacts([stay], "Departs 12 March 2029 at 12:03pm")).toHaveLength(0);
+    expect(groundFacts([stay], "Departs 12 March 2029 at 13pm")).toHaveLength(0);
+    expect(groundFacts([stay], "Departs 12 March 2029 at 3am")).toHaveLength(0);
+  });
+
   it("grounds a non-date value literally", () => {
     const amount = fact({ kind: "amount", value: "410.00", source: "pattern" });
     expect(groundFacts([amount], "Total due: $410.00")).toHaveLength(1);

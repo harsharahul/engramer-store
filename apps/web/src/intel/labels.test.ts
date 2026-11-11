@@ -190,6 +190,11 @@ describe("travel vocabulary", () => {
     expect(fact!.label).toBe("Check-in");
   });
 
+  it("a check-in line keeps its hour when the clock has no colon", () => {
+    const [fact] = labelledFacts("Check-in: 12 March 2027 from 3pm.");
+    expect(fact).toMatchObject({ kind: "event", value: "2027-03-12", time: "15:00", label: "Check-in" });
+  });
+
   it("types departure and boarding, keeping labels as written", () => {
     const facts = labelledFacts("Departure: 4 March 2027 09:40\nBoarding time: 4 March 2027 09:10");
     expect(facts.map((f) => f.label)).toEqual(["Departure", "Boarding time"]);

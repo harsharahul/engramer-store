@@ -211,6 +211,11 @@ describe("scanForFacts", () => {
     expect(events[0]!.source).toBe("jsonld");
   });
 
+  it("a check-in written as 3pm keeps its hour through the whole pipeline", async () => {
+    const out = await scanForFacts({ ...base, text: "Harbor House\nCheck-in: 12 March 2027 from 3pm." });
+    expect(out.facts.find((f) => f.kind === "event")).toMatchObject({ value: "2027-03-12", time: "15:00", label: "Check-in" });
+  });
+
   it("carries a travel event with its time through the whole pipeline", async () => {
     const out = await scanForFacts({
       ...base,

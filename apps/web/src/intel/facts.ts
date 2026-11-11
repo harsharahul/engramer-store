@@ -438,10 +438,25 @@ export function groundFacts(facts: Fact[], source: string): Fact[] {
     // grounding exists to catch, and it is worse than the date alone because
     // it is the part someone would set an alarm by.
     if (fact.time !== undefined) {
-      return timeRenderings(fact.time).some((form) => haystack.includes(normalize(form)));
+      return timeRenderings(fact.time).some((form) => haystack.includes(normalize(form))) || statesHour(fact.time, source);
     }
     return true;
   });
+}
+
+/**
+ * Whether the document writes this whole hour without a colon ("3pm",
+ * "11 a.m."). Read as a clock in the text itself and not as a run of
+ * characters, so "3pm" is never found in the tail of "12:03pm".
+ */
+function statesHour(time: string, source: string): boolean {
+  const [hh, mm] = time.split(":") as [string, string];
+  if (mm !== "00") {
+    return false;
+  }
+  const hour = Number(hh);
+  const half = hour % 12 === 0 ? 12 : hour % 12;
+  return new RegExp(`(?<![\\d.:,])\\b${half}\\s?${hour < 12 ? "a" : "p"}\\.?m(?![A-Za-z])`, "i").test(source);
 }
 
 function normalize(text: string): string {
