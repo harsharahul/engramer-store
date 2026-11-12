@@ -443,6 +443,30 @@ export function parseTime(text: string): string | null {
   return null;
 }
 
+const CLOCK_FORMS = [TIME, TIME_24, TIME_HOUR].map((form) => new RegExp(form.source, `${form.flags}g`));
+
+/** Every clock in a text, in the order they stand, each read as `parseTime` reads it alone. */
+export function findTimes(text: string): { at: number; end: number; time: string }[] {
+  const clocks: { at: number; end: number; time: string; rank: number }[] = [];
+  CLOCK_FORMS.forEach((form, rank) => {
+    for (const match of text.matchAll(form)) {
+      const time = parseTime(match[0]);
+      if (time) {
+        clocks.push({ at: match.index, end: match.index + match[0].length, time, rank });
+      }
+    }
+  });
+  const placed: { at: number; end: number; time: string }[] = [];
+  let end = -1;
+  for (const { rank: _rank, ...clock } of clocks.sort((a, b) => a.at - b.at || a.rank - b.rank)) {
+    if (clock.at >= end) {
+      placed.push(clock);
+      end = clock.end;
+    }
+  }
+  return placed;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**

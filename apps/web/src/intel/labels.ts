@@ -443,7 +443,7 @@ const SYMBOL_AMOUNT = /([$£€₹¥])\s?([\d,]+\.\d{2})/g;
 const CODE_AMOUNT = /\b([A-Z]{3})\s?([\d,]+\.\d{2})\b/g;
 
 /** Every amount above zero a piece of text states with its currency, once per value, and where it stands. */
-function moneyIn(text: string): { value: string; unit: string; at: number }[] {
+export function moneyIn(text: string): { value: string; unit: string; at: number }[] {
   const found = new Map<string, { unit: string; at: number }>();
   for (const match of text.matchAll(SYMBOL_AMOUNT)) {
     found.set(match[2]!.replace(/,/g, ""), { unit: SYMBOL_CURRENCY[match[1]!] ?? match[1]!, at: match.index });
