@@ -153,17 +153,18 @@ export function judgedFacts(answer: unknown, candidates: readonly Candidate[], t
     }
   };
   for (const candidate of candidates) {
-    const label = said[candidate.key];
+    // The model's answer for this candidate: a word from the list, not a fact's label.
+    const verdict = said[candidate.key];
     if (candidate.what === "amount") {
-      if (label === "total" && candidate.unit) {
+      if (verdict === "total" && candidate.unit) {
         keep({ id: factId("amount", candidate.value), kind: "amount", value: candidate.value, unit: candidate.unit, label: "Total" }, candidate);
       }
       continue;
     }
-    if (typeof label !== "string" || !(DATE_ANSWERS as readonly string[]).includes(label) || label === "other") {
+    if (typeof verdict !== "string" || !(DATE_ANSWERS as readonly string[]).includes(verdict) || verdict === "other") {
       continue;
     }
-    const kind = label as Exclude<DateAnswer, "other">;
+    const kind = verdict as Exclude<DateAnswer, "other">;
     const words = wordsFor(said[`${candidate.key}w`], text);
     if (kind === "due" || kind === "expiry" || kind === "issued") {
       keep({ id: factId(kind as FactKind, candidate.value), kind: kind as FactKind, value: candidate.value, ...(words ? { label: capitalised(words) } : {}) }, candidate);
