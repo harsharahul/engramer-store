@@ -36,3 +36,44 @@ describe("exact readers on the eval set", () => {
     }
   });
 });
+
+/**
+ * The label rules against the eval set. A rule reads only where a document
+ * labels its own date or amount, so what it offers must nearly always be
+ * right; how much of the set it finds is printed, and is what the wider
+ * vocabulary is for. Its readings still wait for a yes.
+ */
+const labelReadings = async (evalCase: EvalCase) =>
+  (
+    await scanForFacts({
+      name: evalCase.name,
+      mime: evalCase.mime,
+      text: evalCase.text,
+      ...(evalCase.raw ? { raw: evalCase.raw } : {}),
+      ...(evalCase.writtenAt !== undefined ? { writtenAt: evalCase.writtenAt } : {}),
+    })
+  ).facts.filter((fact) => fact.source === "label");
+
+describe("label rules on the eval set", () => {
+  it("are right at least nine times in ten, on dates and on amounts", async () => {
+    const plain = EVAL_CASES.filter((c) => !c.exact);
+    const lines: string[] = [];
+    const precise: Record<string, boolean> = {};
+    for (const task of ["dates", "amounts"] as const) {
+      // Precision over every case, so a rule that speaks where data already did counts against it.
+      const all = await scoreReader(EVAL_CASES, labelReadings, task);
+      const found = await scoreReader(plain, labelReadings, task);
+      const offered = all.perCase.reduce((sum, c) => sum + c.found + c.extra, 0);
+      lines.push(`label rules, ${task}: precision ${all.precision.toFixed(3)} over ${offered} readings, recall ${found.recall.toFixed(3)} on ${plain.length} plain cases`);
+      for (const c of all.perCase.filter((c) => c.extra)) {
+        lines.push(`  wrong in ${c.id}: ${c.extra}`);
+      }
+      for (const c of found.perCase.filter((c) => c.missed)) {
+        lines.push(`  missed in ${c.id}: ${c.missed}`);
+      }
+      precise[task] = all.precision >= 0.9;
+    }
+    console.info(lines.join("\n"));
+    expect(precise).toEqual({ dates: true, amounts: true });
+  });
+});

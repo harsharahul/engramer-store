@@ -112,6 +112,17 @@ describe("one trip, from raw mail to the Timeline's rows", () => {
     ]);
   });
 
+  it("a flight in plain words is one flight row that asks", async () => {
+    const text = "Your trip\nFlight UA 123 departs SFO 10:15 AM on March 4, 2027, arrives JFK 6:45 PM\nSee you on board.";
+    const { facts } = await scanForFacts({ name: "Your trip.email", mime: EMAIL, text });
+    const rows = await rowsOf([file("words", facts)], none, NOW);
+    expect(rows.map((row) => [row.kind, row.tag, row.title, row.day, row.time, row.endTime, row.ask ?? false])).toEqual([
+      ["flight", "FLIGHT", "San Francisco to New York", "2027-03-04", "10:15", "18:45", true],
+    ]);
+    expect(rows[0]!.flight).toMatchObject({ from: "SFO", to: "JFK", number: "UA 123" });
+    expect(rows[0]!.factIds).toHaveLength(2);
+  });
+
   it("reading the same mail twice changes nothing", async () => {
     const first = await booking(mail.BOOKING_WITH_HOTEL);
     const second = await booking(mail.BOOKING_WITH_HOTEL);

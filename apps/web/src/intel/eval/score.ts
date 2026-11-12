@@ -19,6 +19,8 @@ export interface EvalCase {
   text: string;
   /** The document as written, when it carries structured data (HTML, an invite). */
   raw?: string;
+  /** When a message was written: what a date in it with no year is read against. */
+  writtenAt?: number;
   /** What a good reader finds: the time only where the document gives one. */
   expected: { kind: FactKind; value: string; time?: string; label?: string; role?: Role }[];
   /** The kind of email this is, for the mail-kind task. */

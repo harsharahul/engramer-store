@@ -77,6 +77,42 @@ describe("groundFacts", () => {
     expect(groundFacts([flight], "Departs 12 March 2029 at 18:15")).toHaveLength(0);
   });
 
+  it("matches a whole hour the document wrote without a colon", () => {
+    const stay = fact({ kind: "event", time: "15:00" });
+    expect(groundFacts([stay], "Check-in 12 March 2029 from 3pm")).toHaveLength(1);
+    expect(groundFacts([stay], "Check-in 12 March 2029 from 3 p.m.")).toHaveLength(1);
+    expect(groundFacts([fact({ kind: "event", time: "00:00" })], "Ends 12 March 2029 at 12am")).toHaveLength(1);
+  });
+
+  it("a date whose year was assumed is found by its month and day, as a date and not as a run of characters", () => {
+    const arriving = fact({ kind: "event", value: "2026-11-12", assumedYear: true });
+    for (const text of ["Arriving Thursday, November 12", "Arriving Thu 12 Nov", "Arriving Nov. 12th", "Arriving 12th November"]) {
+      expect(groundFacts([arriving], text), text).toHaveLength(1);
+    }
+    for (const text of ["Arriving November 1", "Arriving November 120 Main St", "Arriving 2 November", "Arriving December 12"]) {
+      expect(groundFacts([fact({ kind: "event", value: "2026-11-12", assumedYear: true })], text), text).toHaveLength(0);
+    }
+  });
+
+  it("a month and a year ground a date only where the document names no day", () => {
+    const proposed = (value: string) => fact({ kind: "due", value, source: "model", confidence: 0.45 });
+    // The document names another day of that month: the proposal is a wrong day.
+    expect(groundFacts([proposed("2026-11-03")], "Your appointment is on 14 Nov 2026.")).toHaveLength(0);
+    expect(groundFacts([proposed("2027-04-15")], "Your room is ready from 15:00 on 8 April 2027.")).toHaveLength(0);
+    expect(groundFacts([proposed("2027-04-15")], "Ready on April 8, 2027.")).toHaveLength(0);
+    // A card or a permit that prints only its month and year.
+    expect(groundFacts([proposed("2026-11-30")], "Card valid thru Nov 2026")).toHaveLength(1);
+    expect(groundFacts([proposed("2029-11-01")], "Expires November 2029")).toHaveLength(1);
+    expect(groundFacts([proposed("2029-11-01")], "Expires: November, 2029")).toHaveLength(1);
+  });
+
+  it("does not find a whole hour in the tail of another clock", () => {
+    const stay = fact({ kind: "event", time: "15:00" });
+    expect(groundFacts([stay], "Departs 12 March 2029 at 12:03pm")).toHaveLength(0);
+    expect(groundFacts([stay], "Departs 12 March 2029 at 13pm")).toHaveLength(0);
+    expect(groundFacts([stay], "Departs 12 March 2029 at 3am")).toHaveLength(0);
+  });
+
   it("grounds a non-date value literally", () => {
     const amount = fact({ kind: "amount", value: "410.00", source: "pattern" });
     expect(groundFacts([amount], "Total due: $410.00")).toHaveLength(1);
@@ -330,6 +366,20 @@ describe("one order between readers", () => {
     expect(merged).toHaveLength(1);
     expect(merged[0]).toMatchObject({ accepted: "agreement", reader: "label + model" });
     expect(isTracked(merged[0]!)).toBe(true);
+  });
+
+  it("a date whose year was assumed stays a question, even when a second reader names the same day", () => {
+    const due = (source: Fact["source"], confidence: number, extra: Partial<Fact> = {}) =>
+      fact({ id: "due:2026-11-13", kind: "due", document: "other", value: "2026-11-13", source, confidence, ...extra });
+    for (const merged of [
+      mergeFacts([due("label", 0.5, { assumedYear: true })], [due("model", 0.45)]),
+      mergeFacts([due("model", 0.45)], [due("label", 0.5, { assumedYear: true })]),
+    ]) {
+      expect(merged).toHaveLength(1);
+      expect(merged[0]!.accepted).toBeUndefined();
+      expect(merged[0]!.assumedYear).toBe(true);
+      expect(isTracked(merged[0]!)).toBe(false);
+    }
   });
 
   it("two readers that disagree on an amount ask once", () => {

@@ -65,6 +65,12 @@ export interface ScanInput {
   file?: Blob;
   /** When the document was stored; anchors inferences like a flight's year. */
   storedAt?: number;
+  /**
+   * When a message was written, from its own date. Set for mail only: a
+   * date with no year ("Thursday, November 12") is read against it, and in
+   * any other file such a date is not read at all.
+   */
+  writtenAt?: number;
 }
 
 export interface ScanResult {
@@ -107,7 +113,7 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
   const text = input.text ?? "";
   if (text) {
     found.push(...mrzFacts(text));
-    const typed = labelledFacts(text);
+    const typed = labelledFacts(text, input.writtenAt);
     found.push(...typed);
     // Labels the vocabulary knows are typed; every other labelled date still
     // surfaces with the document's own words attached. Values already

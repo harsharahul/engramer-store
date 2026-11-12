@@ -2,36 +2,36 @@
   "reader": "apple",
   "version": 3,
   "prompt": "7a0b0785",
-  "measuredAt": "2026-11-11",
-  "cases": 42,
+  "measuredAt": "2026-11-12",
+  "cases": 62,
   "tasks": {
     "dates": {
-      "precision": 0.55,
-      "recall": 0.3793103448275862,
-      "offered": 20,
-      "expected": 29
+      "precision": 0.6923076923076923,
+      "recall": 0.5625,
+      "offered": 39,
+      "expected": 48
     },
     "amounts": {
       "precision": 1,
-      "recall": 0.2,
-      "offered": 2,
-      "expected": 10
+      "recall": 0.35714285714285715,
+      "offered": 5,
+      "expected": 14
     },
     "mailKind": {
-      "accuracy": 0.5714285714285714,
-      "cases": 35,
+      "accuracy": 0.6041666666666666,
+      "cases": 48,
       "byKind": {
         "booking": {
-          "precision": 0.9166666666666666,
-          "offered": 12
+          "precision": 0.875,
+          "offered": 16
         },
         "bill": {
           "precision": 1,
-          "offered": 3
+          "offered": 4
         },
         "delivery": {
           "precision": 1,
-          "offered": 3
+          "offered": 5
         },
         "personal": {
           "precision": 0.1111111111111111,
@@ -39,19 +39,19 @@
         },
         "newsletter": {
           "precision": 1,
-          "offered": 1
+          "offered": 2
         },
         "other": {
-          "precision": 0.14285714285714285,
-          "offered": 7
+          "precision": 0.25,
+          "offered": 12
         }
       }
     },
     "roles": {
       "precision": 1,
-      "recall": 0,
-      "offered": 0,
-      "expected": 4
+      "recall": 0.5,
+      "offered": 4,
+      "expected": 8
     }
   }
 }

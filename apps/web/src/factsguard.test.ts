@@ -20,6 +20,25 @@ function sources(dir: string): string[] {
   });
 }
 
+/**
+ * A message's own date is what a date with no year is read against. A file
+ * is read when it is stored and again when it is saved over or swept; a
+ * reading that left the date out would find fewer facts than the first one
+ * and drop what the first one found. Every reading states it.
+ */
+describe("every reading of a file says when a message was written", () => {
+  it("passes writtenAt in each scanForFacts call of the store and the upload path", () => {
+    const root = join(__dirname);
+    const calls = ["store.ts", "transfer.ts"].flatMap((name) => {
+      const source = readFileSync(join(root, name), "utf8");
+      // The call's own arguments: none is longer than a few lines.
+      return [...source.matchAll(/scanForFacts\(\{/g)].map((match) => ({ name, call: source.slice(match.index, match.index + 400) }));
+    });
+    expect(calls.length).toBeGreaterThanOrEqual(3);
+    expect(calls.filter(({ call }) => !call.includes("writtenAt")).map(({ name, call }) => `${name}: ${call.slice(0, 60)}`)).toEqual([]);
+  });
+});
+
 describe("one predicate decides which facts count", () => {
   it("reads .confirmed nowhere outside intel/facts.ts", () => {
     const root = join(__dirname);

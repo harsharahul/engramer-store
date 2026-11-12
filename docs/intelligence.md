@@ -266,17 +266,44 @@ metadata and index blob like every other derived signal.
   check digits, so a misread is detectable. A failed check discards the whole
   read rather than lowering its confidence, because being able to tell that a
   scan went wrong is the only reason to prefer the zone over the printed text.
-- **Booking data, bills, deliveries and invites.** Confirmation emails and
-  saved pages carry schema.org data about themselves: flights, stays, car
-  rentals, trains, buses, boats, event tickets and restaurant tables; a
-  bill's due date, amount and number; a parcel's delivery window and
-  tracking number. Calendar invites (`.ics`, uploaded or attached to mail)
-  state their events' times. These are read as stated, at full confidence,
-  with times kept in the zone they were written in.
-- **Labelled dates.** "Expires", "Valid until", "Renewal date", "Payment due"
-  and their common variants, over the text extraction already produces. A
-  deadline is claimed only where the document labelled one; an unlabelled date
-  is almost always a print date.
+- **Booking data, bills, orders, deliveries and invites.** Confirmation
+  emails and saved pages carry schema.org data about themselves: flights,
+  stays, car rentals, trains, buses, boats, event tickets and restaurant
+  tables, each with the price the booking states; a bill's due date, amount
+  and number; a shop order's total and number; a parcel's delivery window
+  and tracking number. Calendar invites (`.ics`, uploaded or attached to
+  mail) state their events' times. These are read as stated, at full
+  confidence, with times kept in the zone they were written in. A price is
+  read as written (`1,184.50`, `148,50`, `1.184,00`); one that could be read
+  two ways states no price. A cancelled booking or order states nothing.
+- **Labelled dates.** A date is claimed only where the document's own words
+  say what it is, over the text extraction already produces; an unlabelled
+  date is almost always a print date. The words cover:
+  - expiries: "Expires", "Valid until", "Valid thru", "Renewal date",
+    "Coverage ends", and `EXP` as a licence prints it;
+  - due dates: "Payment due", "Pay by", "Respond by", "Reply by", "Return
+    by", "Due back", "Must be received by", "Deadline", "Let us know by",
+    and the day a plan renews or a payment will be collected;
+  - moments: check-in and check-out, departures and arrivals, pick-up and
+    drop-off, an appointment, a show's doors, each with its time ("14:30",
+    "2:30 PM", "3pm");
+  - deliveries: "Estimated delivery", "Expected delivery", "Delivered by",
+    and, in a message about an order, "Arriving" and "should arrive";
+  - a flight written in words ("Flight UA 123 departs SFO 10:15 AM on March
+    4, 2027, arrives JFK 6:45 PM"), which keeps its number and airports;
+  - the amount a bill asks for, when one amount stands on a line that says
+    it is due.
+
+  A label claims the date on its own line before any line below it. The
+  labels a form prints ("Expiry date", "Due date", "Check-in") also read
+  the value on the line below; the words of running text ("reply by",
+  "arriving", "appointment") claim from their own line only, and `EXP`
+  only a date that follows it at once, so an order day, a street name or
+  the header of a forwarded message on the next line is never theirs. In a
+  message, a date with no year ("Thursday, November 12") is the next such
+  day after the message was written, and is marked as having an assumed
+  year; an expiry never takes one, and in any other file a date with no
+  year is not read.
 - **Amounts and reference numbers**, at low confidence, from any document,
   including kinds no rule anticipated.
 - **The assistant's proposals**, at the lowest confidence of all, on the Mac
@@ -309,6 +336,19 @@ because it gets relied on. Each fact in a file's details says why it counts:
 characters; the whole value lives in the file's index blob and is fetched only
 when you ask to see it. Metadata is decrypted on every device on every sync,
 which is not where a licence number belongs.
+
+**How much a file keeps.** A file carries at most thirty-two facts, twelve of
+them readings softer than exact data. A package of flights and hotels keeps
+all of its dates, references and prices, while the amounts and codes a long
+statement prints are held to twelve. Past the limit, exact dates are kept
+first, then references, then prices.
+
+**One purchase, one bill.** A file's bill is its invoice's amount due, else
+its order's total, else each total its bookings state, so a package with
+flights in one currency and a hotel in another is two bills. A purchase
+stated again in a later message (a changed schedule, a shipping notice) under
+the same booking, order or invoice number is billed once; the same amount on
+the same account is still a bill every month.
 
 **What it notices.** A small table of rules turns confirmed facts into the few
 observations worth interrupting for, several of which read more than one

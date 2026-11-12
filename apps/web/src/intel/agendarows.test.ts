@@ -576,6 +576,76 @@ describe("what was paid is shown once, and as stated", () => {
   });
 });
 
+describe("plain words reach the Timeline", () => {
+  const written = async (id: string, subject: string, text: string) => {
+    const { facts } = await scanForFacts({ name: `${id}.email`, mime: EMAIL, text });
+    return email(id, subject, facts);
+  };
+  const shown = (rows: AgendaRow[]) => rows.map((row) => [row.kind, row.tag, row.title, row.day, row.time, row.ask ?? false]);
+
+  it("a bill that asks shows its amount, and one yes answers both", async () => {
+    const bill = await written("water", "Your water bill", "Water bill\nAmount due $84.20\nDue date: November 20, 2026");
+    const [row] = await rowsOf([bill], none, NOW);
+    expect(row).toMatchObject({ kind: "due", day: "2026-11-20", ask: true, amount: { currency: "USD", value: "84.20" } });
+    expect(row!.factIds).toEqual(["due:2026-11-20", "amount:84.20"]);
+    // After the yes, both count: the row no longer asks and keeps its amount.
+    const confirmed = { ...bill, facts: bill.facts.map((fact) => (row!.factIds!.includes(fact.id) ? { ...fact, confirmed: true } : fact)) };
+    const [after] = await rowsOf([confirmed], none, NOW);
+    expect(after).toMatchObject({ kind: "due", amount: { currency: "USD", value: "84.20" } });
+    expect(after!.ask).toBeUndefined();
+  });
+
+  it("a confirmed due date does not lend its yes to an amount nobody confirmed", async () => {
+    const bill = await written("water", "Your water bill", "Water bill\nAmount due $84.20\nDue date: November 20, 2026");
+    const dated = { ...bill, facts: bill.facts.map((fact) => (fact.kind === "due" ? { ...fact, confirmed: true } : fact)) };
+    const [row] = await rowsOf([dated], none, NOW);
+    expect(row!.amount).toBeUndefined();
+    expect(row!.factIds).toEqual(["due:2026-11-20"]);
+  });
+
+  it("the total is the amount a row shows, not the first amount in the file", async () => {
+    const order = email("order", "Your order", [
+      exact("due", "2026-09-20", "Payment due", { document: "invoice" }),
+      amount("12.00", "USD"),
+      amount("148.00", "USD", { label: "Order total" }),
+    ]);
+    const [row] = await rowsOf([order], none, NOW);
+    expect(row).toMatchObject({ kind: "due", amount: { currency: "USD", value: "148.00" } });
+  });
+
+  it("an appointment and a renewal are rows that ask", async () => {
+    const rows = await rowsOf(
+      [
+        await written("clinic", "Appointment reminder", "Your appointment is on Tuesday, December 8, 2026 at 2:30 PM with Dr. Lee."),
+        await written("plan", "Your plan", "Your plan renews on December 1, 2026."),
+      ],
+      none,
+      NOW,
+    );
+    expect(shown(rows)).toEqual([
+      ["due", "DUE", "Renews", "2026-12-01", undefined, true],
+      ["event", "BOOKED", "Appointment", "2026-12-08", "14:30", true],
+    ]);
+  });
+
+  it("an estimated delivery in plain words is a parcel that asks", async () => {
+    const rows = await rowsOf([await written("shop", "Your order has shipped", "Your order has shipped.\nEstimated delivery: November 12, 2026")], none, NOW);
+    expect(shown(rows)).toEqual([["parcel", "DELIVERY", "Your order has shipped", "2026-11-12", undefined, true]]);
+  });
+
+  it("an appointment in a message about an order is an appointment, not a parcel", async () => {
+    const rows = await rowsOf(
+      [await written("fit", "Your order", "Thanks for your order.\nYour installation appointment is on December 8, 2026 at 2:30 PM.\nPick-up: 9 December 2026 10:00")],
+      none,
+      NOW,
+    );
+    expect(shown(rows)).toEqual([
+      ["event", "BOOKED", "Appointment", "2026-12-08", "14:30", true],
+      ["event", "BOOKED", "Pick up", "2026-12-09", "10:00", true],
+    ]);
+  });
+});
+
 describe("rows read what each date is", () => {
   it("a confirmed stay the model read is a stay row", async () => {
     const said = (value: string, time: string, role: "check-in" | "check-out", label: string): Fact => ({
