@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Fact } from "../facts";
 import { EMAIL_MIME } from "../../mail/kind";
 import { EVAL_CASES } from "./cases";
-import { factCases, kindCases, scoreKinds, scoreReader, scoreRoles, type EvalCase } from "./score";
+import { factCases, kindCases, measure, scoreKinds, scoreNoise, scoreReader, scoreRoles, type EvalCase } from "./score";
 
 const evalCase = (id: string, expected: EvalCase["expected"], mailKind?: string): EvalCase => ({
   id,
@@ -108,5 +108,51 @@ describe("scoreRoles", () => {
     const cases = [evalCase("stay", [{ kind: "event", value: "2027-04-08", role: "check-in" }])];
     const score = await scoreRoles(cases, async () => [{ ...fact("event", "2027-04-08"), label: "Check-in" }]);
     expect(score).toEqual({ precision: 1, recall: 1, offered: 1, expected: 1 });
+  });
+});
+
+describe("scoreNoise", () => {
+  it("counts what a reader offers for documents that state nothing", async () => {
+    const cases = [evalCase("quiet", []), evalCase("loud", []), evalCase("bill", [{ kind: "due", value: "2027-04-10" }])];
+    const answers: Record<string, Fact[]> = {
+      quiet: [],
+      loud: [fact("due", "2027-01-01"), fact("amount", "5.00")],
+      // A wrong date on a document that does state something is an extra, not noise.
+      bill: [fact("due", "2027-04-11")],
+    };
+    expect(await scoreNoise(cases, async (c) => answers[c.id]!)).toEqual({ cases: 2, loud: 1, offered: 2, rate: 0.5 });
+  });
+
+  it("a set with no empty document has no noise to measure", async () => {
+    const cases = [evalCase("bill", [{ kind: "due", value: "2027-04-10" }])];
+    expect(await scoreNoise(cases, async () => [fact("due", "2027-04-10")])).toEqual({ cases: 0, loud: 0, offered: 0, rate: 0 });
+  });
+});
+
+describe("measure", () => {
+  it("one set's figures: dates, amounts, roles and noise, each with the readings it rests on", async () => {
+    const cases = [
+      evalCase("stay", [{ kind: "event", value: "2027-04-08", time: "15:00", role: "check-in" }, { kind: "amount", value: "842.00" }]),
+      evalCase("bill", [{ kind: "due", value: "2027-04-10" }]),
+      evalCase("news", []),
+    ];
+    const answers: Record<string, Fact[]> = {
+      stay: [{ ...fact("event", "2027-04-08", "15:00"), subject: { role: "check-in" } }, fact("amount", "842.00")],
+      bill: [],
+      news: [fact("expiry", "2027-06-30")],
+    };
+    const figures = await measure(cases, async (c) => answers[c.id]!);
+    expect(figures.dates).toEqual({ precision: 0.5, recall: 0.5, offered: 2, expected: 2 });
+    expect(figures.amounts).toEqual({ precision: 1, recall: 1, offered: 1, expected: 1 });
+    expect(figures.roles).toEqual({ precision: 1, recall: 1, offered: 1, expected: 1 });
+    expect(figures.noise).toEqual({ cases: 1, loud: 1, offered: 1, rate: 1 });
+    // The cases that missed or added something, for the run's report.
+    expect(figures.wrong.map((c) => c.id)).toEqual(["bill", "news"]);
+  });
+
+  it("mail that states its facts as data is not asked for them, so it is not measured", async () => {
+    const booked: EvalCase = { ...evalCase("flight", [{ kind: "event", value: "2027-03-04" }]), exact: true };
+    const figures = await measure([booked], async () => []);
+    expect(figures.dates).toEqual({ precision: 1, recall: 1, offered: 0, expected: 0 });
   });
 });

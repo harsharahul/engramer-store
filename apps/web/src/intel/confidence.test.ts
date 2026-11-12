@@ -20,11 +20,18 @@ const fact = (over: Partial<Fact>): Fact => ({
 const CURRENT = READER_VERSION.apple!;
 const PROMPT = readingFingerprint();
 
-const scores = (dates: { precision: number; offered: number }, version = CURRENT): ReaderScores => ({
+type Measured = { precision: number; offered: number };
+const tasks = (dates: Measured) => ({
+  dates: { ...dates, recall: 0.5, expected: 40 },
+  amounts: { precision: 1, recall: 0.3, offered: 3, expected: 10 },
+});
+/** Scores for the first set and, unless left out, for the held-out set (the same figures by default). */
+const scores = (dates: Measured, version = CURRENT, heldout: Measured | null = dates): ReaderScores => ({
   reader: "apple",
   version,
   prompt: PROMPT,
-  tasks: { dates: { ...dates, recall: 0.5, expected: 40 }, amounts: { precision: 1, recall: 0.3, offered: 3, expected: 10 } },
+  tasks: tasks(dates),
+  ...(heldout ? { heldout: { cases: 60, tasks: tasks(heldout) } } : {}),
 });
 
 const trusted = scores({ precision: 0.99, offered: MIN_SAMPLE + 10 });
@@ -42,6 +49,22 @@ describe("acceptance", () => {
     // Amounts measured 100% over three readings.
     const amount = fact({ id: "amount:65.00", kind: "amount", value: "65.00", unit: "USD", label: "Amount due" });
     expect(acceptance(amount, { scores: trusted, siblings: [], now: NOW })).toBeNull();
+  });
+
+  it("the gate uses the held-out figures: a first set read right is not enough", () => {
+    const good = { precision: 0.99, offered: MIN_SAMPLE + 10 };
+    // Documents the instructions were never tuned on, read right nine times in ten.
+    expect(acceptance(fact({}), { scores: scores(good, CURRENT, { precision: 0.9, offered: 50 }), siblings: [], now: NOW })).toBeNull();
+    // Read right, over too few readings.
+    expect(acceptance(fact({}), { scores: scores(good, CURRENT, { precision: 1, offered: MIN_SAMPLE - 1 }), siblings: [], now: NOW })).toBeNull();
+    // Never measured on a held-out set at all.
+    expect(acceptance(fact({}), { scores: scores(good, CURRENT, null), siblings: [], now: NOW })).toBeNull();
+  });
+
+  it("a held-out set read right is not enough when the first set is not", () => {
+    const good = { precision: 0.99, offered: MIN_SAMPLE + 10 };
+    expect(acceptance(fact({}), { scores: scores({ precision: 0.9, offered: 50 }, CURRENT, good), siblings: [], now: NOW })).toBeNull();
+    expect(acceptance(fact({}), { scores: scores(good, CURRENT, good), siblings: [], now: NOW })).toBe("grounded");
   });
 
   it("scores measured for another version of the reader are not trusted", () => {
