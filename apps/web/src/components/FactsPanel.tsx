@@ -16,12 +16,16 @@ import { isDated, isTracked, type FactEvidence } from "../intel/facts";
 import { isTripCurrent, itemsOf, tripsOf } from "../intel/agenda";
 import { basisLabel, describeFact, shown, whenLabel } from "../intel/describe";
 import { insightsFor, type Insight } from "../intel/insights";
+import { shownWhen, type Shown } from "../intel/instants";
 import { useTripWindows } from "./useTripViews";
 import { duplicatesByDigest } from "../intel/duplicates";
 import { factToCalendar } from "../intel/ics";
 import { triggerDownload } from "../download";
 import { rangeLabel } from "../intel/moments";
-import { tripTitle } from "../intel/trips";
+import { isTripTag, tripTitle } from "../intel/trips";
+
+/** Where a file's facts are shown from: whether the file is part of a trip. */
+const whereOf = (file: { tags: readonly string[] }): Shown => ({ inTrip: file.tags.some(isTripTag) });
 import { ClockGlyph, CopyGlyph, InfoGlyph, PlaneGlyph, XGlyph } from "./Icon";
 
 /** ------------------------------------------------------- the whole library */
@@ -138,10 +142,10 @@ export function LibraryIntel(props: {
             <div key={`${file.id}:${fact.id}`} className={`intel-row intel-row-wrap${days < 0 ? " overdue" : ""}`}>
               <button
                 className="intel-row-open"
-                onClick={() => (props.onOpenDay ? props.onOpenDay(fact.value) : props.onOpen(file.id))}
+                onClick={() => (props.onOpenDay ? props.onOpenDay(shownWhen(fact, whereOf(file)).day) : props.onOpen(file.id))}
               >
-                <span className="intel-when">{whenLabel(fact.value, now)}</span>
-                <span className="intel-what">{describeFact(fact)}</span>
+                <span className="intel-when">{whenLabel(shownWhen(fact, whereOf(file)).day, now)}</span>
+                <span className="intel-what">{describeFact(fact, whereOf(file))}</span>
                 <span className="intel-file">{file.name}</span>
               </button>
               {days < 0 && (
@@ -301,12 +305,12 @@ export function FileFacts(props: { file: FileEntry }) {
               </span>
             ) : (
               <span className="filefact-value">
-                {shown(fact.value)}
-                {fact.time ? ` at ${fact.time}` : ""}
+                {shown(shownWhen(fact, whereOf(props.file)).day)}
+                {shownWhen(fact, whereOf(props.file)).time ? ` at ${shownWhen(fact, whereOf(props.file)).time}` : ""}
               </span>
             )}
             <span className="filefact-kind">
-              {fact.kind === "identifier" ? "reference number" : describeFact(fact)}
+              {fact.kind === "identifier" ? "reference number" : describeFact(fact, whereOf(props.file))}
             </span>
           </div>
           <div className="filefact-meta">
@@ -315,7 +319,7 @@ export function FileFacts(props: { file: FileEntry }) {
             </span>
             {isTracked(fact) ? (
               <>
-                {isDated(fact) && <span>· {whenLabel(fact.value, now)}</span>}
+                {isDated(fact) && <span>· {whenLabel(shownWhen(fact, whereOf(props.file)).day, now)}</span>}
                 {fact.stale && (
                   <span className="filefact-stale" title="The file has changed since you confirmed this">
                     · file changed since

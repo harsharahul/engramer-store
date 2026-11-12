@@ -111,8 +111,8 @@ const LINES: Line[] = [
     what: "an invite",
     subject: "Invitation: Design review",
     raw: ["BEGIN:VCALENDAR", "VERSION:2.0", "BEGIN:VEVENT", "UID:20261111T093000Z-48213@example.com", "DTSTART:20261201T220000Z", "DTEND:20261201T230000Z", "SUMMARY:Design review", "END:VEVENT", "END:VCALENDAR"].join("\r\n"),
-    // The invite's own clock, which it states in UTC.
-    rows: [row("event", "BOOKED", "2026-12-01", "22:00", "Design review")],
+    // The invite states 22:00 UTC: 14:00 on this device, in San Francisco.
+    rows: [row("event", "BOOKED", "2026-12-01", "14:00", "Design review")],
   },
   // What plain words say is shown, and asks.
   {

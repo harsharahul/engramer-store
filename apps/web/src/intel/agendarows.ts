@@ -13,7 +13,7 @@
 import { isEmailRecord } from "../mail/kind";
 import { isPlanDismissed, itemsOf, type PlanFile, type TripPlan } from "./agenda";
 import { lookupAirport, placeForCity } from "./airports";
-import { deviceZone, instantOf, localDay, localTime, zoneOf } from "./instants";
+import { deviceZone, instantOf, localDay, localTime, shownWhen, zoneOf } from "./instants";
 import { legsOf, type DatedEntry, type Leg } from "./legs";
 import { documentLabel } from "./describe";
 import { basisOf, isDated, isTracked, offeredFacts, type Fact } from "./facts";
@@ -300,8 +300,10 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
         ...base(file),
         id: `${file.id}:${fact.id}`,
         factIds: [fact.id],
-        day: fact.value,
-        ...(fact.time ? { time: fact.time } : {}),
+        // The day and time every surface shows this fact at: a meeting's
+        // invite in this device's zone; a booking's, and anything in a
+        // trip's file, as its place printed it.
+        ...shownWhen(fact, { inTrip: file.tags.some(isTripTag) }),
         at: await whenOf(file, fact),
         ...(ask ? { ask: true as const } : {}),
       };

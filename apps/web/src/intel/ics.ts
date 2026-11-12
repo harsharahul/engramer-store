@@ -15,6 +15,7 @@
 
 import type { Fact } from "./facts";
 import { describeFact } from "./describe";
+import { instantOf, statesInstant } from "./instants";
 import type { TripView } from "./tripview";
 
 /** RFC 5545 wants CRLF line endings and escaped text. */
@@ -38,7 +39,10 @@ export interface CalendarEvent {
  * than read from a clock so this stays a pure function.
  */
 export function factToCalendar(fact: Fact, fileName: string, stamp: number): CalendarEvent {
-  const summary = describeFact(fact);
+  // An instant's title states no clock: the calendar shows the time, in
+  // whatever zone it is opened in, and a clock in the title would be this
+  // device's.
+  const summary = statesInstant(fact) && fact.label ? fact.label : describeFact(fact);
   const uid = `${fact.id.replace(/[^A-Za-z0-9:-]/g, "")}@engram-store`;
   const stamped = new Date(stamp).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
 
@@ -50,7 +54,11 @@ export function factToCalendar(fact: Fact, fileName: string, stamp: number): Cal
     `UID:${uid}`,
     `DTSTAMP:${stamped}`,
   ];
-  if (fact.time) {
+  if (statesInstant(fact)) {
+    // An invite that stated its zone names an instant, and is handed on as
+    // that instant: any calendar shows it at the right time.
+    lines.push(`DTSTART:${utc(instantOf(fact.value, fact.time, fact.zone!))}`);
+  } else if (fact.time) {
     // A time the document gave is local to whatever the document describes,
     // so it is written as floating local time rather than pinned to UTC:
     // wrong-zone-but-visible beats confidently shifted by five hours.

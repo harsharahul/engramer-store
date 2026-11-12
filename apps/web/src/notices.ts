@@ -15,6 +15,7 @@ import { describeFact } from "./intel/describe";
 import { duplicatesByDigest } from "./intel/duplicates";
 import type { Fact } from "./intel/facts";
 import { insightsFor, type Severity, type TripWindow } from "./intel/insights";
+import { isTripTag } from "./intel/trips";
 
 export interface NoticeFile {
   id: string;
@@ -67,7 +68,7 @@ export function dueNotices(files: readonly NoticeFile[], now: number, trips?: re
     .filter((entry) => entry.days <= DUE_DAYS)
     .map(({ file, fact, days }) => ({
       key: `fact:${file.id}:${fact.id}`,
-      title: describeFact(fact),
+      title: describeFact(fact, { inTrip: file.tags.some(isTripTag) }),
       body: file.name,
       fileId: file.id,
       severity: days < 0 ? "overdue" : "soon",
