@@ -2,23 +2,23 @@
   "reader": "apple",
   "version": 3,
   "prompt": "7a0b0785",
-  "measuredAt": "2026-11-11",
+  "measuredAt": "2026-11-12",
   "cases": 62,
   "tasks": {
     "dates": {
-      "precision": 0.675,
+      "precision": 0.6923076923076923,
       "recall": 0.5625,
-      "offered": 40,
+      "offered": 39,
       "expected": 48
     },
     "amounts": {
-      "precision": 0.8,
-      "recall": 0.2857142857142857,
+      "precision": 1,
+      "recall": 0.35714285714285715,
       "offered": 5,
       "expected": 14
     },
     "mailKind": {
-      "accuracy": 0.625,
+      "accuracy": 0.6041666666666666,
       "cases": 48,
       "byKind": {
         "booking": {
@@ -34,7 +34,7 @@
           "offered": 5
         },
         "personal": {
-          "precision": 0.2222222222222222,
+          "precision": 0.1111111111111111,
           "offered": 9
         },
         "newsletter": {
