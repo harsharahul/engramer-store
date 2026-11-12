@@ -35,6 +35,13 @@ All notable changes to Engram Store are documented here, following
   for each.
 
 ### Fixed
+- **A calendar invite shows your time.** An invite that states its zone
+  (most are written in UTC) showed that zone's clock, so a 14:00 meeting
+  in San Francisco read 22:00 and a late one landed on the next day. It
+  is now shown in the device's zone on the Timeline, in the file's
+  details, in the bell and in notifications, and an invite added to a
+  calendar keeps its true time. A flight or a hotel keeps the clock of
+  its place.
 - **Days are counted from your own day.** In the evening west of UTC, a
   bill due tomorrow read "today" and one due today read overdue, in the
   bell, in notifications and on each file's dates, because the days were

@@ -9,6 +9,7 @@
 import { daysUntil } from "./dates";
 import { shown } from "./describe";
 import { basisOf, DATED_KINDS, isTracked, type DocumentKind, type Fact } from "./facts";
+import { shownWhen } from "./instants";
 import { isLegEnd, subjectOf } from "./subject";
 import {
   isTripTag,
@@ -66,7 +67,9 @@ export function itemsOf<F extends AgendaFile>(files: readonly F[], now: number, 
       if (!isTrackedDate(fact)) {
         continue;
       }
-      const days = daysUntil(fact.value, now);
+      // Counted to the day the fact is shown on: an invite's, in this
+      // device's zone.
+      const days = daysUntil(shownWhen(fact).day, now);
       if (window.name === "coming-up" && !(days > -COMING_UP.past && days < COMING_UP.ahead)) {
         continue;
       }
@@ -77,7 +80,7 @@ export function itemsOf<F extends AgendaFile>(files: readonly F[], now: number, 
   return items.sort(
     (a, b) =>
       a.days - b.days ||
-      (a.fact.time ?? "").localeCompare(b.fact.time ?? "") ||
+      (shownWhen(a.fact).time ?? "").localeCompare(shownWhen(b.fact).time ?? "") ||
       a.file.id.localeCompare(b.file.id),
   );
 }

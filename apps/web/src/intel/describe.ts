@@ -10,6 +10,7 @@
 
 import { basisOf, type Fact } from "./facts";
 import { daysUntil } from "./dates";
+import { shownWhen } from "./instants";
 
 const DOCUMENT_LABELS: Record<string, string> = {
   passport: "passport",
@@ -97,19 +98,20 @@ export function basisLabel(fact: Fact): string {
  * The quotes are the honesty: the system is repeating, not interpreting.
  */
 export function describeFact(fact: Fact): string {
-  const at = fact.time ? ` at ${fact.time}` : "";
+  // The day and time as every surface shows them: an invite's in this
+  // device's zone, anything else as printed.
+  const when = shownWhen(fact);
+  const at = when.time ? ` at ${when.time}` : "";
   if (fact.kind === "dated" && fact.label) {
-    return `“${fact.label}”: ${shown(fact.value)}${at}`;
+    return `“${fact.label}”: ${shown(when.day)}${at}`;
   }
   // An event's label is its name: a flight, a check-in, a pick-up. Saying
   // "a boarding pass on 4 March" when the label says which flight would
   // discard the most useful words the document had.
   if (fact.kind === "event" && fact.label) {
-    return `${fact.label}, ${shown(fact.value)}${at}`;
+    return `${fact.label}, ${shown(when.day)}${at}`;
   }
-  return `${documentLabel(fact.document)} ${KIND_VERBS[fact.kind] ?? "dated"} ${shown(
-    fact.value,
-  )}${at}`;
+  return `${documentLabel(fact.document)} ${KIND_VERBS[fact.kind] ?? "dated"} ${shown(when.day)}${at}`;
 }
 
 /** How far away, in the words someone would say out loud. */

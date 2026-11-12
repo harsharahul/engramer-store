@@ -16,6 +16,7 @@ import { isDated, isTracked, type FactEvidence } from "../intel/facts";
 import { isTripCurrent, itemsOf, tripsOf } from "../intel/agenda";
 import { basisLabel, describeFact, shown, whenLabel } from "../intel/describe";
 import { insightsFor, type Insight } from "../intel/insights";
+import { shownWhen } from "../intel/instants";
 import { useTripWindows } from "./useTripViews";
 import { duplicatesByDigest } from "../intel/duplicates";
 import { factToCalendar } from "../intel/ics";
@@ -138,9 +139,9 @@ export function LibraryIntel(props: {
             <div key={`${file.id}:${fact.id}`} className={`intel-row intel-row-wrap${days < 0 ? " overdue" : ""}`}>
               <button
                 className="intel-row-open"
-                onClick={() => (props.onOpenDay ? props.onOpenDay(fact.value) : props.onOpen(file.id))}
+                onClick={() => (props.onOpenDay ? props.onOpenDay(shownWhen(fact).day) : props.onOpen(file.id))}
               >
-                <span className="intel-when">{whenLabel(fact.value, now)}</span>
+                <span className="intel-when">{whenLabel(shownWhen(fact).day, now)}</span>
                 <span className="intel-what">{describeFact(fact)}</span>
                 <span className="intel-file">{file.name}</span>
               </button>
@@ -301,8 +302,8 @@ export function FileFacts(props: { file: FileEntry }) {
               </span>
             ) : (
               <span className="filefact-value">
-                {shown(fact.value)}
-                {fact.time ? ` at ${fact.time}` : ""}
+                {shown(shownWhen(fact).day)}
+                {shownWhen(fact).time ? ` at ${shownWhen(fact).time}` : ""}
               </span>
             )}
             <span className="filefact-kind">
@@ -315,7 +316,7 @@ export function FileFacts(props: { file: FileEntry }) {
             </span>
             {isTracked(fact) ? (
               <>
-                {isDated(fact) && <span>· {whenLabel(fact.value, now)}</span>}
+                {isDated(fact) && <span>· {whenLabel(shownWhen(fact).day, now)}</span>}
                 {fact.stale && (
                   <span className="filefact-stale" title="The file has changed since you confirmed this">
                     · file changed since

@@ -116,6 +116,30 @@ export function hourOf(ms: number): number {
   return at.getTime();
 }
 
+/**
+ * Whether a fact's time is an instant and not a clock on some wall. A
+ * calendar invite that states its zone is one: a call at 17:00 in New York
+ * is at 14:00 in San Francisco, and every calendar shows it so. A booking's
+ * time is not: a flight's 18:10 is its airport's, wherever it is read.
+ */
+export function isInstant(fact: Pick<Fact, "source" | "time" | "zone">): boolean {
+  return fact.source === "ics" && fact.time !== undefined && fact.zone !== undefined && fact.zone !== "";
+}
+
+/**
+ * The day and the time a fact is shown at, the one rule for every surface:
+ * the Timeline's row, the details pane, the bell and a notification. An
+ * instant is shown in this device's zone; anything else as its document
+ * printed it.
+ */
+export function shownWhen(fact: Pick<Fact, "value" | "source" | "time" | "zone">): { day: string; time?: string } {
+  if (!isInstant(fact)) {
+    return { day: fact.value, ...(fact.time ? { time: fact.time } : {}) };
+  }
+  const at = instantOf(fact.value, fact.time, fact.zone!);
+  return { day: localDay(at), time: localTime(at) };
+}
+
 /** The date of an instant in a named zone, as an ISO day; the device's when the zone is unknown. */
 export function zonedDay(ms: number, zone: string): string {
   try {

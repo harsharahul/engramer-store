@@ -273,7 +273,10 @@ metadata and index blob like every other derived signal.
   and number; a shop order's total and number; a parcel's delivery window
   and tracking number. Calendar invites (`.ics`, uploaded or attached to
   mail) state their events' times. These are read as stated, at full
-  confidence, with times kept in the zone they were written in. A price is
+  confidence, with times kept in the zone they were written in. A booking's
+  time is shown as its place printed it: a flight's clock is its airport's.
+  An invite's time is an instant, and is shown in the device's own zone on
+  every surface, as a calendar shows it. A price is
   read as written (`1,184.50`, `148,50`, `1.184,00`); one that could be read
   two ways states no price. A cancelled booking or order states nothing.
 - **Labelled dates.** A date is claimed only where the document's own words

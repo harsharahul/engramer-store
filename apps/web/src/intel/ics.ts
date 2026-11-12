@@ -15,6 +15,7 @@
 
 import type { Fact } from "./facts";
 import { describeFact } from "./describe";
+import { instantOf, isInstant } from "./instants";
 import type { TripView } from "./tripview";
 
 /** RFC 5545 wants CRLF line endings and escaped text. */
@@ -50,7 +51,11 @@ export function factToCalendar(fact: Fact, fileName: string, stamp: number): Cal
     `UID:${uid}`,
     `DTSTAMP:${stamped}`,
   ];
-  if (fact.time) {
+  if (isInstant(fact)) {
+    // An invite that stated its zone names an instant, and is handed on as
+    // that instant: any calendar shows it at the right time.
+    lines.push(`DTSTART:${utc(instantOf(fact.value, fact.time, fact.zone!))}`);
+  } else if (fact.time) {
     // A time the document gave is local to whatever the document describes,
     // so it is written as floating local time rather than pinned to UTC:
     // wrong-zone-but-visible beats confidently shifted by five hours.
