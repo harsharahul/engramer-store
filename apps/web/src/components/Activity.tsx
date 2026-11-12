@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
 import { progressLabel, unreadCount } from "../activity";
 import { formatDate } from "../format";
+import { hourOf } from "../intel/instants";
 import { loadSeen, markSeen, noticeKeys, NOTICES_SEEN_EVENT, noticeEvents, unseenCount } from "../notices";
 import { LibraryIntel } from "./FactsPanel";
 import { useTripWindows } from "./useTripViews";
@@ -22,9 +23,9 @@ import { cn } from "@/lib/utils";
  * the notices are computed from the same facts the notifications read.
  */
 
-/** Notices are keyed by the hour so the memo does not churn per render. */
+/** Notices are keyed by the device's hour so the memo does not churn per render. */
 function coarseNow(): number {
-  return Math.floor(Date.now() / 3_600_000) * 3_600_000;
+  return hourOf(Date.now());
 }
 
 function useNotices() {

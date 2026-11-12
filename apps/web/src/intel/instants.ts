@@ -104,6 +104,18 @@ export function localTime(ms: number): string {
   return `${pad(at.getHours())}:${pad(at.getMinutes())}`;
 }
 
+/**
+ * The start of the hour an instant falls in, on the device's own clock. A
+ * moment coarse enough to key a memo by and still inside the device's day:
+ * the start of a UTC hour is the day before for up to 45 minutes after
+ * midnight where the clock is half an hour off UTC.
+ */
+export function hourOf(ms: number): number {
+  const at = new Date(ms);
+  at.setMinutes(0, 0, 0);
+  return at.getTime();
+}
+
 /** The date of an instant in a named zone, as an ISO day; the device's when the zone is unknown. */
 export function zonedDay(ms: number, zone: string): string {
   try {
