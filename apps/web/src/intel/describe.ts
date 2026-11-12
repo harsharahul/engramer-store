@@ -10,7 +10,7 @@
 
 import { basisOf, type Fact } from "./facts";
 import { daysUntil } from "./dates";
-import { shownWhen } from "./instants";
+import { shownWhen, type Shown } from "./instants";
 
 const DOCUMENT_LABELS: Record<string, string> = {
   passport: "passport",
@@ -97,10 +97,11 @@ export function basisLabel(fact: Fact): string {
  * not know, the document's own words: "“Benefit End Date”: 19 October 2027".
  * The quotes are the honesty: the system is repeating, not interpreting.
  */
-export function describeFact(fact: Fact): string {
-  // The day and time as every surface shows them: an invite's in this
-  // device's zone, anything else as printed.
-  const when = shownWhen(fact);
+export function describeFact(fact: Fact, where: Shown = { inTrip: false }): string {
+  // The day and time as every surface shows them: a meeting's invite in
+  // this device's zone, anything else as printed. A caller that holds the
+  // fact's file says whether it is part of a trip.
+  const when = shownWhen(fact, where);
   const at = when.time ? ` at ${when.time}` : "";
   if (fact.kind === "dated" && fact.label) {
     return `“${fact.label}”: ${shown(when.day)}${at}`;

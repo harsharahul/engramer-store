@@ -30,10 +30,22 @@ export function deviceZone(): string {
 // Building a formatter costs far more than using one; a library reads
 // thousands of times in a handful of zones.
 const formatters = new Map<string, Intl.DateTimeFormat>();
+// A name this device cannot read (an invite's "Pacific Standard Time") is
+// refused once, not on every reading of every fact that carries it.
+const unreadable = new Set<string>();
 
 function formatterFor(zone: string): Intl.DateTimeFormat {
+  if (unreadable.has(zone)) {
+    throw new RangeError(`unreadable zone: ${zone}`);
+  }
   let formatter = formatters.get(zone);
   if (!formatter) {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    } catch (error) {
+      unreadable.add(zone);
+      throw error;
+    }
     formatter = new Intl.DateTimeFormat("en-US", {
       timeZone: zone,
       hourCycle: "h23",
@@ -116,14 +128,29 @@ export function hourOf(ms: number): number {
   return at.getTime();
 }
 
-/**
- * Whether a fact's time is an instant and not a clock on some wall. A
- * calendar invite that states its zone is one: a call at 17:00 in New York
- * is at 14:00 in San Francisco, and every calendar shows it so. A booking's
- * time is not: a flight's 18:10 is its airport's, wherever it is read.
- */
-export function isInstant(fact: Pick<Fact, "source" | "time" | "zone">): boolean {
+/** Whether a fact states an instant: a calendar file's time, with the zone it is in. */
+export function statesInstant(fact: Pick<Fact, "source" | "time" | "zone">): boolean {
   return fact.source === "ics" && fact.time !== undefined && fact.zone !== undefined && fact.zone !== "";
+}
+
+/** What a booking's date is: a stay, a rental, a journey. Its clock is its place's. */
+const PLACED: ReadonlySet<string> = new Set(["check-in", "check-out", "pick-up", "drop-off", "depart", "arrive"]);
+
+/** Where a fact is being shown: whether its file is part of a trip. */
+export interface Shown {
+  inTrip: boolean;
+}
+
+/**
+ * Whether a fact is shown as an instant, in this device's zone. A meeting's
+ * invite is: a call at 17:00 in New York is at 14:00 in San Francisco, and
+ * every calendar shows it so. Something that happens in a place is not, and
+ * keeps that place's clock wherever it is read: a booking (a flight's 18:10
+ * is its airport's, whether booking data or a calendar file states it), and
+ * an invite in a trip's file (a tour at 09:00 in Tokyo is on the trip's day).
+ */
+export function isInstant(fact: Fact, where: Shown): boolean {
+  return statesInstant(fact) && !where.inTrip && !PLACED.has(subjectOf(fact)?.role ?? "");
 }
 
 /**
@@ -132,8 +159,8 @@ export function isInstant(fact: Pick<Fact, "source" | "time" | "zone">): boolean
  * instant is shown in this device's zone; anything else as its document
  * printed it.
  */
-export function shownWhen(fact: Pick<Fact, "value" | "source" | "time" | "zone">): { day: string; time?: string } {
-  if (!isInstant(fact)) {
+export function shownWhen(fact: Fact, where: Shown): { day: string; time?: string } {
+  if (!isInstant(fact, where)) {
     return { day: fact.value, ...(fact.time ? { time: fact.time } : {}) };
   }
   const at = instantOf(fact.value, fact.time, fact.zone!);

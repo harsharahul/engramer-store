@@ -300,9 +300,10 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
         ...base(file),
         id: `${file.id}:${fact.id}`,
         factIds: [fact.id],
-        // The day and time every surface shows this fact at: an invite's
-        // in this device's zone, a booking's as its place printed it.
-        ...shownWhen(fact),
+        // The day and time every surface shows this fact at: a meeting's
+        // invite in this device's zone; a booking's, and anything in a
+        // trip's file, as its place printed it.
+        ...shownWhen(fact, { inTrip: file.tags.some(isTripTag) }),
         at: await whenOf(file, fact),
         ...(ask ? { ask: true as const } : {}),
       };

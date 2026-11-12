@@ -58,31 +58,30 @@ export function isTrackedDate(fact: Fact): boolean {
 
 /** The dated rows of the live files in a window, soonest first. */
 export function itemsOf<F extends AgendaFile>(files: readonly F[], now: number, window: AgendaWindow): AgendaItem<F>[] {
-  const items: AgendaItem<F>[] = [];
+  const items: (AgendaItem<F> & { time: string })[] = [];
   for (const file of files) {
     if (file.trashed) {
       continue;
     }
+    const where = { inTrip: file.tags.some(isTripTag) };
     for (const fact of file.facts) {
       if (!isTrackedDate(fact)) {
         continue;
       }
-      // Counted to the day the fact is shown on: an invite's, in this
-      // device's zone.
-      const days = daysUntil(shownWhen(fact).day, now);
+      // Counted to the day the fact is shown on (a meeting's invite, in
+      // this device's zone), worked out once per fact.
+      const shown = shownWhen(fact, where);
+      const days = daysUntil(shown.day, now);
       if (window.name === "coming-up" && !(days > -COMING_UP.past && days < COMING_UP.ahead)) {
         continue;
       }
-      items.push({ file, fact, days });
+      items.push({ file, fact, days, time: shown.time ?? "" });
     }
   }
   // A row without a time is the whole day, so it leads the timed ones.
-  return items.sort(
-    (a, b) =>
-      a.days - b.days ||
-      (shownWhen(a.fact).time ?? "").localeCompare(shownWhen(b.fact).time ?? "") ||
-      a.file.id.localeCompare(b.file.id),
-  );
+  return items
+    .sort((a, b) => a.days - b.days || a.time.localeCompare(b.time) || a.file.id.localeCompare(b.file.id))
+    .map(({ time: _time, ...item }) => item as AgendaItem<F>);
 }
 
 /** Every trip in the live files, by tag; a file in two trips belongs to both. */

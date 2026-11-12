@@ -83,6 +83,15 @@ describe("an invite in the details pane and the bell", () => {
     expect(container.textContent).toContain("tomorrow");
   });
 
+  it("a tour in a trip's file shows the clock of the place it happens in", () => {
+    // 09:00 in Tokyo is 16:00 the day before in San Francisco; on a trip, the place's day is the one that matters.
+    const tour: Fact = { ...call, id: "event:2026-12-10 tsukiji tour", value: "2026-12-10", time: "09:00", zone: "Asia/Tokyo", label: "Tsukiji tour" };
+    const inTrip = { ...invite, facts: [tour], tags: ["trip:tokyo-2026-12"] } as unknown as FileEntry;
+    act(() => root.render(<FileFacts file={inTrip} />));
+    expect(container.textContent).toContain("10 December 2026 at 09:00");
+    expect(container.textContent).not.toContain("16:00");
+  });
+
   it("Coming up names the same time and opens the same day", () => {
     const onOpenDay = vi.fn();
     act(() => root.render(<LibraryIntel files={[invite]} onOpen={() => {}} onOpenDay={onOpenDay} />));
