@@ -13,7 +13,8 @@ import { bcbpFacts } from "./bcbp";
 import { factId, maskTail, mergeFacts, withExactAcceptance, type Fact } from "./facts";
 import { tripChecks } from "./insights";
 import { instantOf } from "./instants";
-import { proposedFacts } from "./modelfacts";
+import { spotCandidates } from "./candidates";
+import { judgedFacts } from "./judge";
 import { momentOf, posterOf } from "./moments";
 import { scanForFacts } from "./scan";
 import { tripSpend, tripViewOf, windowOf } from "./tripview";
@@ -38,9 +39,10 @@ function pass(): Fact[] {
   });
 }
 
-/** The guesthouse email as the on-device model reads it, before or after the owner's yes. */
+/** The guesthouse email as the on-device model judges it, before or after the owner's yes. */
 function guesthouse(confirmed: boolean): Fact[] {
-  return proposedFacts(mail.GUESTHOUSE_READING, mail.GUESTHOUSE_TEXT).map((fact) => (confirmed ? { ...fact, confirmed: true } : fact));
+  const judged = judgedFacts(mail.GUESTHOUSE_JUDGED, spotCandidates(mail.GUESTHOUSE_TEXT), mail.GUESTHOUSE_TEXT, "hotel-booking");
+  return judged.map((fact) => (confirmed ? { ...fact, confirmed: true } : fact));
 }
 
 const file = (id: string, facts: Fact[], email = true): RowFile => ({

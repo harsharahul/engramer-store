@@ -16,7 +16,7 @@ import { documentLabel } from "./describe";
 import { factId, isStated, type DocumentKind, type Fact, type FactKind } from "./facts";
 import { MODEL_CONFIDENCE } from "./modelfacts";
 import { cleanSubject, type Role } from "./subject";
-import { headChunk } from "./summarize";
+import { CHARS_PER_TOKEN, headChunk } from "./window";
 
 export const DATE_ANSWERS = ["event", "check-in", "check-out", "depart", "arrive", "due", "expiry", "issued", "other"] as const;
 export const AMOUNT_ANSWERS = ["total", "other"] as const;
@@ -24,7 +24,6 @@ type DateAnswer = (typeof DATE_ANSWERS)[number];
 
 const WORDS_MAX = 6;
 const WORDS_CHARS = 60;
-const CHARS_PER_TOKEN = 3;
 
 const INSTRUCTIONS = [
   "You label dates and amounts that were already found in a document. You never write or change a date or an amount.",

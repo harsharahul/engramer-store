@@ -113,7 +113,7 @@ import {
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import { assistantAvailableNow, assistantEnabled, lastAssistantState } from "./intel/assistant";
 import { CATEGORIES } from "./intel/categorize";
-import { MIN_MAIL_TEXT, MIN_TEXT, cleanTags, outcomeFor, summarize } from "./intel/summarize";
+import { MIN_MAIL_TEXT, MIN_TEXT, cleanTags, messageOf, outcomeFor, summarize } from "./intel/summarize";
 import { isEmailRecord } from "./mail/kind";
 import { remainingModelReads, spendModelReads } from "./modelbudget";
 import { acceptance, modelScores, trustedKind, trustedMailKind } from "./intel/confidence";
@@ -3316,6 +3316,9 @@ export const useStore = create<StoreState>((set, get) => {
         // summary; its dates are read, exactly, and the stamp says so.
         const askFacts = factsWanted && !(mail && current.facts.some((fact) => fact.accepted === "exact"));
         const state = lastAssistantState();
+        // What an email's headers say goes with it: the day it was sent is
+        // what a date written with no year is counted from.
+        const message = mail ? messageOf(current.mail) : undefined;
         try {
           const reading = await summarize({
             text,
@@ -3326,6 +3329,7 @@ export const useStore = create<StoreState>((set, get) => {
             // reading proposes the document's dates, grounded and offered.
             withFacts: askFacts,
             mail,
+            ...(message ? { message } : {}),
             signal,
           });
           if (readElsewhere()) {

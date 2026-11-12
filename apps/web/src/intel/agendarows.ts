@@ -215,6 +215,14 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
     return stated.map((fact) => ({ currency: fact.unit!, value: fact.value }));
   };
   const amountOf = (file: RowFile) => pricesOf(file)[0];
+  // The amount a bill that still asks is asking for: its amount due, else
+  // the one total it states. Two totals are not guessed between.
+  const askedAmount = (file: RowFile): Fact | undefined => {
+    const open = file.facts.filter((candidate) => candidate.kind === "amount" && candidate.unit && !candidate.dismissed && !isTracked(candidate));
+    const labelled = (label: string) => open.filter((candidate) => candidate.label?.toLowerCase() === label);
+    const totals = labelled("total");
+    return labelled("amount due")[0] ?? (totals.length === 1 ? totals[0] : undefined);
+  };
 
   // The trip each file belongs to, and the trips a date only suggests.
   const planByTag = new Map(ctx.plans.map((plan) => [plan.tag, plan]));
@@ -328,13 +336,7 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
         // A bill that still asks carries the amount it asks for, so one yes
         // answers the date and the amount together. A date already answered
         // does not lend its yes to an amount nobody confirmed.
-        const asked =
-          !price && ask && fact.kind === "due"
-            ? file.facts.find(
-                (candidate) =>
-                  candidate.kind === "amount" && candidate.unit && !candidate.dismissed && !isTracked(candidate) && candidate.label?.toLowerCase() === "amount due",
-              )
-            : undefined;
+        const asked = !price && ask && fact.kind === "due" ? askedAmount(file) : undefined;
         rows.push({
           ...common,
           ...(asked ? { factIds: [fact.id, asked.id], amount: { currency: asked.unit!, value: asked.value } } : {}),

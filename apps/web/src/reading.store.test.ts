@@ -175,6 +175,16 @@ describe("a reading that keeps failing", () => {
     expect(stampOf()).toMatchObject({ outcome: "found" });
   });
 
+  it("a refusal is stamped and the file is not asked again", async () => {
+    library([note()]);
+    model.summarize.mockRejectedValueOnce(new AssistantError("guardrail", "the model declined"));
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toMatchObject({ outcome: "declined", version: READER_VERSION.apple });
+    model.summarize.mockClear();
+    await useStore.getState().processFile("n1");
+    expect(model.summarize).not.toHaveBeenCalled();
+  });
+
   it("a timeout from the model counts as a try", async () => {
     library([note()]);
     model.summarize.mockRejectedValueOnce(new AssistantError("timeout", "the reading took too long"));
@@ -335,6 +345,32 @@ describe("reading mail", () => {
     await useStore.getState().processFile("n1");
     expect(model.summarize).toHaveBeenCalledTimes(1);
     expect(model.summarize.mock.calls[0]![0]).toMatchObject({ mail: true });
+  });
+
+  const headers = (date: number) => ({
+    messageId: "<m1@example.com>",
+    from: "City Water",
+    fromAddress: "billing@example.com",
+    to: [],
+    date,
+    subject: "Your water bill",
+    attachmentIds: [],
+  });
+
+  it("an email's subject, sender and sending day go with the reading", async () => {
+    const sent = Date.UTC(2027, 2, 2, 9);
+    library([email({ mail: headers(sent) })]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize.mock.calls[0]![0]).toMatchObject({
+      message: { subject: "Your water bill", from: "City Water", writtenAt: sent },
+    });
+  });
+
+  it("an email record that carries no headers is read without them", async () => {
+    library([email()]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize).toHaveBeenCalledTimes(1);
+    expect(model.summarize.mock.calls[0]![0]).not.toHaveProperty("message");
   });
 
   it("an email with booking data is summarized but not asked for dates", async () => {

@@ -182,6 +182,28 @@ export interface FoundDate {
 }
 
 /**
+ * Every place in a text where a form's words read as a date. Words that
+ * have the form's shape and are no date ("00 due 30": a number, a word, a
+ * number) must not hide a date that begins inside them, so the search then
+ * moves on by one character, not past them.
+ */
+function readings(form: RegExp, text: string, read: (words: string) => ParsedDate | null): FoundDate[] {
+  const found: FoundDate[] = [];
+  // Its own copy: the reader may use the same form, and a shared one would
+  // carry this search's place into the reader's.
+  const walk = new RegExp(form.source, form.flags);
+  for (let match = walk.exec(text); match; match = walk.exec(text)) {
+    const date = read(match[0]);
+    if (date) {
+      found.push({ at: match.index, end: match.index + match[0].length, date });
+    } else {
+      walk.lastIndex = match.index + 1;
+    }
+  }
+  return found;
+}
+
+/**
  * Every date in a text, in the order they stand, none overlapping another.
  *
  * `parseDate` answers "which date does this label mean" and reads one; this
@@ -193,11 +215,8 @@ export interface FoundDate {
 export function findDates(text: string, context: DateContext = {}): FoundDate[] {
   const dated: (FoundDate & { rank: number })[] = [];
   DATED_FORMS.forEach((form, rank) => {
-    for (const match of text.matchAll(form)) {
-      const date = datedIn(match[0], context.order);
-      if (date) {
-        dated.push({ at: match.index, end: match.index + match[0].length, date, rank });
-      }
+    for (const hit of readings(form, text, (words) => datedIn(words, context.order))) {
+      dated.push({ ...hit, rank });
     }
   });
   // In the order they stand, each kept only when it starts past the last
@@ -216,12 +235,7 @@ export function findDates(text: string, context: DateContext = {}): FoundDate[] 
   }
   const undated: FoundDate[] = [];
   for (const form of [MONTH_DAY, DAY_MONTH]) {
-    for (const match of text.matchAll(form)) {
-      const date = undatedIn(match[0], writtenAt);
-      if (date) {
-        undated.push({ at: match.index, end: match.index + match[0].length, date });
-      }
-    }
+    undated.push(...readings(form, text, (words) => undatedIn(words, writtenAt)));
   }
   // A month and a day inside a date that states its year is that date, and
   // two forms that read the same words are one date.

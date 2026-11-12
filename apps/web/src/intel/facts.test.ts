@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { proposedFacts } from "./modelfacts";
+import { spotCandidates } from "./candidates";
+import { judgedFacts } from "./judge";
 import { reservationFacts } from "./reservation";
 import {
   asFacts,
@@ -439,8 +440,8 @@ describe("readers as they really meet", () => {
       `<script type="application/ld+json">{"@type":"LodgingReservation","checkinTime":"2027-03-04T15:00:00+01:00","reservationFor":{"name":"Casa do Rio"}}</script>`,
     ).map((f) => ({ ...f, accepted: "exact" as const }));
     const text = "Check-in from 14:00 on 4 March 2027 at Casa do Rio.";
-    const model = proposedFacts({ document: "hotel-booking", facts: [{ kind: "event", label: "Check-in", value: "2027-03-04", time: "14:00" }] }, text);
-    expect(model).toHaveLength(1);
+    const model = judgedFacts({ d1: "check-in", d1w: "Casa do Rio" }, spotCandidates(text), text, "hotel-booking");
+    expect(model.map((f) => [f.value, f.time, f.source])).toEqual([["2027-03-04", "14:00", "model"]]);
     const merged = mergeFacts(exact, model);
     expect(merged.filter((f) => f.kind === "event").map((f) => [f.time, f.source])).toEqual([["15:00", "jsonld"]]);
     expect(offeredFacts([{ id: "f", trashed: false, facts: merged }], NOW)).toEqual([]);

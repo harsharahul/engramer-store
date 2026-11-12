@@ -24,8 +24,9 @@ export const READER_RANK: Readonly<Record<string, number>> = { [MODEL_READER]: 2
 
 /** Raised when a reader's prompt or model changes, never for a storage change.
  * Version 2 reads mail: its kind, and emails from 60 characters. Version 3
- * says what each date is: a check-in, a departure, and where. */
-export const READER_VERSION: Readonly<Record<string, number>> = { [MODEL_READER]: 3 };
+ * says what each date is: a check-in, a departure, and where. Version 4
+ * judges the dates and amounts the rules found in the text, and writes none. */
+export const READER_VERSION: Readonly<Record<string, number>> = { [MODEL_READER]: 4 };
 
 /** Tries per file per reader, counted across devices, before a reading is final. */
 export const MAX_TRIES = 3;

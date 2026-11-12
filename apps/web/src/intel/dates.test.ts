@@ -137,6 +137,13 @@ describe("findDates", () => {
     expect(found("Sat 14 Nov 2026, doors 7:00 PM", written)).toEqual([["14 Nov 2026", "2026-11-14"]]);
   });
 
+  it("a number and a word standing before a date do not hide it", () => {
+    // "00 due 30" has the shape of a day, a month and a year, and is none.
+    expect(found("Premium of USD 412.00 due 30 September 2025.")).toEqual([["30 September 2025", "2025-09-30"]]);
+    expect(found("Room 12 and 14 March 2027")).toEqual([["14 March 2027", "2027-03-14"]]);
+    expect(found("Paid 20 for the 5 May 2027 show", { writtenAt: Date.parse("2027-01-01T00:00:00Z") })).toEqual([["5 May 2027", "2027-05-05"]]);
+  });
+
   it("a year alone, a clock, a phone number and a version are not dates", () => {
     expect(found("In 2027 at 10:30 call 555-0142 about release 12.30, room 4.")).toEqual([]);
   });

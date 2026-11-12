@@ -9,6 +9,9 @@ process.env.TZ = "America/Los_Angeles";
  */
 import { describe, expect, it } from "vitest";
 import { rowsOf, type AgendaRow, type RowContext, type RowFile } from "./agendarows";
+import { spotCandidates } from "./candidates";
+import { mergeFacts, type DocumentKind, type Fact } from "./facts";
+import { judgedFacts } from "./judge";
 import { scanForFacts } from "./scan";
 
 const EMAIL = "application/vnd.engram.email+json";
@@ -30,6 +33,10 @@ interface Line {
   subject?: string;
   text?: string;
   raw?: string;
+  /** What the on-device model answered about the dates and amounts found in the text. */
+  judged?: Record<string, string>;
+  /** The kind of document the model named. */
+  document?: DocumentKind;
   /** Each row it must give, in order; none when it states nothing. */
   rows: Row[];
 }
@@ -160,6 +167,37 @@ const LINES: Line[] = [
     text: "Your order has shipped.\nArriving Thursday, November 12",
     rows: [row("parcel", "DELIVERY", "2026-11-12", "", "It is on the way", "", "asks")],
   },
+  // Running words no rule reads: the rules find the date or the amount, and
+  // the on-device model says what it is. Its answer is stated here.
+  {
+    what: "an appointment in running words, judged by the model",
+    subject: "See you soon",
+    text: "Hello Sam, this is a reminder of your dental check-up on 22 July 2027 at 09:30. Please arrive ten minutes early.",
+    judged: { d1: "event", d1w: "dental check-up" },
+    rows: [row("event", "BOOKED", "2027-07-22", "09:30", "Dental check-up", "", "asks")],
+  },
+  {
+    what: "a payment day in running words, judged by the model",
+    subject: "Invoice 2291",
+    text: "Thank you for your custom. Invoice 2291 is payable by 10 April 2027.",
+    document: "invoice",
+    judged: { d1: "due" },
+    rows: [row("due", "DUE", "2027-04-10", "", "Invoice due", "", "asks")],
+  },
+  {
+    what: "a bill's total in another sentence, judged by the model",
+    subject: "Your March invoice",
+    text: "Your March invoice is ready and is payable by 10 April 2027. The total for the month comes to EUR 240.00.",
+    document: "invoice",
+    judged: { d1: "due", a1: "total" },
+    rows: [row("due", "DUE", "2027-04-10", "", "Invoice due", "EUR 240.00", "asks")],
+  },
+  {
+    what: "the same words with no answer from the model",
+    subject: "See you soon",
+    text: "Hello Sam, this is a reminder of your dental check-up on 22 July 2027 at 09:30. Please arrive ten minutes early.",
+    rows: [],
+  },
   // What states nothing shows nothing.
   { what: "the same words in a stored file, where no year is known", text: "Your order has shipped.\nArriving Thursday, November 12", rows: [] },
   {
@@ -187,13 +225,20 @@ describe("what the Timeline shows for everyday documents", () => {
         ...(line.raw !== undefined ? { raw: line.raw } : {}),
         ...(line.subject && !ics ? { writtenAt: WRITTEN } : {}),
       });
+      // The model's reading joins the rules' the way the reading pass joins it.
+      const context = line.subject ? { writtenAt: WRITTEN } : undefined;
+      const read = line.judged
+        ? judgedFacts(line.judged, spotCandidates(line.text ?? "", context), line.text ?? "", line.document ?? "other").map(
+            (fact): Fact => ({ ...fact, reader: "apple" }),
+          )
+        : [];
       const file: RowFile = {
         id: "f",
         name,
         mime,
         mtime: WRITTEN,
         tags: [],
-        facts,
+        facts: mergeFacts(facts, read),
         trashed: false,
         ...(line.subject ? { mail: { subject: line.subject, from: "Sender", date: WRITTEN } } : {}),
       };
