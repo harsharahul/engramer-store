@@ -35,8 +35,6 @@ All notable changes to Engram Store are documented here, following
   for each.
 
 ### Fixed
-- **A calendar invite shows your time.** An invite stated in UTC showed
-  its UTC clock; it now shows the day and time of the device.
 - **Dates written with a short month are kept.** "14 Nov 2026" and
   "November 12th, 2026" were read and then dropped by the check against
   the text.

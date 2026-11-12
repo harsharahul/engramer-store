@@ -12,11 +12,10 @@ import { rowsOf, type AgendaRow, type RowContext, type RowFile } from "./agendar
 import { scanForFacts } from "./scan";
 
 const EMAIL = "application/vnd.engram.email+json";
-// Tue 8 Sep 2026, 08:40 in San Francisco.
-const NOW = Date.UTC(2026, 8, 8, 15, 40);
-// Every message below was written on Mon 9 Nov 2026, 12:00 UTC, and stored on 1 Sep 2026 at 09:00 local.
+// Mon 9 Nov 2026, 08:40 in San Francisco.
+const NOW = Date.UTC(2026, 10, 9, 16, 40);
+// Every message below was written, and every file stored, that morning at 04:00.
 const WRITTEN = Date.UTC(2026, 10, 9, 12);
-const STORED = new Date("2026-09-01T09:00:00").getTime();
 const none: RowContext = { plans: [], dismissed: new Set(), excluded: new Set(), assembling: true };
 
 const ld = (...nodes: unknown[]) => `<html><script type="application/ld+json">${JSON.stringify(nodes)}</script></html>`;
@@ -57,7 +56,7 @@ const hotel = (extra: Record<string, unknown> = {}) => ({
   checkoutTime: "2026-11-16T11:00:00+00:00",
   ...extra,
 });
-const parcel = { "@type": "ParcelDelivery", trackingNumber: "TRK99887766", expectedArrivalFrom: "2026-09-09T10:00:00-07:00", expectedArrivalUntil: "2026-09-09T14:00:00-07:00" };
+const parcel = { "@type": "ParcelDelivery", trackingNumber: "TRK99887766", expectedArrivalFrom: "2026-11-12T10:00:00-08:00", expectedArrivalUntil: "2026-11-12T14:00:00-08:00" };
 const order = (extra: Record<string, unknown> = {}) => ({ "@type": "Order", orderNumber: "EX-20391", price: "148.00", priceCurrency: "USD", ...extra });
 
 const LINES: Line[] = [
@@ -66,7 +65,7 @@ const LINES: Line[] = [
     what: "a booked flight with its price",
     subject: "Your booking is confirmed",
     raw: ld(flight({ totalPrice: "1184.00", priceCurrency: "USD" })),
-    rows: [row("bill", "BILL", "2026-09-01", "09:00", "Your booking is confirmed", "USD 1184.00"), row("flight", "FLIGHT", "2026-11-12", "18:10", "San Francisco to Lisbon")],
+    rows: [row("bill", "BILL", "2026-11-09", "04:00","Your booking is confirmed", "USD 1184.00"), row("flight", "FLIGHT", "2026-11-12", "18:10", "San Francisco to Lisbon")],
   },
   {
     what: "a train",
@@ -77,19 +76,19 @@ const LINES: Line[] = [
         trainNumber: "IC 512",
         departureStation: { name: "Central" },
         arrivalStation: { name: "Seaside" },
-        departureTime: "2026-10-01T07:12:00+02:00",
-        arrivalTime: "2026-10-01T09:48:00+02:00",
+        departureTime: "2026-11-20T07:12:00+01:00",
+        arrivalTime: "2026-11-20T09:48:00+01:00",
       },
     }),
-    rows: [row("flight", "TRAIN", "2026-10-01", "07:12", "Central to Seaside")],
+    rows: [row("flight", "TRAIN", "2026-11-20", "07:12", "Central to Seaside")],
   },
   {
     what: "a package: a flight in dollars and a hotel in euros",
     subject: "Your trip is booked",
     raw: ld(flight({ totalPrice: "1184.00", priceCurrency: "USD" }), hotel({ totalPrice: "652,00", priceCurrency: "EUR" })),
     rows: [
-      row("bill", "BILL", "2026-09-01", "09:00", "Your trip is booked", "USD 1184.00"),
-      row("bill", "BILL", "2026-09-01", "09:00", "Your trip is booked", "EUR 652.00"),
+      row("bill", "BILL", "2026-11-09", "04:00","Your trip is booked", "USD 1184.00"),
+      row("bill", "BILL", "2026-11-09", "04:00","Your trip is booked", "EUR 652.00"),
       row("flight", "FLIGHT", "2026-11-12", "18:10", "San Francisco to Lisbon"),
       row("stay", "STAY", "2026-11-13", "15:00", "Check in · Casa do Rio"),
       row("stay", "STAY", "2026-11-16", "11:00", "Check out · Casa do Rio"),
@@ -99,20 +98,21 @@ const LINES: Line[] = [
     what: "a shop order with its delivery",
     subject: "Your order has shipped",
     raw: ld(order({ orderDelivery: parcel })),
-    rows: [row("bill", "BILL", "2026-09-01", "09:00", "Your order has shipped", "USD 148.00"), row("parcel", "DELIVERY", "2026-09-09", "10:00", "Your order has shipped")],
+    rows: [row("bill", "BILL", "2026-11-09", "04:00","Your order has shipped", "USD 148.00"), row("parcel", "DELIVERY", "2026-11-12", "10:00", "Your order has shipped")],
   },
   { what: "a cancelled order", subject: "Your order was cancelled", raw: ld(order({ orderStatus: "http://schema.org/OrderCancelled", orderDelivery: parcel })), rows: [] },
   {
     what: "an invoice with its due date",
     subject: "Your invoice",
-    raw: ld({ "@type": "Invoice", paymentDueDate: "2026-09-20", totalPaymentDue: { "@type": "PriceSpecification", price: "160.84", priceCurrency: "USD" } }),
-    rows: [row("due", "DUE", "2026-09-20", "", "Payment due", "USD 160.84")],
+    raw: ld({ "@type": "Invoice", paymentDueDate: "2026-11-20", totalPaymentDue: { "@type": "PriceSpecification", price: "160.84", priceCurrency: "USD" } }),
+    rows: [row("due", "DUE", "2026-11-20", "", "Payment due", "USD 160.84")],
   },
   {
     what: "an invite",
     subject: "Invitation: Design review",
     raw: ["BEGIN:VCALENDAR", "VERSION:2.0", "BEGIN:VEVENT", "UID:20261111T093000Z-48213@example.com", "DTSTART:20261201T220000Z", "DTEND:20261201T230000Z", "SUMMARY:Design review", "END:VEVENT", "END:VCALENDAR"].join("\r\n"),
-    rows: [row("event", "BOOKED", "2026-12-01", "14:00", "Design review")],
+    // The invite's own clock, which it states in UTC.
+    rows: [row("event", "BOOKED", "2026-12-01", "22:00", "Design review")],
   },
   // What plain words say is shown, and asks.
   {
@@ -191,11 +191,11 @@ describe("what the Timeline shows for everyday documents", () => {
         id: "f",
         name,
         mime,
-        mtime: STORED,
+        mtime: WRITTEN,
         tags: [],
         facts,
         trashed: false,
-        ...(line.subject ? { mail: { subject: line.subject, from: "Sender", date: STORED } } : {}),
+        ...(line.subject ? { mail: { subject: line.subject, from: "Sender", date: WRITTEN } } : {}),
       };
       const rows = await rowsOf([file], none, NOW);
       expect(rows.map(shown)).toEqual(line.rows);

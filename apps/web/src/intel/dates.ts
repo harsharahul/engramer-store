@@ -65,7 +65,8 @@ const MONTH_FIRST_NAMED = /\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+
 // it can be checked against the day.
 const WEEKDAY = "(?:(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\\.?,?\\s+)?";
 const MONTH_DAY = new RegExp(`\\b${WEEKDAY}([A-Z][a-z]{2,8})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?![\\d/:-]|\\.\\d)`, "g");
-const DAY_MONTH = new RegExp(`\\b${WEEKDAY}(\\d{1,2})(?:st|nd|rd|th)?\\s+([A-Z][a-z]{2,8})\\b`, "g");
+// The last day of a range ("5-7 June") is not the day it starts.
+const DAY_MONTH = new RegExp(`(?<!\\d[-–/.])\\b${WEEKDAY}(\\d{1,2})(?:st|nd|rd|th)?\\s+([A-Z][a-z]{2,8})\\b`, "g");
 const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 // Year-first numeric only reads one way: nobody writes year, day, month.
 const YEAR_FIRST_NUMERIC = /\b(\d{4})[/.](\d{1,2})[/.](\d{1,2})\b/;

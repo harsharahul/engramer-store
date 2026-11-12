@@ -273,9 +273,7 @@ metadata and index blob like every other derived signal.
   and number; a shop order's total and number; a parcel's delivery window
   and tracking number. Calendar invites (`.ics`, uploaded or attached to
   mail) state their events' times. These are read as stated, at full
-  confidence, with times kept in the zone they were written in; on the
-  Timeline a time stated in UTC, as most invites are, is shown as the
-  device's own day and time. A price is
+  confidence, with times kept in the zone they were written in. A price is
   read as written (`1,184.50`, `148,50`, `1.184,00`); one that could be read
   two ways states no price. A cancelled booking or order states nothing.
 - **Labelled dates.** A date is claimed only where the document's own words
@@ -296,10 +294,16 @@ metadata and index blob like every other derived signal.
   - the amount a bill asks for, when one amount stands on a line that says
     it is due.
 
-  A label claims the date on its own line before any line below it. In a
+  A label claims the date on its own line before any line below it. The
+  labels a form prints ("Expiry date", "Due date", "Check-in") also read
+  the value on the line below; the words of running text ("reply by",
+  "arriving", "appointment") claim from their own line only, and `EXP`
+  only a date that follows it at once, so an order day, a street name or
+  the header of a forwarded message on the next line is never theirs. In a
   message, a date with no year ("Thursday, November 12") is the next such
   day after the message was written, and is marked as having an assumed
-  year; in any other file a date with no year is not read.
+  year; an expiry never takes one, and in any other file a date with no
+  year is not read.
 - **Amounts and reference numbers**, at low confidence, from any document,
   including kinds no rule anticipated.
 - **The assistant's proposals**, at the lowest confidence of all, on the Mac

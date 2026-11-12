@@ -21,9 +21,18 @@ const WINDOW = 60;
 const PARAGRAPH_BREAK = /\n[ \t]*\n/;
 
 const EXPIRY_LABELS =
-  /\b(?:date\s+of\s+expiry|expir(?:es|y|ation)(?:\s+date)?|valid\s+(?:until|through|thru|to)|renewal\s+date|good\s+through|coverage\s+ends|ends\s+on)\b/gi;
+  /\b(?:date\s+of\s+expiry|expir(?:es|y|ation)(?:\s+date)?|valid\s+(?:until|through|to)|renewal\s+date|good\s+through)\b/gi;
+/** Cover and a lease end; a sale ends too, and is nobody's document. */
+const ENDS_LABELS = /\b(?:valid\s+thru|(?:coverage|lease)\s+ends(?:\s+on)?)\b/gi;
 /** EXP as licences print it: the bare upper-case token, never the start of a word or a code. */
 const EXP_TOKEN = /(?<![A-Za-z0-9])EXP\.?(?![A-Za-z0-9])/g;
+/**
+ * The date EXP states: the one that follows it at once. A receipt prints
+ * "EXP **" and "/" and then the day of the purchase, and that day is not the
+ * card's.
+ */
+const DATE_AT_ONCE =
+  /^\s*[:.]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}(?![/.\-\d])|\d{1,2}\s+[A-Za-z]{3,9}\.?\s+\d{4}|[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4})/;
 const DUE_LABELS =
   /\b(?:payment\s+due|amount\s+due\s+by|due\s+date|due\s+on|pay\s+by)\b/gi;
 /** A date to act by. The document's own words say what the act is, so they are kept as the label. */
@@ -52,14 +61,25 @@ const sentenceCase = (words: string) => {
   return plain.charAt(0).toUpperCase() + plain.slice(1);
 };
 
+/**
+ * How far a label reaches for its date. A form prints a label and its value
+ * on two lines, so the labels a form uses read on below their own line.
+ * The words of running text ("reply by", "arriving", "appointment") stand
+ * in a sentence with their date, and what is on the next line (an order
+ * day, a street called 5 June Avenue, the header of a forwarded message) is
+ * another matter: those claim from their own line only.
+ */
+type Reach = "below" | "line" | "at-once";
+
 /** Order matters within a kind: the first label to claim a date keeps it. */
-const KINDS: { kind: Fact["kind"]; labels: RegExp; label?: (words: string) => string }[] = [
-  { kind: "expiry", labels: EXPIRY_LABELS },
-  { kind: "expiry", labels: EXP_TOKEN },
-  { kind: "due", labels: DUE_LABELS },
-  { kind: "due", labels: ACT_BY_LABELS, label: sentenceCase },
-  { kind: "due", labels: RENEWS_LABELS, label: () => "Renews" },
-  { kind: "issued", labels: ISSUED_LABELS },
+const KINDS: { kind: Fact["kind"]; labels: RegExp; reach: Reach; label?: (words: string) => string }[] = [
+  { kind: "expiry", labels: EXPIRY_LABELS, reach: "below" },
+  { kind: "expiry", labels: ENDS_LABELS, reach: "line" },
+  { kind: "expiry", labels: EXP_TOKEN, reach: "at-once" },
+  { kind: "due", labels: DUE_LABELS, reach: "below" },
+  { kind: "due", labels: ACT_BY_LABELS, reach: "line", label: sentenceCase },
+  { kind: "due", labels: RENEWS_LABELS, reach: "line", label: () => "Renews" },
+  { kind: "issued", labels: ISSUED_LABELS, reach: "below" },
 ];
 
 /**
@@ -69,6 +89,7 @@ const KINDS: { kind: Fact["kind"]; labels: RegExp; label?: (words: string) => st
  */
 const EVENTS: {
   labels: RegExp;
+  reach: Exclude<Reach, "at-once">;
   label?: (words: string) => string;
   role?: Role;
   document?: DocumentKind;
@@ -77,11 +98,14 @@ const EVENTS: {
   /** Its departures and arrivals may belong to a flight the line names. */
   travel?: boolean;
 }[] = [
-  { labels: EVENT_LABELS, travel: true },
-  { labels: START_LABELS, label: sentenceCase, role: "start", lookBack: true },
-  { labels: DELIVERY_LABELS, label: () => "Delivery expected by", role: "by", document: "delivery" },
-  { labels: ARRIVING_LABELS, label: () => "Delivery expected by", role: "by", document: "delivery", only: "delivery" },
+  { labels: EVENT_LABELS, reach: "below", travel: true },
+  { labels: START_LABELS, reach: "line", label: sentenceCase, role: "start", lookBack: true },
+  { labels: DELIVERY_LABELS, reach: "line", label: () => "Delivery expected by", role: "by", document: "delivery" },
+  { labels: ARRIVING_LABELS, reach: "line", label: () => "Delivery expected by", role: "by", document: "delivery", only: "delivery" },
 ];
+
+/** "Book your appointment", "to schedule an appointment": an invitation, and nobody's appointment yet. */
+const INVITED = /\b(?:book|schedule|make|request|arrange|need)\s+(?:an?|your|the)\s+$/i;
 
 /**
  * Ordered, because several match the same document: an insurance certificate
@@ -130,7 +154,12 @@ function windowAfter(text: string, from: number): string {
  * next label, and so does that line's clock. Only a label with no date on
  * its own line reads on, for a value printed below it or wrapped over lines.
  */
-function claimed(window: string, writtenAt?: number): { date: ParsedDate; time: string | null } | null {
+function claimed(window: string, reach: Reach, writtenAt?: number): { date: ParsedDate; time: string | null } | null {
+  if (reach === "at-once") {
+    const at = DATE_AT_ONCE.exec(window);
+    const date = at ? parseDate(at[1]!) : null;
+    return date ? { date, time: null } : null;
+  }
   const [own = "", next = ""] = window.split("\n");
   const onLine = parseDate(own);
   if (onLine) {
@@ -145,22 +174,31 @@ function claimed(window: string, writtenAt?: number): { date: ParsedDate; time: 
       return { date: undated, time: parseTime(own) };
     }
   }
-  const below = parseDate(window, writtenAt === undefined ? undefined : { writtenAt });
+  if (reach === "line") {
+    return null;
+  }
+  // A form's label reads on below itself, and only for a date that states
+  // its year: a month and a day on another line could be anything.
+  const below = parseDate(window);
   return below ? { date: below, time: parseTime(window) } : null;
 }
 
 // A flight's number as a line states it: after the word Flight ("Flight UA
-// 123", "flight no. U2 45"), or standing right before the label ("UA 123
-// departs"). The code is in capitals, and AM and PM before a label are a
-// clock's.
-const FLIGHT_NAMED = /\b(?:[Ff]light|FLIGHT|[Ff]lt\.?)\s*(?:[Nn]umber|[Nn]o\.?|#)?\s*([A-Z][A-Z0-9]|\d[A-Z])\s?(\d{1,4})\b(?!:)/;
-const FLIGHT_BEFORE = /\b(?!AM\b|PM\b)([A-Z][A-Z0-9]|\d[A-Z])\s?(\d{1,4})\s+$/;
+// 123", "flight no. U2 45"), or two capitals and a number standing right
+// before the label ("UA 123 departs"). A number followed by a colon or by
+// AM or PM is a clock ("FLIGHT AT 2 PM"), and a gate (B12) is not two
+// capitals.
+const FLIGHT_NAMED = /\b(?:[Ff]light|FLIGHT|[Ff]lt\.?)\s*(?:[Nn]umber|[Nn]o\.?|#)?\s*([A-Z][A-Z0-9]|\d[A-Z])\s?(\d{1,4})\b(?!:)(?!\s*[AaPp]\.?[Mm]\b)/g;
+const FLIGHT_BEFORE = /\b(?!AM\b|PM\b)([A-Z]{2})\s?(\d{1,4})\s+$/;
+/** A line about a train, a bus or a boat names no flight, whatever code stands on it. */
+const OTHER_TRAVEL = /\b(?:train|rail|bus|coach|ferry|boat)\b/i;
 /** The airport a departure or an arrival names: three capitals right after the word. */
 const AIRPORT_NEXT = /^\s*(?::|from|at|in|to)?\s*([A-Z]{3})\b/;
 
 /**
  * The flight a departure or arrival label belongs to, when its own line
  * states one: the airline's code and number, and the airport right after
+ * the label. Of several flights on a line, it is the last one named before
  * the label. With no flight number on the line, capitals after the label
  * are only a word, and no airport is named.
  */
@@ -168,7 +206,12 @@ function flightOn(text: string, at: number, length: number): { carrier: string; 
   const line = text.lastIndexOf("\n", at - 1) + 1;
   const stop = text.indexOf("\n", at);
   const end = stop === -1 ? text.length : stop;
-  const stated = FLIGHT_NAMED.exec(text.slice(line, end)) ?? FLIGHT_BEFORE.exec(text.slice(line, at));
+  const whole = text.slice(line, end);
+  if (OTHER_TRAVEL.test(whole)) {
+    return undefined;
+  }
+  const named = [...whole.matchAll(FLIGHT_NAMED)];
+  const stated = named.filter((match) => match.index < at - line).pop() ?? named[0] ?? FLIGHT_BEFORE.exec(text.slice(line, at));
   const code = AIRPORT_NEXT.exec(text.slice(at + length, end));
   if (!stated || !code) {
     return undefined;
@@ -176,8 +219,6 @@ function flightOn(text: string, at: number, length: number): { carrier: string; 
   const service = serviceOf(`${stated[1]} ${stated[2]}`);
   return service.carrier && service.number ? { carrier: service.carrier, number: service.number, code: code[1]!, line } : undefined;
 }
-
-const dayAfter = (iso: string) => new Date(Date.parse(`${iso}T00:00:00Z`) + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
 /**
  * The same reach backwards, never past the start of the label's own line
@@ -204,10 +245,12 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
   });
   const document = guessDocumentKind(text);
   const byId = new Map<string, Fact>();
-  for (const { kind, labels, label } of KINDS) {
+  for (const { kind, labels, reach, label } of KINDS) {
     labels.lastIndex = 0;
     for (let match = labels.exec(text); match; match = labels.exec(text)) {
-      const parsed = claimed(windowAfter(text, match.index + match[0].length), writtenAt)?.date;
+      // A document prints the year it expires in; an offer "valid thru
+      // December 31" does not, and is nobody's document.
+      const parsed = claimed(windowAfter(text, match.index + match[0].length), reach, kind === "expiry" ? undefined : writtenAt)?.date;
       if (!parsed) {
         continue;
       }
@@ -238,6 +281,9 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
     }
     words.labels.lastIndex = 0;
     for (let match = words.labels.exec(text); match; match = words.labels.exec(text)) {
+      if (words.lookBack && INVITED.test(text.slice(Math.max(0, match.index - 30), match.index))) {
+        continue;
+      }
       const after = windowAfter(text, match.index + match[0].length);
       const own = after.split("\n", 1)[0]!;
       const end = !words.travel ? undefined : /^depart/i.test(match[0]) ? "depart" : /^arriv/i.test(match[0]) ? "arrive" : undefined;
@@ -247,15 +293,14 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
       let time: string | null;
       if (flight && end === "arrive" && !parseDate(own, writtenAt === undefined ? undefined : { writtenAt })) {
         // An arrival that names no day of its own lands on its departure's
-        // day when its clock is the later one, or the day after when the
-        // line says so. Otherwise its day is not known, and the lines
-        // below are another matter: nothing is stated.
+        // day when its clock is the later one. Otherwise its day is not
+        // printed (a "+1" is a hint, not a date), and the lines below are
+        // another matter: nothing is stated.
         const left = departed.get(flown);
         time = parseTime(own);
-        const nextDay = /\+\s?1\b|\bnext\s+day\b/i.test(own);
-        parsed = !left || !time ? null : nextDay ? { ...left.date, iso: dayAfter(left.date.iso) } : left.time && time > left.time ? left.date : null;
+        parsed = left && time && left.time && time > left.time ? left.date : null;
       } else {
-        const ahead = claimed(after, writtenAt);
+        const ahead = claimed(after, words.reach, writtenAt);
         // A poster prints the date first: with none ahead, the label's own
         // line is read backwards, and the clock is whichever side has one.
         const before = !ahead && words.lookBack ? windowBefore(text, match.index) : "";
@@ -321,6 +366,8 @@ const FIELD_LINE = /^\s*([^:\n]{2,48}?)\s*:\s*(.+)$/;
  * already known, and nothing in it.
  */
 const REFUSED_LABELS = /\b(birth|born|dob\b|print|generat|creat|download|scan)|^(?:sent|received)$/i;
+/** A line of a message's header, as a forward or a quoted reply prints it. */
+const MAIL_HEADER = /^\s*(?:from|to|cc|bcc|subject|date|sent|received|reply-to)\s*:/i;
 
 /**
  * Every labelled date in the document, with the label attached verbatim.
@@ -335,7 +382,12 @@ const REFUSED_LABELS = /\b(birth|born|dob\b|print|generat|creat|download|scan)|^
 export function structuralDatedFacts(text: string, claimed: ReadonlySet<string>): Fact[] {
   const document = guessDocumentKind(text);
   const byId = new Map<string, Fact>();
-  for (const line of text.split(/\r?\n/)) {
+  const lines = text.split(/\r?\n/);
+  // The lines of a forwarded or quoted message's header date the mail, not
+  // anything in it. A Date line counts as one only beside another of them:
+  // a ticket prints "Date:" too.
+  const header = lines.map((line) => MAIL_HEADER.test(line));
+  for (const [index, line] of lines.entries()) {
     const field = FIELD_LINE.exec(line);
     // A colon between two digits is a clock's ("from 15:00 on 8 April"),
     // and the words before it are a sentence, not a label.
@@ -345,6 +397,9 @@ export function structuralDatedFacts(text: string, claimed: ReadonlySet<string>)
     }
     const label = field[1]!.replace(/\s+/g, " ").trim();
     if (!/[A-Za-z]/.test(label) || REFUSED_LABELS.test(label)) {
+      continue;
+    }
+    if (header[index] && (header[index - 1] || header[index + 1])) {
       continue;
     }
     const parsed = parseDate(field[2]!.slice(0, WINDOW));
@@ -387,18 +442,18 @@ const CURRENCY_CODES = new Set([
 const SYMBOL_AMOUNT = /([$£€₹¥])\s?([\d,]+\.\d{2})/g;
 const CODE_AMOUNT = /\b([A-Z]{3})\s?([\d,]+\.\d{2})\b/g;
 
-/** Every amount a piece of text states with its currency, once per value. */
-function moneyIn(text: string): { value: string; unit: string }[] {
-  const found = new Map<string, string>();
+/** Every amount above zero a piece of text states with its currency, once per value, and where it stands. */
+function moneyIn(text: string): { value: string; unit: string; at: number }[] {
+  const found = new Map<string, { unit: string; at: number }>();
   for (const match of text.matchAll(SYMBOL_AMOUNT)) {
-    found.set(match[2]!.replace(/,/g, ""), SYMBOL_CURRENCY[match[1]!] ?? match[1]!);
+    found.set(match[2]!.replace(/,/g, ""), { unit: SYMBOL_CURRENCY[match[1]!] ?? match[1]!, at: match.index });
   }
   for (const match of text.matchAll(CODE_AMOUNT)) {
     if (CURRENCY_CODES.has(match[1]!)) {
-      found.set(match[2]!.replace(/,/g, ""), match[1]!);
+      found.set(match[2]!.replace(/,/g, ""), { unit: match[1]!, at: match.index });
     }
   }
-  return [...found].map(([value, unit]) => ({ value, unit }));
+  return [...found].filter(([value]) => Number(value) > 0).map(([value, { unit, at }]) => ({ value, unit, at }));
 }
 
 const AMOUNT_DUE_LINE = /\b(?:(?:amount|total|balance)\s+due|amount\s+payable|(?:is|are)\s+due)\b/i;
@@ -408,17 +463,30 @@ const MINIMUM = /\bmin(?:imum|\.)?\s/i;
 /**
  * The one amount a bill asks for: alone with its currency on a line that
  * says it is due. A line with two amounts, two lines that disagree, or a
- * minimum beside a balance name no single amount, and then none is stated.
+ * minimum anywhere beside a balance name no single amount, and then none is
+ * stated. Nothing due (0.00) is not an amount due.
  */
 function amountDue(text: string, document: DocumentKind): Fact | undefined {
+  const lines = text.split(/\r?\n/);
+  if (lines.some((line) => MINIMUM.test(line) && moneyIn(line).length > 0)) {
+    return undefined;
+  }
   const stated = new Map<string, string>();
-  for (const line of text.split(/\r?\n/)) {
-    if (!AMOUNT_DUE_LINE.test(line)) {
+  for (const line of lines) {
+    const says = AMOUNT_DUE_LINE.exec(line);
+    const onLine = says ? moneyIn(line) : [];
+    // A line that only says something is due names no amount, and is not a
+    // second answer.
+    if (!says || onLine.length === 0) {
       continue;
     }
-    const onLine = moneyIn(line);
-    if (onLine.length !== 1 || MINIMUM.test(line)) {
+    if (onLine.length > 1) {
       return undefined;
+    }
+    // "Rent of USD 2,400.00 is due": the amount stands before the words. A
+    // prize named after them ("Your feedback is due! Win $50.00") is not it.
+    if (/^(?:is|are)\s/i.test(says[0]) && onLine[0]!.at > says.index) {
+      continue;
     }
     stated.set(onLine[0]!.value, onLine[0]!.unit);
   }

@@ -1437,7 +1437,7 @@ export const useStore = create<StoreState>((set, get) => {
       name: file.name,
       mime: file.mime,
       text,
-      ...(file.mail ? { writtenAt: file.mail.date } : {}),
+      ...(file.mail && file.mail.date > 0 ? { writtenAt: file.mail.date } : {}),
     }).catch(() => null);
     if (!found) {
       return null;
@@ -3858,7 +3858,7 @@ export const useStore = create<StoreState>((set, get) => {
             name: file.name,
             mime: file.mime,
             text,
-            ...(file.mail ? { writtenAt: file.mail.date } : {}),
+            ...(file.mail && file.mail.date > 0 ? { writtenAt: file.mail.date } : {}),
           });
           if (scanned.facts.length === 0) {
             opts?.onOutcome?.(file.id, true);

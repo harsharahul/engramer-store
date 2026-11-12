@@ -94,6 +94,18 @@ describe("groundFacts", () => {
     }
   });
 
+  it("a month and a year ground a date only where the document names no day", () => {
+    const proposed = (value: string) => fact({ kind: "due", value, source: "model", confidence: 0.45 });
+    // The document names another day of that month: the proposal is a wrong day.
+    expect(groundFacts([proposed("2026-11-03")], "Your appointment is on 14 Nov 2026.")).toHaveLength(0);
+    expect(groundFacts([proposed("2027-04-15")], "Your room is ready from 15:00 on 8 April 2027.")).toHaveLength(0);
+    expect(groundFacts([proposed("2027-04-15")], "Ready on April 8, 2027.")).toHaveLength(0);
+    // A card or a permit that prints only its month and year.
+    expect(groundFacts([proposed("2026-11-30")], "Card valid thru Nov 2026")).toHaveLength(1);
+    expect(groundFacts([proposed("2029-11-01")], "Expires November 2029")).toHaveLength(1);
+    expect(groundFacts([proposed("2029-11-01")], "Expires: November, 2029")).toHaveLength(1);
+  });
+
   it("does not find a whole hour in the tail of another clock", () => {
     const stay = fact({ kind: "event", time: "15:00" });
     expect(groundFacts([stay], "Departs 12 March 2029 at 12:03pm")).toHaveLength(0);

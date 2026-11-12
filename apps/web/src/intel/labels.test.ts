@@ -255,6 +255,81 @@ describe("more ways a deadline is written", () => {
   });
 });
 
+describe("how far the newer words reach", () => {
+  const WRITTEN = Date.parse("2026-11-09T12:00:00Z");
+  const read = (text: string) => labelledFacts(text, WRITTEN).map((f) => [f.label ?? f.kind, f.value, f.time]);
+
+  it("a date before its label on the same line wins over any line below", () => {
+    expect(read("Sat 14 Nov 2026, doors 7:00 PM\nReturns accepted to 10 Nov 2026")).toEqual([["Doors", "2026-11-14", "19:00"]]);
+    expect(read("12 November 2026 - appointment with Dr. Lee at 3pm\nBooked on 2 November 2026")).toEqual([["Appointment", "2026-11-12", "15:00"]]);
+  });
+
+  it("a newer word with no date on its own line claims nothing from the lines below", () => {
+    for (const text of [
+      "Your order has shipped.\nArriving Thursday\nOrder placed Nov 9",
+      "Your order has shipped.\nArriving Thursday\nShip to: Sam Lee, 5 June Avenue",
+      "Your order has shipped.\nArriving soon\nShip to: Sam Lee, 12 March Road",
+      "The deadline is Friday.\nPosted Monday, November 9, 2026 10:15 AM",
+      "Sounds good about the appointment\nOn Tue, Nov 10, 2026 at 3:04 PM Sam wrote:",
+      "Re: Appointment request\nWritten November 9, 2026 at 10:15:30 AM PST",
+      "Please reply by\nFriday, November 13",
+      "Your plan renews on\n2026-12-01",
+    ]) {
+      expect(read(text), text).toEqual([]);
+    }
+  });
+
+  it("a date with no year is claimed only from the label's own line, whatever the label", () => {
+    expect(read("Check-out\nThursday, November 12")).toEqual([]);
+    expect(read("Check-out: Thursday, November 12")).toEqual([["Check-out", "2026-11-12", undefined]]);
+  });
+
+  it("an expiry never takes a date with no year: documents print the year, offers do not", () => {
+    expect(read("Offer valid thru December 31.")).toEqual([]);
+    expect(read("Expires November 30")).toEqual([]);
+  });
+
+  it("EXP reads only a date that follows it at once", () => {
+    for (const text of [
+      "VISA XXXXXXXXXXXX4321\nEXP: XX/XX\nDATE: 11/09/26 TIME: 14:03",
+      "VISA ****4321 EXP **/** AUTH 012345 11/09/2026",
+      "Card ending 4321 EXP 08/29\nStatement date 2026-11-09",
+      "5 yrs EXP\nStart date 2026-12-01",
+      "EXP 08/29 11/09/2026",
+    ]) {
+      expect(labelledFacts(text).filter((f) => f.kind === "expiry"), text).toEqual([]);
+    }
+    expect(labelledFacts("EXP: 15 Aug 2029")[0]).toMatchObject({ kind: "expiry", value: "2029-08-15" });
+    expect(labelledFacts("EXP. 2029-08-15")[0]).toMatchObject({ kind: "expiry", value: "2029-08-15" });
+  });
+
+  it("an invitation to book an appointment is not an appointment", () => {
+    for (const text of ["Book your appointment online: Tuesday, December 1 or later.", "Book an appointment before 31 Dec 2026 and save.", "To schedule an appointment, call before 5 January 2027."]) {
+      expect(read(text), text).toEqual([]);
+    }
+  });
+
+  it("a sale that ends is not a document that expires; a lease and cover are", () => {
+    expect(read("Our biggest sale ends on November 30, 2026. Shop now!")).toEqual([]);
+    expect(read("Your lease ends on 31 March 2028.")).toEqual([["expiry", "2028-03-31", undefined]]);
+    expect(read("Limited warranty. Coverage ends 20 March 2028.")).toEqual([["expiry", "2028-03-20", undefined]]);
+  });
+
+  it("a shop's newsletter, read as mail, asks about its one real event and nothing else", () => {
+    const news = [
+      "Our winter sale ends on Monday, November 30. Shop now!",
+      "Live music: Saturday, December 5, doors 7pm.",
+      "Book your appointment online: Tuesday, December 1 or later.",
+      "Offer valid thru December 31.",
+    ].join("\n");
+    expect(read(news)).toEqual([["Doors", "2026-12-05", "19:00"]]);
+  });
+
+  it("a range of days is not its last day", () => {
+    expect(read("Appointment: 5-7 June")).toEqual([]);
+  });
+});
+
 describe("a date before its label", () => {
   const WRITTEN = Date.parse("2026-11-09T12:00:00Z");
   const labels = (text: string) => labelledFacts(text, WRITTEN).map((f) => [f.label, f.value, f.time]);
@@ -277,6 +352,9 @@ describe("a field line", () => {
   it("is not the header of a forwarded or quoted message", () => {
     expect(fields("-----Original Message-----\nFrom: Pat Lee\nSent: Monday, November 9, 2026 10:15 AM\nTo: Team\nSubject: Schedule")).toEqual([]);
     expect(fields("Received: 9 November 2026")).toEqual([]);
+    expect(fields("From: Pat Lee\nDate: November 9, 2026 at 10:15:30 AM PST\nSubject: Re: Appointment request")).toEqual([]);
+    // A ticket's own Date line, with no mail header beside it, is still read.
+    expect(fields("Harbor Hall\nDate: 14 November 2026\nVenue: Main stage")).toEqual([["Date", "2026-11-14"]]);
   });
 
   it("is a label, a colon and a value", () => {
@@ -330,13 +408,23 @@ describe("a flight written in words", () => {
     ]);
   });
 
-  it("an arrival with no date and a clock before its departure's is not given the departure's day", () => {
+  it("an arrival with no date and a clock before its departure's is not given a day", () => {
     expect(flown("Flight UA 900 departs SFO 10:10 PM on March 4, 2027, arrives JFK 6:45 AM").map((f) => f[2])).toEqual(["Flight UA 900 departs SFO"]);
-    // Unless the line says it is the next day.
-    expect(flown("Flight UA 900 departs SFO 10:10 PM on March 4, 2027, arrives JFK 6:45 AM +1").map((f) => [f[0], f[1]])).toEqual([
-      ["2027-03-04", "22:10"],
-      ["2027-03-05", "06:45"],
+    // A day the line does not print is not stated, whatever "+1" suggests.
+    expect(flown("Flight UA 900 departs SFO 10:10 PM on March 4, 2027, arrives JFK 6:45 AM +1").map((f) => f[2])).toEqual(["Flight UA 900 departs SFO"]);
+  });
+
+  it("each flight on a line keeps its own number", () => {
+    expect(flown("Flight UA 123 departs SFO 10:15 AM on March 4, 2027; Flight UA 456 departs JFK 8:00 PM on March 4, 2027").map((f) => f[2])).toEqual([
+      "Flight UA 123 departs SFO",
+      "Flight UA 456 departs JFK",
     ]);
+  });
+
+  it("a clock, a gate and a train are not a flight number", () => {
+    for (const text of ["FLIGHT AT 2 PM departs SFO on March 4, 2027", "Gate B12 departs SFO 10:15 AM on March 4, 2027", "Train IC 512 departs AMS 10:15 on March 4, 2027"]) {
+      expect(labelledFacts(text).map((f) => f.subject), text).toEqual([undefined]);
+    }
   });
 });
 
@@ -394,6 +482,17 @@ describe("the amount a bill asks for", () => {
   it("two amounts on the line, or two lines that disagree, name none", () => {
     expect(due("Total due $84.20 (includes a late fee of $5.00)")).toEqual([]);
     expect(due("Total due $84.20\nBalance due $100.00")).toEqual([]);
+  });
+
+  it("a minimum on its own line beside a balance still names no single amount", () => {
+    expect(due("Minimum due $35.00\nBalance due $1,240.18\nPayment due date: November 20, 2026")).toEqual([]);
+    expect(due("Min. payment $35.00\nTotal due $1,240.18")).toEqual([]);
+  });
+
+  it("nothing due, a prize, and a line that only says something is due are not the bill's amount", () => {
+    expect(due("Amount due $0.00\nDue date: November 20, 2026")).toEqual([]);
+    expect(due("Your feedback is due! Win a $50.00 gift card.")).toEqual([]);
+    expect(due("Amount due $84.20\nPayment is due by November 20, 2026")[0]).toMatchObject({ value: "84.20", label: "Amount due" });
   });
 
   it("an amount with no line that says it is due is left to the harvest", () => {

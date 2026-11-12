@@ -436,7 +436,10 @@ export function groundFacts(facts: Fact[], source: string): Fact[] {
     if (EXACT_SOURCES.has(fact.source)) {
       return true;
     }
-    if (!(fact.assumedYear ? statesMonthDay(fact.value, source) : renderings(fact).some((form) => haystack.includes(normalize(form))))) {
+    const stated = fact.assumedYear
+      ? statesMonthDay(fact.value, source)
+      : renderings(fact).some((form) => haystack.includes(normalize(form))) || statesMonthYear(fact.value, source);
+    if (!stated) {
       return false;
     }
     // A time has to be found too. A fact carrying the right date and a time
@@ -453,6 +456,23 @@ export function groundFacts(facts: Fact[], source: string): Fact[] {
 /** The ways a month is written: its name, its first three letters, and Sept. */
 function monthForms(name: string): string[] {
   return [...new Set([name, name.slice(0, 3), ...(name === "september" ? ["sept"] : [])])];
+}
+
+/**
+ * Whether the document prints this date's month and year with no day, as
+ * cards and some permits print an expiry ("Valid thru Nov 2026"). Looser
+ * than a full date on purpose: refusing a real month-and-year expiry would
+ * be the worse failure. But only where no day stands before the month: in
+ * "14 Nov 2026" the document names its day, and any other day of that
+ * month is a wrong reading, not a loose one.
+ */
+function statesMonthYear(isoDate: string, source: string): boolean {
+  const parts = /^(\d{4})-(\d{2})-\d{2}$/.exec(isoDate);
+  if (!parts) {
+    return false;
+  }
+  const month = `(?:${monthForms(MONTHS[Number(parts[2]) - 1]!).join("|")})`;
+  return new RegExp(`(?<!\\d(?:st|nd|rd|th)?[\\s.,-]{1,3})\\b${month}\\.?,?\\s+${parts[1]}\\b`, "i").test(source);
 }
 
 /**
@@ -546,10 +566,6 @@ function renderings(fact: Fact): string[] {
       // The year-first written form some documents use.
       `${year} ${name} ${d}`,
       `${year} ${name} ${day}`,
-      // A month and a year with no day: how cards and some permits print an
-      // expiry. Looser than the rest on purpose, because refusing to ground a
-      // real month-and-year expiry would be the worse failure.
-      `${name} ${year}`,
     ]),
   ];
 }
