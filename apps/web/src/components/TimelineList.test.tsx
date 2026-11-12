@@ -392,4 +392,14 @@ describe("flights on the list during a trip", () => {
     expect(container.querySelector('[data-id="out"] .tln-inair')!.textContent).toBe("In the air · lands in 8 h 05 m");
     expect((container.querySelector('[data-id="out"] .tln-plane') as HTMLElement).style.left).toBe("32%");
   });
+
+  it("a train under way reads TRAIN and says when it arrives", () => {
+    const now = Date.UTC(2026, 10, 13, 6, 0);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    const flown = outbound();
+    render({ now, rows: [{ ...flown, tag: "TRAIN", flight: { ...flown.flight!, leg: { ...flown.flight!.leg, mode: "train" } } }] });
+    expect(container.querySelector('[data-id="out"] .tln-tag')!.textContent).toBe("TRAIN");
+    expect(container.querySelector('[data-id="out"] .tln-inair')!.textContent).toBe("On the way · arrives in 8 h 05 m");
+  });
 });

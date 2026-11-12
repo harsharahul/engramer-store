@@ -272,13 +272,15 @@ export function tripSpend(
   rows: readonly AgendaRow[],
 ): { sums: Money[]; count: number; bills: AgendaRow[]; waiting?: AgendaRow } {
   const members = new Set(view.memberIds);
-  // A ticket's price shows on each of its days; it was paid once.
+  // A ticket's price shows on each of its days; it was paid once. A file
+  // that states two prices (a package's flights and its hotel) paid both.
   const paid = new Set<string>();
   const spent = rows.filter((row) => {
     if (row.ask || !row.amount || (row.kind !== "bill" && row.kind !== "event") || !row.fileIds.some((id) => members.has(id))) {
       return false;
     }
-    return paid.has(row.fileIds[0]!) ? false : (paid.add(row.fileIds[0]!), true);
+    const payment = `${row.fileIds[0]!}|${row.amount.currency}|${row.amount.value}`;
+    return paid.has(payment) ? false : (paid.add(payment), true);
   });
   const waiting = rows.find(
     (row) => row.kind === "bill" && row.trip?.tag === view.tag && row.trip.evidence === "weak" && row.day >= view.start && row.day <= view.end,

@@ -252,6 +252,72 @@ describe("invoices and deliveries", () => {
     expect(facts.find((f) => f.kind === "identifier")).toMatchObject({ value: "TRK99887766", label: "Tracking number" });
   });
 
+  const order = (extra: Record<string, unknown> = {}) => ({
+    "@type": "Order",
+    orderNumber: "EX-20391",
+    price: "148.00",
+    priceCurrency: "USD",
+    ...extra,
+  });
+  const parcel = (extra: Record<string, unknown> = {}) => ({
+    "@type": "ParcelDelivery",
+    trackingNumber: "TRK99887766",
+    expectedArrivalFrom: "2027-04-02T09:00:00-07:00",
+    expectedArrivalUntil: "2027-04-02T17:00:00-07:00",
+    ...extra,
+  });
+
+  it("an order gives its total, its number and its delivery", () => {
+    const facts = structuredDataFacts(ld(order({ orderDelivery: parcel() })));
+    expect(facts.find((f) => f.kind === "amount")).toMatchObject({ value: "148.00", unit: "USD", label: "Order total", source: "jsonld", confidence: 1, document: "delivery" });
+    expect(facts.filter((f) => f.kind === "identifier").map((f) => [f.label, f.value])).toEqual([
+      ["Order number", "EX-20391"],
+      ["Tracking number", "TRK99887766"],
+    ]);
+    expect(facts.filter((f) => f.kind === "event").map((f) => [f.label, f.time, f.document])).toEqual([
+      ["Delivery window opens", "09:00", "delivery"],
+      ["Delivery expected by", "17:00", "delivery"],
+    ]);
+  });
+
+  it("an order with several parcels reads each delivery", () => {
+    const facts = structuredDataFacts(
+      ld(order({ orderDelivery: [parcel(), parcel({ trackingNumber: "TRK11223344", expectedArrivalFrom: "2027-04-05T09:00:00-07:00", expectedArrivalUntil: "2027-04-05T17:00:00-07:00" })] })),
+    );
+    expect(facts.filter((f) => f.kind === "event").map((f) => f.value)).toEqual(["2027-04-02", "2027-04-02", "2027-04-05", "2027-04-05"]);
+  });
+
+  it("an order with no delivery is a receipt", () => {
+    const facts = structuredDataFacts(ld(order()));
+    expect(facts.find((f) => f.kind === "amount")).toMatchObject({ value: "148.00", document: "invoice", label: "Order total" });
+    expect(facts.some((f) => f.kind === "event")).toBe(false);
+  });
+
+  it("a cancelled or returned order states nothing: no bill, no parcel on its way", () => {
+    for (const status of ["http://schema.org/OrderCancelled", "https://schema.org/OrderReturned", "OrderCancelled"]) {
+      expect(structuredDataFacts(ld(order({ orderStatus: status, orderDelivery: parcel() }))), status).toEqual([]);
+    }
+    // A delivery that names a cancelled order is not on its way either.
+    const cancelled = { "@type": "Order", orderNumber: "EX-20391", orderStatus: "http://schema.org/OrderCancelled" };
+    expect(structuredDataFacts(ld(parcel({ partOfOrder: cancelled })))).toEqual([]);
+    // An order still on its way keeps everything.
+    expect(structuredDataFacts(ld(order({ orderStatus: "http://schema.org/OrderInTransit", orderDelivery: parcel() }))).length).toBeGreaterThan(2);
+  });
+
+  it("an order priced only by its one offer takes that price, and one with no price states no amount", () => {
+    const offered = structuredDataFacts(ld(order({ price: undefined, priceCurrency: undefined, acceptedOffer: { "@type": "Offer", price: "59.90", priceCurrency: "EUR" } })));
+    expect(offered.find((f) => f.kind === "amount")).toMatchObject({ value: "59.90", unit: "EUR" });
+    expect(structuredDataFacts(ld(order({ price: undefined }))).some((f) => f.kind === "amount")).toBe(false);
+  });
+
+  it("an order and a delivery that names it state each fact once", () => {
+    const raw = `<html><script type="application/ld+json">${JSON.stringify([order({ orderDelivery: parcel() }), parcel({ partOfOrder: { "@type": "Order", orderNumber: "EX-20391" } })])}</script></html>`;
+    const facts = structuredDataFacts(raw);
+    expect(facts.filter((f) => f.kind === "event")).toHaveLength(2);
+    expect(facts.filter((f) => f.kind === "identifier")).toHaveLength(2);
+    expect(facts.filter((f) => f.kind === "amount")).toHaveLength(1);
+  });
+
   it("refuses a due date that does not exist", () => {
     const facts = structuredDataFacts(ld({ "@type": "Invoice", paymentDueDate: "2027-02-31" }));
     expect(facts.filter((f) => f.kind === "due")).toEqual([]);
@@ -401,5 +467,70 @@ describe("cancellations", () => {
     expect(cancelled).toContain("ReservationCancelled");
     expect(reservationFacts(cancelled)).toEqual([]);
     expect(reservationFacts(FLIGHT_HTML.replace('"reservationNumber": "ZK8Q2P",', '"reservationNumber": "ZK8Q2P", "reservationStatus": "ReservationConfirmed",'))).toHaveLength(3);
+  });
+});
+
+describe("what a booking cost", () => {
+  const flight = (extra: Record<string, unknown> = {}, number = "214", day = "2027-03-04") => ({
+    "@type": "FlightReservation",
+    reservationNumber: "ZK8Q2P",
+    reservationFor: {
+      "@type": "Flight",
+      flightNumber: number,
+      airline: { iataCode: "AQ" },
+      departureAirport: { iataCode: "SFO" },
+      arrivalAirport: { iataCode: "JFK" },
+      departureTime: `${day}T09:40:00-08:00`,
+      arrivalTime: `${day}T18:05:00-05:00`,
+    },
+    ...extra,
+  });
+  const all = (nodes: unknown[]) => `<html><script type="application/ld+json">${JSON.stringify(nodes)}</script></html>`;
+  const amounts = (raw: string) => reservationFacts(raw).filter((f) => f.kind === "amount");
+
+  it("a booking's price is read as its total", () => {
+    expect(amounts(ld(flight({ totalPrice: "1184.00", priceCurrency: "USD" })))).toEqual([
+      expect.objectContaining({ value: "1184.00", unit: "USD", label: "Total", source: "jsonld", confidence: 1, document: "itinerary" }),
+    ]);
+  });
+
+  it("a price written as a number, with thousands commas, or nested with its currency reads the same", () => {
+    expect(amounts(ld(flight({ totalPrice: 1184, priceCurrency: "usd" })))[0]).toMatchObject({ value: "1184.00", unit: "USD" });
+    expect(amounts(ld(flight({ totalPrice: "1,184.50", priceCurrency: "USD" })))[0]).toMatchObject({ value: "1184.50" });
+    expect(amounts(ld(flight({ totalPrice: { "@type": "PriceSpecification", price: "652.00", priceCurrency: "EUR" } })))[0]).toMatchObject({ value: "652.00", unit: "EUR" });
+    expect(amounts(ld(flight({ price: "99.00", priceCurrency: "GBP" })))[0]).toMatchObject({ value: "99.00", unit: "GBP" });
+  });
+
+  it("a price repeated on each leg counts once, and two totals are both kept", () => {
+    const priced = { totalPrice: "1184.00", priceCurrency: "USD" };
+    expect(amounts(all([flight(priced), flight(priced, "215", "2027-03-09")]))).toHaveLength(1);
+    const two = amounts(all([flight({ totalPrice: "592.00", priceCurrency: "USD" }), flight({ totalPrice: "610.00", priceCurrency: "USD" }, "215", "2027-03-09")]));
+    expect(two.map((f) => f.value)).toEqual(["592.00", "610.00"]);
+  });
+
+  it("a price with a decimal comma is read as written, never a hundred times larger", () => {
+    const eur = (totalPrice: unknown) => amounts(ld(flight({ totalPrice, priceCurrency: "EUR" }))).map((f) => f.value);
+    expect(eur("148,50")).toEqual(["148.50"]);
+    expect(eur("1.184,00")).toEqual(["1184.00"]);
+    expect(eur("1,18")).toEqual(["1.18"]);
+    expect(eur("1,184")).toEqual(["1184.00"]);
+    expect(eur("12,345,678.9")).toEqual(["12345678.90"]);
+  });
+
+  it("a price that could be read two ways, or is not a plain number, states no amount", () => {
+    const eur = (totalPrice: unknown) => amounts(ld(flight({ totalPrice, priceCurrency: "EUR" })));
+    for (const unclear of ["1.184", "148.505", "€148.00", "148.00 EUR", "1 184,00", "1e3", "-5.00", ""]) {
+      expect(eur(unclear), unclear).toEqual([]);
+    }
+  });
+
+  it("a price with no currency, or of zero, is not an amount", () => {
+    expect(amounts(ld(flight({ totalPrice: "1184.00" })))).toEqual([]);
+    expect(amounts(ld(flight({ totalPrice: "0", priceCurrency: "USD" })))).toEqual([]);
+    expect(amounts(ld(flight({ totalPrice: "free", priceCurrency: "USD" })))).toEqual([]);
+  });
+
+  it("a cancelled booking states no price", () => {
+    expect(amounts(ld(flight({ totalPrice: "1184.00", priceCurrency: "USD", reservationStatus: "ReservationCancelled" })))).toEqual([]);
   });
 });

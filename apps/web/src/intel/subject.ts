@@ -25,7 +25,9 @@ export type Role =
   | "end"
   | "opens"
   | "by"
-  | "reference";
+  | "reference"
+  /** The number one order or one invoice goes by: it names a purchase, not a booking. */
+  | "purchase";
 
 export type Mode = "flight" | "train" | "bus" | "boat";
 
@@ -64,6 +66,7 @@ const ROLES: ReadonlySet<string> = new Set<Role>([
   "opens",
   "by",
   "reference",
+  "purchase",
 ]);
 const MODES: ReadonlySet<string> = new Set<Mode>(["flight", "train", "bus", "boat"]);
 

@@ -16,7 +16,7 @@ import { instantOf } from "./instants";
 import { proposedFacts } from "./modelfacts";
 import { momentOf, posterOf } from "./moments";
 import { scanForFacts } from "./scan";
-import { tripViewOf, windowOf } from "./tripview";
+import { tripSpend, tripViewOf, windowOf } from "./tripview";
 
 const EMAIL = "application/vnd.engram.email+json";
 const NOW = Date.UTC(2026, 9, 26, 17); // Mon 26 Oct 2026, 10:00 in San Francisco
@@ -126,8 +126,33 @@ describe("one trip, from raw mail to the poster's words", () => {
 
   async function view(files: RowFile[]) {
     const { plan, rows, files: tagged } = await timeline(files);
-    return { view: await tripViewOf(tripsOf(tagged).find((trip) => trip.tag === plan.tag)!, rows, { plan }), files: tagged };
+    return { view: await tripViewOf(tripsOf(tagged).find((trip) => trip.tag === plan.tag)!, rows, { plan }), files: tagged, rows };
   }
+
+  it("what the flights and the stay cost is the trip's spend", async () => {
+    // Prices stated in the booking data: no receipt needed, each in its own currency.
+    const { view: lisbon, rows } = await view([file("flights", await booking(mail.FLIGHTS_PRICED)), file("hotel", await booking(mail.HOTEL_PRICED))]);
+    const spend = tripSpend(lisbon, rows);
+    expect([...spend.sums].sort((a, b) => a.currency.localeCompare(b.currency))).toEqual([
+      { currency: "EUR", value: "652.00" },
+      { currency: "USD", value: "1184.00" },
+    ]);
+    expect(spend.count).toBe(2);
+  });
+
+  it("one package email spends its flights and its hotel, and a later copy of it adds nothing", async () => {
+    const packaged = file("package", await booking(mail.PACKAGE_PRICED));
+    const changed = { ...file("changed", await booking(mail.PACKAGE_PRICED)), mail: { subject: "Your schedule has changed", from: "Sender", date: Date.UTC(2026, 9, 20) } };
+    for (const files of [[packaged], [packaged, changed]]) {
+      const { view: lisbon, rows } = await view(files);
+      const spend = tripSpend(lisbon, rows);
+      expect([...spend.sums].sort((a, b) => a.currency.localeCompare(b.currency))).toEqual([
+        { currency: "EUR", value: "652.00" },
+        { currency: "USD", value: "1184.00" },
+      ]);
+      expect(spend.count).toBe(2);
+    }
+  });
 
   it("the booked trip's poster reads right at every moment", async () => {
     const { view: lisbon } = await view([file("booking", await booking(mail.BOOKING_WITH_HOTEL)), file("pass", pass(), false)]);

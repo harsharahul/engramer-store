@@ -546,6 +546,8 @@ function Hotel(props: {
 
   if (props.mode === "land") {
     const arr = landing?.arr;
+    // Only a flight lands; a train, a bus or a boat arrives.
+    const byAir = !landing || landing.mode === "flight";
     const checkIn = stay?.checkIn;
     if (!arr && !checkIn) {
       return null;
@@ -558,7 +560,7 @@ function Hotel(props: {
           : arr.time
       : undefined;
     return (
-      <Card title="When you land" className="tln-card-stay">
+      <Card title={byAir ? "When you land" : "When you arrive"} className="tln-card-stay">
         {stay?.name && <div className="tln-title">{stay.name}</div>}
         {stay?.address && <div className="tln-muted">{stay.address}</div>}
         <div className="tln-kv tln-kv-gap">
@@ -573,7 +575,7 @@ function Hotel(props: {
           )}
           {landingLine && (
             <>
-              <span>Landing</span>
+              <span>{byAir ? "Landing" : "Arrival"}</span>
               <div>{landingLine}</div>
             </>
           )}
@@ -652,9 +654,11 @@ function InTheAir(props: { moment: Moment; onInspect(fileId: string): void }) {
   }
   const { leg, progress } = flying;
   const lands = leg.arr!.code ? (view.cities[leg.arr!.code] ?? leg.to) : leg.to;
+  // Only a flight is in the air and lands in another city's time.
+  const flight = leg.mode === "flight";
   return (
     <Card
-      title="In the air"
+      title={flight ? "In the air" : "On the way"}
       aside={
         <button type="button" className="tln-link" onClick={() => props.onInspect(leg.fileId)}>
           {named(leg)}
@@ -666,8 +670,8 @@ function InTheAir(props: { moment: Moment; onInspect(fileId: string): void }) {
         <div className="tln-prog-fill" style={{ width: `${Math.round(progress * 100)}%` }} />
       </div>
       <div className="tln-muted">
-        Lands {leg.arr!.time ? `${leg.arr!.time} ` : ""}
-        {lands} time · in <Until at={leg.arr!.at} />
+        {flight ? `Lands ${leg.arr!.time ? `${leg.arr!.time} ` : ""}${lands} time` : `Arrives ${leg.arr!.time ?? `at ${leg.to}`}`} · in{" "}
+        <Until at={leg.arr!.at} />
       </div>
       <div className="tln-faint">Works offline. Everything on this screen is on this device.</div>
     </Card>

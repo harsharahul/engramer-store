@@ -23,8 +23,8 @@ const SCRIPT_BLOCK = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S
 const RESERVATION_TYPE =
   /(?:^|[^A-Za-z])(?:Flight|Lodging|RentalCar|Train|Bus|Boat|Event|FoodEstablishment)Reservation$/;
 
-/** Structured data a bill or a shipping notice carries about itself. */
-const BILLING_TYPE = /(?:^|[^A-Za-z])(?:Invoice|ParcelDelivery)$/;
+/** Structured data a bill, a shop order or a shipping notice carries about itself. */
+const BILLING_TYPE = /(?:^|[^A-Za-z])(?:Invoice|ParcelDelivery|Order)$/;
 
 type Node = Record<string, unknown>;
 
@@ -268,15 +268,99 @@ function factsOf(res: Node, reservation: number): ReadFact[] {
       confidence: 1,
     });
   }
+
+  // What the booking cost, when it says so with a currency. A total is often
+  // repeated on every leg; the same value is one fact (firstOfEach).
+  const priced = record(res["totalPrice"]);
+  const total = priced
+    ? moneyOf(priced["price"] ?? priced["value"], priced["priceCurrency"] ?? priced["currency"])
+    : moneyOf(res["totalPrice"] ?? res["price"], res["priceCurrency"]);
+  if (total) {
+    facts.push({
+      id: factId("amount", total.value),
+      kind: "amount",
+      document,
+      value: total.value,
+      unit: total.unit,
+      label: "Total",
+      source: "jsonld",
+      confidence: 1,
+    });
+  }
   return facts;
+}
+
+/**
+ * A price as written, read one way or not at all. A number is itself. Text is
+ * a plain decimal ("1184.5"), one with thousands commas ("1,184.50"), or the
+ * form with a decimal comma ("148,50", "1.184,00"). Text that could be read
+ * two ways ("1.184") or carries anything else states no price: a wrong price
+ * counts without a yes, and that is worse than none.
+ */
+function priceOf(price: unknown): number | undefined {
+  if (typeof price === "number") {
+    return price;
+  }
+  const text = typeof price === "string" ? price.trim() : "";
+  if (/^\d+(?:\.\d{1,2})?$/.test(text)) {
+    return Number(text);
+  }
+  if (/^\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?$/.test(text)) {
+    return Number(text.replace(/,/g, ""));
+  }
+  if (/^\d+,\d{2}$/.test(text)) {
+    return Number(text.replace(",", "."));
+  }
+  if (/^\d{1,3}(?:\.\d{3})+,\d{2}$/.test(text)) {
+    return Number(text.replace(/\./g, "").replace(",", "."));
+  }
+  return undefined;
+}
+
+/** A price and its currency as an amount's value and unit; nothing when either is missing or the price is not above zero. */
+function moneyOf(price: unknown, currency: unknown): { value: string; unit: string } | undefined {
+  const amount = priceOf(price);
+  const unit = str(currency);
+  return amount !== undefined && Number.isFinite(amount) && amount > 0 && unit ? { value: amount.toFixed(2), unit: unit.toUpperCase() } : undefined;
+}
+
+/** An order that was cancelled or sent back: nothing was bought and nothing is on its way. */
+function undone(order: Node | undefined): boolean {
+  return /Order(?:Cancelled|Returned)$/.test(str(order?.["orderStatus"]) ?? "");
 }
 
 /** A bill's due date, amount and number, or a parcel's delivery window. */
 function billingFactsOf(node: Node): Fact[] {
   const type = (str(node["@type"]) ?? "").replace(/^.*[:/]/, "");
   const invoice = type === "Invoice";
-  const document: DocumentKind = invoice ? "invoice" : "delivery";
+  const order = type === "Order";
+  if (undone(order ? node : record(node["partOfOrder"]))) {
+    return [];
+  }
+  // The parcels this node states: its own window, or each delivery an order carries.
+  const carried = node["orderDelivery"];
+  const parcels: Node[] = order
+    ? (Array.isArray(carried) ? carried : [carried]).map(record).filter((parcel): parcel is Node => parcel !== undefined)
+    : invoice
+      ? []
+      : [node];
+  // An order with nothing on its way is a receipt.
+  const document: DocumentKind = parcels.length > 0 ? "delivery" : "invoice";
   const facts: Fact[] = [];
+  const amount = (total: { value: string; unit: string } | undefined, label: string) => {
+    if (total) {
+      facts.push({
+        id: factId("amount", total.value),
+        kind: "amount",
+        document,
+        value: total.value,
+        unit: total.unit,
+        label,
+        source: "jsonld",
+        confidence: 1,
+      });
+    }
+  };
   const dated = (kind: "due" | "event", stamp: unknown, label: string, role?: "opens" | "by") => {
     const at = when(stamp);
     if (!at) {
@@ -295,7 +379,9 @@ function billingFactsOf(node: Node): Fact[] {
       confidence: 1,
     });
   };
-  const identifier = (value: string | undefined, label: string) => {
+  // An order's or an invoice's own number names one purchase; an account or
+  // a parcel's tracking number does not, and says so by saying nothing.
+  const identifier = (value: string | undefined, label: string, role?: "purchase") => {
     if (value) {
       facts.push({
         id: factId("identifier", value),
@@ -303,6 +389,7 @@ function billingFactsOf(node: Node): Fact[] {
         document,
         value,
         label,
+        ...(role ? { subject: { role } } : {}),
         source: "jsonld",
         confidence: 1,
       });
@@ -310,28 +397,22 @@ function billingFactsOf(node: Node): Fact[] {
   };
   if (invoice) {
     dated("due", node["paymentDueDate"] ?? node["paymentDue"], "Payment due");
-    const total = record(node["totalPaymentDue"]);
-    const price = Number(String(total?.["price"] ?? total?.["value"] ?? "").replace(/,/g, ""));
-    const currency = str(total?.["priceCurrency"]) ?? str(total?.["currency"]);
-    if (Number.isFinite(price) && price > 0 && currency) {
-      const value = price.toFixed(2);
-      facts.push({
-        id: factId("amount", value),
-        kind: "amount",
-        document,
-        value,
-        unit: currency.toUpperCase(),
-        label: "Amount due",
-        source: "jsonld",
-        confidence: 1,
-      });
-    }
-    identifier(str(node["confirmationNumber"]) ?? str(node["identifier"]), "Invoice number");
+    const due = record(node["totalPaymentDue"]);
+    amount(moneyOf(due?.["price"] ?? due?.["value"], due?.["priceCurrency"] ?? due?.["currency"]), "Amount due");
+    identifier(str(node["confirmationNumber"]) ?? str(node["identifier"]), "Invoice number", "purchase");
     identifier(str(node["accountId"]), "Account number");
-  } else {
-    dated("event", node["expectedArrivalFrom"], "Delivery window opens", "opens");
-    dated("event", node["expectedArrivalUntil"], "Delivery expected by", "by");
-    identifier(str(node["trackingNumber"]), "Tracking number");
+  }
+  if (order) {
+    // The order's own price is its total; one offer alone states it too.
+    // Several offers are line items, and adding them up would be a guess.
+    const offer = record(node["acceptedOffer"]);
+    amount(moneyOf(node["price"], node["priceCurrency"]) ?? (offer ? moneyOf(offer["price"], offer["priceCurrency"]) : undefined), "Order total");
+    identifier(str(node["orderNumber"]), "Order number", "purchase");
+  }
+  for (const parcel of parcels) {
+    dated("event", parcel["expectedArrivalFrom"], "Delivery window opens", "opens");
+    dated("event", parcel["expectedArrivalUntil"], "Delivery expected by", "by");
+    identifier(str(parcel["trackingNumber"]), "Tracking number");
   }
   return facts;
 }

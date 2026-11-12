@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { planTrips } from "./agenda";
 import { localDay, localTime, photoDayOf, photosInDays, rowsOf, type AgendaRow, type RowContext, type RowFile } from "./agendarows";
 import { withExactAcceptance, type Fact } from "./facts";
+import { scanForFacts } from "./scan";
 
 const EMAIL = "application/vnd.engram.email+json";
 // Tue 8 Sep 2026, 08:40 in San Francisco.
@@ -95,6 +96,63 @@ describe("rowsOf", () => {
     const rows = await rowsOf([parcel], none, NOW);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: "parcel", tag: "DELIVERY", title: "Your order has shipped", sub: "Between 10:00 and 14:00", time: "10:00" });
+  });
+
+  it("a train, a bus and a boat are tagged as what they are", async () => {
+    const booked = async (id: string, type: string, trip: Record<string, unknown>) => {
+      const raw = `<html><script type="application/ld+json">${JSON.stringify({ "@type": type, reservationFor: trip })}</script></html>`;
+      const { facts } = await scanForFacts({ name: `${id}.email`, mime: EMAIL, raw, text: "Your tickets." });
+      return email(id, "Your tickets", facts);
+    };
+    const rows = await rowsOf(
+      [
+        flights(),
+        await booked("train", "TrainReservation", {
+          trainNumber: "IC 512",
+          departureStation: { name: "Central" },
+          arrivalStation: { name: "Seaside" },
+          departureTime: "2026-10-01T07:12:00+02:00",
+          arrivalTime: "2026-10-01T09:48:00+02:00",
+        }),
+        await booked("bus", "BusReservation", {
+          departureBusStop: { name: "Central Station" },
+          arrivalBusStop: { name: "Seaside" },
+          departureTime: "2026-10-02T08:15:00+02:00",
+          arrivalTime: "2026-10-02T11:40:00+02:00",
+        }),
+        await booked("boat", "BoatReservation", {
+          departureBoatTerminal: { name: "North Pier" },
+          arrivalBoatTerminal: { name: "Island Quay" },
+          departureTime: "2026-10-03T07:00:00+02:00",
+          arrivalTime: "2026-10-03T08:30:00+02:00",
+        }),
+      ],
+      none,
+      NOW,
+    );
+    expect(rows.map((row) => [row.kind, row.tag, row.day])).toEqual([
+      ["flight", "TRAIN", "2026-10-01"],
+      ["flight", "BUS", "2026-10-02"],
+      ["flight", "BOAT", "2026-10-03"],
+      ["flight", "FLIGHT", "2026-11-12"],
+      ["flight", "FLIGHT", "2026-11-16"],
+    ]);
+  });
+
+  it("a shop order is one parcel and one bill, read from the order itself", async () => {
+    // The shop's email as stored: an order with its delivery, and the same
+    // delivery stated again on its own, naming the order.
+    const parcel = { "@type": "ParcelDelivery", trackingNumber: "TRK99887766", expectedArrivalFrom: "2026-09-09T10:00:00-07:00", expectedArrivalUntil: "2026-09-09T14:00:00-07:00" };
+    const raw = `<html><script type="application/ld+json">${JSON.stringify([
+      { "@type": "Order", orderNumber: "EX-20391", price: "148.00", priceCurrency: "USD", orderDelivery: parcel },
+      { ...parcel, partOfOrder: { "@type": "Order", orderNumber: "EX-20391" } },
+    ])}</script></html>`;
+    const { facts } = await scanForFacts({ name: "Your order.email", mime: EMAIL, raw, text: "Thanks for your order." });
+    const rows = await rowsOf([email("order", "Your order has shipped", facts)], none, NOW);
+    expect(rows.map((row) => [row.kind, row.tag, row.day, row.amount?.value])).toEqual([
+      ["bill", "BILL", "2026-09-01", "148.00"],
+      ["parcel", "DELIVERY", "2026-09-09", undefined],
+    ]);
   });
 
   it("an event with a price is tickets, without one is booked", async () => {
@@ -370,6 +428,151 @@ describe("rowsOf", () => {
   it("local days and times are the device's", () => {
     expect(localDay(NOW)).toBe("2026-09-08");
     expect(localTime(NOW)).toBe("08:40");
+  });
+});
+
+describe("what was paid is shown once, and as stated", () => {
+  const mailed = async (id: string, subject: string, nodes: unknown[], day = "2026-09-01") => {
+    const raw = `<html><script type="application/ld+json">${JSON.stringify(nodes)}</script></html>`;
+    const { facts } = await scanForFacts({ name: `${id}.email`, mime: EMAIL, raw, text: subject });
+    return email(id, subject, facts, { mail: { subject, from: "Sender", date: at(day, "09:00") } });
+  };
+  const money = (rows: AgendaRow[]) => rows.filter((row) => row.amount).map((row) => [row.kind, row.day, row.amount!.currency, row.amount!.value]);
+  const invoice = (extra: Record<string, unknown> = {}) => ({
+    "@type": "Invoice",
+    totalPaymentDue: { "@type": "PriceSpecification", price: "160.84", priceCurrency: "USD" },
+    ...extra,
+  });
+  const order = (extra: Record<string, unknown> = {}) => ({ "@type": "Order", orderNumber: "EX-20391", price: "148.00", priceCurrency: "USD", ...extra });
+  const parcel = { "@type": "ParcelDelivery", trackingNumber: "TRK99887766", expectedArrivalFrom: "2026-09-09T10:00:00-07:00", expectedArrivalUntil: "2026-09-09T14:00:00-07:00" };
+  const show = (name: string, day: string, price: string) => ({
+    "@type": "EventReservation",
+    reservationNumber: `EVT-${name.length}${day.slice(8)}`,
+    reservationFor: { "@type": "MusicEvent", name, startDate: `${day}T19:30:00-07:00` },
+    totalPrice: price,
+    priceCurrency: "USD",
+  });
+  const flight = (reference: string, price: string, currency = "USD") => ({
+    "@type": "FlightReservation",
+    reservationNumber: reference,
+    reservationFor: {
+      "@type": "Flight",
+      flightNumber: "236",
+      airline: { iataCode: "TP" },
+      departureAirport: { iataCode: "SFO" },
+      arrivalAirport: { iataCode: "LIS" },
+      departureTime: "2026-11-12T18:10:00-08:00",
+      arrivalTime: "2026-11-13T14:05:00+00:00",
+    },
+    totalPrice: price,
+    priceCurrency: currency,
+  });
+  const stay = (price: string, currency: string) => ({
+    "@type": "LodgingReservation",
+    reservationNumber: "CR77419C1D",
+    reservationFor: { name: "Casa do Rio" },
+    checkinTime: "2026-11-13T15:00:00+00:00",
+    checkoutTime: "2026-11-16T11:00:00+00:00",
+    totalPrice: price,
+    priceCurrency: currency,
+  });
+
+  it("an invoice beside an order bills the amount due, not the order's own total", async () => {
+    const rows = await rowsOf([await mailed("shop", "Your receipt", [invoice(), order()])], none, NOW);
+    expect(money(rows)).toEqual([["bill", "2026-09-01", "USD", "160.84"]]);
+  });
+
+  it("an invoice with a due date shows what is due, with an order beside it", async () => {
+    const rows = await rowsOf([await mailed("shop", "Your invoice", [invoice({ paymentDueDate: "2026-09-20" }), order()])], none, NOW);
+    expect(money(rows)).toEqual([["due", "2026-09-20", "USD", "160.84"]]);
+  });
+
+  it("a package's flight and hotel are two bills, each in its own currency", async () => {
+    const rows = await rowsOf([await mailed("package", "Your trip is booked", [flight("ZK8Q2P", "1184.00"), stay("652.00", "EUR")])], none, NOW);
+    expect(money(rows)).toEqual([
+      ["bill", "2026-09-01", "USD", "1184.00"],
+      ["bill", "2026-09-01", "EUR", "652.00"],
+    ]);
+    expect(new Set(rows.map((row) => row.id)).size).toBe(rows.length);
+  });
+
+  it("two shows in one email are two bills, and neither show wears the other's price", async () => {
+    const rows = await rowsOf([await mailed("shows", "Your tickets", [show("Harbor Lights", "2026-10-03", "48.00"), show("Night Market", "2026-10-10", "100.00")])], none, NOW);
+    expect(rows.filter((row) => row.kind === "event").map((row) => [row.tag, row.day, row.amount?.value])).toEqual([
+      ["BOOKED", "2026-10-03", undefined],
+      ["BOOKED", "2026-10-10", undefined],
+    ]);
+    expect(money(rows)).toEqual([
+      ["bill", "2026-09-01", "USD", "100.00"],
+      ["bill", "2026-09-01", "USD", "48.00"],
+    ]);
+  });
+
+  it("one show with its price is still tickets, and no second bill", async () => {
+    const rows = await rowsOf([await mailed("show", "Your tickets", [show("Harbor Lights", "2026-10-03", "48.00")])], none, NOW);
+    expect(money(rows)).toEqual([["event", "2026-10-03", "USD", "48.00"]]);
+    expect(rows[0]!.tag).toBe("TICKETS");
+  });
+
+  it("a booking and a later email that restates it are one bill, dated when it was first stated", async () => {
+    const rows = await rowsOf(
+      [
+        await mailed("changed", "Your schedule has changed", [flight("ZK8Q2P", "1184.00")], "2026-09-20"),
+        await mailed("booked", "Your booking is confirmed", [flight("ZK8Q2P", "1184.00")], "2026-09-01"),
+      ],
+      none,
+      NOW,
+    );
+    expect(money(rows)).toEqual([["bill", "2026-09-01", "USD", "1184.00"]]);
+    expect(rows.find((row) => row.kind === "bill")!.title).toBe("Your booking is confirmed");
+  });
+
+  it("an order and its shipping notice are one bill and one parcel", async () => {
+    const rows = await rowsOf(
+      [await mailed("ordered", "Thanks for your order", [order()], "2026-09-01"), await mailed("shipped", "Your order has shipped", [order({ orderDelivery: parcel })], "2026-09-03")],
+      none,
+      NOW,
+    );
+    expect(rows.map((row) => [row.kind, row.day, row.amount?.value])).toEqual([
+      ["bill", "2026-09-01", "148.00"],
+      ["parcel", "2026-09-09", undefined],
+    ]);
+  });
+
+  it("the same amount on the same account is a bill every month; the same invoice sent twice is one", async () => {
+    const monthly = (number: string) => invoice({ totalPaymentDue: { "@type": "PriceSpecification", price: "9.99", priceCurrency: "USD" }, accountId: "ACC-778812", confirmationNumber: number });
+    const rows = await rowsOf(
+      [
+        await mailed("june", "Your receipt", [monthly("INV-1006")], "2026-06-01"),
+        await mailed("july", "Your receipt", [monthly("INV-1007")], "2026-07-01"),
+        await mailed("august", "Your receipt", [monthly("INV-1008")], "2026-08-01"),
+        await mailed("again", "A copy of your receipt", [monthly("INV-1008")], "2026-08-02"),
+      ],
+      none,
+      NOW,
+    );
+    expect(money(rows)).toEqual([
+      ["bill", "2026-06-01", "USD", "9.99"],
+      ["bill", "2026-07-01", "USD", "9.99"],
+      ["bill", "2026-08-01", "USD", "9.99"],
+    ]);
+  });
+
+  it("the same price under another reference, or in another currency, is another bill", async () => {
+    const rows = await rowsOf(
+      [
+        await mailed("one", "Your booking is confirmed", [flight("ZK8Q2P", "1184.00")], "2026-09-01"),
+        await mailed("two", "Your booking is confirmed", [flight("MM4T7X", "1184.00")], "2026-09-02"),
+        await mailed("three", "Your booking is confirmed", [flight("ZK8Q2P", "1184.00", "CAD")], "2026-09-03"),
+      ],
+      none,
+      NOW,
+    );
+    expect(money(rows)).toEqual([
+      ["bill", "2026-09-01", "USD", "1184.00"],
+      ["bill", "2026-09-02", "USD", "1184.00"],
+      ["bill", "2026-09-03", "CAD", "1184.00"],
+    ]);
   });
 });
 

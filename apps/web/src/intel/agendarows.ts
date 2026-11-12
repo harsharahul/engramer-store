@@ -42,7 +42,7 @@ export interface RowTrip {
 export interface AgendaRow {
   id: string;
   kind: RowKind;
-  /** The label above the row: FLIGHT, STAY, BILL, DUE, TICKETS, BOOKED, DOCUMENT, DELIVERY, PHOTOS, TRIP?. */
+  /** The label above the row: FLIGHT (or TRAIN, BUS, BOAT), STAY, BILL, DUE, TICKETS, BOOKED, DOCUMENT, DELIVERY, PHOTOS, TRIP?. */
   tag: string;
   day: string;
   time?: string;
@@ -204,10 +204,17 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
   const byId = new Map(live.map((file) => [file.id, file]));
   const subOf = (file: RowFile) =>
     file.mail?.subject ?? (file.mailParent ? byId.get(file.mailParent)?.mail?.subject : undefined) ?? file.name;
-  const amountOf = (file: RowFile) => {
-    const fact = file.facts.find((candidate) => candidate.kind === "amount" && isTracked(candidate) && candidate.unit);
-    return fact ? { currency: fact.unit!, value: fact.value } : undefined;
+  // What a file says was paid, the most binding statement first: an invoice's
+  // amount due is the whole bill; else an order's total; else each total a
+  // booking states (a package email carries the flights and the hotel, each
+  // with its own); else the first amount it holds.
+  const pricesOf = (file: RowFile): { currency: string; value: string }[] => {
+    const tracked = file.facts.filter((candidate) => candidate.kind === "amount" && isTracked(candidate) && candidate.unit);
+    const labelled = (label: string) => tracked.filter((candidate) => candidate.label?.toLowerCase() === label);
+    const stated = [labelled("amount due"), labelled("order total"), labelled("total")].find((group) => group.length > 0) ?? tracked.slice(0, 1);
+    return stated.map((fact) => ({ currency: fact.unit!, value: fact.value }));
   };
+  const amountOf = (file: RowFile) => pricesOf(file)[0];
 
   // The trip each file belongs to, and the trips a date only suggests.
   const planByTag = new Map(ctx.plans.map((plan) => [plan.tag, plan]));
@@ -302,7 +309,10 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
       } else if (subject?.role === "pick-up" || subject?.role === "drop-off") {
         rows.push({ ...common, kind: "event", tag: "BOOKED", title: named(subject.role === "pick-up" ? "Pick up" : "Drop off"), sub: subOf(file) });
       } else if (fact.kind === "event") {
-        const price = amountOf(file);
+        // One price is this booking's own. Several belong to several
+        // bookings, and each is stated once below as a bill instead.
+        const prices = pricesOf(file);
+        const price = prices.length === 1 ? prices[0] : undefined;
         if (price) {
           ticketed.add(file.id);
         }
@@ -359,7 +369,8 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
       id: `flight:${file.id}:${leg.key}:${start.day} ${start.time ?? ""}`,
       factIds: leg.factIds,
       kind: "flight",
-      tag: "FLIGHT",
+      // The row says how you travel: FLIGHT, TRAIN, BUS or BOAT.
+      tag: leg.mode.toUpperCase(),
       day: start.day,
       ...(start.time ? { time: start.time } : {}),
       ...(leg.arr ? { endDay: leg.arr.day, ...(leg.arr.time ? { endTime: leg.arr.time } : {}) } : {}),
@@ -401,7 +412,18 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
     threads.set(root, held);
   }
   const owes = (file: RowFile) => file.facts.some((fact) => fact.kind === "due" || fact.kind === "expiry");
-  for (const [rootId, members] of threads) {
+  // A purchase stated again (a changed schedule, a shipping notice) was not
+  // paid again: one bill for an amount under the number that names the
+  // purchase (a booking's reference, an order's or an invoice's own number),
+  // and the earliest statement of it is the bill. An account number names
+  // the payer, who pays the same amount again next month.
+  const namesPurchase = (fact: Fact) => {
+    const role = fact.kind === "identifier" && !fact.dismissed ? subjectOf(fact)?.role : undefined;
+    return role === "reference" || role === "purchase";
+  };
+  const bought = new Set<string>();
+  const statedAt = (rootId: string) => byId.get(rootId)!.mail?.date ?? byId.get(rootId)!.mtime;
+  for (const [rootId, members] of [...threads].sort(([a], [b]) => statedAt(a) - statedAt(b) || a.localeCompare(b))) {
     if (members.some((file) => owes(file) || ticketed.has(file.id))) {
       continue;
     }
@@ -413,19 +435,27 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
     const when = root.mail?.date ?? payer.mtime;
     const day = localDay(when);
     const trip = tripOf(root) ?? tripOf(payer) ?? suggested(root, day);
-    rows.push({
-      id: `bill:${rootId}`,
-      kind: "bill",
-      tag: "BILL",
-      day,
-      time: localTime(when),
-      at: when,
-      title: root.mail?.subject ?? payer.name,
-      amount: amountOf(payer)!,
-      source: sourceOf(payer),
-      fileIds: [payer.id],
-      ...(trip ? { trip } : {}),
-    });
+    const references = members.flatMap((file) => file.facts.filter(namesPurchase).map((fact) => fact.value));
+    for (const [index, amount] of pricesOf(payer).entries()) {
+      const purchase = references.map((reference) => `${amount.currency}|${amount.value}|${reference}`);
+      if (purchase.some((key) => bought.has(key))) {
+        continue;
+      }
+      purchase.forEach((key) => bought.add(key));
+      rows.push({
+        id: index === 0 ? `bill:${rootId}` : `bill:${rootId}:${amount.currency}${amount.value}`,
+        kind: "bill",
+        tag: "BILL",
+        day,
+        time: localTime(when),
+        at: when,
+        title: root.mail?.subject ?? payer.name,
+        amount,
+        source: sourceOf(payer),
+        fileIds: [payer.id],
+        ...(trip ? { trip } : {}),
+      });
+    }
   }
 
   for (const [day, photos] of photosByDay) {

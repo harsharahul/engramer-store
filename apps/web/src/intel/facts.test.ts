@@ -204,6 +204,13 @@ describe("asFacts", () => {
     const many = Array.from({ length: 40 }, (_, i) => ({ ...fact(), id: `f${i}` }));
     expect(asFacts(many).length).toBe(12);
   });
+
+  it("reads back a whole booking: exact readings beside the twelve soft ones, thirty-two at most", () => {
+    const exact = Array.from({ length: 40 }, (_, i) => ({ ...fact(), id: `e${i}`, source: "jsonld", confidence: 1 }));
+    const soft = Array.from({ length: 40 }, (_, i) => ({ ...fact(), id: `s${i}` }));
+    expect(asFacts([...exact.slice(0, 16), ...soft]).map((kept) => kept.id)).toEqual([...exact.slice(0, 16), ...soft.slice(0, 12)].map((kept) => kept.id));
+    expect(asFacts([...exact, ...soft]).length).toBe(32);
+  });
 });
 
 describe("maskTail", () => {
@@ -243,17 +250,32 @@ describe("mergeFacts", () => {
     expect(mergeFacts([fact()], [found])).toHaveLength(2);
   });
 
-  it("caps how many facts one file may carry, dropping the weakest", () => {
+  it("caps how many soft readings one file may carry, dropping the weakest", () => {
     const many = Array.from({ length: 30 }, (_, i) =>
       fact({
         id: `f${i}`,
         value: `2029-03-${String((i % 28) + 1).padStart(2, "0")}`,
-        confidence: i === 0 ? 1 : 0.3,
+        confidence: i === 0 ? 0.7 : 0.3,
       }),
     );
     const merged = mergeFacts([], many);
-    expect(merged.length).toBeLessThanOrEqual(12);
-    expect(merged[0]!.confidence).toBe(1);
+    expect(merged).toHaveLength(12);
+    expect(merged[0]!.confidence).toBe(0.7);
+  });
+
+  it("an exact reading does not use up the room for soft ones", () => {
+    const exact = Array.from({ length: 16 }, (_, i) => fact({ id: `e${i}`, kind: "event", value: `2029-04-${String(i + 1).padStart(2, "0")}`, source: "jsonld", confidence: 1 }));
+    const soft = Array.from({ length: 30 }, (_, i) => fact({ id: `s${i}`, value: `2029-03-${String((i % 28) + 1).padStart(2, "0")}`, confidence: 0.3 }));
+    const merged = mergeFacts([], [...soft, ...exact]);
+    expect(merged.filter((kept) => kept.confidence === 1)).toHaveLength(16);
+    expect(merged.filter((kept) => kept.confidence < 1)).toHaveLength(12);
+  });
+
+  it("among weak readings, the limit still keeps amounts before reference numbers", () => {
+    // Harvested from a long receipt: what was paid matters more than its codes.
+    const codes = Array.from({ length: 14 }, (_, i) => fact({ id: `identifier:AB${i}`, kind: "identifier", value: `AB${i}0000`, source: "pattern", confidence: 0.3 }));
+    const paid = fact({ id: "amount:410.00", kind: "amount", value: "410.00", unit: "USD", source: "pattern", confidence: 0.3 });
+    expect(mergeFacts([], [...codes, paid]).some((kept) => kept.kind === "amount")).toBe(true);
   });
 });
 

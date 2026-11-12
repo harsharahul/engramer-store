@@ -214,6 +214,10 @@ const CURRENCY_CODES = new Set([
 const SYMBOL_AMOUNT = /([$£€₹¥])\s?([\d,]+\.\d{2})/g;
 const CODE_AMOUNT = /\b([A-Z]{3})\s?([\d,]+\.\d{2})\b/g;
 const TOKEN = /\b[A-Za-z0-9][A-Za-z0-9-]{5,}\b/g;
+// A date and a clock joined by T, as invites and mail headers write them
+// (20261201T140000Z, or the 2027-03-04T10 a colon cuts a longer one to):
+// letters and digits together, and never a reference number.
+const TIMESTAMP = /^(?:\d{8}T\d{4,6}|\d{4}-\d{2}-\d{2}T\d{2}(?:-?\d{2}){0,2})(?:Z|-\d{4})?$/;
 
 /** The weakest signal: enough to be worth offering, never enough to act on. */
 const HARVEST_CONFIDENCE = 0.3;
@@ -258,7 +262,7 @@ export function harvestFacts(text: string): Fact[] {
     const token = m[0];
     // Both letters and digits: a word is not a reference number, and neither
     // is a bare run of digits, which is far more often a date or an amount.
-    if (!/[A-Za-z]/.test(token) || !/\d/.test(token)) {
+    if (!/[A-Za-z]/.test(token) || !/\d/.test(token) || TIMESTAMP.test(token)) {
       continue;
     }
     const id = factId("identifier", token);

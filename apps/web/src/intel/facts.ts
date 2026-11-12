@@ -179,8 +179,23 @@ export interface FactEvidence {
  */
 export type ReadFact = Fact & { link?: string };
 
-/** Metadata is synced everywhere; a document cannot grow it without bound. */
-export const MAX_FACTS_PER_FILE = 12;
+/**
+ * Metadata is synced everywhere; a document cannot grow it without bound.
+ *
+ * Two bounds, because two things grow it. A long statement prints hundreds
+ * of amounts and codes, and each is a soft reading: twelve of those are
+ * kept. Exact data is as long as the booking that states it, and a package
+ * of flights and hotels keeps all of its dates, references and prices, so
+ * the whole list may hold thirty-two.
+ */
+export const MAX_FACTS_PER_FILE = 32;
+export const MAX_SOFT_FACTS_PER_FILE = 12;
+
+/** What a file may carry, from a list already in the order to keep it in. */
+function capped<F extends Fact>(facts: F[]): F[] {
+  let soft = 0;
+  return facts.filter((fact) => fact.confidence >= 1 || soft++ < MAX_SOFT_FACTS_PER_FILE).slice(0, MAX_FACTS_PER_FILE);
+}
 
 /** Kinds that name a moment worth being reminded about. */
 export const DATED_KINDS: ReadonlySet<string> = new Set(["expiry", "due", "event", "dated"]);
@@ -366,7 +381,7 @@ export function reconcileFacts(existing: Fact[], rescanned: Fact[], digest: stri
   for (const fresh of found.values()) {
     kept.push({ ...fresh, digest });
   }
-  return kept.slice(0, MAX_FACTS_PER_FILE);
+  return capped(kept);
 }
 
 /**
@@ -385,7 +400,7 @@ export function asFacts(raw: unknown): Fact[] {
   }
   // Facts read before the accepted marker existed counted on their source
   // alone; they keep counting, and carry the marker from the next write.
-  return raw.filter(isFactShaped).slice(0, MAX_FACTS_PER_FILE).map(withExactAcceptance);
+  return capped(raw.filter(isFactShaped)).map(withExactAcceptance);
 }
 
 function isFactShaped(value: unknown): value is Fact {
@@ -543,9 +558,21 @@ export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
     merged.set(fact.id, withSubjectFrom(pick(prior, fact), fact));
   }
   // The cap has to drop the weakest rather than whichever arrived last.
-  return resolveSlots([...merged.values()])
-    .sort((a, b) => b.confidence - a.confidence || a.value.localeCompare(b.value))
-    .slice(0, MAX_FACTS_PER_FILE);
+  return capped(
+    resolveSlots([...merged.values()]).sort((a, b) => b.confidence - a.confidence || capRank(a) - capRank(b) || a.value.localeCompare(b.value)),
+  );
+}
+
+/**
+ * What the cap keeps first among exact readings: a date makes a row, a
+ * reference links one file to another, and a price only adds to them. Softer
+ * readings keep the order they had; their confidence already ranks them.
+ */
+function capRank(fact: Fact): number {
+  if (fact.confidence < 1) {
+    return 0;
+  }
+  return fact.kind === "amount" ? 2 : fact.kind === "identifier" ? 1 : 0;
 }
 
 /** Kinds a document states once: two different readings of one disagree. */

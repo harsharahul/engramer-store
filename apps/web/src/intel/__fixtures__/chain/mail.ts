@@ -46,6 +46,15 @@ export const BOOKING_WITH_HOTEL = ld([...FLIGHTS, HOTEL]);
 /** The same flights alone; the stay is booked by plain email below. */
 export const BOOKING_FLIGHTS_ONLY = ld(FLIGHTS);
 
+/** The flights with what they cost, the total repeated on each leg as airlines write it. */
+export const FLIGHTS_PRICED = ld(FLIGHTS.map((leg) => ({ ...leg, totalPrice: "1184.00", priceCurrency: "USD" })));
+
+/** The hotel's own email, with its price in its own currency. */
+export const HOTEL_PRICED = ld([{ ...HOTEL, totalPrice: "652.00", priceCurrency: "EUR" }]);
+
+/** One package email: the flights priced in dollars and the hotel in euros. */
+export const PACKAGE_PRICED = ld([...FLIGHTS.map((leg) => ({ ...leg, totalPrice: "1184.00", priceCurrency: "USD" })), { ...HOTEL, totalPrice: "652.00", priceCurrency: "EUR" }]);
+
 export const GUESTHOUSE_TEXT =
   "Hello! Your room at Casa Azulejo is ready from 15:00 on 13 November 2026. Please leave the key at the desk by 11:00 on 16 November 2026. See you soon.";
 

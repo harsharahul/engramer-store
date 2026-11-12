@@ -79,6 +79,66 @@ describe("scanForFacts", () => {
     expect(out.facts.length).toBeLessThanOrEqual(12);
   });
 
+  describe("a priced package email and the limit on a file's facts", () => {
+    const leg = (number: string, from: string, to: string, day: string, price?: string) => ({
+      "@type": "FlightReservation",
+      reservationNumber: "ZK8Q2P",
+      reservationFor: {
+        "@type": "Flight",
+        flightNumber: number,
+        airline: { iataCode: "TP" },
+        departureAirport: { iataCode: from },
+        arrivalAirport: { iataCode: to },
+        departureTime: `${day}T08:00:00+00:00`,
+        arrivalTime: `${day}T11:00:00+00:00`,
+      },
+      ...(price ? { totalPrice: price, priceCurrency: "USD" } : {}),
+    });
+    const hotel = {
+      "@type": "LodgingReservation",
+      reservationNumber: "CR77419C1D",
+      reservationFor: { name: "Casa do Rio" },
+      checkinTime: "2026-11-13T15:00:00+00:00",
+      checkoutTime: "2026-11-16T11:00:00+00:00",
+      totalPrice: "652.00",
+      priceCurrency: "EUR",
+    };
+    const scan = async (nodes: unknown[]) =>
+      (await scanForFacts({ name: "Your trip.email", mime: "application/vnd.engram.email+json", raw: `<html><script type="application/ld+json">${JSON.stringify(nodes)}</script></html>` })).facts;
+    const count = (facts: { kind: string }[], kind: string) => facts.filter((f) => f.kind === kind).length;
+
+    it("four legs and a hotel keep every date, reference and price", async () => {
+      const facts = await scan([
+        leg("236", "SFO", "JFK", "2026-11-12", "1184.00"),
+        leg("237", "JFK", "LIS", "2026-11-13", "1184.00"),
+        leg("238", "LIS", "JFK", "2026-11-16", "1184.00"),
+        leg("239", "JFK", "SFO", "2026-11-17", "1184.00"),
+        hotel,
+      ]);
+      expect([count(facts, "event"), count(facts, "identifier"), count(facts, "amount")]).toEqual([10, 2, 2]);
+    });
+
+    it("past thirty-two exact facts, dates are kept first, then references, then prices", async () => {
+      // Fourteen legs and a hotel: thirty dates, two references and two prices.
+      const legs = Array.from({ length: 14 }, (_, i) => leg(String(300 + i), "SFO", "LIS", `2026-10-${String(i + 1).padStart(2, "0")}`, "1184.00"));
+      const facts = await scan([...legs, hotel]);
+      expect([count(facts, "event"), count(facts, "identifier"), count(facts, "amount")]).toEqual([30, 2, 0]);
+    });
+
+    it("the codes printed around a booking are still held to twelve", async () => {
+      const raw = `<html><script type="application/ld+json">${JSON.stringify([leg("236", "SFO", "LIS", "2026-11-12", "1184.00"), hotel])}</script></html>`;
+      const text = Array.from({ length: 40 }, (_, i) => `Ref AB${i}00000${i}`).join("\n");
+      const { facts } = await scanForFacts({ name: "Your trip.email", mime: "application/vnd.engram.email+json", raw, text });
+      expect(facts.filter((f) => f.confidence === 1)).toHaveLength(8);
+      expect(facts.filter((f) => f.confidence < 1)).toHaveLength(12);
+    });
+
+    it("a booking that fits keeps its prices too", async () => {
+      const facts = await scan([leg("236", "SFO", "LIS", "2026-11-12", "1184.00"), leg("237", "LIS", "SFO", "2026-11-16", "1184.00"), hotel]);
+      expect([count(facts, "event"), count(facts, "identifier"), count(facts, "amount")]).toEqual([6, 2, 2]);
+    });
+  });
+
   it("reads a saved confirmation's own reservation data, zones intact", async () => {
     const raw = `<html><script type="application/ld+json">{
       "@type": "LodgingReservation",
