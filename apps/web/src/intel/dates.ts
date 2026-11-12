@@ -168,6 +168,79 @@ export function parseDate(text: string, given?: DateOrder | DateContext): Parsed
   return datedIn(text, context.order) ?? (context.writtenAt === undefined ? null : undatedIn(text, context.writtenAt));
 }
 
+// Each form a full date is written in, most certain first, ready to be
+// matched again and again across a text.
+const DATED_FORMS = [ISO, YEAR_FIRST_NAMED, DAY_FIRST_NAMED, MONTH_FIRST_NAMED, YEAR_FIRST_NUMERIC, NUMERIC].map(
+  (form) => new RegExp(form.source, `${form.flags}g`),
+);
+
+export interface FoundDate {
+  /** Where it starts and ends in the text. */
+  at: number;
+  end: number;
+  date: ParsedDate;
+}
+
+/**
+ * Every date in a text, in the order they stand, none overlapping another.
+ *
+ * `parseDate` answers "which date does this label mean" and reads one; this
+ * answers "which dates does this document hold". Each is read exactly as
+ * `parseDate` would read it alone. A date with no year is found only when
+ * the context says when the text was written, and never inside a date that
+ * states its year.
+ */
+export function findDates(text: string, context: DateContext = {}): FoundDate[] {
+  const dated: (FoundDate & { rank: number })[] = [];
+  DATED_FORMS.forEach((form, rank) => {
+    for (const match of text.matchAll(form)) {
+      const date = datedIn(match[0], context.order);
+      if (date) {
+        dated.push({ at: match.index, end: match.index + match[0].length, date, rank });
+      }
+    }
+  });
+  // In the order they stand, each kept only when it starts past the last
+  // one kept: one pass, however long the text.
+  const placed: FoundDate[] = [];
+  let end = -1;
+  for (const { rank: _rank, ...hit } of dated.sort((a, b) => a.at - b.at || a.rank - b.rank)) {
+    if (hit.at >= end) {
+      placed.push(hit);
+      end = hit.end;
+    }
+  }
+  const { writtenAt } = context;
+  if (writtenAt === undefined) {
+    return placed;
+  }
+  const undated: FoundDate[] = [];
+  for (const form of [MONTH_DAY, DAY_MONTH]) {
+    for (const match of text.matchAll(form)) {
+      const date = undatedIn(match[0], writtenAt);
+      if (date) {
+        undated.push({ at: match.index, end: match.index + match[0].length, date });
+      }
+    }
+  }
+  // A month and a day inside a date that states its year is that date, and
+  // two forms that read the same words are one date.
+  const stated = placed.length;
+  let next = 0;
+  end = -1;
+  for (const hit of undated.sort((a, b) => a.at - b.at)) {
+    while (next < stated && placed[next]!.end <= hit.at) {
+      next += 1;
+    }
+    const taken = next < stated && placed[next]!.at < hit.end;
+    if (!taken && hit.at >= end) {
+      placed.push(hit);
+      end = hit.end;
+    }
+  }
+  return placed.sort((a, b) => a.at - b.at);
+}
+
 /** A month and a day with no year, read against when the text was written. */
 function undatedIn(text: string, writtenAt: number): ParsedDate | null {
   // The first of each form whose word really is a month ("Thu 12" is not).
