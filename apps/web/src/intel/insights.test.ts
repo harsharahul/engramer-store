@@ -1,3 +1,6 @@
+// Days are counted from the device's day; these tests state their moments in UTC.
+process.env.TZ = "UTC";
+
 import { describe, expect, it } from "vitest";
 import { insightsFor, tripChecks, type TripWindow } from "./insights";
 import type { Fact } from "./facts";

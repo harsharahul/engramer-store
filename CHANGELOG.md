@@ -35,6 +35,10 @@ All notable changes to Engram Store are documented here, following
   for each.
 
 ### Fixed
+- **Days are counted from your own day.** In the evening west of UTC, a
+  bill due tomorrow read "today" and one due today read overdue, in the
+  bell, in notifications and on each file's dates, because the days were
+  counted from the UTC date. They are now counted from the device's day.
 - **Dates written with a short month are kept.** "14 Nov 2026" and
   "November 12th, 2026" were read and then dropped by the check against
   the text.
