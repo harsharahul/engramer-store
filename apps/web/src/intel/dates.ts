@@ -372,7 +372,15 @@ export function parseTime(text: string): string | null {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Whole calendar days from today, negative once the date has passed. */
+/**
+ * Whole calendar days from today, negative once the date has passed.
+ *
+ * Today is the device's own day. West of UTC the evening is already
+ * tomorrow by the UTC clock, and counting from that day would call a bill
+ * due tomorrow "today" and one due today overdue. Both days are laid on the
+ * same UTC ruler only to count them, so a clock change never adds or drops
+ * a day.
+ */
 export function daysUntil(iso: string, now: number): number {
   const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!parts) {
@@ -380,7 +388,7 @@ export function daysUntil(iso: string, now: number): number {
   }
   const target = Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
   const today = new Date(now);
-  const start = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const start = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   return Math.round((target - start) / DAY_MS);
 }
 
