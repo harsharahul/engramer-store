@@ -43,7 +43,23 @@ Each case is given what the app gives a reading: a message's subject, sender
 and sending day, what the rules already found, and for a stored file the day
 it was kept (the cases name none, so one fixed early day stands for all).
 
-Every raw answer is kept in `out/` (not committed), one file per case.
+Every answer is kept in `out/` (not committed), one file per case, under the
+name of the request it answered. After a change to the code around the model
+(the merge, the rules that do not change what the model is asked, the
+scoring), score the kept answers again in seconds, with no model:
+
+```
+EVAL_REPLAY=1 tools/eval/apple/run.sh
+```
+
+A request that changed since the kept run is stale: the replay says how many
+cases need the model and writes no scores, so an answer to another request
+is never counted.
+
+Beside found and right, each set reports the questions a person would be
+shown per 100 documents (counted the way the app asks them, on the day each
+document reached its reader), how many of those are wrong, and what kind of
+error each wrong reading is.
 
 Run it again whenever a prompt, a schema, the model reader's version or a set
 changes, and commit the new `scores.json`. Dates and amounts are judged at

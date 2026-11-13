@@ -57,13 +57,39 @@ describe("scanForFacts", () => {
       mime: "application/pdf",
       text: "Enrollment Record Number: X90000012B3\nEnrollment/Issued Date: 2027 April 12\nCoverage Class: R2\nBenefit End Date: 2027 October 19",
     });
-    // The controlling date, quoted in the document's own words.
-    expect(out.facts.find((f) => f.kind === "dated")).toMatchObject({
+    // The controlling date, read by what its label means and kept under
+    // the document's own words.
+    expect(out.facts.find((f) => f.kind === "expiry")).toMatchObject({
       value: "2027-10-19",
       label: "Benefit End Date",
     });
+    expect(out.facts.some((f) => f.kind === "dated")).toBe(false);
     expect(out.facts.find((f) => f.kind === "issued")?.value).toBe("2027-04-12");
     expect(out.facts.find((f) => f.kind === "identifier")?.masked).toBe("12B3");
+  });
+
+  it("a statement's hundred lines of payments already received give nothing", async () => {
+    const lines = Array.from({ length: 100 }, (_, i) => `Payment received: ${(i % 28) + 1} January 2027`);
+    const out = await scanForFacts({ ...base, text: `Account statement\n${lines.join("\n")}` });
+    expect(out.facts).toEqual([]);
+  });
+
+  it("keeps a moment whose clock is written with one digit for the hour", async () => {
+    const moments = async (text: string) => (await scanForFacts({ ...base, text })).facts.filter((f) => f.kind === "event").map((f) => [f.value, f.time]);
+    expect(await moments("Exam date: 12 June 2027\nTime: 9:00")).toEqual([["2027-06-12", "09:00"]]);
+    expect(await moments("Course starts: 6 September 2027\nRoom: B12\nTime: 9:15")).toEqual([["2027-09-06", "09:15"]]);
+    expect(await moments("Your appointment is on 3 March 2027 at 9:30 with Dr. Lee.")).toEqual([["2027-03-03", "09:30"]]);
+  });
+
+  it("reads a form line by what its label means, from the shipped table", async () => {
+    const dated = async (text: string) =>
+      (await scanForFacts({ ...base, text })).facts.filter((f) => f.kind !== "identifier" && f.kind !== "amount").map((f) => [f.kind, f.value]);
+    // A statement's own day is nobody's business; a deadline on the same line stays.
+    expect(await dated("Statement date: 3 February 2027")).toEqual([]);
+    expect(await dated("Statement date: 3 Feb 2027, pay by 20 Feb 2027")).toEqual([["due", "2027-02-20"]]);
+    // A label the table knows is typed; one it does not hold is kept with its own words.
+    expect(await dated("Cover ends: 30 November 2027")).toEqual([["expiry", "2027-11-30"]]);
+    expect(await dated("Ledger folio: 12 March 2027")).toEqual([["dated", "2027-03-12"]]);
   });
 
   it("returns nothing at all for a file with no text and no bytes", async () => {

@@ -165,10 +165,12 @@ for the version and the exact prompt of the reader that ships, over at
 least 30 readings, on each of two synthetic sets; never for a travel time,
 an identity document's expiry or a legal deadline, which need exact data;
 and only when the value passes sanity checks (the day exists, a stay ends
-after it begins, an amount names its currency). The first set is 92
-invented emails and documents, a third of them written so that the date or
-amount that matters stands among others that do not; the rules and the
-model's instructions are written against it. The second is 60 more,
+after it begins, an amount names its currency). The first set is 132
+invented emails and documents: a third of them written so that the date or
+amount that matters stands among others that do not, and forty written as
+forms (labels and values, flattened tables, a time on the line under its
+date); the rules, the label table and the model's instructions are written
+against it. The second is 60 more,
 written without sight of the readers: nothing is ever tuned on it, and it
 is the one that says how unseen documents are read. The exact readers are
 scored in the test suite, and Apple's on-device model is scored on a Mac
@@ -176,12 +178,19 @@ by a harness that runs the app's own reading code (`tools/eval/apple`).
 
 On the second set today, the rules and the model together find 82% of the
 dates and 80% of the amounts a careful reader would, and of what they
-offer 69% of the dates and 84% of the amounts are right; two of twelve
+offer 70% of the dates and 84% of the amounts are right; two of twelve
 documents that state nothing still get an offer. The model's own readings
-measure 68% right for dates and 82% for amounts, well below the bar, so
-they are offered for a yes, and naming an email's kind (86%) is below its
+measure 67% right for dates and 82% for amounts, well below the bar, so
+they are offered for a yes, and naming an email's kind (84%) is below its
 bar too. The bar never moves: a task earns trust only by measuring above
 it.
+
+The same harness counts what a person is asked, the way the app asks it:
+every unanswered date still ahead, or a deadline lately behind, on the day
+the document arrived. On the second set that is 98 suggestions for every
+100 documents, 8 of them on a day the document does not state for its
+reader or under the wrong meaning. Both numbers are tracked from change to
+change, and a change that raises either does not ship.
 
 **Mail is read newest first, within a window.** The model reads email from
 the last 12 months by default (3 to 12 in Profile, following your account);
@@ -317,6 +326,32 @@ metadata and index blob like every other derived signal.
   day after the message was written, and is marked as having an assumed
   year; an expiry never takes one, and in any other file a date with no
   year is not read.
+
+  A form line, a label and its date ("Cover ends: 30 November 2027"), is
+  also looked up in a table of about 1,900 labels that ships with the app
+  (`tools/label-lexicon/dates.tsv`). A label is matched whole, after its
+  case, its punctuation and a closing "date" or "on" are set aside; nothing
+  is matched loosely. The line then has one of three outcomes:
+  - a label the table gives a meaning (a due date, an expiry, an issue
+    date, an event, a check-in or check-out, a departure or an arrival) is
+    read as that, under the document's own words, with the clock on its
+    line or on the clock line a form prints under it ("Class begins: 2
+    November 2027", then "Class time: 6:30 PM");
+  - a label the table marks as needing no reminder (the day a statement
+    was made, an order placed, a booking made, a document printed) gives
+    nothing: no fact, no row, no question, and the on-device model is not
+    asked about that line either;
+  - a label the table does not hold, or one whose meaning depends on the
+    document ("Date", "Start date", "Arrival"), is kept with the
+    document's own words and waits for your yes.
+
+  No label that speaks of paying, expiring, attending, travelling or
+  delivering can be marked as needing no reminder; a test holds the whole
+  table to that. On a form, a clock line ("Departs: 08:42") belongs to the
+  date line above it, never to a date below. Files stored earlier take the
+  table on the next date sweep, and a line you already answered stays as
+  you answered it. If the table cannot be loaded, every line is read with
+  its own words.
 - **Amounts and reference numbers**, at low confidence, from any document,
   including kinds no rule anticipated.
 - **The assistant's judgement**, at the lowest confidence of all, on the Mac
@@ -361,6 +396,12 @@ that could be read two ways (`03/04/2028`) offers both readings as dates
 rather than picking one. A wrong expiry date is worse than no expiry date,
 because it gets relied on. Each fact in a file's details says why it counts:
 "confirmed by you", "read from the booking data", "two readers agree".
+
+A suggestion is made only while it can still matter. A date more than sixty
+days behind is not asked about; a deadline missed lately still is, because
+it can be acted on. A form line that only names its date ("Job completed:
+28 October") says nothing of a deadline, so it is not asked about once its
+day is behind. Such facts stay in the file's details, quietly.
 
 **Reference numbers are kept short.** Metadata carries the last four
 characters; the whole value lives in the file's index blob and is fetched only

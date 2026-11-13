@@ -5,7 +5,11 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
 cd "$here"
-swift build -c release
+# EVAL_REPLAY=1 scores the answers the last run kept: no model, no harness.
+if [ -z "${EVAL_REPLAY:-}" ]; then
+  swift build -c release
+fi
+mkdir -p .build
 # The constants Vite injects into the app build.
 defines=()
 for name in __APP_VERSION__ __GLINER_ORT_BASE__ __OCR_BASE__ __ORT_BASE__ __ZXING_BASE__; do

@@ -107,6 +107,7 @@ import {
   ownerDecided,
   reconcileFacts,
   settleDisputes,
+  withoutUnreadLines,
   type Fact,
   type FactEvidence,
 } from "./intel/facts";
@@ -3870,22 +3871,33 @@ export const useStore = create<StoreState>((set, get) => {
             text,
             ...(file.mail && file.mail.date > 0 ? { writtenAt: file.mail.date } : {}),
           });
-          if (scanned.facts.length === 0) {
-            opts?.onOutcome?.(file.id, true);
-            continue;
-          }
           const current = get().files.get(file.id);
           if (!current) {
             opts?.onOutcome?.(file.id, true);
             continue;
           }
+          // A stored line the rules no longer read (its label now means the
+          // date needs no reminder) goes; everything else is folded as before.
+          const held = withoutUnreadLines(current.facts, scanned.facts);
+          if (scanned.facts.length === 0 && held.length === current.facts.length) {
+            opts?.onOutcome?.(file.id, true);
+            continue;
+          }
           const merged = mergeFacts(
-            current.facts,
+            held,
             scanned.facts.map((fact) => ({ ...fact, digest: current.digest })),
           );
           if (JSON.stringify(merged) === JSON.stringify(current.facts)) {
             // Nothing new: writing the same facts again would only sync a
             // change that is not one, and a sync is what schedules a pass.
+            opts?.onOutcome?.(file.id, true);
+            continue;
+          }
+          const known = new Set(current.facts.map((fact) => fact.id));
+          if (!merged.some((fact) => !known.has(fact.id))) {
+            // Only less than before: the file's evidence is untouched, and
+            // nothing was found to announce.
+            await patchFileMeta(file.id, { facts: merged });
             opts?.onOutcome?.(file.id, true);
             continue;
           }

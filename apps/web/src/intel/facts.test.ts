@@ -80,6 +80,15 @@ describe("groundFacts", () => {
     expect(groundFacts([flight], "Departs 12 March 2029 at 18:15")).toHaveLength(0);
   });
 
+  it("matches a morning clock written with one digit for the hour, as a clock and not as a run of characters", () => {
+    const exam = fact({ kind: "event", time: "09:40" });
+    expect(groundFacts([exam], "Exam 12 March 2029\nTime: 9:40")).toHaveLength(1);
+    // The tail of an evening clock, or a morning clock said of the evening, is another time.
+    expect(groundFacts([exam], "Exam 12 March 2029 at 19:40")).toHaveLength(0);
+    expect(groundFacts([exam], "Exam 12 March 2029 at 9:40 PM")).toHaveLength(0);
+    expect(groundFacts([exam], "Exam 12 March 2029 at 9:405")).toHaveLength(0);
+  });
+
   it("matches a whole hour the document wrote without a colon", () => {
     const stay = fact({ kind: "event", time: "15:00" });
     expect(groundFacts([stay], "Check-in 12 March 2029 from 3pm")).toHaveLength(1);
@@ -144,6 +153,14 @@ describe("offeredFacts", () => {
   it("offers a labelled date whose meaning is unknown", () => {
     const generic = fact({ kind: "dated", value: "2027-10-19", label: "Benefit End Date" });
     expect(offeredFacts(shelf([generic]), NOW)).toHaveLength(1);
+  });
+
+  it("does not ask about a line that only names a date once its day is behind", () => {
+    const named = (value: string) => fact({ kind: "dated", value, label: "Job completed" });
+    expect(offeredFacts(shelf([named("2026-08-01")]), NOW)).toHaveLength(0);
+    expect(offeredFacts(shelf([named("2026-08-09")]), NOW)).toHaveLength(1);
+    // A deadline missed lately still asks: it can be acted on.
+    expect(offeredFacts(shelf([fact({ kind: "due", value: "2026-08-01" })]), NOW)).toHaveLength(1);
   });
 
   it("never re-offers what is answered, and never reads trash", () => {
@@ -259,6 +276,56 @@ describe("maskTail", () => {
 
   it("returns a short value unchanged rather than revealing nothing", () => {
     expect(maskTail("123")).toBe("123");
+  });
+});
+
+describe("a stored form line, read again by what its label means", () => {
+  const NOW = Date.UTC(2027, 2, 1);
+  const shelf = (facts: Fact[]) => [{ id: "f1", trashed: false, facts }];
+  // The line as it was stored before its label had a meaning, and as it is read now.
+  const named = (over: Partial<Fact> = {}) =>
+    fact({ id: "dated:2028-08-02", kind: "dated", document: "other", value: "2028-08-02", label: "Cover ends", confidence: 0.4, ...over });
+  const typed = fact({ id: "expiry:2028-08-02", kind: "expiry", document: "other", value: "2028-08-02", label: "Cover ends" });
+
+  it("a line the owner said no to does not come back typed", () => {
+    const merged = mergeFacts([named({ dismissed: true })], [typed]);
+    expect(merged.filter((held) => !held.dismissed)).toEqual([]);
+    expect(offeredFacts(shelf(merged), NOW)).toEqual([]);
+  });
+
+  it("a line the owner confirmed stays as it was confirmed", () => {
+    const merged = mergeFacts([named({ confirmed: true })], [typed]);
+    expect(merged.map((held) => [held.kind, held.value, held.confirmed])).toEqual([["dated", "2028-08-02", true]]);
+  });
+
+  it("an unanswered line that only names its date gives way to the typed reading", () => {
+    expect(mergeFacts([named()], [typed]).map((held) => [held.kind, held.value])).toEqual([["expiry", "2028-08-02"]]);
+    // Whichever arrives first.
+    expect(mergeFacts([typed], [named()]).map((held) => [held.kind, held.value])).toEqual([["expiry", "2028-08-02"]]);
+  });
+
+  it("the answer is for that line: another line of the same day is still read", () => {
+    const debit = fact({ id: "due:2028-08-02", kind: "due", document: "other", value: "2028-08-02", label: "Direct debit date" });
+    const merged = mergeFacts([named({ dismissed: true, label: "Statement date" })], [debit]);
+    expect(merged.filter((held) => !held.dismissed).map((held) => [held.kind, held.label])).toEqual([["due", "Direct debit date"]]);
+    // The same line, however its label is spaced or cased.
+    const again = { ...typed, label: "COVER  ENDS" };
+    expect(mergeFacts([named({ dismissed: true })], [again]).filter((held) => !held.dismissed)).toEqual([]);
+  });
+
+  it("a file saved again keeps the answer as well", () => {
+    const afterNo = reconcileFacts([named({ dismissed: true })], [typed], "d2");
+    expect(afterNo.filter((held) => !held.dismissed)).toEqual([]);
+    // A yes stays a yes, and is not marked as no longer said by the file.
+    const afterYes = reconcileFacts([named({ confirmed: true })], [typed], "d2");
+    expect(afterYes.map((held) => [held.kind, held.confirmed, held.stale, held.digest])).toEqual([["dated", true, undefined, "d2"]]);
+    // A line the file no longer holds at all is still marked.
+    expect(reconcileFacts([named({ confirmed: true })], [], "d2").map((held) => held.stale)).toEqual([true]);
+  });
+
+  it("booking data on a day the owner answered still stands", () => {
+    const booked = fact({ id: "event:2028-08-02 stay", kind: "event", value: "2028-08-02", source: "jsonld", confidence: 1, accepted: "exact" });
+    expect(mergeFacts([named({ dismissed: true })], [booked]).map((held) => held.id)).toContain(booked.id);
   });
 });
 

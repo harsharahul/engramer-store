@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AssistantError, type GenerateRequest } from "./assistant";
+import { hashRequest, replayRunner, StaleAnswer, type SavedAnswer } from "./eval/replay";
 import type { Fact } from "./facts";
 import {
   cleanTags,
@@ -230,6 +231,22 @@ describe("summarize with facts", () => {
     expect(answer?.facts).toEqual([]);
   });
 
+  it("a document whose only dates stand on lines that are nobody's business is asked once", async () => {
+    const statement = "Account summary\nStatement date: 3 February 2027\nBooked on: 10 February 2027\nThank you for being a member.";
+    const { asked, run } = model({ d1: "due" });
+    const answer = await summarize({ text: statement, name: "statement.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true }, run);
+    expect(asked).toHaveLength(1);
+    expect(answer?.facts).toEqual([]);
+  });
+
+  it("a line that is nobody's business is left out of what the model is asked; the rest is asked", async () => {
+    const letter = "Statement date: 3 February 2027\nWe will visit to read your meter on 9 March 2027.";
+    const { asked, run } = model({ d1: "event", d1w: "meter reading" });
+    await summarize({ text: letter, name: "letter.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true }, run);
+    expect(Object.keys(asked[1]!.schema!.properties)).toEqual(["d1", "d1w"]);
+    expect(asked[1]!.prompt).toContain("d1: 9 March 2027");
+  });
+
   describe("what another reader already settled", () => {
     const bill = "City Water. Amount due: $84.20. Due date: 20 November 2027. Your meter will be read on 3 December 2027 at 10:00.";
     const known: Fact[] = [
@@ -325,6 +342,24 @@ describe("summarize with facts", () => {
       return SUMMARY;
     }).catch((error: unknown) => error);
     expect(outcomeFor(failure)).toBe("paused");
+  });
+
+  it("a kept answer that belongs to another request comes out of the reading as stale, never as no facts", async () => {
+    // The first reading is recorded as the eval keeps it: each answer under its request's name.
+    const kept: SavedAnswer[] = [];
+    const input = { text: POLICY, name: "policy.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true };
+    await summarize(input, async (request) => {
+      const answer = kept.length === 0 ? SUMMARY : { d1: "expiry", d2: "due", pays: "yes", total: "a1" };
+      kept.push({ request: hashRequest(request), answer });
+      return answer;
+    });
+    // Replayed unchanged, the reading is the same reading.
+    expect((await summarize(input, replayRunner(kept)))?.facts).toHaveLength(3);
+    // The judge's question changed since (here: its kept name is another's). Its
+    // old answer must not be scored as this reading, nor as "found nothing".
+    const stale = await summarize(input, replayRunner([kept[0]!, { ...kept[1]!, request: "00000000" }])).catch((error: unknown) => error);
+    expect(stale).toBeInstanceOf(FactsOwed);
+    expect((stale as FactsOwed).cause).toBeInstanceOf(StaleAnswer);
   });
 
   it("a judge request that still overflows with the shorter opening gives no facts and keeps the summary", async () => {

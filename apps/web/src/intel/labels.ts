@@ -11,7 +11,8 @@
  */
 
 import { type DocumentKind, type Fact, factId, maskTail } from "./facts";
-import { parseDate, parseTime, type ParsedDate } from "./dates";
+import { findDates, findTimes, parseDate, parseTime, type DateContext, type ParsedDate } from "./dates";
+import { meaningOf, type LabelMeaning, type Lexicon } from "./lexicon";
 import { serviceOf, type Role, type Subject } from "./subject";
 
 /** How far past a label to look for its date. */
@@ -183,6 +184,110 @@ function claimed(window: string, reach: Reach, writtenAt?: number): { date: Pars
   return below ? { date: below, time: parseTime(window) } : null;
 }
 
+/** A form's clock line is short: a label and its clock. */
+const CLOCK_LINE_MAX = 40;
+/** How many lines up a clock line looks for its date. */
+const BLOCK_REACH = 3;
+
+/**
+ * The clock of a form's clock line ("Departs 14:20", "Check-in time: from
+ * 3 PM"): a short line that is no sentence and holds a clock and no date of
+ * its own. A clock inside a sentence is not one.
+ */
+function clockLineTime(line: string, writtenAt?: number): string | null {
+  const plain = line.trim();
+  if (!plain || plain.length > CLOCK_LINE_MAX || /[.!?]$/.test(plain) || /[.!?]\s+[A-Z]/.test(plain)) {
+    return null;
+  }
+  if (findDates(plain, writtenAt === undefined ? undefined : { writtenAt }).length > 0) {
+    return null;
+  }
+  return parseTime(plain);
+}
+
+/**
+ * The date a clock line belongs to: the nearest line above it that states
+ * one, in the same block (no blank line between, at most three lines up). A
+ * form prints the day once and the clocks of that day under it; the date on
+ * a line below belongs to the next fact.
+ */
+function dateAbove(text: string, lineStart: number, writtenAt?: number, lexicon?: Lexicon): { date: ParsedDate; line: number } | null {
+  let end = lineStart - 1;
+  for (let step = 0; step < BLOCK_REACH && end > 0; step += 1) {
+    const start = text.lastIndexOf("\n", end - 1) + 1;
+    const line = text.slice(start, end);
+    if (!line.trim()) {
+      return null;
+    }
+    // A line that is nobody's business ("Booked on: 10 Feb 2027") lends its
+    // day to nothing: the day of the fact stands further up, or nowhere.
+    const field = lexicon ? FIELD_LINE.exec(line) : null;
+    const nobodys = field !== null && meaningOf(lexicon!, field[1]!) === "none";
+    const date = nobodys ? null : parseDate(line, writtenAt === undefined ? undefined : { writtenAt });
+    if (date) {
+      return { date, line: start };
+    }
+    end = start - 1;
+  }
+  return null;
+}
+
+/** Words that say only "the time of it": they name no moment of their own. */
+const TIME_WORDS = new Set(["time", "date", "at", "from", "on", "the", "is", "start", "starts", "starting", "begin", "begins", "commences"]);
+/** The words of a label that name what it is about. */
+const namingWords = (label: string) => (label.toLowerCase().match(/[a-z]+/g) ?? []).filter((word) => !TIME_WORDS.has(word));
+
+/**
+ * The clock a form prints under a date line ("Class begins: 2 November
+ * 2027", then "Class time: 6:30 PM"): a clock line below it in the same
+ * block, before any other date. The clock is the moment's own when its line
+ * says only "time", names what the date line names ("Class"), or is the
+ * same end of a stay or a journey in the table. A clock said of something
+ * else ("Arrive by: 6:15 PM", "Registration: 6:00 PM") is passed over, and
+ * hours ("9:00 to 17:00") are a span and no moment.
+ */
+function clockBelow(text: string, line: FieldLine, meaning: LabelMeaning, lexicon: Lexicon, writtenAt?: number): string | null {
+  const named = namingWords(line.label);
+  let at = line.end + 1;
+  for (let step = 0; step < BLOCK_REACH && at < text.length; step += 1) {
+    const stop = text.indexOf("\n", at);
+    const end = stop === -1 ? text.length : stop;
+    const below = text.slice(at, end);
+    if (!below.trim() || findDates(below, writtenAt === undefined ? undefined : { writtenAt }).length > 0) {
+      return null;
+    }
+    const time = clockLineTime(below, writtenAt);
+    const [clock, second] = findTimes(below);
+    if (time && clock && !second) {
+      // What the line says before its clock.
+      const words = below.slice(0, clock.at);
+      const said = meaningOf(lexicon, words.replace(/:\s*$/, ""));
+      const own = namingWords(words);
+      const sameEnd = said !== undefined && said !== "event" && said === meaning;
+      if (sameEnd || ((said === undefined || said === meaning) && (own.length === 0 || own.some((word) => named.includes(word))))) {
+        return time;
+      }
+    }
+    at = end + 1;
+  }
+  return null;
+}
+
+/**
+ * The clock that stands straight after a date on a line, with at most a
+ * joining word between ("30 July 2027 17:00", "8 January at 6:00 PM"). A
+ * clock further along the line is another matter ("open 9:00 to 17:00").
+ */
+function clockAfterDate(line: string, writtenAt?: number): string | null {
+  const [date] = findDates(line, writtenAt === undefined ? undefined : { writtenAt });
+  if (!date) {
+    return null;
+  }
+  const rest = line.slice(date.end);
+  const [clock] = findTimes(rest);
+  return clock && /^[\s,]*(?:at|by|before|from|@)?\s*$/i.test(rest.slice(0, clock.at)) ? clock.time : null;
+}
+
 // A flight's number as a line states it: after the word Flight ("Flight UA
 // 123", "flight no. U2 45"), or two capitals and a number standing right
 // before the label ("UA 123 departs"). A number followed by a colon or by
@@ -234,8 +339,12 @@ function windowBefore(text: string, to: number): string {
   return last ? reach.slice(last.index + last[0].length) : reach;
 }
 
-/** Dates that a document labelled, which is the only kind worth trusting. */
-export function labelledFacts(text: string, writtenAt?: number): Fact[] {
+/**
+ * Dates that a document labelled, which is the only kind worth trusting.
+ * With the label table, a clock line on a form never takes the day of a
+ * line that is nobody's business.
+ */
+export function labelledFacts(text: string, writtenAt?: number, lexicon?: Lexicon): Fact[] {
   // How sure a date is: one that could be read two ways, or whose year the
   // message did not print, is a question for the owner.
   const sureness = (parsed: ParsedDate) => ({
@@ -250,7 +359,8 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
     for (let match = labels.exec(text); match; match = labels.exec(text)) {
       // A document prints the year it expires in; an offer "valid thru
       // December 31" does not, and is nobody's document.
-      const parsed = claimed(windowAfter(text, match.index + match[0].length), reach, kind === "expiry" ? undefined : writtenAt)?.date;
+      const window = windowAfter(text, match.index + match[0].length);
+      const parsed = claimed(window, reach, kind === "expiry" ? undefined : writtenAt)?.date;
       if (!parsed) {
         continue;
       }
@@ -258,11 +368,15 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
       if (byId.has(id)) {
         continue;
       }
+      // A day to act by keeps the clock that stands straight after it on the
+      // label's own line ("Return by: Fri 30 July 2027 17:00").
+      const time = kind === "due" ? clockAfterDate(window.split("\n", 1)[0]!, writtenAt) : null;
       byId.set(id, {
         id,
         kind,
         document,
         value: parsed.iso,
+        ...(time ? { time } : {}),
         ...(label ? { label: label(match[0]) } : {}),
         source: "label",
         // A date that could be read two ways is worth less than one that
@@ -275,6 +389,11 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
   // Each flight's departure, by its line: an arrival on the same line may
   // have only a clock.
   const departed = new Map<string, { date: ParsedDate; time: string | null }>();
+  // A form prints a day once and its clocks under it. The moments read from
+  // a line's own date, by that line; and the lines whose date a clock line
+  // below them took.
+  const madeOn = new Map<number, string[]>();
+  const lent = new Set<number>();
   for (const words of EVENTS) {
     if (words.only && words.only !== document) {
       continue;
@@ -291,7 +410,19 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
       const flown = flight ? `${flight.line}|${flight.carrier}|${flight.number}` : "";
       let parsed: ParsedDate | null;
       let time: string | null;
-      if (flight && end === "arrive" && !parseDate(own, writtenAt === undefined ? undefined : { writtenAt })) {
+      const lineStart = text.lastIndexOf("\n", match.index - 1) + 1;
+      const lineStop = text.indexOf("\n", match.index);
+      // A clock line takes the day of the date line above it, and reads
+      // nothing below: the date under it is the next fact's.
+      const clock = flight ? null : clockLineTime(text.slice(lineStart, lineStop === -1 ? text.length : lineStop), writtenAt);
+      const above = clock ? dateAbove(text, lineStart, writtenAt, lexicon) : null;
+      if (clock) {
+        parsed = above?.date ?? null;
+        time = clock;
+        if (above) {
+          lent.add(above.line);
+        }
+      } else if (flight && end === "arrive" && !parseDate(own, writtenAt === undefined ? undefined : { writtenAt })) {
         // An arrival that names no day of its own lands on its departure's
         // day when its clock is the later one. Otherwise its day is not
         // printed (a "+1" is a hint, not a date), and the lines below are
@@ -320,8 +451,17 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
       // The label joins the identity: a check-in and a check-out can share a
       // day, and a date alone would collapse them into one fact.
       const id = factId("event", `${parsed.iso} ${label.toLowerCase()}`);
-      if (byId.has(id)) {
+      const held = byId.get(id);
+      if (held) {
+        // The same moment named again by its time line ("Pick-up date", then
+        // "Pick-up time") gains the clock it lacked.
+        if (time && !held.time) {
+          byId.set(id, { ...held, time });
+        }
         continue;
+      }
+      if (!clock) {
+        madeOn.set(lineStart, [...(madeOn.get(lineStart) ?? []), id]);
       }
       if (flight && end === "depart") {
         departed.set(flown, { date: parsed, time });
@@ -342,6 +482,16 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
         source: "label",
         ...sureness(parsed),
       });
+    }
+  }
+  // A date line whose day a clock line took is the same moment, said without
+  // its clock ("Arrival date", then "Check-in time"): the clock line's
+  // reading is the moment, and the bare one goes.
+  for (const line of lent) {
+    for (const id of madeOn.get(line) ?? []) {
+      if (!byId.get(id)?.time) {
+        byId.delete(id);
+      }
     }
   }
   const asked = amountDue(text, document);
@@ -379,31 +529,74 @@ const MAIL_HEADER = /^\s*(?:from|to|cc|bcc|subject|date|sent|received|reply-to)\
  * supplies the meaning once. Values the vocabulary already claimed are
  * skipped, so a known label is typed and an unknown one still surfaces.
  */
-export function structuralDatedFacts(text: string, claimed: ReadonlySet<string>): Fact[] {
+export function structuralDatedFacts(
+  text: string,
+  claimed: ReadonlySet<string>,
+  opts: { lexicon?: Lexicon; writtenAt?: number } = {},
+): Fact[] {
   const document = guessDocumentKind(text);
   const byId = new Map<string, Fact>();
-  const lines = text.split(/\r?\n/);
-  // The lines of a forwarded or quoted message's header date the mail, not
-  // anything in it. A Date line counts as one only beside another of them:
-  // a ticket prints "Date:" too.
-  const header = lines.map((line) => MAIL_HEADER.test(line));
-  for (const [index, line] of lines.entries()) {
-    const field = FIELD_LINE.exec(line);
-    // A colon between two digits is a clock's ("from 15:00 on 8 April"),
-    // and the words before it are a sentence, not a label.
-    const colon = line.indexOf(":");
-    if (!field || (/\d/.test(line[colon - 1] ?? "") && /\d/.test(line[colon + 1] ?? ""))) {
+  const lines = fieldLines(text).map((line) => ({ ...line, meaning: opts.lexicon ? meaningOf(opts.lexicon, line.label) : undefined }));
+  // One date, one reading: a day a typed label read is not read again from
+  // a line that only names it.
+  const read = new Set(claimed);
+
+  // The lines whose label the table knows. A label that means nothing for
+  // the reader ("Statement date") gives nothing; every other meaning is a
+  // reading like a word rule's, under the document's own words.
+  for (const line of lines) {
+    const meaning = line.meaning;
+    if (meaning === undefined || meaning === "none") {
       continue;
     }
-    const label = field[1]!.replace(/\s+/g, " ").trim();
-    if (!/[A-Za-z]/.test(label) || REFUSED_LABELS.test(label)) {
+    // A document prints the year it expires in, and a day of issue is
+    // behind the message, not ahead of it: neither takes a guessed year.
+    const context = meaning === "expiry" || meaning === "issued" || opts.writtenAt === undefined ? undefined : { writtenAt: opts.writtenAt };
+    const parsed = parseDate(line.value.slice(0, WINDOW), context);
+    if (!parsed || read.has(parsed.iso)) {
       continue;
     }
-    if (header[index] && (header[index - 1] || header[index + 1])) {
+    const label = line.label.slice(0, MAX_LABEL_CHARS);
+    const sure = {
+      confidence: parsed.ambiguous || parsed.assumedYear ? 0.5 : 0.7,
+      ...(parsed.ambiguous ? { ambiguous: true as const } : {}),
+      ...(parsed.assumedYear ? { assumedYear: true as const } : {}),
+    };
+    if (meaning === "due" || meaning === "expiry" || meaning === "issued") {
+      const id = factId(meaning, parsed.iso);
+      if (!byId.has(id)) {
+        const time = meaning === "due" ? clockAfterDate(line.value, opts.writtenAt) : null;
+        byId.set(id, { id, kind: meaning, document, value: parsed.iso, ...(time ? { time } : {}), label, source: "label", ...sure });
+      }
+    } else {
+      const id = factId("event", `${parsed.iso} ${label.toLowerCase()}`);
+      if (!byId.has(id)) {
+        // The clock on the line itself, or on the clock line a form prints under it.
+        const time = parseTime(line.value) ?? clockBelow(text, line, meaning, opts.lexicon!, opts.writtenAt);
+        byId.set(id, {
+          id,
+          kind: "event",
+          document,
+          value: parsed.iso,
+          label,
+          ...(time ? { time } : {}),
+          ...(meaning === "event" ? {} : { subject: { role: meaning } }),
+          source: "label",
+          ...sure,
+        });
+      }
+    }
+    read.add(parsed.iso);
+  }
+
+  // The lines whose label the table does not hold: kept with their own
+  // words, as before, and only for a date that states its year.
+  for (const line of lines) {
+    if (line.meaning !== undefined) {
       continue;
     }
-    const parsed = parseDate(field[2]!.slice(0, WINDOW));
-    if (!parsed || claimed.has(parsed.iso)) {
+    const parsed = parseDate(line.value.slice(0, WINDOW));
+    if (!parsed || read.has(parsed.iso)) {
       continue;
     }
     const id = factId("dated", parsed.iso);
@@ -415,7 +608,7 @@ export function structuralDatedFacts(text: string, claimed: ReadonlySet<string>)
       kind: "dated",
       document,
       value: parsed.iso,
-      label: label.slice(0, MAX_LABEL_CHARS),
+      label: line.label.slice(0, MAX_LABEL_CHARS),
       source: "label",
       // Below a typed label, above bare harvesting: the anchor is real but
       // its meaning is the owner's to supply.
@@ -424,6 +617,72 @@ export function structuralDatedFacts(text: string, claimed: ReadonlySet<string>)
     });
   }
   return [...byId.values()];
+}
+
+/** One line shaped like a form field, with its place in the text. */
+export interface FieldLine {
+  at: number;
+  end: number;
+  label: string;
+  value: string;
+}
+
+/**
+ * The form lines of a text: a label, a colon, a value. Left out: a line
+ * whose colon is a clock's ("from 15:00 on 8 April" is a sentence, not a
+ * label), a refused label, and the header lines of a forwarded or quoted
+ * message, which date the mail and nothing in it. A Date line counts as a
+ * header only beside another header line: a ticket prints "Date:" too.
+ */
+export function fieldLines(text: string): FieldLine[] {
+  const spans: { at: number; end: number; line: string }[] = [];
+  for (let at = 0; at <= text.length; ) {
+    const stop = text.indexOf("\n", at);
+    const end = stop === -1 ? text.length : stop;
+    const line = text.slice(at, end).replace(/\r$/, "");
+    spans.push({ at, end: at + line.length, line });
+    at = end + 1;
+  }
+  const header = spans.map(({ line }) => MAIL_HEADER.test(line));
+  const fields: FieldLine[] = [];
+  for (const [index, { at, end, line }] of spans.entries()) {
+    const field = FIELD_LINE.exec(line);
+    const colon = line.indexOf(":");
+    if (!field || (/\d/.test(line[colon - 1] ?? "") && /\d/.test(line[colon + 1] ?? ""))) {
+      continue;
+    }
+    const label = field[1]!.replace(/\s+/g, " ").trim();
+    if (!/[A-Za-z]/.test(label) || REFUSED_LABELS.test(label)) {
+      continue;
+    }
+    if (header[index] && (header[index - 1] || header[index + 1])) {
+      continue;
+    }
+    fields.push({ at: at + (line.length - line.trimStart().length), end, label, value: field[2]!.trim() });
+  }
+  return fields;
+}
+
+/**
+ * The places whose date the table says is nobody's business: each such
+ * line, from its label to the end of the date the label names. Nothing is
+ * read there, and nothing else should ask about that date. What stands
+ * further along the line ("..., please pay before 20 Feb 2027", or a second
+ * column the text extraction joined on) is not the label's, and stays open.
+ */
+export function settledNowhere(text: string, lexicon: Lexicon, context?: DateContext): { at: number; end: number }[] {
+  const spans: { at: number; end: number }[] = [];
+  for (const line of fieldLines(text)) {
+    if (meaningOf(lexicon, line.label) !== "none") {
+      continue;
+    }
+    const [own] = findDates(line.value, context);
+    if (own) {
+      // The value runs to the end of its line.
+      spans.push({ at: line.at, end: line.end - line.value.length + own.end });
+    }
+  }
+  return spans;
 }
 
 const SYMBOL_CURRENCY: Record<string, string> = {

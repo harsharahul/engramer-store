@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { scanForFacts } from "../scan";
 import { EVAL_CASES } from "./cases";
+import { HELDOUT_CASES } from "./heldout";
 import { scoreReader, type EvalCase } from "./score";
 
 /**
@@ -19,6 +20,14 @@ describe("exact readers on the eval set", () => {
   it("holds forty synthetic cases", () => {
     expect(EVAL_CASES.length).toBeGreaterThanOrEqual(40);
     expect(new Set(EVAL_CASES.map((c) => c.id)).size).toBe(EVAL_CASES.length);
+  });
+
+  it("the first set holds the distractor and the form cases, each id once, none shared with the held-out set", () => {
+    expect(EVAL_CASES).toHaveLength(132);
+    expect(EVAL_CASES.filter((c) => c.id.startsWith("x-"))).toHaveLength(30);
+    expect(EVAL_CASES.filter((c) => c.id.startsWith("f-"))).toHaveLength(40);
+    const heldout = new Set(HELDOUT_CASES.map((c) => c.id));
+    expect(EVAL_CASES.filter((c) => heldout.has(c.id))).toEqual([]);
   });
 
   it("exact readers are never wrong on structured cases", async () => {
@@ -63,12 +72,14 @@ const labelReadings = async (evalCase: EvalCase) => (await labelFacts(evalCase))
 
 describe("label rules on the eval set", () => {
   it("are right at least nine times in ten, on dates and on amounts", async () => {
-    const plain = EVAL_CASES.filter((c) => !c.exact);
+    // Every case of the first set: running words, distractors and forms alike.
+    const written = EVAL_CASES;
+    const plain = written.filter((c) => !c.exact);
     const lines: string[] = [];
     const precise: Record<string, boolean> = {};
     for (const task of ["dates", "amounts"] as const) {
       // Precision over every case, so a rule that speaks where data already did counts against it.
-      const all = await scoreReader(EVAL_CASES, labelReadings, task);
+      const all = await scoreReader(written, labelReadings, task);
       const found = await scoreReader(plain, labelReadings, task);
       const offered = all.perCase.reduce((sum, c) => sum + c.found + c.extra, 0);
       lines.push(`label rules, ${task}: precision ${all.precision.toFixed(3)} over ${offered} readings, recall ${found.recall.toFixed(3)} on ${plain.length} plain cases`);

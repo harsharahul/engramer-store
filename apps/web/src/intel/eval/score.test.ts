@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Fact } from "../facts";
 import { EMAIL_MIME } from "../../mail/kind";
 import { EVAL_CASES } from "./cases";
-import { factCases, kindCases, measure, scoreKinds, scoreNoise, scoreReader, scoreRoles, type EvalCase } from "./score";
+import { errorsByClass, factCases, kindCases, measure, scoreAsked, scoreKinds, scoreNoise, scoreReader, scoreRoles, type EvalCase } from "./score";
 
 const evalCase = (id: string, expected: EvalCase["expected"], mailKind?: string): EvalCase => ({
   id,
@@ -141,7 +141,9 @@ describe("measure", () => {
       bill: [],
       news: [fact("expiry", "2027-06-30")],
     };
-    const figures = await measure(cases, async (c) => answers[c.id]!);
+    const figures = await measure(cases, async (c) => answers[c.id]!, () => Date.UTC(2027, 3, 1, 12));
+    // On 1 April 2027 the stay and the stray expiry are ahead: two questions, one of them wrong.
+    expect(figures.asked).toEqual({ documents: 3, asked: 2, wrong: 1, clock: 0, untyped: 0, askedPer100: 66.7, wrongPer100: 33.3 });
     expect(figures.dates).toEqual({ precision: 0.5, recall: 0.5, offered: 2, expected: 2 });
     expect(figures.amounts).toEqual({ precision: 1, recall: 1, offered: 1, expected: 1 });
     expect(figures.roles).toEqual({ precision: 1, recall: 1, offered: 1, expected: 1 });
@@ -152,7 +154,126 @@ describe("measure", () => {
 
   it("mail that states its facts as data is not asked for them, so it is not measured", async () => {
     const booked: EvalCase = { ...evalCase("flight", [{ kind: "event", value: "2027-03-04" }]), exact: true };
-    const figures = await measure([booked], async () => []);
+    const figures = await measure([booked], async () => [], () => Date.UTC(2027, 3, 1, 12));
     expect(figures.dates).toEqual({ precision: 1, recall: 1, offered: 0, expected: 0 });
+  });
+});
+
+describe("errorsByClass", () => {
+  it("each wrong reading falls in exactly one class, and what nothing explains is missed", async () => {
+    const cases = [
+      evalCase("statement", [{ kind: "due", value: "2027-04-10" }]),
+      evalCase("renewal", [{ kind: "due", value: "2027-08-01" }]),
+      evalCase("ticket", [{ kind: "event", value: "2027-05-15", time: "08:42" }]),
+      evalCase("invoice", [{ kind: "amount", value: "79.99" }]),
+      evalCase("newsletter", []),
+      evalCase("silent", [{ kind: "event", value: "2027-06-01" }]),
+    ];
+    const answers: Record<string, Fact[]> = {
+      // A form line that only names a date; the due day itself was not read.
+      statement: [{ ...fact("dated", "2027-03-03"), label: "Statement date" }],
+      // The right day, called an expiry.
+      renewal: [fact("expiry", "2027-08-01")],
+      // The right day and kind, without its clock.
+      ticket: [fact("event", "2027-05-15")],
+      // A part of the invoice in place of its total.
+      invoice: [fact("amount", "20.00")],
+      // A day that is nobody's business.
+      newsletter: [fact("event", "2027-04-03")],
+      silent: [],
+    };
+    expect(await errorsByClass(cases, async (c) => answers[c.id]!)).toEqual({
+      "named-only line": { count: 1, cases: ["statement"] },
+      "wrong meaning": { count: 1, cases: ["renewal"] },
+      "clock missing": { count: 1, cases: ["ticket"] },
+      "part for the total": { count: 1, cases: ["invoice"] },
+      "not the reader's business": { count: 1, cases: ["newsletter"] },
+      // The renewal and the ticket were found, wrongly; they are not missed twice.
+      missed: { count: 3, cases: ["statement", "invoice", "silent"] },
+    });
+  });
+
+  it("a wrong clock is set against the expected fact of its own meaning, not another fact of that day", async () => {
+    // A day that holds both a payment and a meeting; the meeting was read an hour early.
+    const cases = [evalCase("busy-day", [{ kind: "due", value: "2027-05-15" }, { kind: "event", value: "2027-05-15", time: "10:00" }])];
+    const classes = await errorsByClass(cases, async () => [fact("event", "2027-05-15", "09:00")]);
+    expect(classes["clock missing"]).toEqual({ count: 1, cases: ["busy-day"] });
+    expect(classes["wrong meaning"].count).toBe(0);
+    // The payment was found by nothing: it is missed, and not hidden by the meeting's error.
+    expect(classes.missed).toEqual({ count: 1, cases: ["busy-day"] });
+  });
+
+  it("a reading that is right is in no class", async () => {
+    const cases = [evalCase("bill", [{ kind: "due", value: "2027-04-10" }, { kind: "amount", value: "84.20" }])];
+    const classes = await errorsByClass(cases, async () => [fact("due", "2027-04-10"), fact("amount", "84.20")]);
+    expect(Object.values(classes).every((entry) => entry.count === 0)).toBe(true);
+  });
+});
+
+describe("scoreAsked: the questions a person would be shown", () => {
+  // Every document below is looked at on 1 April 2027, the day it reached the reader.
+  const onApril1 = () => Date.UTC(2027, 3, 1, 12);
+
+  it("a question is what the app would ask on the document's own day", async () => {
+    const cases = [
+      evalCase("ahead", [{ kind: "due", value: "2027-04-10" }]),
+      evalCase("long-over", [{ kind: "due", value: "2027-01-05" }]),
+      evalCase("answered", [{ kind: "due", value: "2027-04-12" }]),
+    ];
+    const answers: Record<string, Fact[]> = {
+      // Ahead and unanswered: it asks.
+      ahead: [fact("due", "2027-04-10")],
+      // Nearly three months behind: the app never asks about it.
+      "long-over": [fact("due", "2027-01-05")],
+      // Already confirmed: nothing left to ask.
+      answered: [{ ...fact("due", "2027-04-12"), confirmed: true }],
+    };
+    expect(await scoreAsked(cases, async (c) => answers[c.id]!, onApril1)).toEqual({ documents: 3, asked: 1, wrong: 0, clock: 0, untyped: 0, askedPer100: 33.3, wrongPer100: 0 });
+  });
+
+  it("the right day and meaning with another clock, or none, is counted apart from a wrong question", async () => {
+    const cases = [evalCase("train", [{ kind: "event", value: "2027-05-15", time: "08:42" }]), evalCase("show", [{ kind: "event", value: "2027-06-05", time: "20:00" }])];
+    const answers: Record<string, Fact[]> = {
+      train: [fact("event", "2027-05-15")],
+      show: [fact("event", "2027-06-05", "19:00")],
+    };
+    expect(await scoreAsked(cases, async (c) => answers[c.id]!, onApril1)).toMatchObject({ asked: 2, wrong: 0, clock: 2, untyped: 0, wrongPer100: 0 });
+  });
+
+  it("a named-only line on the document's own issue day is not a day the reader is asked about", async () => {
+    const cases = [evalCase("policy", [{ kind: "issued", value: "2027-04-20" }, { kind: "expiry", value: "2028-03-19" }])];
+    const lines: Fact[] = [{ ...fact("dated", "2027-04-20"), label: "Date of letter", source: "label", confidence: 0.4 }];
+    expect(await scoreAsked(cases, async () => lines, onApril1)).toMatchObject({ asked: 1, wrong: 1, untyped: 0 });
+  });
+
+  it("a named-only line on a day already behind is not asked about at all", async () => {
+    const cases = [evalCase("invoice", [{ kind: "due", value: "2027-04-20" }])];
+    const lines: Fact[] = [{ ...fact("dated", "2027-03-20"), label: "Job completed", source: "label", confidence: 0.4 }];
+    expect(await scoreAsked(cases, async () => lines, onApril1)).toMatchObject({ asked: 0, wrong: 0 });
+  });
+
+  it("a named-only line on an expected day is untyped; on another day it is wrong", async () => {
+    const cases = [evalCase("ticket", [{ kind: "event", value: "2027-05-15", time: "08:42" }])];
+    const lines: Fact[] = [
+      { ...fact("dated", "2027-05-15"), label: "Date", source: "label", confidence: 0.4 },
+      { ...fact("dated", "2027-04-20"), label: "Booked on", source: "label", confidence: 0.4 },
+    ];
+    expect(await scoreAsked(cases, async () => lines, onApril1)).toMatchObject({ asked: 2, untyped: 1, wrong: 1 });
+  });
+
+  it("the right day under the wrong meaning is a wrong question", async () => {
+    const cases = [evalCase("renewal", [{ kind: "due", value: "2027-08-01" }])];
+    expect(await scoreAsked(cases, async () => [fact("expiry", "2027-08-01")], onApril1)).toMatchObject({ asked: 1, wrong: 1, untyped: 0 });
+  });
+
+  it("an amount asks nothing on its own, and the numbers are per 100 documents", async () => {
+    const cases = [evalCase("a", []), evalCase("b", []), evalCase("c", []), evalCase("d", [{ kind: "due", value: "2027-04-10" }])];
+    const answers: Record<string, Fact[]> = {
+      a: [fact("amount", "45.00")],
+      b: [fact("event", "2027-04-03")],
+      c: [],
+      d: [fact("due", "2027-04-10")],
+    };
+    expect(await scoreAsked(cases, async (c) => answers[c.id]!, onApril1)).toEqual({ documents: 4, asked: 2, wrong: 1, clock: 0, untyped: 0, askedPer100: 50, wrongPer100: 25 });
   });
 });

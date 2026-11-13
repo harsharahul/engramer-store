@@ -274,6 +274,32 @@ export async function generate(
   }
 }
 
+/** A request as the model receives it: what the caller left unsaid is the default. */
+export interface SentRequest {
+  model: "system" | "tagging";
+  instructions: string;
+  prompt: string;
+  schema?: JsonSchema;
+  maxTokens: number;
+  temperature: number;
+}
+
+/**
+ * Everything of a request that the model sees, with the defaults filled in.
+ * The one place the defaults are applied: what is sent is built from this,
+ * and so is the name a kept answer is filed under.
+ */
+export function asSent(request: GenerateRequest): SentRequest {
+  return {
+    model: request.model ?? "system",
+    instructions: request.instructions,
+    prompt: request.prompt,
+    ...(request.schema ? { schema: request.schema } : {}),
+    maxTokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+    temperature: request.temperature ?? DEFAULT_TEMPERATURE,
+  };
+}
+
 async function generateOnce(request: GenerateRequest, transport: AssistantTransport): Promise<unknown> {
   if (request.signal?.aborted) {
     throw new AssistantError("cancelled", "");
@@ -282,13 +308,8 @@ async function generateOnce(request: GenerateRequest, transport: AssistantTransp
   const stream = request.onChunk !== undefined && request.schema === undefined;
   const payload: Record<string, unknown> = {
     job,
-    model: request.model ?? "system",
-    instructions: request.instructions,
-    prompt: request.prompt,
-    ...(request.schema ? { schema: request.schema } : {}),
+    ...asSent(request),
     stream,
-    maxTokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
-    temperature: request.temperature ?? DEFAULT_TEMPERATURE,
     deadlineMs:
       request.deadlineMs ?? (request.priority === "interactive" ? INTERACTIVE_DEADLINE_MS : BACKGROUND_DEADLINE_MS),
     priority: request.priority,

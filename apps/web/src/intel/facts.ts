@@ -255,6 +255,12 @@ export function offeredFacts(
       if (DATED_KINDS.has(fact.kind) && daysUntil(fact.value, now) < -RECENT_PAST_OFFER_DAYS) {
         continue;
       }
+      // A line that only names its date says nothing of a deadline. Once
+      // its day is behind there is nothing left to be reminded of, so it is
+      // not asked about; the line stays on the file, quietly.
+      if (fact.kind === "dated" && daysUntil(fact.value, now) < 0) {
+        continue;
+      }
       if (partner) {
         // One question per disagreement, asked through the stronger reading.
         if (partner.confidence > fact.confidence || (partner.confidence === fact.confidence && partner.id < fact.id)) {
@@ -360,7 +366,12 @@ export function factId(kind: FactKind, value: string): string {
  * would lose the only evidence of the disagreement.
  */
 export function reconcileFacts(existing: Fact[], rescanned: Fact[], digest: string): Fact[] {
-  const found = new Map(rescanned.map((fact) => [fact.id, fact]));
+  // A form line the owner answered under its own words, now read by what
+  // its label means, is the same line: the answer stands and the typed
+  // reading is not added beside it.
+  const answered = answeredLines(existing);
+  const retyped = new Set(rescanned.filter(answered).map(lineOf));
+  const found = new Map(rescanned.filter((fact) => !answered(fact)).map((fact) => [fact.id, fact]));
   const kept: Fact[] = [];
   for (const fact of existing) {
     const again = found.get(fact.id);
@@ -373,6 +384,13 @@ export function reconcileFacts(existing: Fact[], rescanned: Fact[], digest: stri
     }
     if (again) {
       const forward: Fact = { ...withSubjectFrom(fact, again), digest };
+      delete forward.stale;
+      kept.push(forward);
+      continue;
+    }
+    if (fact.confirmed && fact.kind === "dated" && retyped.has(lineOf(fact))) {
+      // The new contents still hold the line; only its reading has a name now.
+      const forward: Fact = { ...fact, digest };
       delete forward.stale;
       kept.push(forward);
       continue;
@@ -447,7 +465,11 @@ export function groundFacts(facts: Fact[], source: string): Fact[] {
     // grounding exists to catch, and it is worse than the date alone because
     // it is the part someone would set an alarm by.
     if (fact.time !== undefined) {
-      return timeRenderings(fact.time).some((form) => haystack.includes(normalize(form))) || statesHour(fact.time, source);
+      return (
+        timeRenderings(fact.time).some((form) => haystack.includes(normalize(form))) ||
+        statesHour(fact.time, source) ||
+        statesMorningClock(fact.time, source)
+      );
     }
     return true;
   });
@@ -505,6 +527,20 @@ function statesHour(time: string, source: string): boolean {
   return new RegExp(`(?<![\\d.:,])\\b${half}\\s?${hour < 12 ? "a" : "p"}\\.?m(?![A-Za-z])`, "i").test(source);
 }
 
+/**
+ * Whether the document writes this morning clock with one digit for its
+ * hour ("9:40"). Read as a clock in the text itself, so it is never found
+ * in the tail of "19:40", and never where the text says it of the evening
+ * ("9:40 PM").
+ */
+function statesMorningClock(time: string, source: string): boolean {
+  const [hh, mm] = time.split(":") as [string, string];
+  if (!hh.startsWith("0")) {
+    return false;
+  }
+  return new RegExp(`(?<![\\d.:,])${Number(hh)}:${mm}(?!\\d)(?!\\s?p\\.?m(?![a-z]))`, "i").test(source);
+}
+
 function normalize(text: string): string {
   return text.toLowerCase().replace(/[\s.,/\\_:-]+/g, "");
 }
@@ -520,8 +556,8 @@ export function isStated(phrase: string, source: string): boolean {
  *
  * The unpadded twenty-four hour form ("9:40") is left out: once separators are
  * stripped it is a substring of "19:40", so including it would ground an
- * evening fact against a morning document. Missing a real match is the safer
- * direction to be wrong in.
+ * evening fact against a morning document. That form is looked for in the
+ * text as a clock instead (`statesMorningClock`).
  */
 function timeRenderings(time: string): string[] {
   const [hh, mm] = time.split(":") as [string, string];
@@ -570,6 +606,38 @@ function renderings(fact: Fact): string[] {
   ];
 }
 
+/** A form line by its day and its label, however the label is spaced or cased. */
+function lineOf(fact: Pick<Fact, "value" | "label">): string {
+  return `${fact.value}|${(fact.label ?? "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()}`;
+}
+
+/**
+ * Tells a typed reading of a form line the owner already answered, yes or
+ * no, while the line only named its date. The answer was for that line: a
+ * reading of the same day under another label is another line.
+ */
+function answeredLines(existing: readonly Fact[]): (fact: Fact) => boolean {
+  const lines = new Set(existing.filter((fact) => fact.kind === "dated" && ownerDecided(fact)).map(lineOf));
+  return (fact) => fact.source === "label" && MEANT_KINDS.has(fact.kind) && lines.has(lineOf(fact));
+}
+
+/**
+ * What a file carries, less the form lines the rules no longer read.
+ *
+ * A line that only names its date comes from the text alone, so reading the
+ * same text again is the whole truth about it. Where its label has since
+ * been given a meaning that needs no reminder ("Statement date"), the line
+ * is not read any more and the stored one goes with it. A line the owner
+ * answered stays, and so does every other reader's fact.
+ */
+export function withoutUnreadLines(existing: readonly Fact[], rescanned: readonly Fact[]): Fact[] {
+  const again = new Set(rescanned.map((fact) => fact.id));
+  return existing.filter((fact) => !(fact.kind === "dated" && fact.source === "label" && !ownerDecided(fact) && !again.has(fact.id)));
+}
+
 /**
  * Folds a rescan into what a file already carries, in one fixed order.
  *
@@ -590,12 +658,19 @@ export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
   const confirmedValues = new Set(
     existing.filter((fact) => fact.confirmed).map((fact) => `${fact.kind}:${fact.value}`),
   );
+  // A form line the owner answered under its own words, yes or no, is
+  // settled. The same line read later by what its label means is not news,
+  // and is not asked about under a new name.
+  const answered = answeredLines(existing);
   for (const fact of existing) {
     merged.set(fact.id, fact);
   }
   for (const fact of found) {
     const prior = merged.get(fact.id);
     if (!prior) {
+      if (answered(fact)) {
+        continue;
+      }
       if (!confirmedValues.has(`${fact.kind}:${fact.value}`)) {
         merged.set(fact.id, fact);
         continue;
@@ -791,10 +866,18 @@ function resolveSlots(facts: Fact[]): Fact[] {
     }
   }
   // A form line that only names a date ("Date: 15 May 2027") says nothing of
-  // what the date is. Where the model says what it is, that is the reading
-  // of that day, answered or not: one date, one question.
+  // what the date is. Where the model says what it is, or a rule now reads
+  // the line by what its label means, that is the reading of that day,
+  // answered or not: one date, one question.
   const meant = new Set(
-    out.filter((fact) => fact.source === "model" && !drop.has(fact.id) && (fact.kind === "event" || fact.kind === "due" || fact.kind === "expiry")).map((fact) => fact.value),
+    out
+      .filter(
+        (fact) =>
+          !drop.has(fact.id) &&
+          ((fact.source === "model" && (fact.kind === "event" || fact.kind === "due" || fact.kind === "expiry")) ||
+            (fact.source === "label" && MEANT_KINDS.has(fact.kind))),
+      )
+      .map((fact) => fact.value),
   );
   for (const fact of out) {
     if (fact.kind === "dated" && fact.source === "label" && !ownerDecided(fact) && meant.has(fact.value)) {

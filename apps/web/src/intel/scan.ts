@@ -29,6 +29,7 @@ import {
   type ReadFact,
 } from "./facts";
 import { harvestFacts, labelledFacts, structuralDatedFacts } from "./labels";
+import { loadLexicon } from "./lexicon";
 import { mrzFacts } from "./mrz";
 import { structuredDataFacts } from "./reservation";
 import { icsFacts } from "./icsread";
@@ -113,12 +114,21 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
   const text = input.text ?? "";
   if (text) {
     found.push(...mrzFacts(text));
-    const typed = labelledFacts(text, input.writtenAt);
+    // What a form line's label means, from the shipped table. With no table
+    // every line is read with its own words.
+    const lexicon = await loadLexicon();
+    const typed = labelledFacts(text, input.writtenAt, lexicon);
     found.push(...typed);
-    // Labels the vocabulary knows are typed; every other labelled date still
-    // surfaces with the document's own words attached. Values already
-    // claimed by a typed fact are skipped so nothing appears twice.
-    found.push(...structuralDatedFacts(text, new Set(typed.map((fact) => fact.value))));
+    // A form line is read by its label: the table types it, or says it is
+    // nobody's business, and a label it does not hold still surfaces with
+    // the document's own words attached. Values already claimed by a typed
+    // fact are skipped so nothing appears twice.
+    found.push(
+      ...structuralDatedFacts(text, new Set(typed.map((fact) => fact.value)), {
+        ...(lexicon ? { lexicon } : {}),
+        ...(input.writtenAt !== undefined ? { writtenAt: input.writtenAt } : {}),
+      }),
+    );
     found.push(...harvestFacts(text));
   }
   if (found.length === 0) {

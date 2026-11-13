@@ -130,6 +130,8 @@ export interface Known {
   read?: readonly { value: string; time?: string }[];
   /** A reader already named the document's total. */
   total?: boolean;
+  /** Places whose dates are nobody's business (a form line such as "Statement date: ..."): nothing is asked about a date found there. */
+  skip?: readonly { at: number; end: number }[];
 }
 
 /**
@@ -213,6 +215,9 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
       break;
     }
     if (earliest !== undefined && hit.date.iso < earliest) {
+      continue;
+    }
+    if (known.skip?.some((span) => hit.at >= span.at && hit.at < span.end)) {
       continue;
     }
     const printed = text.slice(hit.at, hit.end);

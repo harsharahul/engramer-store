@@ -2,6 +2,8 @@ import { isHandheld } from "./analysisslot";
 import { loadPolicy } from "./backuppolicy";
 import { settingChanged } from "./settingsbus";
 import { connectionIsUnmetered } from "./connection";
+import { ownerDecided } from "./intel/facts";
+import { loadLexicon } from "./intel/lexicon";
 import { factsEnabled } from "./intel/scan";
 import { useStore } from "./store";
 import { SweepMemory, type SweepKind } from "./sweepmemory";
@@ -150,23 +152,49 @@ export async function runBackfill(): Promise<BackfillResult | null> {
    * is skipped, every outcome is written back, and a run of failures
    * trips the breaker for the whole run.
    */
-  const pass = (kind: SweepKind, session: Set<string>) => {
+  const pass = (kind: SweepKind, session: Set<string>, again?: { owed: (id: string) => boolean; record: (id: string, ok: boolean) => void }) => {
     const memory = new SweepMemory(account, kind);
     return {
       // Asked per file rather than seeded, so nothing has to enumerate
       // candidates here: this session's attempts plus whatever this
       // device has already given up on across earlier opens.
       skip: {
-        has: (id: string) => session.has(id) || memory.exhausted(id),
+        has: (id: string) => session.has(id) || (memory.exhausted(id) && !again?.owed(id)),
         add: (id: string) => void session.add(id),
       },
       stop,
       onOutcome: (id: string, ok: boolean) => {
         memory.record(id, ok);
+        again?.record(id, ok);
         session.add(id);
         consecutiveFailures = ok ? 0 : consecutiveFailures + 1;
       },
     };
+  };
+
+  /**
+   * The dates pass reads a file once on this device. A label table that
+   * shipped later still has to reach those files, without reading the
+   * library again: a file that still holds an unanswered line kept with
+   * its own words is owed one more look, once per edition of the table.
+   * Every file the pass reads is noted for the edition, so the look is
+   * never owed twice, whatever another device writes back.
+   */
+  const datesPass = async () => {
+    const edition = (await loadLexicon())?.edition;
+    if (!edition) {
+      return pass("facts", attemptedFacts);
+    }
+    const lines = new SweepMemory(account, "lines", edition);
+    const openLine = (id: string) =>
+      useStore
+        .getState()
+        .files.get(id)
+        ?.facts.some((fact) => fact.kind === "dated" && fact.source === "label" && !ownerDecided(fact)) ?? false;
+    return pass("facts", attemptedFacts, {
+      owed: (id) => !lines.exhausted(id) && openLine(id),
+      record: (id, ok) => lines.record(id, ok),
+    });
   };
 
   try {
@@ -176,7 +204,7 @@ export async function runBackfill(): Promise<BackfillResult | null> {
     const processed = await store.processLibrary({ ...pass("process", attemptedProcess), ...cap });
     const facts =
       !stop() && factsEnabled()
-        ? await useStore.getState().scanLibraryForFacts(pass("facts", attemptedFacts))
+        ? await useStore.getState().scanLibraryForFacts(await datesPass())
         : 0;
     // Trips last, over the dates just read; it gates itself on its switch.
     const trips = !stop() ? await useStore.getState().assembleTrips() : 0;

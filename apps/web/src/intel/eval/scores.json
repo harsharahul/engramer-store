@@ -4,102 +4,120 @@
   "prompt": "91930e36",
   "measuredAt": "2026-11-13",
   "contextSize": 8192,
-  "cases": 92,
+  "cases": 132,
   "tasks": {
     "dates": {
-      "precision": 0.5625,
-      "recall": 0.23684210526315788,
-      "offered": 32,
-      "expected": 76
+      "precision": 0.5476190476190477,
+      "recall": 0.1796875,
+      "offered": 42,
+      "expected": 128
     },
     "amounts": {
-      "precision": 0.6785714285714286,
-      "recall": 0.76,
-      "offered": 28,
-      "expected": 25
+      "precision": 0.75,
+      "recall": 0.7636363636363637,
+      "offered": 56,
+      "expected": 55
     },
     "roles": {
-      "precision": 1,
-      "recall": 0.1875,
-      "offered": 3,
-      "expected": 16
+      "precision": 0.6666666666666666,
+      "recall": 0.11764705882352941,
+      "offered": 6,
+      "expected": 34
     },
     "noise": {
-      "cases": 13,
-      "loud": 3,
-      "offered": 8,
-      "rate": 0.23076923076923078
+      "cases": 21,
+      "loud": 6,
+      "offered": 12,
+      "rate": 0.2857142857142857
+    },
+    "asked": {
+      "documents": 121,
+      "asked": 42,
+      "wrong": 16,
+      "clock": 3,
+      "untyped": 0,
+      "askedPer100": 34.7,
+      "wrongPer100": 13.2
     },
     "mailKind": {
-      "accuracy": 0.7571428571428571,
-      "cases": 70,
+      "accuracy": 0.7142857142857143,
+      "cases": 91,
       "byKind": {
         "booking": {
-          "precision": 0.8275862068965517,
-          "offered": 29
+          "precision": 0.8157894736842105,
+          "offered": 38
         },
         "bill": {
           "precision": 1,
-          "offered": 9
+          "offered": 11
         },
         "delivery": {
           "precision": 1,
-          "offered": 8
+          "offered": 9
         },
         "newsletter": {
-          "precision": 1,
-          "offered": 4
-        },
-        "personal": {
-          "precision": 0.2,
+          "precision": 0.8,
           "offered": 5
         },
+        "personal": {
+          "precision": 0.14285714285714285,
+          "offered": 7
+        },
         "other": {
-          "precision": 0.42857142857142855,
-          "offered": 14
+          "precision": 0.3888888888888889,
+          "offered": 18
         },
         "receipt": {
-          "precision": 1,
-          "offered": 1
+          "precision": 0.6666666666666666,
+          "offered": 3
         }
       }
     }
   },
   "together": {
     "dates": {
-      "precision": 0.638095238095238,
-      "recall": 0.881578947368421,
-      "offered": 105,
-      "expected": 76
+      "precision": 0.6785714285714286,
+      "recall": 0.890625,
+      "offered": 168,
+      "expected": 128
     },
     "amounts": {
-      "precision": 0.7272727272727273,
-      "recall": 0.96,
-      "offered": 33,
-      "expected": 25
+      "precision": 0.7777777777777778,
+      "recall": 0.8909090909090909,
+      "offered": 63,
+      "expected": 55
     },
     "roles": {
-      "precision": 1,
-      "recall": 0.625,
-      "offered": 10,
-      "expected": 16
+      "precision": 0.9230769230769231,
+      "recall": 0.7058823529411765,
+      "offered": 26,
+      "expected": 34
     },
     "noise": {
-      "cases": 13,
-      "loud": 4,
-      "offered": 12,
-      "rate": 0.3076923076923077
+      "cases": 21,
+      "loud": 9,
+      "offered": 18,
+      "rate": 0.42857142857142855
     },
-    "documents": 81,
-    "readWhole": 58
+    "asked": {
+      "documents": 121,
+      "asked": 146,
+      "wrong": 31,
+      "clock": 5,
+      "untyped": 2,
+      "askedPer100": 120.7,
+      "wrongPer100": 25.6
+    },
+    "documents": 121,
+    "readWhole": 77
   },
   "heldout": {
     "cases": 60,
     "tasks": {
       "dates": {
-        "precision": 0.6774193548387096,
-        "recall": 0.38181818181818183,
-        "offered": 31,
+        "precision": 0.6666666666666666,
+        "recall": 0.36363636363636365,
+        "offered": 30,
         "expected": 55
       },
       "amounts": {
@@ -120,8 +138,17 @@
         "offered": 2,
         "rate": 0.16666666666666666
       },
+      "asked": {
+        "documents": 60,
+        "asked": 30,
+        "wrong": 2,
+        "clock": 7,
+        "untyped": 0,
+        "askedPer100": 50,
+        "wrongPer100": 3.3
+      },
       "mailKind": {
-        "accuracy": 0.8636363636363636,
+        "accuracy": 0.8409090909090909,
         "cases": 44,
         "byKind": {
           "booking": {
@@ -130,15 +157,15 @@
           },
           "bill": {
             "precision": 1,
-            "offered": 5
+            "offered": 4
+          },
+          "personal": {
+            "precision": 0.5,
+            "offered": 6
           },
           "other": {
             "precision": 0.7142857142857143,
             "offered": 7
-          },
-          "personal": {
-            "precision": 0.6,
-            "offered": 5
           },
           "delivery": {
             "precision": 1,
@@ -157,9 +184,9 @@
     },
     "together": {
       "dates": {
-        "precision": 0.6923076923076923,
+        "precision": 0.703125,
         "recall": 0.8181818181818182,
-        "offered": 65,
+        "offered": 64,
         "expected": 55
       },
       "amounts": {
@@ -180,8 +207,17 @@
         "offered": 2,
         "rate": 0.16666666666666666
       },
+      "asked": {
+        "documents": 60,
+        "asked": 59,
+        "wrong": 5,
+        "clock": 10,
+        "untyped": 0,
+        "askedPer100": 98.3,
+        "wrongPer100": 8.3
+      },
       "documents": 60,
-      "readWhole": 37
+      "readWhole": 38
     }
   }
 }
