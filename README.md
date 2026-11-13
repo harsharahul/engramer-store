@@ -73,7 +73,67 @@ Files, names, folders, tags and search text are encrypted on your device before 
 
 This holds even if the server is fully compromised. The design is in [docs/architecture.md](docs/architecture.md), the threat model in [SECURITY.md](SECURITY.md).
 
-## How a date reaches the Timeline
+## Features
+
+Everything below runs on your device or on ciphertext. Each group ends with the document that explains it in depth.
+
+| | | | | |
+|---|---|---|---|---|
+| [Security and accounts](#security-and-accounts) | [Files](#files) | [Documents: Word, Excel, PDF and notes](#documents-word-excel-pdf-and-notes) | [Timeline, dates and trips](#timeline-dates-and-trips) | [Mail](#mail) |
+| [Search and understanding](#search-and-understanding) | [Photos and media](#photos-and-media) | [Sharing](#sharing) | [Apps and devices](#apps-and-devices) | [Self-hosting and storage](#self-hosting-and-storage) |
+
+### Security and accounts
+
+- **End-to-end encryption.** File content is sealed with XChaCha20-Poly1305 as a stream, keys and metadata with XSalsa20-Poly1305, and your password is stretched with Argon2id. Every primitive comes from libsodium; there is no custom cryptography.
+- **Content verified end to end.** A digest of every file is taken on the device before encryption and checked after decryption, so the vault can prove that what comes back is what your file held. A vault of any size is spot-checked in seconds, "Check every file" reads everything back, and each file's details show its integrity state.
+- **Recovery key.** A random key, shown once at sign-up, restores access after a lost password. Changing the password re-wraps the master key without re-encrypting any data. There is no password reset, because the server never holds key material.
+- **Two-factor authentication.** Standard TOTP with any authenticator app, QR enrollment and one-time recovery codes. Key material is withheld until the second factor passes.
+- **Unlock with your device.** Touch ID, Face ID or a passkey can release the vault key, so one touch reopens the vault. Signing out revokes the enrollment.
+- **Session control.** "Sign out everywhere" ends every other device's session, an optional lock closes the vault after inactivity, and every account has a key fingerprint that can be compared before sharing.
+- **Delete your account.** Profile removes the account and every file in it for good, after the password is proved again on the device.
+
+More: [docs/architecture.md](docs/architecture.md), [docs/auth.md](docs/auth.md), [SECURITY.md](SECURITY.md).
+
+### Files
+
+<p align="center">
+  <img src="docs/media/history.png" alt="A file's details: its tags, its integrity state, and an earlier version to download or restore" width="760">
+</p>
+
+- **A drive you already know.** Nested folders, drag-and-drop upload with progress per file, rename, move, trash and restore. Dropping a folder keeps its whole structure, and thousands of small files move through a bounded pipeline that retries politely when throttled.
+- **Version history on every file.** Each save keeps the previous content as a version you can download or restore with one click (the last 10 by default). Writes are append-only, so an interrupted save can never corrupt a file.
+- **Auto-organization.** Every upload is analyzed on your device and filed by kind (Photos, Screenshots, Receipts, Code and more), with tags such as the capture year, the camera, invoice or contract. The Library sidebar shows live category views. All of it lives in encrypted metadata.
+- **Previews for almost everything.** Images, PDFs, spreadsheets, Word documents, text, video and audio open after local decryption. A spreadsheet previews as a table with a tab per sheet. Archives (zip, tar, tar.gz) show what is inside and extract into the vault, folders included.
+- **Encrypted thumbnails.** Thumbnails are made on the client and stored encrypted, with a blurred placeholder painted before any bytes arrive.
+- **A picture editor.** Rotate, flip, crop, add boxes, arrows, text and blur. The result is saved as a new version.
+- **Quotas and fast sync.** Per-user quotas are enforced while a file uploads, and clients converge in one round trip. A change feed that carries only a counter tells always-on clients to pull at once.
+
+More: [docs/storage.md](docs/storage.md).
+
+### Documents: Word, Excel, PDF and notes
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/media/excel.png" alt="A spreadsheet edited in the browser, with a SUM formula in the formula bar">
+      <br>A spreadsheet from the vault, edited in the browser: formulas calculate on your device, and Save writes a new encrypted version.
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/media/word.png" alt="A Word document edited in the browser, with a heading and a list">
+      <br>A Word document, edited in its own format with styles, lists and tracked changes. Nothing is converted on a server.
+    </td>
+  </tr>
+</table>
+
+- **Word and Excel editing, fully on your device.** Open a `.docx` or `.xlsx` and edit it in a real office engine that runs in your browser. Formulas, charts, images, tables and tracked changes survive, because the document is edited in its own format and never converted on a server. That is the reason the usual self-hosted office suites cannot work on encrypted storage, and this can. OpenDocument text and sheets open the same way.
+- **The editor cannot reach your keys.** The office engine is third-party code, so it runs in a frame with an opaque origin: it receives bytes and returns bytes, and cannot touch the page that holds your keys, its storage or your session. Saving re-encrypts under the file's key and keeps the previous version.
+- **Editing together, live.** Two people can edit the same Word document or spreadsheet at once and see each other's changes as they happen. Changes travel sealed under the file key through a channel the server relays without reading. If the channel is unavailable, the document stays editable one person at a time, with no silent overwrites.
+- **PDFs you can read, search, mark up, fill and re-page.** A real viewer: text you can select and copy, find with a match count, thumbnails, the outline, rotation. Markup adds highlight, drawing, text and images; forms fill in. Pages can be turned, reordered, removed or extracted, and several PDFs combine into one. Every change saves as a new version. PDFs are drawn on your device, so they look the same in every browser and in the apps.
+- **Notes, Markdown and code.** Create a note from the New menu or the command palette. Text, Markdown and code open in an editor with highlighting, line numbers and search, and Markdown gets a preview beside the text. Edits are searchable at once.
+
+More: [docs/office-editing.md](docs/office-editing.md), [docs/collaboration.md](docs/collaboration.md), [docs/editing.md](docs/editing.md).
+
+### Timeline, dates and trips
 
 ```mermaid
 flowchart LR
@@ -85,23 +145,72 @@ flowchart LR
   model -- "waits for your yes" --> timeline
 ```
 
-Every reader runs on the device. A value that the document does not state cannot be stored, and nothing is sent to a model in the cloud. Details and measured accuracy are in [docs/intelligence.md](docs/intelligence.md).
+- **The Timeline.** One place for time: every bill, booking, delivery, renewal, trip and photo day in order, what is due this week, and a Month view. The app opens on it once the library holds anything dated.
+- **Dates read out of your documents.** The app reads what a document says about itself: when it expires, when a payment is due, the reference numbers that identify it. Driver's licence barcodes and passport machine-readable zones are read as structured fields with their own check digits, and every other barcode on a page is decoded too, so a booking reference becomes searchable.
+- **Nothing is assumed.** A date read from exact data (booking data, an invite, a barcode) counts at once and says why. Anything else is offered once and counts when you accept it. A date that could be read two ways asks which one. A value the document does not state cannot be stored, and nothing is sent to a model in the cloud.
+- **Reminders that need two documents.** A passport stops being useful for travel about six months before the date printed on it, a residence permit can outlive its passport, and an insurance period can end with nothing newer stored. A small set of rules says the things worth interrupting for.
+- **Trips come together on their own.** Flights, stays, tickets and the documents that share a booking reference are grouped as a trip on every device, labelled, and undone with "Not a trip". Anything matched only by date is offered for a yes.
+- **A page for every trip.** The route drawn on the device with no map service, the itinerary, the checks, the cost bill by bill in each currency, and a calendar export. From a month before you fly the Timeline follows the trip: the countdown, when to leave for the airport, your boarding pass and hotel on the day, and a recap when you are back.
+- **Private by construction.** An offline airport table turns codes into cities and time zones. Directions hand off to your maps app, because door-to-door timing would mean sending your location somewhere. Reference numbers are kept as their last four characters.
 
-## Features
+More: [docs/intelligence.md](docs/intelligence.md), with the measured accuracy of each reader.
 
-| Area | What you get | More |
-|---|---|---|
-| **Encryption** | XChaCha20-Poly1305 for content, XSalsa20-Poly1305 for keys and metadata, Argon2id for the password. libsodium only, no custom cryptography. A digest taken before encryption proves that what comes back is what you stored. | [architecture](docs/architecture.md) |
-| **Accounts** | Recovery key, TOTP two-factor, unlock with Touch ID, Face ID or a passkey, sign out everywhere, delete your own account. | [auth](docs/auth.md) |
-| **Files** | Folders, drag-and-drop upload of whole folder trees, version history on every file, trash and restore, quotas. Uploads are filed by kind and tagged on the device. | [storage](docs/storage.md) |
-| **Timeline and trips** | Dates, amounts and bookings read from documents and mail. Trips assembled from exact evidence, with a page per trip, checks such as passport validity, spend per currency and calendar export. | [intelligence](docs/intelligence.md) |
-| **Mail** | Import saved messages and mailbox exports, including Google Takeout and Apple Mail. A safe viewer with remote images off until asked. | [intelligence](docs/intelligence.md) |
-| **Search** | One engine for names (typo tolerant), tags, folder paths and full text. Opt-in OCR and search by meaning ("a dog on a beach"). On the Mac and iPhone apps: search in plain words, one-line summaries and Ask your files, all on the device. | [intelligence](docs/intelligence.md) |
-| **Photos and media** | A photo timeline, albums stored as encrypted tags, encrypted thumbnails, and video that starts at once and seeks anywhere while every chunk is verified. | [storage](docs/storage.md) |
-| **Documents** | Previews for PDF, Word, spreadsheets, images and text. PDFs can be searched, marked up, filled and re-paged. Word and Excel files are edited in the browser in their own format, and two people can edit at once. | [office editing](docs/office-editing.md), [collaboration](docs/collaboration.md) |
-| **Sharing** | Links that carry the key in the URL fragment, with password, expiry and download limits. Sharing to another account as viewer or editor. File requests that let anyone send files into your vault. | [sharing](docs/sharing.md) |
-| **Apps** | A Mac app with a Finder drive and watch folders. An iPhone app with the vault in Files, the share sheet and photo backup. An installable web app. The Mac and iPhone apps can also keep the vault on the device, with no server. | [native apps](docs/native-apps.md) |
-| **Self-hosting** | One container. SQLite or PostgreSQL. Blobs on local disk, S3, or a provider you already pay for through rclone. Storage tiering on ciphertext, registration policy, an admin panel, and a local S3 bridge for rclone and other S3 tools. | [backends](docs/backends.md), [S3 gateway](docs/s3-gateway.md) |
+### Mail
+
+- **Mail import.** Saved messages (`.eml`) and mailbox exports (`.mbox`, including Google Takeout and Apple Mail exports) import from the New menu, the command palette or a drop. Each message becomes an email record and each real attachment a file, linked both ways; tracking pixels are dropped. Importing the same file again adds only what is new.
+- **A safe email viewer.** Sender, recipients, date and attachments, with the body in a sandboxed frame that runs no script. Remote images stay off until you ask, links show their real address, and "Save as PDF" keeps a plain copy.
+- **Mail feeds the Timeline.** Bookings, bills, deliveries and invites are read exactly from the data the sender included. On the Mac and iPhone apps the on-device model reads the rest, newest first.
+- **Mail in search.** `type:email`, `from:`, `to:` and `has:attachment` filter results, which show the sender, the date and attachment chips.
+
+More: [docs/intelligence.md](docs/intelligence.md).
+
+### Search and understanding
+
+- **Search that finds what you half remember.** One engine behind the top bar and the Cmd+K palette matches names (typo-tolerant), tags, folder names anywhere on a file's path, and the text inside documents, PDFs and mail. Results show thumbnails, folder paths and highlighted snippets, all reachable by keyboard, with filters such as `tag:receipts`, `type:photo`, `in:Work` and `before:2026`. Queries never leave your device.
+- **On-device OCR (opt-in).** Screenshots and scans become searchable by the text inside them, read locally with every asset served from your own host.
+- **Search by meaning (opt-in).** Type "a dog on a beach" and matching photos and videos surface even when no name or text agrees. "Find similar" ranks the library by visual closeness. The model runs on the device and its vectors live in encrypted metadata.
+- **Scene labels as tags.** With meaning search on, confident labels (beach, food, dog, document, screenshot and more) become ordinary tags: searchable, shown as chips, usable in albums.
+- **Search in plain words (Mac and iPhone apps).** "receipts from last december" is turned by Apple's on-device model into the filters search already understands. Anything the model invents is dropped, and the line beside the results shows what was actually searched.
+- **A one-line summary of every document (Mac and iPhone apps).** The on-device model writes one sentence and a few tags into encrypted metadata, so every device shows them and search finds a scan by what it is about. Reference numbers are masked first.
+- **Ask your files (Mac and iPhone apps).** Type a question and the app answers from your own documents, naming the files it used. Nothing about the question or the answer is stored or leaves the device.
+
+More: [docs/intelligence.md](docs/intelligence.md).
+
+### Photos and media
+
+- **Photos and Albums.** Every photo and video in one timeline with month sections and a favorites filter. Albums are stored as encrypted tags, so a photo can be in any number of them without copies.
+- **Streaming that stays encrypted and verified.** Video and audio start at once and seek anywhere without downloading the whole file. Media is stored as independently sealed chunks, and a service worker decrypts only the bytes playback touches, so memory stays flat and a 4K original plays as uploaded, with no transcoding. Every chunk is authenticated before it reaches the player.
+- **Photo backup from the iPhone.** Opt-in backup uploads originals without recompressing them, with choices for Wi-Fi only, videos, screenshots and how far back to go.
+
+More: [docs/storage.md](docs/storage.md), [docs/photo-backup.md](docs/photo-backup.md).
+
+### Sharing
+
+- **Share links that keep the server blind.** A link carries the decryption key in the URL fragment, which browsers never send. Add a password (wrapped with Argon2id on your device), an expiry or a download limit, including one-time links, and revoke any link from the Shared view.
+- **Share with people, at a role.** Share a file to another account as a viewer or an editor through a claim-once invitation that carries no key material. Concurrent saves resolve into a clear choice, and removing someone can rotate the key. No endpoint turns an email address into an account.
+- **File requests.** A public link that lets anyone send files into your vault. Uploads are encrypted on the sender's device and sealed to your public key, then filed into the folder you chose. Not even the server can read them.
+
+More: [docs/sharing.md](docs/sharing.md).
+
+### Apps and devices
+
+- **A Finder drive on the Mac.** The vault appears under Locations in Finder. Files download and decrypt as they are opened, new and edited files encrypt and upload in place, deletions go to the vault's trash, and a conflicting save becomes a "(conflicted copy)". Changes from your other devices arrive within seconds, and a right-click copies a share link.
+- **Watch folders.** Point the Mac app at a folder and anything that appears in it is encrypted and uploaded. One-way by design: nothing local is changed or deleted, and nothing is uploaded twice.
+- **The vault in the iPhone's Files app.** Browse, open, save and edit in place from Files and from every app's file picker. The share sheet saves into the vault from any app, and a shared web page is stored as a searchable PDF.
+- **Works without a server.** The Mac and iPhone apps can keep the vault on the device, encrypted, with the same client. "Connect a server" copies the vault to a server later, checks the copy and switches over.
+- **Installable web app.** Add the web client to your Dock or home screen and it runs standalone. Paste a screenshot anywhere in the app to store it encrypted.
+
+More: [docs/native-apps.md](docs/native-apps.md).
+
+### Self-hosting and storage
+
+- **Bring your own cloud storage.** Keep the ciphertext on storage you already pay for: any provider with an S3 API directly, and most others (Drime, pCloud, Dropbox, Google Drive) through a bundled rclone gateway and one token. The provider only holds unreadable blobs under meaningless names. Thumbnails, search indexes and the opening bytes of every video stay on the server's own disk, so browsing and playback feel local.
+- **Storage tiering on ciphertext.** Small, request-heavy blobs and large content can live on different stores. A bounded cache of ciphertext keeps new uploads and repeat viewing fast, and request budgets keep a throttled store below its limit. The server never decrypts anything to place it.
+- **Local S3 bridge.** A zero-knowledge S3 endpoint (`apps/bridge`) lets rclone, s3fs or the AWS SDK browse and download the vault, with folders as buckets.
+- **Registration and administration.** Registration can be open, by invite, or closed. Admins get a panel to list accounts, mint invites, set quotas and disable or delete accounts.
+- **SQLite or PostgreSQL.** SQLite by default. PostgreSQL serves deployments with more than one server instance, with rolling updates and a clean stop.
+
+More: [docs/backends.md](docs/backends.md), [docs/storage.md](docs/storage.md), [docs/s3-gateway.md](docs/s3-gateway.md), [docs/auth.md](docs/auth.md).
 
 ## Quickstart
 
@@ -142,6 +251,18 @@ pnpm --filter @engramer/server start
 ### With an AI agent
 
 Point an agent that can run shell commands at [skills/setup/SKILL.md](skills/setup/SKILL.md). It asks what kind of deployment you want, sets it up, and checks the result.
+
+## Using it
+
+- **Create** a note, a Word document, a spreadsheet or a folder from the **New** menu, or from the command palette with `Cmd+K`. A new document is created encrypted in your vault and opens straight into its editor.
+- **Edit** a `.docx` or `.xlsx` by opening it and choosing **Edit**. Everything runs on your device; saving keeps the previous version, so an edit can be undone like any other change.
+- **Preview** anything by double-clicking it: PDFs, spreadsheets, Word documents, images, text, video and audio.
+- **Find** things from the search box or `Cmd+K`: names, tags, folder names and the text inside documents, with filters such as `tag:receipts`, `type:photo`, `in:Work` and `before:2026`.
+- **Import mail** from the New menu or the palette: choose a `.mbox` export or `.eml` files.
+- **Open the Timeline** to see what is happening and what is next, and answer the dates it offers with one click.
+- **Watch a folder** in the Mac app, under your account menu. Choose per folder whether arrivals are sorted by kind and tagged with the folder's name, or kept together in a folder of the same name.
+- **Share** a file with a link. Add a password, an expiry or a download limit, and revoke it at any time from **Shared**.
+- **Keep it on this device.** The Mac and iPhone apps offer on first launch to keep the vault on the device. The office editor and the on-device models are optional downloads, offered the first time a feature needs them.
 
 ## Configuration
 
