@@ -114,7 +114,8 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
   const text = input.text ?? "";
   if (text) {
     found.push(...mrzFacts(text));
-    // What a form line's label means, from the shipped table.
+    // What a form line's label means, from the shipped table. With no table
+    // every line is read with its own words.
     const lexicon = await loadLexicon();
     const typed = labelledFacts(text, input.writtenAt, lexicon);
     found.push(...typed);
@@ -124,7 +125,7 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
     // fact are skipped so nothing appears twice.
     found.push(
       ...structuralDatedFacts(text, new Set(typed.map((fact) => fact.value)), {
-        lexicon,
+        ...(lexicon ? { lexicon } : {}),
         ...(input.writtenAt !== undefined ? { writtenAt: input.writtenAt } : {}),
       }),
     );

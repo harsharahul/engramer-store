@@ -143,7 +143,8 @@ describe("the shipped label table", () => {
 
 describe("loadLexicon", () => {
   it("loads the shipped table once and answers from it", async () => {
-    const loaded = await loadLexicon();
+    const loaded = (await loadLexicon())!;
+    expect(loaded).toBeDefined();
     expect(loaded).toBe(await loadLexicon());
     expect(meaningOf(loaded, "Statement date")).toBe("none");
     expect(loaded.dates.size).toBe(source.rows.length);

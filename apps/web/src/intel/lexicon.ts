@@ -99,13 +99,23 @@ export function meaningOf(lexicon: Lexicon, label: string): LabelMeaning | undef
   return key ? lexicon.dates.get(key) : undefined;
 }
 
-let loading: Promise<Lexicon> | null = null;
+let loading: Promise<Lexicon | undefined> | null = null;
 
-/** The shipped table, loaded on first use and kept. */
-export function loadLexicon(): Promise<Lexicon> {
-  loading ??= import("./tables/labels.json").then((mod) => {
-    const table: { dates: readonly (readonly string[])[] } = mod.default ?? mod;
-    return lexiconFrom(table.dates);
-  });
+/**
+ * The shipped table, loaded on first use and kept. A table that cannot be
+ * loaded is no table: every label is then one it does not hold, so each
+ * line is read with its own words, and the next call asks for it again.
+ */
+export function loadLexicon(): Promise<Lexicon | undefined> {
+  loading ??= import("./tables/labels.json").then(
+    (mod) => {
+      const table: { dates: readonly (readonly string[])[] } = mod.default ?? mod;
+      return lexiconFrom(table.dates);
+    },
+    () => {
+      loading = null;
+      return undefined;
+    },
+  );
   return loading;
 }
