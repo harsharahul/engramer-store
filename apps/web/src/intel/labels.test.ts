@@ -711,6 +711,7 @@ describe("a form line read by what its label means", () => {
     ["class begins", "event"],
     ["delivery", "event"],
     ["sailing", "depart"],
+    ["certificate issued", "issued"],
   ]);
   const read = (text: string, writtenAt?: number, claimed: string[] = []) =>
     structuralDatedFacts(text, new Set(claimed), { lexicon: table, ...(writtenAt !== undefined ? { writtenAt } : {}) }).map((fact) => [
@@ -755,6 +756,9 @@ describe("a form line read by what its label means", () => {
     expect(read("Delivery: Thursday, November 12", sent)).toEqual([["event", "2026-11-12", undefined, "Delivery", 0.5]]);
     expect(read("Good through: November 12", sent)).toEqual([]);
     expect(read("Boarding group: November 12", sent)).toEqual([]);
+    // A day of issue is behind the message, never the next such day after it.
+    expect(read("Certificate issued: November 12", sent)).toEqual([]);
+    expect(read("Certificate issued: 12 November 2026", sent)).toEqual([["issued", "2026-11-12", undefined, "Certificate issued", 0.7]]);
     // In a stored file no year is known.
     expect(read("Delivery: Thursday, November 12")).toEqual([]);
   });
@@ -799,6 +803,11 @@ describe("a form line read by what its label means", () => {
     // Hours are a span, not a moment; a sentence is no clock line.
     expect(read("Class begins: 2 November 2027\nOffice open: 9:00 to 17:00")).toEqual(bare);
     expect(read("Class begins: 2 November 2027\nPlease arrive by 6:15 PM to set up.")).toEqual(bare);
+    // A clock said of something else (when to arrive, when the desk opens) is not the moment's.
+    expect(read("Class begins: 2 November 2027\nArrive by: 6:15 PM")).toEqual(bare);
+    expect(read("Class begins: 2 November 2027\nRegistration: 6:00 PM")).toEqual(bare);
+    // Past such a line, the moment's own clock is still found.
+    expect(read("Class begins: 2 November 2027\nRegistration: 6:00 PM\nClass time: 6:30 PM")).toEqual([["event", "2027-11-02", "18:30", "Class begins", 0.7]]);
     // A clock under another date line is that line's.
     expect(read("Class begins: 2 November 2027\nCover ends: 30 November 2027\nTime: 18:30")).toEqual([
       bare[0],

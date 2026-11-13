@@ -232,27 +232,39 @@ function dateAbove(text: string, lineStart: number, writtenAt?: number, lexicon?
   return null;
 }
 
+/** Words that say only "the time of it": they name no moment of their own. */
+const TIME_WORDS = new Set(["time", "date", "at", "from", "on", "the", "is", "start", "starts", "starting", "begin", "begins", "commences"]);
+/** The words of a label that name what it is about. */
+const namingWords = (label: string) => (label.toLowerCase().match(/[a-z]+/g) ?? []).filter((word) => !TIME_WORDS.has(word));
+
 /**
  * The clock a form prints under a date line ("Class begins: 2 November
- * 2027", then "Class time: 6:30 PM"): the first clock line below it in the
- * same block, before any other date. Hours ("9:00 to 17:00") are a span and
- * no moment, and a clock line the table gives another meaning is another
- * moment's.
+ * 2027", then "Class time: 6:30 PM"): a clock line below it in the same
+ * block, before any other date. The clock is the moment's own when its line
+ * says only "time", names what the date line names ("Class"), or is the
+ * same end of a stay or a journey in the table. A clock said of something
+ * else ("Arrive by: 6:15 PM", "Registration: 6:00 PM") is passed over, and
+ * hours ("9:00 to 17:00") are a span and no moment.
  */
-function clockBelow(text: string, lineEnd: number, meaning: LabelMeaning, lexicon: Lexicon, writtenAt?: number): string | null {
-  let at = lineEnd + 1;
+function clockBelow(text: string, line: FieldLine, meaning: LabelMeaning, lexicon: Lexicon, writtenAt?: number): string | null {
+  const named = namingWords(line.label);
+  let at = line.end + 1;
   for (let step = 0; step < BLOCK_REACH && at < text.length; step += 1) {
     const stop = text.indexOf("\n", at);
     const end = stop === -1 ? text.length : stop;
-    const line = text.slice(at, end);
-    if (!line.trim() || findDates(line, writtenAt === undefined ? undefined : { writtenAt }).length > 0) {
+    const below = text.slice(at, end);
+    if (!below.trim() || findDates(below, writtenAt === undefined ? undefined : { writtenAt }).length > 0) {
       return null;
     }
-    const time = clockLineTime(line, writtenAt);
-    if (time && findTimes(line).length === 1) {
-      const field = FIELD_LINE.exec(line);
-      const said = field ? meaningOf(lexicon, field[1]!) : undefined;
-      if (said === undefined || said === meaning) {
+    const time = clockLineTime(below, writtenAt);
+    const [clock, second] = findTimes(below);
+    if (time && clock && !second) {
+      // What the line says before its clock.
+      const words = below.slice(0, clock.at);
+      const said = meaningOf(lexicon, words.replace(/:\s*$/, ""));
+      const own = namingWords(words);
+      const sameEnd = said !== undefined && said !== "event" && said === meaning;
+      if (sameEnd || ((said === undefined || said === meaning) && (own.length === 0 || own.some((word) => named.includes(word))))) {
         return time;
       }
     }
@@ -537,8 +549,9 @@ export function structuralDatedFacts(
     if (meaning === undefined || meaning === "none") {
       continue;
     }
-    // A document prints the year it expires in; no other year is guessed.
-    const context = meaning === "expiry" || opts.writtenAt === undefined ? undefined : { writtenAt: opts.writtenAt };
+    // A document prints the year it expires in, and a day of issue is
+    // behind the message, not ahead of it: neither takes a guessed year.
+    const context = meaning === "expiry" || meaning === "issued" || opts.writtenAt === undefined ? undefined : { writtenAt: opts.writtenAt };
     const parsed = parseDate(line.value.slice(0, WINDOW), context);
     if (!parsed || read.has(parsed.iso)) {
       continue;
@@ -559,7 +572,7 @@ export function structuralDatedFacts(
       const id = factId("event", `${parsed.iso} ${label.toLowerCase()}`);
       if (!byId.has(id)) {
         // The clock on the line itself, or on the clock line a form prints under it.
-        const time = parseTime(line.value) ?? clockBelow(text, line.end, meaning, opts.lexicon!, opts.writtenAt);
+        const time = parseTime(line.value) ?? clockBelow(text, line, meaning, opts.lexicon!, opts.writtenAt);
         byId.set(id, {
           id,
           kind: "event",
