@@ -4,47 +4,55 @@
   "prompt": "91930e36",
   "measuredAt": "2026-11-13",
   "contextSize": 8192,
-  "cases": 92,
+  "cases": 132,
   "tasks": {
     "dates": {
-      "precision": 0.5625,
-      "recall": 0.23684210526315788,
-      "offered": 32,
-      "expected": 76
+      "precision": 0.5,
+      "recall": 0.1953125,
+      "offered": 50,
+      "expected": 128
     },
     "amounts": {
-      "precision": 0.6785714285714286,
-      "recall": 0.76,
-      "offered": 28,
-      "expected": 25
+      "precision": 0.6896551724137931,
+      "recall": 0.7272727272727273,
+      "offered": 58,
+      "expected": 55
     },
     "roles": {
-      "precision": 1,
-      "recall": 0.1875,
-      "offered": 3,
-      "expected": 16
+      "precision": 0.5,
+      "recall": 0.08823529411764706,
+      "offered": 6,
+      "expected": 34
     },
     "noise": {
-      "cases": 13,
-      "loud": 3,
-      "offered": 8,
-      "rate": 0.23076923076923078
+      "cases": 21,
+      "loud": 7,
+      "offered": 15,
+      "rate": 0.3333333333333333
+    },
+    "asked": {
+      "documents": 121,
+      "asked": 50,
+      "wrong": 25,
+      "untyped": 0,
+      "askedPer100": 41.3,
+      "wrongPer100": 20.7
     },
     "mailKind": {
-      "accuracy": 0.7571428571428571,
-      "cases": 70,
+      "accuracy": 0.7472527472527473,
+      "cases": 91,
       "byKind": {
         "booking": {
-          "precision": 0.8275862068965517,
-          "offered": 29
+          "precision": 0.8157894736842105,
+          "offered": 38
         },
         "bill": {
           "precision": 1,
-          "offered": 9
+          "offered": 12
         },
         "delivery": {
           "precision": 1,
-          "offered": 8
+          "offered": 9
         },
         "newsletter": {
           "precision": 1,
@@ -55,42 +63,50 @@
           "offered": 5
         },
         "other": {
-          "precision": 0.42857142857142855,
-          "offered": 14
+          "precision": 0.45,
+          "offered": 20
         },
         "receipt": {
-          "precision": 1,
-          "offered": 1
+          "precision": 0.6666666666666666,
+          "offered": 3
         }
       }
     }
   },
   "together": {
     "dates": {
-      "precision": 0.638095238095238,
-      "recall": 0.881578947368421,
-      "offered": 105,
-      "expected": 76
+      "precision": 0.43457943925233644,
+      "recall": 0.7265625,
+      "offered": 214,
+      "expected": 128
     },
     "amounts": {
-      "precision": 0.7272727272727273,
-      "recall": 0.96,
-      "offered": 33,
-      "expected": 25
+      "precision": 0.7230769230769231,
+      "recall": 0.8545454545454545,
+      "offered": 65,
+      "expected": 55
     },
     "roles": {
-      "precision": 1,
-      "recall": 0.625,
-      "offered": 10,
-      "expected": 16
+      "precision": 0.8125,
+      "recall": 0.38235294117647056,
+      "offered": 16,
+      "expected": 34
     },
     "noise": {
-      "cases": 13,
-      "loud": 4,
-      "offered": 12,
-      "rate": 0.3076923076923077
+      "cases": 21,
+      "loud": 12,
+      "offered": 28,
+      "rate": 0.5714285714285714
     },
-    "documents": 81,
+    "asked": {
+      "documents": 121,
+      "asked": 195,
+      "wrong": 98,
+      "untyped": 10,
+      "askedPer100": 161.2,
+      "wrongPer100": 81
+    },
+    "documents": 121,
     "readWhole": 58
   },
   "heldout": {
@@ -120,8 +136,16 @@
         "offered": 2,
         "rate": 0.16666666666666666
       },
+      "asked": {
+        "documents": 60,
+        "asked": 31,
+        "wrong": 9,
+        "untyped": 0,
+        "askedPer100": 51.7,
+        "wrongPer100": 15
+      },
       "mailKind": {
-        "accuracy": 0.8636363636363636,
+        "accuracy": 0.8409090909090909,
         "cases": 44,
         "byKind": {
           "booking": {
@@ -132,12 +156,12 @@
             "precision": 1,
             "offered": 5
           },
-          "other": {
-            "precision": 0.7142857142857143,
+          "personal": {
+            "precision": 0.42857142857142855,
             "offered": 7
           },
-          "personal": {
-            "precision": 0.6,
+          "other": {
+            "precision": 0.8,
             "offered": 5
           },
           "delivery": {
@@ -179,6 +203,14 @@
         "loud": 2,
         "offered": 2,
         "rate": 0.16666666666666666
+      },
+      "asked": {
+        "documents": 60,
+        "asked": 62,
+        "wrong": 18,
+        "untyped": 0,
+        "askedPer100": 103.3,
+        "wrongPer100": 30
       },
       "documents": 60,
       "readWhole": 37
