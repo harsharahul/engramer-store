@@ -28,6 +28,18 @@ All notable changes to Engram Store are documented here, following
   when the message was sent, and not about anything a rule or the booking
   data already read. These readings wait for your yes, and a bill that
   still asks shows the one total it states.
+- **Form lines are read by what their label means.** A table of about
+  1,900 labels that forms print ("Cover ends", "Direct debit date", "Class
+  begins", "Sailing date") says what the date beside each one is: a day to
+  pay or act by, an expiry, something that happens, an end of a stay or a
+  journey. Such a line is read as that, under the document's own words,
+  and takes its time from the line a form prints under it ("Class time:
+  6:30 PM"). These readings wait for your yes, as before.
+- **Fewer questions about dates that need no reminder.** The day a
+  statement was made, an order placed, a booking made or a document
+  printed is no longer kept or asked about, and the on-device model is not
+  asked about it either. Files already stored lose those lines on the next
+  date sweep; a line you already answered stays as you answered it.
 - **Amounts written with a decimal comma are found** ("€213,40",
   "EUR 1.250,00").
 - **Dates with no year, in mail.** "Arriving Thursday, November 12" in a
@@ -71,6 +83,10 @@ All notable changes to Engram Store are documented here, following
   order shows no bill and no parcel.
 - **A label takes the date on its own line**, not one written another way
   on the line below, and a check-in no longer takes the check-out's time.
+- **A clock line on a form belongs to the date above it.** "Date: Saturday
+  15 May 2027" followed by "Departs: 08:42" and "Arrives: 11:05" is that
+  day's departure and arrival; the times were read against the date on
+  the next line, which is another entry's.
 - **An hour is not a year.** "November 12, 10:30" is no longer read as a
   date in 2010, and a sentence that holds a clock is not taken for a
   labelled field.

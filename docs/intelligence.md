@@ -317,6 +317,32 @@ metadata and index blob like every other derived signal.
   day after the message was written, and is marked as having an assumed
   year; an expiry never takes one, and in any other file a date with no
   year is not read.
+
+  A form line, a label and its date ("Cover ends: 30 November 2027"), is
+  also looked up in a table of about 1,900 labels that ships with the app
+  (`tools/label-lexicon/dates.tsv`). A label is matched whole, after its
+  case, its punctuation and a closing "date" or "on" are set aside; nothing
+  is matched loosely. The line then has one of three outcomes:
+  - a label the table gives a meaning (a due date, an expiry, an issue
+    date, an event, a check-in or check-out, a departure or an arrival) is
+    read as that, under the document's own words, with the clock on its
+    line or on the clock line a form prints under it ("Class begins: 2
+    November 2027", then "Class time: 6:30 PM");
+  - a label the table marks as needing no reminder (the day a statement
+    was made, an order placed, a booking made, a document printed) gives
+    nothing: no fact, no row, no question, and the on-device model is not
+    asked about that line either;
+  - a label the table does not hold, or one whose meaning depends on the
+    document ("Date", "Start date", "Arrival"), is kept with the
+    document's own words and waits for your yes.
+
+  No label that speaks of paying, expiring, attending, travelling or
+  delivering can be marked as needing no reminder; a test holds the whole
+  table to that. On a form, a clock line ("Departs: 08:42") belongs to the
+  date line above it, never to a date below. Files stored earlier take the
+  table on the next date sweep, and a line you already answered stays as
+  you answered it. If the table cannot be loaded, every line is read with
+  its own words.
 - **Amounts and reference numbers**, at low confidence, from any document,
   including kinds no rule anticipated.
 - **The assistant's judgement**, at the lowest confidence of all, on the Mac
