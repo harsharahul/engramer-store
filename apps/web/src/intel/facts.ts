@@ -1,4 +1,4 @@
-import { daysUntil } from "./dates";
+import { daysUntil, findTimes } from "./dates";
 import type { Subject } from "./subject";
 
 /**
@@ -468,7 +468,10 @@ export function groundFacts(facts: Fact[], source: string): Fact[] {
       return (
         timeRenderings(fact.time).some((form) => haystack.includes(normalize(form))) ||
         statesHour(fact.time, source) ||
-        statesMorningClock(fact.time, source)
+        statesMorningClock(fact.time, source) ||
+        // A clock in words or with an h ("noon", "9 o'clock in the
+        // evening", "15h30") is found as the readers find it.
+        findTimes(source).some((clock) => clock.time === fact.time)
       );
     }
     return true;

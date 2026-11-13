@@ -2,7 +2,7 @@
 process.env.TZ = "UTC";
 
 import { describe, expect, it } from "vitest";
-import { daysUntil, findDates, parseDate, parseTime, swappedReading } from "./dates";
+import { daysUntil, findDates, findTimes, parseDate, parseTime, swappedReading } from "./dates";
 
 describe("parseDate", () => {
   it("reads an unambiguous slash date, where the first number cannot be a month", () => {
@@ -291,6 +291,28 @@ describe("parseTime", () => {
 
   it("a clock with a colon wins over one without", () => {
     expect(parseTime("3pm show, doors 18:30")).toBe("18:30");
+  });
+
+  it("reads noon, midday, an hour o'clock and the hour written with an h", () => {
+    expect(parseTime("Lunch at noon")).toBe("12:00");
+    expect(parseTime("Collection from midday")).toBe("12:00");
+    expect(parseTime("Starts at 9 o'clock")).toBe("09:00");
+    expect(parseTime("Starts at 9 o'clock in the evening")).toBe("21:00");
+    expect(parseTime("Dinner at 8 o'clock tonight")).toBe("20:00");
+    expect(parseTime("7 o'clock pm")).toBe("19:00");
+    expect(parseTime("Rendez-vous 15h00")).toBe("15:00");
+    expect(parseTime("Rendez-vous 15h30")).toBe("15:30");
+    expect(parseTime("Opening at 15h")).toBe("15:00");
+    expect(parseTime("from 9h")).toBe("09:00");
+  });
+
+  it("an amount, a room or an hour count is not one of those clocks", () => {
+    const not = ["Total: 14.30", "EUR 19.00", "Room 15h, second floor", "midnight", "Noonan Street", "a 24h service", "48h delivery", "13 o'clock", "15h75", "noonday"];
+    expect(not.map((text) => parseTime(text))).toEqual(not.map(() => null));
+  });
+
+  it("finds the new forms in running text, in order", () => {
+    expect(findTimes("Lunch at noon, coffee 15h30, close at 6 o'clock in the evening").map((clock) => clock.time)).toEqual(["12:00", "15:30", "18:00"]);
   });
 });
 

@@ -416,6 +416,21 @@ const TIME_24 = /\b([01]?\d|2[0-3]):([0-5]\d)\b/;
  * so is a word that only begins with the marker ("10 Amsterdam").
  */
 const TIME_HOUR = /(?<![\d.:,])\b(\d{1,2})\s?([ap])\.?m(?![A-Za-z])/i;
+/**
+ * An hour said with "o'clock", and what after it says which half of the day
+ * ("9 o'clock in the evening", "8 o'clock tonight", "7 o'clock pm"). With
+ * nothing after it, the hour is read as written.
+ */
+const TIME_OCLOCK = /\b(\d{1,2})\s?o[’']?\s?clock\b(?:\s*(?:([ap])\.?m\.?(?![A-Za-z])|in the (morning|afternoon|evening)|(tonight|at night)))?/i;
+/**
+ * The hour written with an h ("15h00", "15h30"), as much of Europe writes it.
+ * A bare "15h" is a clock only after a word that says when ("at 15h",
+ * "from 9h"): "Room 15h" and "a 24h service" are not.
+ */
+const TIME_H = /(?<![\d.:,])\b([01]?\d|2[0-3])h([0-5]\d)(?![\dA-Za-z])/i;
+const TIME_H_BARE = /\b(?:at|from|until|till|by|before|after|to|à|dès|vers)\s+([01]?\d|2[0-3])h(?![\dA-Za-z])/i;
+/** Noon said in words. Midnight is not read: which day it closes is unclear. */
+const TIME_NOON = /\b(?:noon|midday)\b/i;
 
 /**
  * A local time of day as "HH:MM".
@@ -443,7 +458,7 @@ export function parseTime(text: string): string | null {
   if (plain) {
     return `${String(Number(plain[1])).padStart(2, "0")}:${plain[2]}`;
   }
-  // Last, so a clock written with a colon always wins.
+  // After the colon forms, so a clock written with a colon always wins.
   const hourOnly = TIME_HOUR.exec(text);
   if (hourOnly) {
     const raw = Number(hourOnly[1]);
@@ -454,10 +469,36 @@ export function parseTime(text: string): string | null {
     const hour = raw === 12 ? (pm ? 12 : 0) : pm ? raw + 12 : raw;
     return `${String(hour).padStart(2, "0")}:00`;
   }
+  const oclock = TIME_OCLOCK.exec(text);
+  if (oclock) {
+    const raw = Number(oclock[1]);
+    if (raw < 1 || raw > 12) {
+      return null;
+    }
+    const half = (oclock[2] ?? "").toLowerCase();
+    const part = (oclock[3] ?? "").toLowerCase();
+    const pm = half === "p" || part === "afternoon" || part === "evening" || oclock[4] !== undefined;
+    const am = half === "a" || part === "morning";
+    const hour = raw === 12 ? (am ? 0 : 12) : pm ? raw + 12 : raw;
+    return `${String(hour).padStart(2, "0")}:00`;
+  }
+  const withH = TIME_H.exec(text);
+  if (withH) {
+    return `${String(Number(withH[1])).padStart(2, "0")}:${withH[2]}`;
+  }
+  const bareH = TIME_H_BARE.exec(text);
+  if (bareH) {
+    return `${String(Number(bareH[1])).padStart(2, "0")}:00`;
+  }
+  if (TIME_NOON.test(text)) {
+    return "12:00";
+  }
   return null;
 }
 
-const CLOCK_FORMS = [TIME, TIME_24, TIME_HOUR].map((form) => new RegExp(form.source, `${form.flags}g`));
+const CLOCK_FORMS = [TIME, TIME_24, TIME_HOUR, TIME_OCLOCK, TIME_H, TIME_H_BARE, TIME_NOON].map(
+  (form) => new RegExp(form.source, `${form.flags}g`),
+);
 
 /** Every clock in a text, in the order they stand, each read as `parseTime` reads it alone. */
 export function findTimes(text: string): { at: number; end: number; time: string }[] {
