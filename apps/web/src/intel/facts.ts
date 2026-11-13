@@ -571,6 +571,20 @@ function renderings(fact: Fact): string[] {
 }
 
 /**
+ * What a file carries, less the form lines the rules no longer read.
+ *
+ * A line that only names its date comes from the text alone, so reading the
+ * same text again is the whole truth about it. Where its label has since
+ * been given a meaning that needs no reminder ("Statement date"), the line
+ * is not read any more and the stored one goes with it. A line the owner
+ * answered stays, and so does every other reader's fact.
+ */
+export function withoutUnreadLines(existing: readonly Fact[], rescanned: readonly Fact[]): Fact[] {
+  const again = new Set(rescanned.map((fact) => fact.id));
+  return existing.filter((fact) => !(fact.kind === "dated" && fact.source === "label" && !ownerDecided(fact) && !again.has(fact.id)));
+}
+
+/**
  * Folds a rescan into what a file already carries, in one fixed order.
  *
  * A decision the owner made outranks anything a later scan finds: a confirmed
@@ -590,12 +604,19 @@ export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
   const confirmedValues = new Set(
     existing.filter((fact) => fact.confirmed).map((fact) => `${fact.kind}:${fact.value}`),
   );
+  // A form line the owner answered under its own words, yes or no, settles
+  // its day. The same line read later by what its label means is not news,
+  // and is not asked about under a new name.
+  const answeredLines = new Set(existing.filter((fact) => fact.kind === "dated" && ownerDecided(fact)).map((fact) => fact.value));
   for (const fact of existing) {
     merged.set(fact.id, fact);
   }
   for (const fact of found) {
     const prior = merged.get(fact.id);
     if (!prior) {
+      if (fact.source === "label" && MEANT_KINDS.has(fact.kind) && answeredLines.has(fact.value)) {
+        continue;
+      }
       if (!confirmedValues.has(`${fact.kind}:${fact.value}`)) {
         merged.set(fact.id, fact);
         continue;
@@ -791,10 +812,18 @@ function resolveSlots(facts: Fact[]): Fact[] {
     }
   }
   // A form line that only names a date ("Date: 15 May 2027") says nothing of
-  // what the date is. Where the model says what it is, that is the reading
-  // of that day, answered or not: one date, one question.
+  // what the date is. Where the model says what it is, or a rule now reads
+  // the line by what its label means, that is the reading of that day,
+  // answered or not: one date, one question.
   const meant = new Set(
-    out.filter((fact) => fact.source === "model" && !drop.has(fact.id) && (fact.kind === "event" || fact.kind === "due" || fact.kind === "expiry")).map((fact) => fact.value),
+    out
+      .filter(
+        (fact) =>
+          !drop.has(fact.id) &&
+          ((fact.source === "model" && (fact.kind === "event" || fact.kind === "due" || fact.kind === "expiry")) ||
+            (fact.source === "label" && MEANT_KINDS.has(fact.kind))),
+      )
+      .map((fact) => fact.value),
   );
   for (const fact of out) {
     if (fact.kind === "dated" && fact.source === "label" && !ownerDecided(fact) && meant.has(fact.value)) {

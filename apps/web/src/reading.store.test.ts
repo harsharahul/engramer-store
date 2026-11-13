@@ -505,6 +505,47 @@ describe("no reading loops", () => {
     expect(writes.blobs).toBe(after.blobs);
   });
 
+  it("the date sweep takes away a stored line the reader no longer reads, once, and announces no find", async () => {
+    model.facts = true;
+    // Stored before the label table: the statement's own day, kept with its words.
+    const stored = { id: "dated:2027-02-03", kind: "dated" as const, document: "other" as const, value: "2027-02-03", label: "Statement date", source: "label" as const, confidence: 0.4 };
+    library([note({ text: "Statement date: 3 February 2027", facts: [stored] })]);
+    const before = writes.count;
+    expect(await useStore.getState().scanLibraryForFacts()).toBe(0);
+    expect(useStore.getState().files.get("n1")!.facts).toEqual([]);
+    expect(writes.count).toBeGreaterThan(before);
+    const after = { count: writes.count, blobs: writes.blobs };
+    await useStore.getState().scanLibraryForFacts();
+    expect(writes.count).toBe(after.count);
+    expect(writes.blobs).toBe(after.blobs);
+  });
+
+  it("a device on an older build that writes the line back does not start a loop: one open sweeps a file once", async () => {
+    model.facts = true;
+    const stored = { id: "dated:2027-02-03", kind: "dated" as const, document: "other" as const, value: "2027-02-03", label: "Statement date", source: "label" as const, confidence: 0.4 };
+    library([note({ text: "Statement date: 3 February 2027", facts: [stored] })]);
+    // What this open has already swept, as the background pass keeps it.
+    const skip = new Set<string>();
+    await useStore.getState().scanLibraryForFacts({ skip });
+    expect(useStore.getState().files.get("n1")!.facts).toEqual([]);
+    // The other device reads the line its old way and syncs it back.
+    const file = useStore.getState().files.get("n1")!;
+    useStore.setState({ files: new Map([["n1", { ...file, facts: [stored] }]]) });
+    const after = writes.count;
+    await useStore.getState().scanLibraryForFacts({ skip });
+    expect(writes.count).toBe(after);
+  });
+
+  it("the date sweep leaves a line the owner answered, and other readers' facts, as they are", async () => {
+    model.facts = true;
+    const guessed = { id: "event:2027-03-09 visit", kind: "event" as const, document: "other" as const, value: "2027-03-09", label: "Visit", source: "model" as const, confidence: 0.6 };
+    library([note({ text: "Statement date: 3 February 2027", facts: [guessed] })]);
+    const before = writes.count;
+    await useStore.getState().scanLibraryForFacts();
+    expect(useStore.getState().files.get("n1")!.facts).toEqual([guessed]);
+    expect(writes.count).toBe(before);
+  });
+
   it("an unstable model causes no re-reads", async () => {
     let n = 0;
     model.summarize.mockImplementation(async () => ({ summary: `Reading number ${++n}.`, tags: [], kind: null, facts: [] }));

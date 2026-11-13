@@ -262,6 +262,37 @@ describe("maskTail", () => {
   });
 });
 
+describe("a stored form line, read again by what its label means", () => {
+  const NOW = Date.UTC(2027, 2, 1);
+  const shelf = (facts: Fact[]) => [{ id: "f1", trashed: false, facts }];
+  // The line as it was stored before its label had a meaning, and as it is read now.
+  const named = (over: Partial<Fact> = {}) =>
+    fact({ id: "dated:2028-08-02", kind: "dated", document: "other", value: "2028-08-02", label: "Cover ends", confidence: 0.4, ...over });
+  const typed = fact({ id: "expiry:2028-08-02", kind: "expiry", document: "other", value: "2028-08-02", label: "Cover ends" });
+
+  it("a line the owner said no to does not come back typed", () => {
+    const merged = mergeFacts([named({ dismissed: true })], [typed]);
+    expect(merged.filter((held) => !held.dismissed)).toEqual([]);
+    expect(offeredFacts(shelf(merged), NOW)).toEqual([]);
+  });
+
+  it("a line the owner confirmed stays as it was confirmed", () => {
+    const merged = mergeFacts([named({ confirmed: true })], [typed]);
+    expect(merged.map((held) => [held.kind, held.value, held.confirmed])).toEqual([["dated", "2028-08-02", true]]);
+  });
+
+  it("an unanswered line that only names its date gives way to the typed reading", () => {
+    expect(mergeFacts([named()], [typed]).map((held) => [held.kind, held.value])).toEqual([["expiry", "2028-08-02"]]);
+    // Whichever arrives first.
+    expect(mergeFacts([typed], [named()]).map((held) => [held.kind, held.value])).toEqual([["expiry", "2028-08-02"]]);
+  });
+
+  it("booking data on a day the owner answered still stands", () => {
+    const booked = fact({ id: "event:2028-08-02 stay", kind: "event", value: "2028-08-02", source: "jsonld", confidence: 1, accepted: "exact" });
+    expect(mergeFacts([named({ dismissed: true })], [booked]).map((held) => held.id)).toContain(booked.id);
+  });
+});
+
 describe("mergeFacts", () => {
   it("keeps a confirmed fact even when a rescan no longer finds it", () => {
     const confirmed = fact({ confirmed: true });
