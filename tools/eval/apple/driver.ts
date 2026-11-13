@@ -18,7 +18,7 @@ import { generate, type AssistantTransport, type GenerateRequest } from "../../.
 import { CATEGORIES } from "../../../apps/web/src/intel/categorize";
 import { EVAL_CASES } from "../../../apps/web/src/intel/eval/cases";
 import { HELDOUT_CASES } from "../../../apps/web/src/intel/eval/heldout";
-import { hashRequest, replayRunner, StaleAnswer, type SavedAnswer } from "../../../apps/web/src/intel/eval/replay";
+import { hashRequest, keptAnswers, replayRunner, StaleAnswer, type SavedAnswer } from "../../../apps/web/src/intel/eval/replay";
 import { errorsByClass, factCases, kindCases, measure, scoreKinds, type EvalCase, type SetFigures } from "../../../apps/web/src/intel/eval/score";
 import { mergeFacts, type Fact } from "../../../apps/web/src/intel/facts";
 import { EMAIL_MIME } from "../../../apps/web/src/mail/kind";
@@ -41,14 +41,19 @@ const rawDir = join(dirname(fileURLToPath(import.meta.url)), "..", "out");
 mkdirSync(rawDir, { recursive: true });
 const runFile = join(rawDir, "_run.json");
 
-// The window the model reports here is the one the app reads with.
+// The window the model reports here is the one the app reads with. A replay
+// takes it, and the day of the measurement, from the run it replays: scores
+// from kept answers carry the day the model gave them, not today.
 let contextSize: number;
+let measuredAt = new Date().toISOString().slice(0, 10);
 if (replay) {
   if (!existsSync(runFile)) {
     process.stderr.write("No kept run here. Run once without EVAL_REPLAY, with the model.\n");
     process.exit(2);
   }
-  contextSize = (JSON.parse(readFileSync(runFile, "utf8")) as { contextSize: number }).contextSize;
+  const keptRun = JSON.parse(readFileSync(runFile, "utf8")) as { contextSize: number; measuredAt?: string };
+  contextSize = keptRun.contextSize;
+  measuredAt = keptRun.measuredAt ?? measuredAt;
 } else {
   const reported = JSON.parse(spawnSync(binary, ["--availability"], { encoding: "utf8" }).stdout) as {
     state?: string;
@@ -59,7 +64,7 @@ if (replay) {
     throw new Error(`the on-device model is not available here: ${reported.reason ?? "no reason given"}`);
   }
   contextSize = reported.contextSize;
-  writeFileSync(runFile, `${JSON.stringify({ contextSize })}\n`);
+  writeFileSync(runFile, `${JSON.stringify({ contextSize, measuredAt })}\n`);
 }
 
 const harness = replay ? null : spawn(binary, [], { stdio: ["pipe", "pipe", "inherit"] });
@@ -113,8 +118,8 @@ function runnerFor(id: string): Runner {
   if (!replay) {
     return recording(id);
   }
-  const saved = existsSync(keptFile(id)) ? (JSON.parse(readFileSync(keptFile(id), "utf8")) as SavedAnswer[]) : [];
-  return replayRunner(Array.isArray(saved) ? saved : []);
+  // A file that is missing or cannot be read holds no answers: its case is stale.
+  return replayRunner(keptAnswers(existsSync(keptFile(id)) ? readFileSync(keptFile(id), "utf8") : undefined));
 }
 
 /** Whether a reading failed only because no kept answer belongs to its request. */
@@ -273,8 +278,8 @@ const report = (title: string, figures: SetFigures, documents: number) =>
 const dayOf = (evalCase: EvalCase) => evalCase.writtenAt ?? KEPT;
 const questions = (title: string, figures: SetFigures) =>
   `${title}: questions shown per 100 documents ${figures.asked.askedPer100} ` +
-  `(${figures.asked.asked} in ${figures.asked.documents}); wrong ${figures.asked.wrongPer100} per 100 (${figures.asked.wrong}); ` +
-  `a named-only line on a day that matters ${figures.asked.untyped}`;
+  `(${figures.asked.asked} in ${figures.asked.documents}); wrong day or meaning ${figures.asked.wrongPer100} per 100 (${figures.asked.wrong}); ` +
+  `right but for the clock ${figures.asked.clock}; a named-only line on a day that matters ${figures.asked.untyped}`;
 
 interface SetScores {
   cases: number;
@@ -324,7 +329,7 @@ const scores = {
   reader: MODEL_READER,
   version: READER_VERSION[MODEL_READER],
   prompt: readingFingerprint(),
-  measuredAt: new Date().toISOString().slice(0, 10),
+  measuredAt,
   contextSize,
   cases: measured["first"]!.cases,
   // Each figure carries the readings it rests on: a precision over a handful

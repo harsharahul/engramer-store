@@ -87,7 +87,9 @@ describe("label rules on the eval set", () => {
     const wrong = score.perCase.reduce((sum, c) => sum + c.extra, 0);
     const offered = score.perCase.reduce((sum, c) => sum + c.found + c.extra, 0);
     console.info(`label rules on the form cases, dates: ${wrong} wrong of ${offered} typed readings, recall ${score.recall.toFixed(3)}`);
-    expect(wrong).toBeLessThanOrEqual(WRONG_ON_FORMS);
+    // Exactly the count: a change that lowers it must lower the ceiling with it,
+    // so wrong readings can never creep back under an old, higher number.
+    expect(wrong).toBe(WRONG_ON_FORMS);
     // And a part is never offered as the total.
     const amounts = await scoreReader(forms, labelReadings, "amounts");
     expect(amounts.precision).toBe(1);

@@ -188,17 +188,24 @@ export async function errorsByClass(
       if (evalCase.expected.some((expected) => matches(fact, expected))) {
         continue;
       }
-      const sameDay = evalCase.expected.findIndex((expected) => expected.kind !== "amount" && expected.value === fact.value);
+      // An expected fact of this reading's own meaning on its day comes first:
+      // then only the clock is off. Failing that, another meaning on that day.
+      const onDay = (same: boolean) =>
+        evalCase.expected.findIndex(
+          (expected, index) => !explained.has(index) && expected.kind !== "amount" && expected.value === fact.value && (expected.kind === fact.kind) === same,
+        );
+      const ownMeaning = onDay(true);
+      const otherMeaning = onDay(false);
       if (fact.kind === "dated" || fact.kind === "period") {
         note("named-only line", evalCase.id);
       } else if (fact.kind === "amount") {
         note("part for the total", evalCase.id);
-      } else if (sameDay >= 0 && evalCase.expected[sameDay]!.kind !== fact.kind) {
-        explained.add(sameDay);
-        note("wrong meaning", evalCase.id);
-      } else if (sameDay >= 0) {
-        explained.add(sameDay);
+      } else if (ownMeaning >= 0) {
+        explained.add(ownMeaning);
         note("clock missing", evalCase.id);
+      } else if (otherMeaning >= 0) {
+        explained.add(otherMeaning);
+        note("wrong meaning", evalCase.id);
       } else {
         note("not the reader's business", evalCase.id);
       }
@@ -218,11 +225,16 @@ export interface AskedScore {
   asked: number;
   /** Of those: a day the document does not state for the reader, or the right day under the wrong meaning. */
   wrong: number;
-  /** Of those: a line that only names a date, on a day the reader does care about. */
+  /** Of those: the right day and the right meaning, with another clock or none. */
+  clock: number;
+  /** Of those: a line that only names a date, on a day the reader would be asked about. */
   untyped: number;
   askedPer100: number;
   wrongPer100: number;
 }
+
+/** Kinds of expected fact the app asks about on a day: an issue day and an amount are not. */
+const ASKED_ABOUT: ReadonlySet<FactKind> = new Set(["event", "due", "expiry"]);
 
 const per100 = (count: number, documents: number) => (documents === 0 ? 0 : Math.round((count * 1000) / documents) / 10);
 
@@ -231,6 +243,13 @@ const per100 = (count: number, documents: number) => (documents === 0 ? 0 : Math
  * app asks it (`offeredFacts`: unanswered, a date, still ahead or lately
  * behind), on the day each document reached its reader, so the number means
  * the same thing here as on the screen.
+ *
+ * It is the size of the queue, not the number of cards seen at once: the
+ * home screen shows one such question at a time, and only for the next sixty
+ * days; the rest ask in the list above the files. Two readings that the
+ * Timeline folds into one row (a journey's two ends) count as two. A stored
+ * file is counted from one fixed day, so lines far behind its real day of
+ * keeping count here and would not ask in the app.
  */
 export async function scoreAsked(
   cases: readonly EvalCase[],
@@ -239,6 +258,7 @@ export async function scoreAsked(
 ): Promise<AskedScore> {
   let asked = 0;
   let wrong = 0;
+  let clock = 0;
   let untyped = 0;
   for (const evalCase of cases) {
     const file = { id: evalCase.id, trashed: false, facts: await read(evalCase) };
@@ -250,15 +270,18 @@ export async function scoreAsked(
       if (evalCase.expected.some((expected) => matches(fact, expected))) {
         continue;
       }
-      const dayExpected = evalCase.expected.some((expected) => expected.kind !== "amount" && expected.value === fact.value);
-      if (fact.kind === "dated" && dayExpected) {
+      const sameDay = evalCase.expected.filter((expected) => expected.value === fact.value);
+      if (sameDay.some((expected) => expected.kind === fact.kind)) {
+        // Right day, right meaning: only the clock differs or is missing.
+        clock++;
+      } else if (fact.kind === "dated" && sameDay.some((expected) => ASKED_ABOUT.has(expected.kind))) {
         untyped++;
       } else {
         wrong++;
       }
     }
   }
-  return { documents: cases.length, asked, wrong, untyped, askedPer100: per100(asked, cases.length), wrongPer100: per100(wrong, cases.length) };
+  return { documents: cases.length, asked, wrong, clock, untyped, askedPer100: per100(asked, cases.length), wrongPer100: per100(wrong, cases.length) };
 }
 
 export interface Measured {

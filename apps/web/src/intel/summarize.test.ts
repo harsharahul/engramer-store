@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AssistantError, type GenerateRequest } from "./assistant";
+import { hashRequest, replayRunner, StaleAnswer, type SavedAnswer } from "./eval/replay";
 import type { Fact } from "./facts";
 import {
   cleanTags,
@@ -325,6 +326,24 @@ describe("summarize with facts", () => {
       return SUMMARY;
     }).catch((error: unknown) => error);
     expect(outcomeFor(failure)).toBe("paused");
+  });
+
+  it("a kept answer that belongs to another request comes out of the reading as stale, never as no facts", async () => {
+    // The first reading is recorded as the eval keeps it: each answer under its request's name.
+    const kept: SavedAnswer[] = [];
+    const input = { text: POLICY, name: "policy.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true };
+    await summarize(input, async (request) => {
+      const answer = kept.length === 0 ? SUMMARY : { d1: "expiry", d2: "due", pays: "yes", total: "a1" };
+      kept.push({ request: hashRequest(request), answer });
+      return answer;
+    });
+    // Replayed unchanged, the reading is the same reading.
+    expect((await summarize(input, replayRunner(kept)))?.facts).toHaveLength(3);
+    // The judge's question changed since (here: its kept name is another's). Its
+    // old answer must not be scored as this reading, nor as "found nothing".
+    const stale = await summarize(input, replayRunner([kept[0]!, { ...kept[1]!, request: "00000000" }])).catch((error: unknown) => error);
+    expect(stale).toBeInstanceOf(FactsOwed);
+    expect((stale as FactsOwed).cause).toBeInstanceOf(StaleAnswer);
   });
 
   it("a judge request that still overflows with the shorter opening gives no facts and keeps the summary", async () => {

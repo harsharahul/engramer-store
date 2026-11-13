@@ -143,7 +143,7 @@ describe("measure", () => {
     };
     const figures = await measure(cases, async (c) => answers[c.id]!, () => Date.UTC(2027, 3, 1, 12));
     // On 1 April 2027 the stay and the stray expiry are ahead: two questions, one of them wrong.
-    expect(figures.asked).toEqual({ documents: 3, asked: 2, wrong: 1, untyped: 0, askedPer100: 66.7, wrongPer100: 33.3 });
+    expect(figures.asked).toEqual({ documents: 3, asked: 2, wrong: 1, clock: 0, untyped: 0, askedPer100: 66.7, wrongPer100: 33.3 });
     expect(figures.dates).toEqual({ precision: 0.5, recall: 0.5, offered: 2, expected: 2 });
     expect(figures.amounts).toEqual({ precision: 1, recall: 1, offered: 1, expected: 1 });
     expect(figures.roles).toEqual({ precision: 1, recall: 1, offered: 1, expected: 1 });
@@ -193,6 +193,16 @@ describe("errorsByClass", () => {
     });
   });
 
+  it("a wrong clock is set against the expected fact of its own meaning, not another fact of that day", async () => {
+    // A day that holds both a payment and a meeting; the meeting was read an hour early.
+    const cases = [evalCase("busy-day", [{ kind: "due", value: "2027-05-15" }, { kind: "event", value: "2027-05-15", time: "10:00" }])];
+    const classes = await errorsByClass(cases, async () => [fact("event", "2027-05-15", "09:00")]);
+    expect(classes["clock missing"]).toEqual({ count: 1, cases: ["busy-day"] });
+    expect(classes["wrong meaning"].count).toBe(0);
+    // The payment was found by nothing: it is missed, and not hidden by the meeting's error.
+    expect(classes.missed).toEqual({ count: 1, cases: ["busy-day"] });
+  });
+
   it("a reading that is right is in no class", async () => {
     const cases = [evalCase("bill", [{ kind: "due", value: "2027-04-10" }, { kind: "amount", value: "84.20" }])];
     const classes = await errorsByClass(cases, async () => [fact("due", "2027-04-10"), fact("amount", "84.20")]);
@@ -218,7 +228,22 @@ describe("scoreAsked: the questions a person would be shown", () => {
       // Already confirmed: nothing left to ask.
       answered: [{ ...fact("due", "2027-04-12"), confirmed: true }],
     };
-    expect(await scoreAsked(cases, async (c) => answers[c.id]!, onApril1)).toEqual({ documents: 3, asked: 1, wrong: 0, untyped: 0, askedPer100: 33.3, wrongPer100: 0 });
+    expect(await scoreAsked(cases, async (c) => answers[c.id]!, onApril1)).toEqual({ documents: 3, asked: 1, wrong: 0, clock: 0, untyped: 0, askedPer100: 33.3, wrongPer100: 0 });
+  });
+
+  it("the right day and meaning with another clock, or none, is counted apart from a wrong question", async () => {
+    const cases = [evalCase("train", [{ kind: "event", value: "2027-05-15", time: "08:42" }]), evalCase("show", [{ kind: "event", value: "2027-06-05", time: "20:00" }])];
+    const answers: Record<string, Fact[]> = {
+      train: [fact("event", "2027-05-15")],
+      show: [fact("event", "2027-06-05", "19:00")],
+    };
+    expect(await scoreAsked(cases, async (c) => answers[c.id]!, onApril1)).toMatchObject({ asked: 2, wrong: 0, clock: 2, untyped: 0, wrongPer100: 0 });
+  });
+
+  it("a named-only line on the document's own issue day is not a day the reader is asked about", async () => {
+    const cases = [evalCase("policy", [{ kind: "issued", value: "2027-03-20" }, { kind: "expiry", value: "2028-03-19" }])];
+    const lines: Fact[] = [{ ...fact("dated", "2027-03-20"), label: "Date of letter", source: "label", confidence: 0.4 }];
+    expect(await scoreAsked(cases, async () => lines, onApril1)).toMatchObject({ asked: 1, wrong: 1, untyped: 0 });
   });
 
   it("a named-only line on an expected day is untyped; on another day it is wrong", async () => {
@@ -243,6 +268,6 @@ describe("scoreAsked: the questions a person would be shown", () => {
       c: [],
       d: [fact("due", "2027-04-10")],
     };
-    expect(await scoreAsked(cases, async (c) => answers[c.id]!, onApril1)).toEqual({ documents: 4, asked: 2, wrong: 1, untyped: 0, askedPer100: 50, wrongPer100: 25 });
+    expect(await scoreAsked(cases, async (c) => answers[c.id]!, onApril1)).toEqual({ documents: 4, asked: 2, wrong: 1, clock: 0, untyped: 0, askedPer100: 50, wrongPer100: 25 });
   });
 });

@@ -8,7 +8,7 @@
  * a changed request is stale and has to go to the model again.
  */
 
-import { AssistantError, type GenerateRequest } from "../assistant";
+import { asSent, AssistantError, type GenerateRequest } from "../assistant";
 
 /** No kept answer belongs to this request: it has to go to the model. */
 export class StaleAnswer extends Error {
@@ -28,18 +28,37 @@ export interface SavedAnswer {
 }
 
 /**
- * A short name for a request: everything the model sees (instructions,
- * prompt, schema, answer budget, temperature, model) and nothing it does
- * not (who waits for the answer, a deadline, a signal).
+ * A short name for a request: everything the model receives (instructions,
+ * prompt, schema, answer budget, temperature, model, each with its default
+ * where the caller said nothing) and nothing it does not (who waits for the
+ * answer, a deadline, a signal). A changed default is a changed request.
  */
 export function hashRequest(request: GenerateRequest): string {
-  const seen = [request.instructions, request.prompt, request.schema ?? null, request.maxTokens ?? null, request.temperature ?? null, request.model ?? null];
+  const sent = asSent(request);
+  const seen = [sent.instructions, sent.prompt, sent.schema ?? null, sent.maxTokens, sent.temperature, sent.model];
   let hash = 0x811c9dc5;
   for (const char of JSON.stringify(seen)) {
     hash ^= char.charCodeAt(0);
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return hash.toString(16).padStart(8, "0");
+}
+
+/**
+ * The answers a kept file holds. A file that is missing, cut short or not a
+ * list holds none, so its case is stale and goes to the model: a reading is
+ * never scored from a file that cannot be read.
+ */
+export function keptAnswers(text: string | undefined): SavedAnswer[] {
+  if (!text) {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed) ? (parsed as SavedAnswer[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
