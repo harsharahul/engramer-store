@@ -619,3 +619,80 @@ describe("words of ordinary life", () => {
     expect(dated.every((fact) => fact.accepted === undefined && !fact.confirmed && fact.confidence < 1)).toBe(true);
   });
 });
+
+describe("a date line and the clock lines under it", () => {
+  const moments = (text: string, writtenAt?: number) =>
+    labelledFacts(text, writtenAt)
+      .filter((fact) => fact.kind === "event")
+      .map((fact) => [fact.value, fact.time, subjectOf(fact)?.role ?? fact.label])
+      .sort();
+
+  it("a clock line belongs to the date line above it, never to the next fact's date", () => {
+    const itinerary = [
+      "Booked on: 10 Feb 2027",
+      "Outbound: Mon 12 Apr 2027, LHR to AMS",
+      "Departs 14:20",
+      "Arrives 16:45",
+      "Return: Fri 16 Apr 2027, AMS to LHR",
+      "Departs 18:10",
+      "Arrives 18:35",
+    ].join("\n");
+    expect(moments(itinerary)).toEqual([
+      ["2027-04-12", "14:20", "depart"],
+      ["2027-04-12", "16:45", "arrive"],
+      ["2027-04-16", "18:10", "depart"],
+      ["2027-04-16", "18:35", "arrive"],
+    ]);
+  });
+
+  it("a ticket's date line gives its day to the departure and the arrival under it", () => {
+    const ticket = "From: Marlow Central\nTo: Kestrel Cross\nDate: Saturday 15 May 2027\nDeparts: 08:42\nArrives: 11:05\nFare: £48.50";
+    expect(moments(ticket)).toEqual([
+      ["2027-05-15", "08:42", "depart"],
+      ["2027-05-15", "11:05", "arrive"],
+    ]);
+  });
+
+  it("a time line takes its own fact's day, and a day to act by keeps its clock", () => {
+    const hire = "Pick-up date: Fri 23 July 2027\nPick-up time: 10:00\nReturn by: Fri 30 July 2027 17:00\nDaily rate: USD 58.94";
+    expect(moments(hire)).toEqual([["2027-07-23", "10:00", "pick-up"]]);
+    const due = labelledFacts(hire).find((fact) => fact.kind === "due");
+    expect(due).toMatchObject({ value: "2027-07-30", time: "17:00" });
+  });
+
+  it("a check-in time under an arrival date is that day's check-in, once", () => {
+    const stay = "Arrival date: 19 April 2027\nCheck-in time: from 3 PM\nDeparture date: 22 April 2027\nCheck-out time: by 11:00\nNights: 3";
+    expect(moments(stay)).toEqual([
+      ["2027-04-19", "15:00", "check-in"],
+      ["2027-04-22", "11:00", "check-out"],
+    ]);
+  });
+
+  it("an appointment's own time line gives the appointment its clock", () => {
+    const letter = "Appointment: Wednesday 20 January 2027\nArrive by: 09:20\nAppointment time: 09:40\nPlease confirm by: 15 January 2027";
+    expect(moments(letter)).toEqual([["2027-01-20", "09:40", "start"]]);
+  });
+
+  it("a date with no year on the line above is read the way the message's other dates are", () => {
+    const workshop = "Workshop: Natural dyes\nDate: Sat Feb 6\nCheck-in: 10:15 AM";
+    expect(moments(workshop, Date.UTC(2027, 0, 20, 17))).toEqual([["2027-02-06", "10:15", "check-in"]]);
+    // In a stored file no year is known, so there is no day to give.
+    expect(moments(workshop)).toEqual([]);
+  });
+
+  it("a blank line ends the block: a clock line under it has no day", () => {
+    const apart = "Outbound: Mon 12 Apr 2027\n\nDeparts 14:20";
+    expect(moments(apart)).toEqual([]);
+  });
+
+  it("a clock in a sentence is not a form's clock line: it takes no day from the line above", () => {
+    const prose = "We received your form on 3 March 2027.\nYour check-in is at 2:30 PM, and we look forward to seeing you.";
+    expect(moments(prose)).toEqual([]);
+  });
+
+  it("a clock that only stands on the same line as a day to act by is not its clock", () => {
+    const notice = "Reply by 12 March 2027. Our office is open 9:00 to 17:00.";
+    expect(labelledFacts(notice).find((fact) => fact.kind === "due")).toMatchObject({ value: "2027-03-12" });
+    expect(labelledFacts(notice).find((fact) => fact.kind === "due")?.time).toBeUndefined();
+  });
+});

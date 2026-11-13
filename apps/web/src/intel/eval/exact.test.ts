@@ -70,34 +70,10 @@ const labelFacts = async (evalCase: EvalCase) =>
 const NAMED_ONLY = new Set(["dated", "period"]);
 const labelReadings = async (evalCase: EvalCase) => (await labelFacts(evalCase)).filter((fact) => !NAMED_ONLY.has(fact.kind));
 
-/** Documents laid out as forms: a date line with its clock lines under it. */
-const laidOutAsForm = (evalCase: EvalCase) => evalCase.id.startsWith("f-");
-/**
- * Wrong typed readings the rules give today on the form cases: a clock line
- * under a date line is read against the next date instead of the one above
- * it, and a day to act by loses its clock. A ceiling until the rules for
- * such blocks are written. It may only be lowered.
- */
-const WRONG_ON_FORMS = 12;
-
 describe("label rules on the eval set", () => {
-  it("on documents laid out as forms, the wrong typed readings may only become fewer", async () => {
-    const forms = EVAL_CASES.filter(laidOutAsForm);
-    const score = await scoreReader(forms, labelReadings, "dates");
-    const wrong = score.perCase.reduce((sum, c) => sum + c.extra, 0);
-    const offered = score.perCase.reduce((sum, c) => sum + c.found + c.extra, 0);
-    console.info(`label rules on the form cases, dates: ${wrong} wrong of ${offered} typed readings, recall ${score.recall.toFixed(3)}`);
-    // Exactly the count: a change that lowers it must lower the ceiling with it,
-    // so wrong readings can never creep back under an old, higher number.
-    expect(wrong).toBe(WRONG_ON_FORMS);
-    // And a part is never offered as the total.
-    const amounts = await scoreReader(forms, labelReadings, "amounts");
-    expect(amounts.precision).toBe(1);
-  });
-
   it("are right at least nine times in ten, on dates and on amounts", async () => {
-    // The form cases are counted in the test above until their block rules exist.
-    const written = EVAL_CASES.filter((c) => !laidOutAsForm(c));
+    // Every case of the first set: running words, distractors and forms alike.
+    const written = EVAL_CASES;
     const plain = written.filter((c) => !c.exact);
     const lines: string[] = [];
     const precise: Record<string, boolean> = {};

@@ -11,7 +11,7 @@
  */
 
 import { type DocumentKind, type Fact, factId, maskTail } from "./facts";
-import { parseDate, parseTime, type ParsedDate } from "./dates";
+import { findDates, findTimes, parseDate, parseTime, type ParsedDate } from "./dates";
 import { serviceOf, type Role, type Subject } from "./subject";
 
 /** How far past a label to look for its date. */
@@ -183,6 +183,65 @@ function claimed(window: string, reach: Reach, writtenAt?: number): { date: Pars
   return below ? { date: below, time: parseTime(window) } : null;
 }
 
+/** A form's clock line is short: a label and its clock. */
+const CLOCK_LINE_MAX = 40;
+/** How many lines up a clock line looks for its date. */
+const BLOCK_REACH = 3;
+
+/**
+ * The clock of a form's clock line ("Departs 14:20", "Check-in time: from
+ * 3 PM"): a short line that is no sentence and holds a clock and no date of
+ * its own. A clock inside a sentence is not one.
+ */
+function clockLineTime(line: string, writtenAt?: number): string | null {
+  const plain = line.trim();
+  if (!plain || plain.length > CLOCK_LINE_MAX || /[.!?]$/.test(plain) || /[.!?]\s+[A-Z]/.test(plain)) {
+    return null;
+  }
+  if (findDates(plain, writtenAt === undefined ? undefined : { writtenAt }).length > 0) {
+    return null;
+  }
+  return parseTime(plain);
+}
+
+/**
+ * The date a clock line belongs to: the nearest line above it that states
+ * one, in the same block (no blank line between, at most three lines up). A
+ * form prints the day once and the clocks of that day under it; the date on
+ * a line below belongs to the next fact.
+ */
+function dateAbove(text: string, lineStart: number, writtenAt?: number): { date: ParsedDate; line: number } | null {
+  let end = lineStart - 1;
+  for (let step = 0; step < BLOCK_REACH && end > 0; step += 1) {
+    const start = text.lastIndexOf("\n", end - 1) + 1;
+    const line = text.slice(start, end);
+    if (!line.trim()) {
+      return null;
+    }
+    const date = parseDate(line, writtenAt === undefined ? undefined : { writtenAt });
+    if (date) {
+      return { date, line: start };
+    }
+    end = start - 1;
+  }
+  return null;
+}
+
+/**
+ * The clock that stands straight after a date on a line, with at most a
+ * joining word between ("30 July 2027 17:00", "8 January at 6:00 PM"). A
+ * clock further along the line is another matter ("open 9:00 to 17:00").
+ */
+function clockAfterDate(line: string, writtenAt?: number): string | null {
+  const [date] = findDates(line, writtenAt === undefined ? undefined : { writtenAt });
+  if (!date) {
+    return null;
+  }
+  const rest = line.slice(date.end);
+  const [clock] = findTimes(rest);
+  return clock && /^[\s,]*(?:at|by|before|from|@)?\s*$/i.test(rest.slice(0, clock.at)) ? clock.time : null;
+}
+
 // A flight's number as a line states it: after the word Flight ("Flight UA
 // 123", "flight no. U2 45"), or two capitals and a number standing right
 // before the label ("UA 123 departs"). A number followed by a colon or by
@@ -250,7 +309,8 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
     for (let match = labels.exec(text); match; match = labels.exec(text)) {
       // A document prints the year it expires in; an offer "valid thru
       // December 31" does not, and is nobody's document.
-      const parsed = claimed(windowAfter(text, match.index + match[0].length), reach, kind === "expiry" ? undefined : writtenAt)?.date;
+      const window = windowAfter(text, match.index + match[0].length);
+      const parsed = claimed(window, reach, kind === "expiry" ? undefined : writtenAt)?.date;
       if (!parsed) {
         continue;
       }
@@ -258,11 +318,15 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
       if (byId.has(id)) {
         continue;
       }
+      // A day to act by keeps the clock that stands straight after it on the
+      // label's own line ("Return by: Fri 30 July 2027 17:00").
+      const time = kind === "due" ? clockAfterDate(window.split("\n", 1)[0]!, writtenAt) : null;
       byId.set(id, {
         id,
         kind,
         document,
         value: parsed.iso,
+        ...(time ? { time } : {}),
         ...(label ? { label: label(match[0]) } : {}),
         source: "label",
         // A date that could be read two ways is worth less than one that
@@ -275,6 +339,11 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
   // Each flight's departure, by its line: an arrival on the same line may
   // have only a clock.
   const departed = new Map<string, { date: ParsedDate; time: string | null }>();
+  // A form prints a day once and its clocks under it. The moments read from
+  // a line's own date, by that line; and the lines whose date a clock line
+  // below them took.
+  const madeOn = new Map<number, string[]>();
+  const lent = new Set<number>();
   for (const words of EVENTS) {
     if (words.only && words.only !== document) {
       continue;
@@ -291,7 +360,19 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
       const flown = flight ? `${flight.line}|${flight.carrier}|${flight.number}` : "";
       let parsed: ParsedDate | null;
       let time: string | null;
-      if (flight && end === "arrive" && !parseDate(own, writtenAt === undefined ? undefined : { writtenAt })) {
+      const lineStart = text.lastIndexOf("\n", match.index - 1) + 1;
+      const lineStop = text.indexOf("\n", match.index);
+      // A clock line takes the day of the date line above it, and reads
+      // nothing below: the date under it is the next fact's.
+      const clock = flight ? null : clockLineTime(text.slice(lineStart, lineStop === -1 ? text.length : lineStop), writtenAt);
+      const above = clock ? dateAbove(text, lineStart, writtenAt) : null;
+      if (clock) {
+        parsed = above?.date ?? null;
+        time = clock;
+        if (above) {
+          lent.add(above.line);
+        }
+      } else if (flight && end === "arrive" && !parseDate(own, writtenAt === undefined ? undefined : { writtenAt })) {
         // An arrival that names no day of its own lands on its departure's
         // day when its clock is the later one. Otherwise its day is not
         // printed (a "+1" is a hint, not a date), and the lines below are
@@ -320,8 +401,17 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
       // The label joins the identity: a check-in and a check-out can share a
       // day, and a date alone would collapse them into one fact.
       const id = factId("event", `${parsed.iso} ${label.toLowerCase()}`);
-      if (byId.has(id)) {
+      const held = byId.get(id);
+      if (held) {
+        // The same moment named again by its time line ("Pick-up date", then
+        // "Pick-up time") gains the clock it lacked.
+        if (time && !held.time) {
+          byId.set(id, { ...held, time });
+        }
         continue;
+      }
+      if (!clock) {
+        madeOn.set(lineStart, [...(madeOn.get(lineStart) ?? []), id]);
       }
       if (flight && end === "depart") {
         departed.set(flown, { date: parsed, time });
@@ -342,6 +432,16 @@ export function labelledFacts(text: string, writtenAt?: number): Fact[] {
         source: "label",
         ...sureness(parsed),
       });
+    }
+  }
+  // A date line whose day a clock line took is the same moment, said without
+  // its clock ("Arrival date", then "Check-in time"): the clock line's
+  // reading is the moment, and the bare one goes.
+  for (const line of lent) {
+    for (const id of madeOn.get(line) ?? []) {
+      if (!byId.get(id)?.time) {
+        byId.delete(id);
+      }
     }
   }
   const asked = amountDue(text, document);
