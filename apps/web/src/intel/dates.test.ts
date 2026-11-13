@@ -2,7 +2,7 @@
 process.env.TZ = "UTC";
 
 import { describe, expect, it } from "vitest";
-import { daysUntil, parseDate, parseTime, swappedReading } from "./dates";
+import { daysUntil, findDates, parseDate, parseTime, swappedReading } from "./dates";
 
 describe("parseDate", () => {
   it("reads an unambiguous slash date, where the first number cannot be a month", () => {
@@ -101,6 +101,63 @@ describe("swappedReading", () => {
 
   it("returns null for anything that is not an ISO date", () => {
     expect(swappedReading("410.00")).toBeNull();
+  });
+});
+
+describe("findDates", () => {
+  const found = (text: string, context?: Parameters<typeof findDates>[1]) => findDates(text, context).map((hit) => [text.slice(hit.at, hit.end), hit.date.iso]);
+
+  it("finds each date in a sentence that holds three, in the order they stand", () => {
+    expect(found("Booked 2 March 2027, check-in March 4, 2027 and check-out 2027-03-07.")).toEqual([
+      ["2 March 2027", "2027-03-02"],
+      ["March 4, 2027", "2027-03-04"],
+      ["2027-03-07", "2027-03-07"],
+    ]);
+  });
+
+  it("reads each date as parseDate reads it alone", () => {
+    for (const text of ["12 March 2029", "March 12, 2029", "2029-03-12", "2029 March 12", "25/12/2028", "03/04/2028", "03.04.2028", "2028/12/25", "12th March 2029"]) {
+      expect(findDates(text).map((hit) => hit.date), text).toEqual([parseDate(text)]);
+    }
+  });
+
+  it("a date with no year is found only with the day the message was written", () => {
+    const written = { writtenAt: Date.parse("2026-11-09T12:00:00Z") };
+    expect(found("Arriving Thursday, November 12 or Fri 13 Nov.", written)).toEqual([
+      ["Thursday, November 12", "2026-11-12"],
+      ["Fri 13 Nov", "2026-11-13"],
+    ]);
+    expect(found("Arriving Thursday, November 12 or Fri 13 Nov.")).toEqual([]);
+    expect(findDates("Arriving Thursday, November 12", written)[0]!.date.assumedYear).toBe(true);
+  });
+
+  it("a date that states its year is one date, not also one without", () => {
+    const written = { writtenAt: Date.parse("2026-11-09T12:00:00Z") };
+    expect(found("Thursday, March 12, 2027 at 10:30", written)).toEqual([["March 12, 2027", "2027-03-12"]]);
+    expect(found("Sat 14 Nov 2026, doors 7:00 PM", written)).toEqual([["14 Nov 2026", "2026-11-14"]]);
+  });
+
+  it("a number and a word standing before a date do not hide it", () => {
+    // "00 due 30" has the shape of a day, a month and a year, and is none.
+    expect(found("Premium of USD 412.00 due 30 September 2025.")).toEqual([["30 September 2025", "2025-09-30"]]);
+    expect(found("Room 12 and 14 March 2027")).toEqual([["14 March 2027", "2027-03-14"]]);
+    expect(found("Paid 20 for the 5 May 2027 show", { writtenAt: Date.parse("2027-01-01T00:00:00Z") })).toEqual([["5 May 2027", "2027-05-05"]]);
+  });
+
+  it("a year alone, a clock, a phone number and a version are not dates", () => {
+    expect(found("In 2027 at 10:30 call 555-0142 about release 12.30, room 4.")).toEqual([]);
+  });
+
+  it("a date that does not exist is not found, and the one after it still is", () => {
+    expect(found("31 February 2027 or 1 March 2027")).toEqual([["1 March 2027", "2027-03-01"]]);
+  });
+
+  it("reads a long document quickly", () => {
+    const text = Array.from({ length: 10_000 }, (_, i) => `Line ${i}: paid on ${String((i % 28) + 1).padStart(2, "0")} March 2027, ref ${i}`).join("\n");
+    const started = performance.now();
+    expect(findDates(text)).toHaveLength(10_000);
+    // Generous for a slow machine; the point is that it does not grow with the square of the text.
+    expect(performance.now() - started).toBeLessThan(400);
   });
 });
 

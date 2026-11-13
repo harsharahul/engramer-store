@@ -160,20 +160,28 @@ are waiting, and for which device. "Summarize now" in a file's menu reads
 one file on request.
 
 **Trust is measured, not assumed.** A model reading counts without your yes
-only for a task where that reader's precision, measured on a synthetic eval
-set, is at least 98%, for the version and the exact prompt of the reader that
-ships, over at least 30 readings; never for a travel time, an identity document's
-expiry or a legal deadline, which need exact data or two readers agreeing;
+only for a task where that reader's precision is measured at 98% or more,
+for the version and the exact prompt of the reader that ships, over at
+least 30 readings, on each of two synthetic sets; never for a travel time,
+an identity document's expiry or a legal deadline, which need exact data;
 and only when the value passes sanity checks (the day exists, a stay ends
-after it begins, an amount names its currency). The eval set is forty
-invented emails and documents; the exact readers are scored against it in
-the test suite, and Apple's on-device model is scored on a Mac by a harness
-that runs the app's own reading code (`tools/eval/apple`). Today the model
-measures well below that bar for dates and for naming an email's kind, so
-its readings are offered for a yes. The bar never moves: a task earns trust
-only by measuring above it, and for amounts and for each kind of email the
-eval set must first grow, since forty cases hold too few of them to measure
-at all.
+after it begins, an amount names its currency). The first set is 92
+invented emails and documents, a third of them written so that the date or
+amount that matters stands among others that do not; the rules and the
+model's instructions are written against it. The second is 60 more,
+written without sight of the readers: nothing is ever tuned on it, and it
+is the one that says how unseen documents are read. The exact readers are
+scored in the test suite, and Apple's on-device model is scored on a Mac
+by a harness that runs the app's own reading code (`tools/eval/apple`).
+
+On the second set today, the rules and the model together find 82% of the
+dates and 80% of the amounts a careful reader would, and of what they
+offer 69% of the dates and 84% of the amounts are right; two of twelve
+documents that state nothing still get an offer. The model's own readings
+measure 68% right for dates and 82% for amounts, well below the bar, so
+they are offered for a yes, and naming an email's kind (86%) is below its
+bar too. The bar never moves: a task earns trust only by measuring above
+it.
 
 **Mail is read newest first, within a window.** The model reads email from
 the last 12 months by default (3 to 12 in Profile, following your account);
@@ -311,14 +319,31 @@ metadata and index blob like every other derived signal.
   year is not read.
 - **Amounts and reference numbers**, at low confidence, from any document,
   including kinds no rule anticipated.
-- **The assistant's proposals**, at the lowest confidence of all, on the Mac
-  and iPhone apps where the on-device model runs. While it reads a document
-  for its summary, the model also names the kind of document and the dates
-  and amounts it states. Each proposal is typed by the same vocabulary the
-  rules use and then held to the same test: a value the text does not state,
-  in some rendering, is dropped rather than lowered. What survives is
-  offered like every other reading, marked "proposed and checked against
-  the document", and confirmed by you or not at all.
+- **The assistant's judgement**, at the lowest confidence of all, on the Mac
+  and iPhone apps where the on-device model runs. Running words no label
+  covers ("your dental check-up on 22 July at 09:30", "payable by 10
+  April") are read in two steps. First the rules find every date in the
+  whole text, each with the clock beside it, and every amount, and set
+  aside what cannot matter: a day that was already over when the message
+  was sent or the file was kept, a rate ("per night") or a deposit, and
+  anything a rule or the document's own booking data already read. Then
+  the on-device model is asked once about what is left. For each date it
+  answers from a short fixed list: something that happens, a check-in, a
+  check-out, a departure, an arrival, a day to pay or act by, an expiry,
+  or none of these. For the amounts it first answers yes or no, whether
+  the document states a whole amount you paid or have to pay, and only
+  then which one. It may add up to six of the document's own words (what
+  happens, or the place of a stay or a journey), kept only when the text
+  holds them and they hold no date or clock. The model has nowhere to
+  write a date or an amount of its own, so a value the document does not
+  state cannot arrive. For a message it is told the subject, the sender and
+  the day it was sent. A document with nothing left to ask about is not
+  asked, and an email whose booking data already gave its dates is only
+  summarized. A moment that a rule and the model both read is one fact,
+  and a form line that only names a date ("Date: 15 May 2027") gives way
+  to what the model says the date is. What the model labels is offered
+  like every other reading, marked "proposed and checked against the
+  document", and confirmed by you or not at all.
 
 **What counts without asking, and what waits for a yes.** A fact counts
 (for the bell, notifications, the Timeline and trips) when you

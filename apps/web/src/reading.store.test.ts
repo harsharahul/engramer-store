@@ -66,7 +66,7 @@ vi.mock("./api", async (importOriginal) => {
 import { api, ApiError } from "./api";
 import { AssistantError } from "./intel/assistant";
 import { READER_VERSION } from "./intel/reading";
-import { readingFingerprint } from "./intel/summarize";
+import { FactsOwed, readingFingerprint } from "./intel/summarize";
 import { useStore, type FileEntry } from "./store";
 import { spendModelReads, startOfOpen } from "./modelbudget";
 
@@ -163,6 +163,40 @@ describe("a reading that keeps failing", () => {
     expect(model.summarize).not.toHaveBeenCalled();
   });
 
+  it("a second call that keeps failing costs the dates, never the summary", async () => {
+    model.facts = true;
+    library([note()]);
+    const owed = () =>
+      new FactsOwed({ summary: "A synthetic note.", tags: [], facts: [] }, new AssistantError("timeout", "the reading took too long"));
+    model.summarize.mockImplementation(async () => {
+      throw owed();
+    });
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toMatchObject({ outcome: "retrying", tries: 1 });
+    expect(useStore.getState().files.get("n1")!.summary).toBeUndefined();
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toMatchObject({ outcome: "retrying", tries: 2 });
+    // The last try: the summary that was read each time is kept, the dates are given up.
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toMatchObject({ outcome: "found", tasks: ["summary", "facts"] });
+    expect(useStore.getState().files.get("n1")!.summary).toBe("A synthetic note.");
+    // Final: nothing asks the model about this file again.
+    model.summarize.mockClear();
+    await useStore.getState().processFile("n1");
+    expect(model.summarize).not.toHaveBeenCalled();
+  });
+
+  it("a model that went away between the two calls spends no try and stores nothing", async () => {
+    model.facts = true;
+    library([note()]);
+    model.summarize.mockImplementationOnce(async () => {
+      throw new FactsOwed({ summary: "A synthetic note.", tags: [], facts: [] }, new AssistantError("preempted", ""));
+    });
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toBeUndefined();
+    expect(useStore.getState().files.get("n1")!.summary).toBeUndefined();
+  });
+
   it("a model that is off, busy or cancelled on this device spends no tries", async () => {
     library([note()]);
     for (const code of ["unavailable", "preempted", "cancelled", "bad-request"]) {
@@ -173,6 +207,16 @@ describe("a reading that keeps failing", () => {
     // The file is still owed to a device whose model works.
     expect(await useStore.getState().processFile("n1")).not.toBeNull();
     expect(stampOf()).toMatchObject({ outcome: "found" });
+  });
+
+  it("a refusal is stamped and the file is not asked again", async () => {
+    library([note()]);
+    model.summarize.mockRejectedValueOnce(new AssistantError("guardrail", "the model declined"));
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toMatchObject({ outcome: "declined", version: READER_VERSION.apple });
+    model.summarize.mockClear();
+    await useStore.getState().processFile("n1");
+    expect(model.summarize).not.toHaveBeenCalled();
   });
 
   it("a timeout from the model counts as a try", async () => {
@@ -335,6 +379,58 @@ describe("reading mail", () => {
     await useStore.getState().processFile("n1");
     expect(model.summarize).toHaveBeenCalledTimes(1);
     expect(model.summarize.mock.calls[0]![0]).toMatchObject({ mail: true });
+  });
+
+  const headers = (date: number) => ({
+    messageId: "<m1@example.com>",
+    from: "City Water",
+    fromAddress: "billing@example.com",
+    to: [],
+    date,
+    subject: "Your water bill",
+    attachmentIds: [],
+  });
+
+  it("an email's subject, sender and sending day go with the reading", async () => {
+    const sent = Date.UTC(2027, 2, 2, 9);
+    library([email({ mail: headers(sent) })]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize.mock.calls[0]![0]).toMatchObject({
+      message: { subject: "Your water bill", from: "City Water", writtenAt: sent },
+    });
+  });
+
+  it("an email record that carries no headers is read without them", async () => {
+    library([email()]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize).toHaveBeenCalledTimes(1);
+    expect(model.summarize.mock.calls[0]![0]).not.toHaveProperty("message");
+  });
+
+  it("a reading is told what the file's other readers already found", async () => {
+    const due = {
+      id: "due:2027-11-20",
+      kind: "due" as const,
+      document: "invoice" as const,
+      value: "2027-11-20",
+      source: "label" as const,
+      confidence: 0.7,
+    };
+    library([note({ facts: [due] })]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize.mock.calls[0]![0]).toMatchObject({ known: [due] });
+  });
+
+  it("a stored file's reading is told the day the file was kept; an email's is not", async () => {
+    const kept = Date.UTC(2026, 10, 9, 12);
+    library([note({ createdAt: kept })]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize.mock.calls[0]![0]).toMatchObject({ keptAt: kept });
+    model.summarize.mockClear();
+    // An email is read from the day it was sent, which its headers give.
+    library([email({ mail: headers(Date.UTC(2027, 2, 2, 9)), createdAt: kept })]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize.mock.calls[0]![0]).not.toHaveProperty("keptAt");
   });
 
   it("an email with booking data is summarized but not asked for dates", async () => {

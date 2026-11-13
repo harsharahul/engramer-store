@@ -168,6 +168,93 @@ export function parseDate(text: string, given?: DateOrder | DateContext): Parsed
   return datedIn(text, context.order) ?? (context.writtenAt === undefined ? null : undatedIn(text, context.writtenAt));
 }
 
+// Each form a full date is written in, most certain first, ready to be
+// matched again and again across a text.
+const DATED_FORMS = [ISO, YEAR_FIRST_NAMED, DAY_FIRST_NAMED, MONTH_FIRST_NAMED, YEAR_FIRST_NUMERIC, NUMERIC].map(
+  (form) => new RegExp(form.source, `${form.flags}g`),
+);
+
+export interface FoundDate {
+  /** Where it starts and ends in the text. */
+  at: number;
+  end: number;
+  date: ParsedDate;
+}
+
+/**
+ * Every place in a text where a form's words read as a date. Words that
+ * have the form's shape and are no date ("00 due 30": a number, a word, a
+ * number) must not hide a date that begins inside them, so the search then
+ * moves on by one character, not past them.
+ */
+function readings(form: RegExp, text: string, read: (words: string) => ParsedDate | null): FoundDate[] {
+  const found: FoundDate[] = [];
+  // Its own copy: the reader may use the same form, and a shared one would
+  // carry this search's place into the reader's.
+  const walk = new RegExp(form.source, form.flags);
+  for (let match = walk.exec(text); match; match = walk.exec(text)) {
+    const date = read(match[0]);
+    if (date) {
+      found.push({ at: match.index, end: match.index + match[0].length, date });
+    } else {
+      walk.lastIndex = match.index + 1;
+    }
+  }
+  return found;
+}
+
+/**
+ * Every date in a text, in the order they stand, none overlapping another.
+ *
+ * `parseDate` answers "which date does this label mean" and reads one; this
+ * answers "which dates does this document hold". Each is read exactly as
+ * `parseDate` would read it alone. A date with no year is found only when
+ * the context says when the text was written, and never inside a date that
+ * states its year.
+ */
+export function findDates(text: string, context: DateContext = {}): FoundDate[] {
+  const dated: (FoundDate & { rank: number })[] = [];
+  DATED_FORMS.forEach((form, rank) => {
+    for (const hit of readings(form, text, (words) => datedIn(words, context.order))) {
+      dated.push({ ...hit, rank });
+    }
+  });
+  // In the order they stand, each kept only when it starts past the last
+  // one kept: one pass, however long the text.
+  const placed: FoundDate[] = [];
+  let end = -1;
+  for (const { rank: _rank, ...hit } of dated.sort((a, b) => a.at - b.at || a.rank - b.rank)) {
+    if (hit.at >= end) {
+      placed.push(hit);
+      end = hit.end;
+    }
+  }
+  const { writtenAt } = context;
+  if (writtenAt === undefined) {
+    return placed;
+  }
+  const undated: FoundDate[] = [];
+  for (const form of [MONTH_DAY, DAY_MONTH]) {
+    undated.push(...readings(form, text, (words) => undatedIn(words, writtenAt)));
+  }
+  // A month and a day inside a date that states its year is that date, and
+  // two forms that read the same words are one date.
+  const stated = placed.length;
+  let next = 0;
+  end = -1;
+  for (const hit of undated.sort((a, b) => a.at - b.at)) {
+    while (next < stated && placed[next]!.end <= hit.at) {
+      next += 1;
+    }
+    const taken = next < stated && placed[next]!.at < hit.end;
+    if (!taken && hit.at >= end) {
+      placed.push(hit);
+      end = hit.end;
+    }
+  }
+  return placed.sort((a, b) => a.at - b.at);
+}
+
 /** A month and a day with no year, read against when the text was written. */
 function undatedIn(text: string, writtenAt: number): ParsedDate | null {
   // The first of each form whose word really is a month ("Thu 12" is not).
@@ -368,6 +455,30 @@ export function parseTime(text: string): string | null {
     return `${String(hour).padStart(2, "0")}:00`;
   }
   return null;
+}
+
+const CLOCK_FORMS = [TIME, TIME_24, TIME_HOUR].map((form) => new RegExp(form.source, `${form.flags}g`));
+
+/** Every clock in a text, in the order they stand, each read as `parseTime` reads it alone. */
+export function findTimes(text: string): { at: number; end: number; time: string }[] {
+  const clocks: { at: number; end: number; time: string; rank: number }[] = [];
+  CLOCK_FORMS.forEach((form, rank) => {
+    for (const match of text.matchAll(form)) {
+      const time = parseTime(match[0]);
+      if (time) {
+        clocks.push({ at: match.index, end: match.index + match[0].length, time, rank });
+      }
+    }
+  });
+  const placed: { at: number; end: number; time: string }[] = [];
+  let end = -1;
+  for (const { rank: _rank, ...clock } of clocks.sort((a, b) => a.at - b.at || a.rank - b.rank)) {
+    if (clock.at >= end) {
+      placed.push(clock);
+      end = clock.end;
+    }
+  }
+  return placed;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;

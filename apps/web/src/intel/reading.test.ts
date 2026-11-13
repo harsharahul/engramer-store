@@ -97,6 +97,18 @@ describe("needsReading", () => {
     expect(needsReading(file({ createdAt: NOW - 10 * DAY, reading: older({ outcome: "found" }) }), "apple", wants)).toBe(true);
   });
 
+  it("a version 3 reading that found nothing is read once more under version 4, and one that found something is left alone", () => {
+    expect(READER_VERSION.apple).toBe(4);
+    const three = (over: Partial<ReadingStamp>) => stamp({ version: 3, ...over });
+    expect(needsReading(file({ reading: three({ outcome: "none" }) }), "apple", wants)).toBe(true);
+    expect(needsReading(file({ reading: three({ outcome: "found" }) }), "apple", wants)).toBe(false);
+    // Read under version 4, the same file is finished: no second read.
+    expect(needsReading(file({ reading: stamp({ version: 4, outcome: "none" }) }), "apple", wants)).toBe(false);
+    // A refusal is asked once more by the new version, and never again by the same one.
+    expect(needsReading(file({ reading: three({ outcome: "declined" }) }), "apple", wants)).toBe(true);
+    expect(needsReading(file({ reading: stamp({ version: 4, outcome: "declined" }) }), "apple", wants)).toBe(false);
+  });
+
   it("the first mail reader re-reads emails the earlier one found too short", () => {
     // Version 2 reads an email from 60 characters; version 1 needed more.
     const email = { mime: "message/rfc822", mail: { date: NOW - 200 * DAY } };

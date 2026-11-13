@@ -6,11 +6,12 @@
  * plain text, where only a model can find what is there.
  */
 
+import { DISTRACTOR_CASES } from "./distractors";
 import type { EvalCase } from "./score";
 
 const EMAIL = "application/vnd.engram.email+json";
 
-const ld = (node: Record<string, unknown>) =>
+const ld =(node: Record<string, unknown>) =>
   `<html><body><script type="application/ld+json">${JSON.stringify(node)}</script><p>Synthetic message.</p></body></html>`;
 
 const ics = (...lines: string[]) =>
@@ -710,4 +711,6 @@ export const EVAL_CASES: readonly EvalCase[] = [
     text: "Gate B12 is in Terminal T2. Security opens at 4 AM. Lounge access with card ON 12.",
     expected: [],
   },
+  // Longer documents in which what matters stands among dates and amounts that do not.
+  ...DISTRACTOR_CASES,
 ];

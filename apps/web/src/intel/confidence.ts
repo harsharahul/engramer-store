@@ -4,8 +4,9 @@
  * Confidence is computed, never the model's own report: an exact source
  * counts as read; agreement between two readers is decided where readings
  * merge (facts.ts); a model reading alone counts only for a task where the
- * reader's precision, measured on the eval set over enough readings and for
- * this version of the reader, is at least 98%, only when the stakes allow
+ * reader's precision, measured on both eval sets (the first, and the
+ * held-out one nothing was tuned on) over enough readings and for this
+ * version of the reader, is at least 98%, only when the stakes allow
  * one reader, and only when the value passes the sanity checks. Scores count
  * only for the reader version and the exact prompt they were measured with.
  * Everything else waits for a yes.
@@ -48,6 +49,12 @@ export interface ReaderScores {
     amounts?: TaskScore;
     mailKind?: { accuracy: number; cases: number; byKind?: Record<string, { precision: number; offered: number }> };
   };
+  /**
+   * The same tasks measured on the held-out set: documents no rule and no
+   * instruction was ever tuned on. A reading counts alone only where both
+   * sets clear the bar; absent in older scores, which then trust nothing.
+   */
+  heldout?: { cases: number; tasks: { dates?: TaskScore; amounts?: TaskScore } };
 }
 
 /** How often an email's kind must be named right before the kind is used. */
@@ -152,8 +159,12 @@ export function acceptance(
   if (fact.source !== "model" || !current(ctx.scores) || stakesOf(fact) === "high") {
     return null;
   }
-  const score = ctx.scores.tasks[fact.kind === "amount" ? "amounts" : "dates"];
-  if (!score || score.offered < MIN_SAMPLE || score.precision < PRECISION_BAR) {
+  // The first set is the one the instructions were written against; the
+  // held-out set says whether that carries to documents never seen. Both.
+  const task = fact.kind === "amount" ? "amounts" : "dates";
+  const clears = (score: TaskScore | undefined) =>
+    score !== undefined && score.offered >= MIN_SAMPLE && score.precision >= PRECISION_BAR;
+  if (!clears(ctx.scores.tasks[task]) || !clears(ctx.scores.heldout?.tasks[task])) {
     return null;
   }
   return saneFact(fact, ctx.siblings, ctx.now) ? "grounded" : null;

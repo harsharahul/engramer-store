@@ -203,6 +203,42 @@ export function designatorOf(subject: Subject): string | undefined {
   return [subject.carrier, subject.number].filter(Boolean).join(" ") || undefined;
 }
 
+/** A role's own word standing before a place: "Check-in: Harbor House". */
+const ROLE_FIRST = /^(?:check[- ]?in|check[- ]?out|departs?|departure|arrives?|arrival)\b[\s:,-]*(?:(?:from|at|in|to)\s+)?/i;
+/** A role's own word anywhere. */
+const ROLE_WORD = /\b(?:check[- ]?in|check[- ]?out|departs?|departure|departing|leaves?|leaving|arrives?|arrival|arriving|lands?|landing)\b/i;
+
+/**
+ * The place in the words a reader gave for a stay or a journey. The role's
+ * own word before the place is not part of its name ("Check-in: Harbor
+ * House" names Harbor House); words that still hold one ("Flight UA 123
+ * departs SFO") are a phrase about the moment, and name no place.
+ */
+export function placeNamed(words: string): string | undefined {
+  const place = words.replace(ROLE_FIRST, "").trim();
+  return place && !ROLE_WORD.test(place) ? place : undefined;
+}
+
+/** Words of leaving, and words of getting there. */
+const LEAVING = /\b(?:depart(?:s|ed|ing|ure)?|leav(?:e|es|ing)|sail(?:s|ing)?|takes?\s+off|sets?\s+off|boarding)\b/i;
+const GETTING_THERE = /\b(?:arriv(?:e|es|ed|ing|al)|land(?:s|ing)?|reach(?:es)?|gets?\s+in)\b/i;
+
+/**
+ * Which end of a journey a sentence states, given the end a reader named.
+ * A sentence that holds a word of only one end states that end, whatever
+ * the reader said; one that holds both leaves it to the reader, who saw
+ * which clock it was asked about; one that holds neither states no journey
+ * at all (a show that starts, a train that "runs"), and names a plain event.
+ */
+export function journeyRole(said: "depart" | "arrive", sentence: string): "depart" | "arrive" | undefined {
+  const leaving = LEAVING.test(sentence);
+  const there = GETTING_THERE.test(sentence);
+  if (leaving && there) {
+    return said;
+  }
+  return leaving ? "depart" : there ? "arrive" : undefined;
+}
+
 // The label forms readers wrote before they stated subjects, read here and
 // nowhere else.
 const LEG = /^(flight|train|bus|boat)\b\s*(.*?)\s*\b(departs|arrives)\b\s*(.*)$/i;

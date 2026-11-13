@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Fact } from "./facts";
-import { cleanSubject, designatorOf, subjectOf } from "./subject";
+import { cleanSubject, designatorOf, journeyRole, placeNamed, subjectOf } from "./subject";
 
 function event(label: string, overrides: Partial<Fact> = {}): Fact {
   return {
@@ -135,6 +135,39 @@ describe("ends", () => {
   it("an end that names a check-in is an end", () => {
     expect(subjectOf(event("Check-in: Casa do Rio ends", { source: "ics" }))).toEqual({ role: "end" });
     expect(subjectOf(event("Table at Taberna da Rua ends", { source: "ics" }))).toEqual({ role: "end" });
+  });
+});
+
+describe("placeNamed", () => {
+  it("the role's own word before a place is not part of its name", () => {
+    expect(placeNamed("Check-in: Harbor House")).toBe("Harbor House");
+    expect(placeNamed("Departs from Porto Campanha")).toBe("Porto Campanha");
+    expect(placeNamed("Casa Azulejo")).toBe("Casa Azulejo");
+    expect(placeNamed("SFO")).toBe("SFO");
+  });
+
+  it("words that still hold a role's word are a phrase about the moment, and name no place", () => {
+    expect(placeNamed("Flight UA 123 departs SFO")).toBeUndefined();
+    expect(placeNamed("your train leaves Gareth Central")).toBeUndefined();
+    expect(placeNamed("Check-in")).toBeUndefined();
+  });
+});
+
+describe("journeyRole", () => {
+  it("a journey's end stands only when the sentence holds a word of it", () => {
+    expect(journeyRole("arrive", "Flight SW 212 lands in LIS on Saturday 20 March 2027 at 16:25.")).toBe("arrive");
+    expect(journeyRole("depart", "Your coach departs on Saturday, June 19 at 7:05 AM from Bay 4.")).toBe("depart");
+    // A show, or a train that only "runs", is no journey's end: a plain event.
+    expect(journeyRole("arrive", "The show starts at 8:00 PM on Saturday, November 6, 2027.")).toBeUndefined();
+    expect(journeyRole("arrive", "Your train from Leeds to London King's Cross runs on Fri 9 July 2027.")).toBeUndefined();
+  });
+
+  it("the sentence's own word decides when it holds only one end", () => {
+    expect(journeyRole("arrive", "The ferry sails from Dover at 14:30 on 6 August 2027.")).toBe("depart");
+    expect(journeyRole("depart", "Your parcel should reach you on 6 May 2027.")).toBe("arrive");
+    // Both ends in one sentence: the reader that saw the clock says which.
+    expect(journeyRole("arrive", "Departs SFO 10:15 AM on March 4, 2027, arrives JFK 6:45 PM.")).toBe("arrive");
+    expect(journeyRole("depart", "Departs SFO 10:15 AM on March 4, 2027, arrives JFK 6:45 PM.")).toBe("depart");
   });
 });
 

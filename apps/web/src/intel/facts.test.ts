@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { proposedFacts } from "./modelfacts";
+import { spotCandidates } from "./candidates";
+import { judgedFacts } from "./judge";
+import { labelledFacts } from "./labels";
 import { reservationFacts } from "./reservation";
 import {
+  alreadyRead,
   asFacts,
   groundFacts,
   isTracked,
@@ -439,11 +442,73 @@ describe("readers as they really meet", () => {
       `<script type="application/ld+json">{"@type":"LodgingReservation","checkinTime":"2027-03-04T15:00:00+01:00","reservationFor":{"name":"Casa do Rio"}}</script>`,
     ).map((f) => ({ ...f, accepted: "exact" as const }));
     const text = "Check-in from 14:00 on 4 March 2027 at Casa do Rio.";
-    const model = proposedFacts({ document: "hotel-booking", facts: [{ kind: "event", label: "Check-in", value: "2027-03-04", time: "14:00" }] }, text);
-    expect(model).toHaveLength(1);
+    const model = judgedFacts({ d1: "check-in", d1w: "Casa do Rio" }, spotCandidates(text), text, "hotel-booking");
+    expect(model.map((f) => [f.value, f.time, f.source])).toEqual([["2027-03-04", "14:00", "model"]]);
     const merged = mergeFacts(exact, model);
     expect(merged.filter((f) => f.kind === "event").map((f) => [f.time, f.source])).toEqual([["15:00", "jsonld"]]);
     expect(offeredFacts([{ id: "f", trashed: false, facts: merged }], NOW)).toEqual([]);
+  });
+
+  it("a moment a rule already read is one fact: the model's reading of it is an echo", () => {
+    // The rules read the labelled lines; the model is asked about every date
+    // in the text, so it judges the same two moments under its own words.
+    const text = "Harbor House\nCheck-in: 12 March 2027 from 3pm\nCheck-out: 15 March 2027 by 11am";
+    const rules = labelledFacts(text);
+    const model = judgedFacts({ d1: "check-in", d1w: "Harbor House", d2: "check-out", d2w: "Harbor House" }, spotCandidates(text), text, "hotel-booking");
+    expect(model).toHaveLength(2);
+    for (const merged of [mergeFacts(rules, model), mergeFacts(model, rules)]) {
+      const moments = merged.filter((f) => f.kind === "event");
+      expect(moments.map((f) => [f.value, f.time, f.source])).toEqual([
+        ["2027-03-12", "15:00", "label"],
+        ["2027-03-15", "11:00", "label"],
+      ]);
+      // An echo is no second witness: the rule's reading still asks.
+      expect(moments.some((f) => f.accepted !== undefined)).toBe(false);
+    }
+  });
+
+  it("a moment with no clock and the model's reading of that day with one are the same moment", () => {
+    const rule = fact({ id: "event:2026-11-12 delivery expected by", kind: "event", value: "2026-11-12", label: "Delivery expected by", source: "label", confidence: 0.7 });
+    const model = fact({ id: "event:2026-11-12 arrives 13:00", kind: "event", value: "2026-11-12", time: "13:00", label: "Arrives", source: "model", confidence: 0.45 });
+    expect(mergeFacts([rule], [model]).map((f) => f.source)).toEqual(["label"]);
+  });
+
+  it("another clock on the same day is another moment, and stays", () => {
+    const rule = fact({ id: "event:2027-03-04 departs sfo", kind: "event", value: "2027-03-04", time: "10:15", label: "Departs SFO", source: "label", confidence: 0.7 });
+    const model = fact({ id: "event:2027-03-04 arrives jfk 18:45", kind: "event", value: "2027-03-04", time: "18:45", label: "Arrives JFK", source: "model", confidence: 0.45 });
+    expect(mergeFacts([rule], [model]).map((f) => [f.time, f.source])).toEqual([
+      ["10:15", "label"],
+      ["18:45", "model"],
+    ]);
+  });
+
+  it("a date a form line only names gives way to what the model says it is: one date, one question", () => {
+    // "Date: Saturday 15 May 2027" on a ticket is a labelled date with no
+    // meaning of its own; the model says the journey leaves then.
+    const named = fact({ id: "dated:2027-05-15", kind: "dated", value: "2027-05-15", label: "Date", source: "label", confidence: 0.4 });
+    const judged = fact({ id: "event:2027-05-15 departs eastbridge 08:42", kind: "event", value: "2027-05-15", time: "08:42", label: "Departs Eastbridge", source: "model", confidence: 0.45 });
+    for (const merged of [mergeFacts([named], [judged]), mergeFacts([judged], [named])]) {
+      expect(merged.map((f) => [f.kind, f.source])).toEqual([["event", "model"]]);
+    }
+    // The model's no to the meaning does not bring the bare line back as a second question.
+    expect(mergeFacts([{ ...judged, dismissed: true }], [named]).filter((f) => !f.dismissed)).toEqual([]);
+    // A line the owner confirmed stays, whatever the model says later.
+    expect(mergeFacts([{ ...named, confirmed: true }], [judged]).some((f) => f.kind === "dated" && f.confirmed)).toBe(true);
+    // Another day's line is untouched.
+    const other = fact({ id: "dated:2027-05-02", kind: "dated", value: "2027-05-02", label: "Booked on", source: "label", confidence: 0.4 });
+    expect(mergeFacts([other], [judged]).map((f) => f.kind).sort()).toEqual(["dated", "event"]);
+  });
+
+  it("a moment the owner said no to does not come back as the model's reading of it", () => {
+    const rule = fact({ id: "event:2026-12-08 appointment", kind: "event", value: "2026-12-08", time: "14:30", label: "Appointment", source: "label", confidence: 0.7, dismissed: true });
+    const model = fact({ id: "event:2026-12-08 dental check-up 14:30", kind: "event", value: "2026-12-08", time: "14:30", label: "Dental check-up", source: "model", confidence: 0.45 });
+    expect(mergeFacts([rule], [model]).filter((f) => !f.dismissed)).toEqual([]);
+  });
+
+  it("a model moment the owner confirmed is not taken back when a rule reads the same one later", () => {
+    const rule = fact({ id: "event:2026-12-08 appointment", kind: "event", value: "2026-12-08", time: "14:30", label: "Appointment", source: "label", confidence: 0.7 });
+    const model = fact({ id: "event:2026-12-08 dental check-up 14:30", kind: "event", value: "2026-12-08", time: "14:30", label: "Dental check-up", source: "model", confidence: 0.45, confirmed: true });
+    expect(mergeFacts([model], [rule]).some((f) => f.source === "model" && f.confirmed)).toBe(true);
   });
 
   it("an ambiguous date is never accepted by agreement", () => {
@@ -484,6 +549,50 @@ describe("readers as they really meet", () => {
       fact({ id: "due:2027-04-10", kind: "due", document: "invoice", value: "2027-04-10", source: "model", confidence: 0.45, disputed: "due:2027-04-01", confirmed: true }),
     ];
     expect(offeredFacts([{ id: "f", trashed: false, facts }], NOW)).toEqual([]);
+  });
+});
+
+describe("what the model is not asked about again", () => {
+  const event = (over: Partial<Fact>): Fact => fact({ id: `event:${over.value} ${over.label ?? ""}`, kind: "event", ...over });
+
+  it("a date a rule or booking data gave a meaning, with its clock when it has one", () => {
+    const known = alreadyRead([
+      event({ value: "2027-03-04", time: "10:15", label: "Flight UA 123 departs SFO", source: "label", confidence: 0.7 }),
+      fact({ id: "due:2027-06-30", kind: "due", value: "2027-06-30", source: "label", confidence: 0.7 }),
+      event({ value: "2027-04-08", time: "15:00", label: "Check-in", source: "jsonld", confidence: 1, accepted: "exact" }),
+    ]);
+    expect(known.read).toEqual([{ value: "2027-03-04", time: "10:15" }, { value: "2027-06-30" }, { value: "2027-04-08", time: "15:00" }]);
+    expect(known.total).toBe(false);
+  });
+
+  it("the model's own earlier reading is asked about again, unless the owner answered it", () => {
+    const mine = event({ value: "2027-07-22", time: "09:30", label: "Dental check-up", source: "model", confidence: 0.45 });
+    expect(alreadyRead([mine]).read).toEqual([]);
+    expect(alreadyRead([{ ...mine, confirmed: true }]).read).toEqual([{ value: "2027-07-22", time: "09:30" }]);
+    expect(alreadyRead([{ ...mine, dismissed: true }]).read).toEqual([{ value: "2027-07-22", time: "09:30" }]);
+  });
+
+  it("a form line that only names a date has no meaning yet, so the model is asked", () => {
+    expect(alreadyRead([fact({ id: "dated:2027-05-15", kind: "dated", value: "2027-05-15", label: "Date", source: "label", confidence: 0.4 })]).read).toEqual([]);
+  });
+
+  it("a date line the owner already answered is not asked about again under the model's words", () => {
+    const line = fact({ id: "dated:2027-05-15", kind: "dated", value: "2027-05-15", label: "Date", source: "label", confidence: 0.4 });
+    expect(alreadyRead([{ ...line, dismissed: true }]).read).toEqual([{ value: "2027-05-15" }]);
+    expect(alreadyRead([{ ...line, confirmed: true }]).read).toEqual([{ value: "2027-05-15" }]);
+    // So the answered day is no candidate, and nothing new asks about it.
+    const text = "Date: 15 May 2027. Bring the form with you.";
+    const asked = spotCandidates(text, undefined, alreadyRead([{ ...line, dismissed: true }]));
+    expect(asked).toEqual([]);
+  });
+
+  it("a total a reader named is the total; an amount nobody named is not", () => {
+    const amount = (over: Partial<Fact>): Fact => fact({ id: `amount:${over.value}`, kind: "amount", unit: "USD", ...over });
+    expect(alreadyRead([amount({ value: "84.20", label: "Amount due", source: "label", confidence: 0.7 })]).total).toBe(true);
+    expect(alreadyRead([amount({ value: "1184.00", label: "Total", source: "jsonld", confidence: 1 })]).total).toBe(true);
+    expect(alreadyRead([amount({ value: "45.00", source: "pattern", confidence: 0.3 })]).total).toBe(false);
+    expect(alreadyRead([amount({ value: "64.10", label: "Total", source: "model", confidence: 0.45 })]).total).toBe(false);
+    expect(alreadyRead([amount({ value: "64.10", label: "Total", source: "model", confidence: 0.45, confirmed: true })]).total).toBe(true);
   });
 });
 

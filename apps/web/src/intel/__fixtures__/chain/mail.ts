@@ -58,14 +58,12 @@ export const PACKAGE_PRICED = ld([...FLIGHTS.map((leg) => ({ ...leg, totalPrice:
 export const GUESTHOUSE_TEXT =
   "Hello! Your room at Casa Azulejo is ready from 15:00 on 13 November 2026. Please leave the key at the desk by 11:00 on 16 November 2026. See you soon.";
 
-/** What the on-device model answers for the guesthouse email. */
-export const GUESTHOUSE_READING = {
-  document: "hotel-booking",
-  facts: [
-    { kind: "event", label: "Room ready", value: "2026-11-13", time: "15:00", role: "check-in", place: "Casa Azulejo" },
-    { kind: "event", label: "Key at the desk", value: "2026-11-16", time: "11:00", role: "check-out", place: "Casa Azulejo" },
-  ],
-};
+/**
+ * What the on-device model answers when it judges the guesthouse email's
+ * two dates: the first is the check-in, the second the check-out, both at
+ * the place the text names.
+ */
+export const GUESTHOUSE_JUDGED = { d1: "check-in", d1w: "Casa Azulejo", d2: "check-out", d2w: "Casa Azulejo" };
 
 /** The boarding pass barcode: TP 236 from SFO to LIS on day 316 (12 Nov). */
 export const PASS_PAYLOAD = "M1MORGAN/AVERY        E4F2KQ7 SFOLISTP 0236 316Y014C0041 100";

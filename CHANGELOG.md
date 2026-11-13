@@ -18,6 +18,18 @@ All notable changes to Engram Store are documented here, following
   flight row. A bill's row shows the amount it asks for, and one yes
   answers the date and the amount. These readings wait for your yes, as
   before.
+- **Running words are read on the Mac and iPhone.** An appointment, a day
+  to pay by or a total written in a sentence, with no label beside it, is
+  found by the rules and named by the on-device model. The model chooses
+  what each date and amount is from a short fixed list and has nowhere to
+  write a value of its own, so it cannot invent a date or an amount. For a
+  message it is told the subject, the sender and the day it was sent. It
+  is asked only about what is still open: not about a day that was over
+  when the message was sent, and not about anything a rule or the booking
+  data already read. These readings wait for your yes, and a bill that
+  still asks shows the one total it states.
+- **Amounts written with a decimal comma are found** ("€213,40",
+  "EUR 1.250,00").
 - **Dates with no year, in mail.** "Arriving Thursday, November 12" in a
   message is read as the next such day after the message was written, and
   asks before it counts.
@@ -33,6 +45,12 @@ All notable changes to Engram Store are documented here, following
   an order and its shipping notice, is billed once. An email that states
   several totals (flights in one currency, a hotel in another) is a bill
   for each.
+- **Trust is measured on documents nothing was tuned on.** A second set of
+  sixty invented messages and documents, written without sight of the
+  readers, is measured beside the first. A model reading counts without a
+  yes only where both sets measure above 98% over at least 30 readings.
+  Earlier model readings that found nothing, and recent ones, are read once
+  more by the new reader.
 
 ### Fixed
 - **A meeting's invite shows your time.** An invite written in UTC or in

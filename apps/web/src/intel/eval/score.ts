@@ -19,6 +19,8 @@ export interface EvalCase {
   text: string;
   /** The document as written, when it carries structured data (HTML, an invite). */
   raw?: string;
+  /** Who sent a message, as its header names them. */
+  from?: string;
   /** When a message was written: what a date in it with no year is read against. */
   writtenAt?: number;
   /** What a good reader finds: the time only where the document gives one. */
@@ -125,6 +127,67 @@ export async function scoreRoles(
     offered,
     expected,
   };
+}
+
+export interface NoiseScore {
+  /** Documents that state nothing for the reader. */
+  cases: number;
+  /** How many of them the reader offered something for. */
+  loud: number;
+  /** Everything it offered for them. */
+  offered: number;
+  /** The share of them that got an offer: each one is a question the owner should never see. */
+  rate: number;
+}
+
+/** What a reader offers for documents that state nothing: dates and amounts alike. */
+export async function scoreNoise(cases: readonly EvalCase[], read: (evalCase: EvalCase) => Promise<Fact[]>): Promise<NoiseScore> {
+  const empty = cases.filter((evalCase) => evalCase.expected.length === 0);
+  let loud = 0;
+  let offered = 0;
+  for (const evalCase of empty) {
+    const facts = (await read(evalCase)).filter((fact) => TASK_KINDS.dates.has(fact.kind) || TASK_KINDS.amounts.has(fact.kind));
+    offered += facts.length;
+    loud += facts.length > 0 ? 1 : 0;
+  }
+  return { cases: empty.length, loud, offered, rate: empty.length === 0 ? 0 : loud / empty.length };
+}
+
+export interface Measured {
+  precision: number;
+  recall: number;
+  /** The readings each figure rests on: a precision over a handful says nothing. */
+  offered: number;
+  expected: number;
+}
+
+export interface SetFigures {
+  dates: Measured;
+  amounts: Measured;
+  roles: Measured;
+  noise: NoiseScore;
+  /** Each case that missed or added something, dates and amounts together. */
+  wrong: CaseScore[];
+}
+
+/** One set's figures for a reader, over the cases the app asks it for dates and amounts. */
+export async function measure(cases: readonly EvalCase[], read: (evalCase: EvalCase) => Promise<Fact[]>): Promise<SetFigures> {
+  const asked = factCases(cases);
+  const figures = (score: ReaderScore): Measured => ({
+    precision: score.precision,
+    recall: score.recall,
+    offered: score.perCase.reduce((sum, c) => sum + c.found + c.extra, 0),
+    expected: score.perCase.reduce((sum, c) => sum + c.found + c.missed, 0),
+  });
+  const dates = await scoreReader(asked, read, "dates");
+  const amounts = await scoreReader(asked, read, "amounts");
+  const wrong = dates.perCase
+    .map((date, i) => {
+      const amount = amounts.perCase[i]!;
+      return { id: date.id, found: date.found + amount.found, missed: date.missed + amount.missed, extra: date.extra + amount.extra };
+    })
+    .filter((c) => c.missed > 0 || c.extra > 0);
+  return { dates: figures(dates), amounts: figures(amounts), roles: await scoreRoles(asked, read), noise: await scoreNoise(asked, read), wrong };
 }
 
 /** Cases the app asks a model for dates and amounts: all but mail that states them as data. */
