@@ -698,6 +698,35 @@ describe("a date line and the clock lines under it", () => {
   });
 });
 
+describe("a show's start and its doors", () => {
+  const moments = (text: string) =>
+    labelledFacts(text)
+      .filter((fact) => fact.kind === "event")
+      .map((fact) => [fact.value, fact.time]);
+
+  it("the start outranks the doors: one moment, at the start", () => {
+    expect(moments("Example Quartet\nSaturday 14 November 2026\nDoors: 7:00 PM\nShow starts: 8:00 PM")).toEqual([["2026-11-14", "20:00"]]);
+    expect(moments("Friday 20 November 2026, doors 7pm, show 8pm.")).toEqual([["2026-11-20", "20:00"]]);
+    expect(moments("Saturday 21 November 2026\nDoors open 18:45\nCurtain up 19:30")).toEqual([["2026-11-21", "19:30"]]);
+    expect(moments("Thursday 3 December 2026\nDoors: 6:30 PM\nShow: 8:30 PM")).toEqual([["2026-12-03", "20:30"]]);
+  });
+
+  it("a start said alone is the moment", () => {
+    expect(moments("Example United v Sample Town\nSunday 22 November 2026\nKick-off: 3pm")).toEqual([["2026-11-22", "15:00"]]);
+    expect(moments("Wednesday 25 November 2026\nTalk begins 18:00")).toEqual([["2026-11-25", "18:00"]]);
+  });
+
+  it("doors alone keep the doors time", () => {
+    expect(moments("Saturday 5 December 2026\nDoors: 7:30 PM")).toEqual([["2026-12-05", "19:30"]]);
+    expect(moments("Sat 14 Nov 2026, doors 7:00 PM")).toEqual([["2026-11-14", "19:00"]]);
+  });
+
+  it("a sale or a season that starts is no show", () => {
+    expect(moments("Sale starts Friday 20 November 2026 at 9am")).toEqual([]);
+    expect(moments("The season starts on 1 December 2026.")).toEqual([]);
+  });
+});
+
 describe("a form line read by what its label means", () => {
   // A small table, as the shipped one is shaped: normalized label to meaning.
   const table = lexiconFrom([

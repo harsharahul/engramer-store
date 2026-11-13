@@ -72,22 +72,10 @@ const NAMED_ONLY = new Set(["dated", "period"]);
 const labelReadings = async (evalCase: EvalCase) => (await labelFacts(evalCase)).filter((fact) => !NAMED_ONLY.has(fact.kind));
 
 describe("label rules on the eval set", () => {
-  it("the time-language cases hold at most the wrong readings counted when they joined, and fewer as the readers learn", async () => {
-    // Counted when the cases joined: a show read at its doors, a range read
-    // from the morning. Lowered by each change that fixes one; the cases
-    // join the test below once they clear it.
-    const WRONG_ON_TIME_CASES = 5;
-    const time = EVAL_CASES.filter((c) => c.id.startsWith("t-"));
-    const score = await scoreReader(time, labelReadings, "dates");
-    const wrong = score.perCase.reduce((sum, c) => sum + c.extra, 0);
-    expect(wrong).toBeLessThanOrEqual(WRONG_ON_TIME_CASES);
-  });
-
   it("are right at least nine times in ten, on dates and on amounts", async () => {
-    // Every case of the first set: running words, distractors and forms
-    // alike. The time-language cases are held by their own ceiling above
-    // until the readers clear them.
-    const written = EVAL_CASES.filter((c) => !c.id.startsWith("t-"));
+    // Every case of the first set: running words, distractors, forms and
+    // time language alike.
+    const written = EVAL_CASES;
     const plain = written.filter((c) => !c.exact);
     const lines: string[] = [];
     const precise: Record<string, boolean> = {};

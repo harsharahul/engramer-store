@@ -136,7 +136,10 @@ Saturday 12 December 2026
 Doors open 6pm
 Cloakroom closes at 2am
 Pass REF-77120, issued 1 December 2026`,
-    expected: [{ kind: "event", value: "2026-12-12", time: "18:00" }],
+    expected: [
+      { kind: "event", value: "2026-12-12", time: "18:00" },
+      { kind: "issued", value: "2026-12-01" },
+    ],
   },
   // t-09: the order day is not an event.
   {
