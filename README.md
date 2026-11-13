@@ -55,13 +55,9 @@ Files, names, folders, tags and search text are encrypted on your device before 
 
 ```mermaid
 flowchart LR
-  subgraph device["Your device"]
-    direction TB
-    files["Files, photos, mail"] --> read["Read here: text, OCR, dates, trips, search index"]
-    read --> seal["Encrypt content, names, tags and index"]
-  end
-  seal -- "ciphertext only" --> server[("Server")]
-  server --> store[("Disk, S3, or cloud storage you already pay for")]
+  device["<b>Your device</b><br/>reads: text, OCR, dates, trips, search index<br/>encrypts: content, names, tags, index"]
+  device -- "ciphertext only" --> server[("Server")]
+  server --> store[("Disk, S3, or cloud storage<br/>you already pay for")]
   server -- "ciphertext only" --> other["Your other devices"]
 ```
 
