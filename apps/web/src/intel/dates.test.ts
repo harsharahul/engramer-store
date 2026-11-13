@@ -311,6 +311,29 @@ describe("parseTime", () => {
     expect(not.map((text) => parseTime(text))).toEqual(not.map(() => null));
   });
 
+  it("reads a range of hours from its start, the start taking the end's half of the day", () => {
+    const range = (text: string) => findTimes(text).map(({ time, endTime }) => [time, endTime]);
+    expect(range("Class 7:00-9:00 PM")).toEqual([["19:00", "21:00"]]);
+    expect(range("Class 7-9pm")).toEqual([["19:00", "21:00"]]);
+    expect(range("Open 11-1pm")).toEqual([["11:00", "13:00"]]);
+    expect(range("Delivery between 10:00 and 14:00")).toEqual([["10:00", "14:00"]]);
+    expect(range("Workshop 14:00 to 17:30")).toEqual([["14:00", "17:30"]]);
+    expect(range("Session 9:30-11:00")).toEqual([["09:30", "11:00"]]);
+    expect(range("Lunch 11am to 1pm")).toEqual([["11:00", "13:00"]]);
+    expect(range("Class 7–9pm")).toEqual([["19:00", "21:00"]]);
+    expect(parseTime("Class 7-9pm")).toBe("19:00");
+  });
+
+  it("a range whose start is after its end, or numbers that are not clocks, give no range", () => {
+    expect(findTimes("Shift 9pm-7am").map(({ time, endTime }) => [time, endTime])).toEqual([
+      ["21:00", undefined],
+      ["07:00", undefined],
+    ]);
+    expect(findTimes("Pages 7-9")).toEqual([]);
+    expect(findTimes("Ages 7-9 years, class at 4pm").map(({ time }) => time)).toEqual(["16:00"]);
+    expect(findTimes("Score 2-1pm").map(({ time }) => time)).toEqual(["13:00"]);
+  });
+
   it("finds the new forms in running text, in order", () => {
     expect(findTimes("Lunch at noon, coffee 15h30, close at 6 o'clock in the evening").map((clock) => clock.time)).toEqual(["12:00", "15:30", "18:00"]);
   });

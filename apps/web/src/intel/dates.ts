@@ -432,6 +432,67 @@ const TIME_H_BARE = /\b(?:at|from|until|till|by|before|after|to|à|dès|vers)\s+
 /** Noon said in words. Midnight is not read: which day it closes is unclear. */
 const TIME_NOON = /\b(?:noon|midday)\b/i;
 
+/** One end of a range: an hour, its minutes, its half of the day. */
+const RANGE_END = String.raw`(\d{1,2})(?::([0-5]\d))?\s*(?:([ap])\.?m\.?(?![A-Za-z]))?`;
+/** "7-9pm", "7:00-9:00 PM", "11am to 1pm", "14:00 until 17:30". */
+const RANGE_TO = new RegExp(String.raw`(?<![\d.:,])\b${RANGE_END}\s*(?:-|\u2013|to|until|till)\s*${RANGE_END}(?![\dA-Za-z:])`, "i");
+/** "between 10:00 and 14:00": "and" joins a range only after "between". */
+const RANGE_BETWEEN = new RegExp(String.raw`\bbetween\s+${RANGE_END}\s*and\s*${RANGE_END}(?![\dA-Za-z:])`, "i");
+/** How long a range may run when its start leaves its half of the day unsaid ("11-1pm"). */
+const IMPLIED_SPAN_MINUTES = 6 * 60;
+
+const minutesOf = (hour: number, minute: number) => hour * 60 + minute;
+const clockOf = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+/** An hour in a half of the day, as minutes after midnight; null when the hour cannot be in that half. */
+function inHalf(hour: number, minute: number, half: string | undefined): number | null {
+  if (!half) {
+    return hour <= 23 ? minutesOf(hour, minute) : null;
+  }
+  if (hour < 1 || hour > 12) {
+    return null;
+  }
+  const pm = half.toLowerCase() === "p";
+  return minutesOf(hour === 12 ? (pm ? 12 : 0) : pm ? hour + 12 : hour, minute);
+}
+
+/**
+ * The start and end of a range of hours, or null when the match is not one.
+ * Two bare numbers ("7-9", pages, ages, a score) are not a range: the end
+ * says its half of the day, or both ends carry minutes. A start that leaves
+ * its half unsaid takes the end's ("7-9pm" is the evening), or the other
+ * half when that would put it after the end ("11-1pm"), and then only for a
+ * short span. A range that would end before it starts is none.
+ */
+function rangeIn(match: RegExpExecArray): { start: string; end: string } | null {
+  const [, h1, m1, half1, h2, m2, half2] = match;
+  if (!half2 && !(m1 && m2)) {
+    return null;
+  }
+  const end = inHalf(Number(h2), Number(m2 ?? 0), half2);
+  if (end === null) {
+    return null;
+  }
+  let start = inHalf(Number(h1), Number(m1 ?? 0), half1 ?? half2);
+  if (!half1 && half2 && start !== null && start >= end) {
+    const other = half2.toLowerCase() === "p" ? "a" : "p";
+    const earlier = inHalf(Number(h1), Number(m1 ?? 0), other);
+    start = earlier !== null && earlier < end && end - earlier <= IMPLIED_SPAN_MINUTES ? earlier : null;
+  }
+  return start !== null && start < end ? { start: clockOf(start), end: clockOf(end) } : null;
+}
+
+/** The first range of hours in a text, if any. */
+function firstRange(text: string): { start: string; end: string } | null {
+  for (const form of [RANGE_BETWEEN, RANGE_TO]) {
+    const match = form.exec(text);
+    const range = match ? rangeIn(match) : null;
+    if (range) {
+      return range;
+    }
+  }
+  return null;
+}
+
 /**
  * A local time of day as "HH:MM".
  *
@@ -443,6 +504,11 @@ const TIME_NOON = /\b(?:noon|midday)\b/i;
 export function parseTime(text: string): string | null {
   if (!text) {
     return null;
+  }
+  // A range is its start, whatever form its ends are written in.
+  const range = firstRange(text);
+  if (range) {
+    return range.start;
   }
   const meridiem = TIME.exec(text);
   if (meridiem) {
@@ -500,9 +566,23 @@ const CLOCK_FORMS = [TIME, TIME_24, TIME_HOUR, TIME_OCLOCK, TIME_H, TIME_H_BARE,
   (form) => new RegExp(form.source, `${form.flags}g`),
 );
 
-/** Every clock in a text, in the order they stand, each read as `parseTime` reads it alone. */
-export function findTimes(text: string): { at: number; end: number; time: string }[] {
-  const clocks: { at: number; end: number; time: string; rank: number }[] = [];
+const RANGE_FORMS = [RANGE_BETWEEN, RANGE_TO].map((form) => new RegExp(form.source, `${form.flags}g`));
+
+/**
+ * Every clock in a text, in the order they stand, each read as `parseTime`
+ * reads it alone. A range of hours is one clock, its start, with the end
+ * kept beside it.
+ */
+export function findTimes(text: string): { at: number; end: number; time: string; endTime?: string }[] {
+  const clocks: { at: number; end: number; time: string; endTime?: string; rank: number }[] = [];
+  for (const form of RANGE_FORMS) {
+    for (const match of text.matchAll(form)) {
+      const range = rangeIn(match);
+      if (range) {
+        clocks.push({ at: match.index, end: match.index + match[0].length, time: range.start, endTime: range.end, rank: -1 });
+      }
+    }
+  }
   CLOCK_FORMS.forEach((form, rank) => {
     for (const match of text.matchAll(form)) {
       const time = parseTime(match[0]);
@@ -511,7 +591,7 @@ export function findTimes(text: string): { at: number; end: number; time: string
       }
     }
   });
-  const placed: { at: number; end: number; time: string }[] = [];
+  const placed: { at: number; end: number; time: string; endTime?: string }[] = [];
   let end = -1;
   for (const { rank: _rank, ...clock } of clocks.sort((a, b) => a.at - b.at || a.rank - b.rank)) {
     if (clock.at >= end) {

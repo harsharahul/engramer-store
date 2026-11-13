@@ -76,7 +76,7 @@ describe("label rules on the eval set", () => {
     // Counted when the cases joined: a show read at its doors, a range read
     // from the morning. Lowered by each change that fixes one; the cases
     // join the test below once they clear it.
-    const WRONG_ON_TIME_CASES = 6;
+    const WRONG_ON_TIME_CASES = 5;
     const time = EVAL_CASES.filter((c) => c.id.startsWith("t-"));
     const score = await scoreReader(time, labelReadings, "dates");
     const wrong = score.perCase.reduce((sum, c) => sum + c.extra, 0);
