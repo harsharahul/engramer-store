@@ -67,6 +67,13 @@ All notable changes to Engram Store are documented here, following
   more by the new reader.
 
 ### Fixed
+- **Word and Excel editing on a server reached directly.** Since 0.57.0
+  the editor could stop at "Fonts are not loaded" when the server was
+  reached with no reverse proxy in front of it, or behind one that does not
+  merge slashes: the editor asks for its fonts at a path with a doubled
+  slash, and the server refused such a path. It now names the same file,
+  as it already did on the on-device backend. A path that climbs out of its
+  folder is still refused, and API routes keep their one spelling.
 - **A meeting's invite shows your time.** An invite written in UTC or in
   a named zone such as `America/New_York` showed that zone's clock, so a
   14:00 meeting in San Francisco read 22:00 and a late one landed on the
