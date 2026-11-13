@@ -19,6 +19,8 @@ export type LabelMeaning = (typeof LABEL_MEANINGS)[number];
 export interface Lexicon {
   /** Normalized label to meaning. */
   dates: ReadonlyMap<string, LabelMeaning>;
+  /** A short name for the shipped table's contents: it changes when any row does. */
+  edition?: string;
 }
 
 /**
@@ -109,8 +111,8 @@ let loading: Promise<Lexicon | undefined> | null = null;
 export function loadLexicon(): Promise<Lexicon | undefined> {
   loading ??= import("./tables/labels.json").then(
     (mod) => {
-      const table: { dates: readonly (readonly string[])[] } = mod.default ?? mod;
-      return lexiconFrom(table.dates);
+      const table: { edition?: string; dates: readonly (readonly string[])[] } = mod.default ?? mod;
+      return { ...lexiconFrom(table.dates), ...(table.edition ? { edition: table.edition } : {}) };
     },
     () => {
       loading = null;

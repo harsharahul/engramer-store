@@ -193,6 +193,50 @@ describe("the automatic backfill on a bad network", () => {
   });
 });
 
+/**
+ * The dates pass reads a file once per device. A label table that ships
+ * later must still reach the files that device already read, without
+ * reading the whole library again: only a file that still holds an
+ * unanswered line kept with its own words is owed one more look, once per
+ * table.
+ */
+describe("the dates pass and a label table that came later", () => {
+  const line = { id: "dated:2027-02-03", kind: "dated", document: "other", value: "2027-02-03", label: "Statement date", source: "label", confidence: 0.4 };
+
+  it("reads an already swept file once more only where a line is still open, then leaves it alone", async () => {
+    install();
+    resetBackfillSession();
+    const seen: string[][] = [];
+    useStore.setState({
+      files: new Map([
+        ["plain", { id: "plain", facts: [] }],
+        ["lined", { id: "lined", facts: [line] }],
+        ["answered", { id: "answered", facts: [{ ...line, dismissed: true }] }],
+      ]) as never,
+      scanLibraryForFacts: async (o?: SweepCall) => {
+        const round: string[] = [];
+        for (const id of ["plain", "lined", "answered"]) {
+          if (o?.skip?.has(id)) {
+            continue;
+          }
+          round.push(id);
+          o?.skip?.add(id);
+          o?.onOutcome?.(id, true);
+        }
+        seen.push(round);
+        return 0;
+      },
+    });
+    // As an earlier build left it: every file swept once on this device.
+    localStorage.setItem("engram-sweep-facts:t@example.com", JSON.stringify({ plain: 1, lined: 1, answered: 1 }));
+    await runBackfill();
+    // The next open, and a line an older build may have written back.
+    resetBackfillSession();
+    await runBackfill();
+    expect(seen).toEqual([["lined"], []]);
+  });
+});
+
 describe("the automatic backfill can be declined and stopped", () => {
   it("is on by default and obeys the preference", async () => {
     expect(autoBackfillEnabled()).toBe(true);

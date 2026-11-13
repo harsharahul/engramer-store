@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -65,7 +66,9 @@ describe("the shipped label table", () => {
   });
 
   it("is what its source says, and small enough to ship", () => {
-    expect(shipped).toEqual({ v: 1, dates: source.rows });
+    // The edition names the table's contents: any change to a row changes it.
+    const edition = createHash("sha256").update(JSON.stringify(source.rows)).digest("hex").slice(0, 8);
+    expect(shipped).toEqual({ v: 1, edition, dates: source.rows });
     expect(statSync(SHIPPED).size).toBeLessThan(120_000);
   });
 
@@ -157,5 +160,7 @@ describe("loadLexicon", () => {
     expect(loaded).toBe(await loadLexicon());
     expect(meaningOf(loaded, "Statement date")).toBe("none");
     expect(loaded.dates.size).toBe(source.rows.length);
+    expect(loaded.edition).toBe(shipped.edition);
+    expect(loaded.edition).toMatch(/^[0-9a-f]{8}$/);
   });
 });

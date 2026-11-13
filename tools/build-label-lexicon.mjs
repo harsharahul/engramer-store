@@ -9,8 +9,9 @@
  *
  * Usage: node tools/build-label-lexicon.mjs
  *
- * Writes apps/web/src/intel/tables/labels.json as { v, dates: [label,
- * meaning] pairs }, labels normalized and sorted. A label listed with two
+ * Writes apps/web/src/intel/tables/labels.json as { v, edition, dates:
+ * [label, meaning] pairs }, labels normalized and sorted; the edition is a
+ * short digest of the pairs. A label listed with two
  * meanings, a meaning that is not in the list, or a line that cannot be
  * read stops the build: a wrong meaning is worse than a missing label.
  *
@@ -18,6 +19,7 @@
  * test suite checks that the written table is what the app reads from the
  * same source.
  */
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,5 +83,8 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-writeFileSync(out, `${JSON.stringify({ v: 1, dates })}\n`);
+// The edition names the table's contents, so the app can tell a changed
+// table from the one a file was last read with.
+const edition = createHash("sha256").update(JSON.stringify(dates)).digest("hex").slice(0, 8);
+writeFileSync(out, `${JSON.stringify({ v: 1, edition, dates })}\n`);
 console.log(`${dates.length} labels written to ${out}`);
