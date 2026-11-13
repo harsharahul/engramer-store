@@ -53,12 +53,18 @@ Files, names, folders, tags and search text are encrypted on your device before 
 
 ## How it stays private
 
-```mermaid
-flowchart TB
-  device["<b>Your device</b><br/>reads: text, OCR, dates, trips, search index<br/>encrypts: content, names, tags, index"]
-  device -- "ciphertext only" --> server[("Server")]
-  server --> store[("Disk, S3, or cloud storage<br/>you already pay for")]
-  server -- "ciphertext only" --> other["Your other devices"]
+```
+         YOUR DEVICE                     SERVER                    STORAGE
++---------------------------+     +------------------+     +----------------------+
+| reads:    text, OCR,      |     | holds ciphertext |     | local disk, S3, or   |
+|           dates, trips,   | --> | it cannot read   | --> | cloud storage you    |
+|           search index    | <-- |                  |     | already pay for      |
+| encrypts: content, names, |     +------------------+     +----------------------+
+|           tags, index     |              |
++---------------------------+              |  ciphertext only
+                                           v
+                                  YOUR OTHER DEVICES
+                                  decrypt with your keys
 ```
 
 | The server stores | The server can never see |
