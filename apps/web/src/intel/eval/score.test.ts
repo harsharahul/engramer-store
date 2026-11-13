@@ -241,9 +241,15 @@ describe("scoreAsked: the questions a person would be shown", () => {
   });
 
   it("a named-only line on the document's own issue day is not a day the reader is asked about", async () => {
-    const cases = [evalCase("policy", [{ kind: "issued", value: "2027-03-20" }, { kind: "expiry", value: "2028-03-19" }])];
-    const lines: Fact[] = [{ ...fact("dated", "2027-03-20"), label: "Date of letter", source: "label", confidence: 0.4 }];
+    const cases = [evalCase("policy", [{ kind: "issued", value: "2027-04-20" }, { kind: "expiry", value: "2028-03-19" }])];
+    const lines: Fact[] = [{ ...fact("dated", "2027-04-20"), label: "Date of letter", source: "label", confidence: 0.4 }];
     expect(await scoreAsked(cases, async () => lines, onApril1)).toMatchObject({ asked: 1, wrong: 1, untyped: 0 });
+  });
+
+  it("a named-only line on a day already behind is not asked about at all", async () => {
+    const cases = [evalCase("invoice", [{ kind: "due", value: "2027-04-20" }])];
+    const lines: Fact[] = [{ ...fact("dated", "2027-03-20"), label: "Job completed", source: "label", confidence: 0.4 }];
+    expect(await scoreAsked(cases, async () => lines, onApril1)).toMatchObject({ asked: 0, wrong: 0 });
   });
 
   it("a named-only line on an expected day is untyped; on another day it is wrong", async () => {

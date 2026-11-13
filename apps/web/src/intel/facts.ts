@@ -255,6 +255,12 @@ export function offeredFacts(
       if (DATED_KINDS.has(fact.kind) && daysUntil(fact.value, now) < -RECENT_PAST_OFFER_DAYS) {
         continue;
       }
+      // A line that only names its date says nothing of a deadline. Once
+      // its day is behind there is nothing left to be reminded of, so it is
+      // not asked about; the line stays on the file, quietly.
+      if (fact.kind === "dated" && daysUntil(fact.value, now) < 0) {
+        continue;
+      }
       if (partner) {
         // One question per disagreement, asked through the stronger reading.
         if (partner.confidence > fact.confidence || (partner.confidence === fact.confidence && partner.id < fact.id)) {

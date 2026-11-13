@@ -388,6 +388,12 @@ rather than picking one. A wrong expiry date is worse than no expiry date,
 because it gets relied on. Each fact in a file's details says why it counts:
 "confirmed by you", "read from the booking data", "two readers agree".
 
+A suggestion is made only while it can still matter. A date more than sixty
+days behind is not asked about; a deadline missed lately still is, because
+it can be acted on. A form line that only names its date ("Job completed:
+28 October") says nothing of a deadline, so it is not asked about once its
+day is behind. Such facts stay in the file's details, quietly.
+
 **Reference numbers are kept short.** Metadata carries the last four
 characters; the whole value lives in the file's index blob and is fetched only
 when you ask to see it. Metadata is decrypted on every device on every sync,

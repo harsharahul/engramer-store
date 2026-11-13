@@ -155,6 +155,14 @@ describe("offeredFacts", () => {
     expect(offeredFacts(shelf([generic]), NOW)).toHaveLength(1);
   });
 
+  it("does not ask about a line that only names a date once its day is behind", () => {
+    const named = (value: string) => fact({ kind: "dated", value, label: "Job completed" });
+    expect(offeredFacts(shelf([named("2026-08-01")]), NOW)).toHaveLength(0);
+    expect(offeredFacts(shelf([named("2026-08-09")]), NOW)).toHaveLength(1);
+    // A deadline missed lately still asks: it can be acted on.
+    expect(offeredFacts(shelf([fact({ kind: "due", value: "2026-08-01" })]), NOW)).toHaveLength(1);
+  });
+
   it("never re-offers what is answered, and never reads trash", () => {
     expect(offeredFacts(shelf([fact({ value: "2027-10-19", confirmed: true })]), NOW)).toHaveLength(0);
     expect(offeredFacts(shelf([fact({ value: "2027-10-19", dismissed: true })]), NOW)).toHaveLength(0);

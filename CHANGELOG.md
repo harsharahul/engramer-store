@@ -39,7 +39,9 @@ All notable changes to Engram Store are documented here, following
   statement was made, an order placed, a booking made or a document
   printed is no longer kept or asked about, and the on-device model is not
   asked about it either. Files already stored lose those lines on the next
-  date sweep; a line you already answered stays as you answered it.
+  date sweep; a line you already answered stays as you answered it. A line
+  that only names its date ("Job completed: 28 October") is not asked
+  about once its day is behind; a deadline missed lately still is.
 - **Amounts written with a decimal comma are found** ("€213,40",
   "EUR 1.250,00").
 - **Dates with no year, in mail.** "Arriving Thursday, November 12" in a
