@@ -656,6 +656,24 @@ function slotOf(fact: Fact): string | undefined {
   return fact.kind;
 }
 
+/** Kinds that say what a date is; a form line that only names a date does not. */
+const MEANT_KINDS: ReadonlySet<FactKind> = new Set(["event", "due", "expiry", "issued"]);
+
+/**
+ * What a file's readers already gave a meaning, so the model is not asked
+ * about it again: each date a rule, booking data or the owner settled (with
+ * its clock when it has one), and whether a reader named the total. The
+ * model's own earlier reading does not count: a new reading judges it afresh,
+ * unless the owner answered it.
+ */
+export function alreadyRead(facts: readonly Fact[]): { read: { value: string; time?: string }[]; total: boolean } {
+  const settled = facts.filter((fact) => fact.source !== "model" || ownerDecided(fact));
+  return {
+    read: settled.filter((fact) => MEANT_KINDS.has(fact.kind)).map((fact) => ({ value: fact.value, ...(fact.time ? { time: fact.time } : {}) })),
+    total: settled.some((fact) => slotOf(fact) === "amount"),
+  };
+}
+
 /** Whether two readings of a slot could be the same thing said two ways: an
  * amount with no currency matches any; two named currencies must agree. */
 function comparable(a: Fact, b: Fact): boolean {
@@ -757,8 +775,26 @@ function resolveSlots(facts: Fact[]): Fact[] {
   // the record of that day's booking in this file; the model's own reading
   // of an event that day (its own label, often its own clock) is an echo.
   const exactDays = new Set(out.filter((fact) => fact.kind === "event" && !fact.dismissed && isExact(fact)).map((fact) => fact.value));
+  // A moment a label rule read is that moment in this file, asked about (or
+  // already answered) under the rule's own words. The model is asked about
+  // every date in the text, so its reading of the same day and clock is the
+  // same moment again, not a second witness and not a second question.
+  const ruled = out.filter((fact) => fact.kind === "event" && fact.source === "label");
+  const echoes = (fact: Fact) =>
+    exactDays.has(fact.value) || ruled.some((rule) => rule.value === fact.value && (!rule.time || !fact.time || rule.time === fact.time));
   for (const fact of out) {
-    if (fact.kind === "event" && fact.source === "model" && !ownerDecided(fact) && exactDays.has(fact.value)) {
+    if (fact.kind === "event" && fact.source === "model" && !ownerDecided(fact) && echoes(fact)) {
+      drop.add(fact.id);
+    }
+  }
+  // A form line that only names a date ("Date: 15 May 2027") says nothing of
+  // what the date is. Where the model says what it is, that is the reading
+  // of that day, answered or not: one date, one question.
+  const meant = new Set(
+    out.filter((fact) => fact.source === "model" && !drop.has(fact.id) && (fact.kind === "event" || fact.kind === "due" || fact.kind === "expiry")).map((fact) => fact.value),
+  );
+  for (const fact of out) {
+    if (fact.kind === "dated" && fact.source === "label" && !ownerDecided(fact) && meant.has(fact.value)) {
       drop.add(fact.id);
     }
   }

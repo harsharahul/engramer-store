@@ -64,10 +64,102 @@ describe("the dates a document holds, each with the clock beside it", () => {
   });
 });
 
+describe("a date that was over before a message was sent", () => {
+  const text = "You ordered on 8 March 2027. Your sofa will arrive on 6 April 2027. Our records were updated on 21 March 2027 and again on 22 March 2027.";
+
+  it("is not a candidate: nothing can still happen then; the sending day and the day before it are", () => {
+    // Sent early on 22 March in UTC: still 21 March further west.
+    const found = spotCandidates(text, { writtenAt: Date.UTC(2027, 2, 22, 2) });
+    expect(found.map((c) => [c.key, c.value])).toEqual([
+      ["d1", "2027-04-06"],
+      ["d2", "2027-03-21"],
+      ["d3", "2027-03-22"],
+    ]);
+  });
+
+  it("a stored file is read the same way from the day it was kept", () => {
+    expect(spotCandidates(text, undefined, { keptAt: Date.UTC(2027, 2, 22, 2) }).map((c) => c.value)).toEqual(["2027-04-06", "2027-03-21", "2027-03-22"]);
+  });
+
+  it("a text with no known day keeps every date", () => {
+    expect(spotCandidates(text).map((c) => c.value)).toEqual(["2027-03-08", "2027-04-06", "2027-03-21", "2027-03-22"]);
+  });
+
+  it("days that are over do not use up the ten", () => {
+    const statement = `${Array.from({ length: 14 }, (_, i) => `Payment received on ${i + 1} January 2027.`).join("\n")}\nYour next payment is due on 28 April 2027.`;
+    expect(spotCandidates(statement, { writtenAt: Date.UTC(2027, 2, 22, 12) }).map((c) => c.value)).toEqual(["2027-04-28"]);
+  });
+});
+
+describe("what a reader already settled is not a candidate", () => {
+  const text =
+    "Flight UA 123 departs SFO 10:15 AM on March 4, 2027, arrives JFK 6:45 PM. Your dental check-up is on 22 July 2027 at 09:30. Amount due: $84.20. Pay by 30 June 2027.";
+
+  it("a day and clock a reader gave a meaning is left out; another clock that day, and every other date, stays", () => {
+    const found = spotCandidates(text, undefined, { read: [{ value: "2027-03-04", time: "10:15" }, { value: "2027-06-30" }] });
+    expect(found.filter((c) => c.what === "date").map((c) => [c.key, c.value, c.time])).toEqual([
+      ["d1", "2027-03-04", "18:45"],
+      ["d2", "2027-07-22", "09:30"],
+    ]);
+    expect(found.filter((c) => c.what === "amount").map((c) => c.value)).toEqual(["84.20"]);
+  });
+
+  it("a day read with no clock covers that day whatever clock stands beside it", () => {
+    const found = spotCandidates(text, undefined, { read: [{ value: "2027-07-22" }] });
+    expect(found.filter((c) => c.what === "date").map((c) => c.value)).toEqual(["2027-03-04", "2027-03-04", "2027-06-30"]);
+  });
+
+  it("a total a reader already named leaves no amount to ask about", () => {
+    const found = spotCandidates(text, undefined, { total: true });
+    expect(found.some((c) => c.what === "amount")).toBe(false);
+    expect(found.filter((c) => c.what === "date")).toHaveLength(4);
+  });
+
+  it("what is left out does not use up the ten", () => {
+    const lines = Array.from({ length: 12 }, (_, i) => `Payment due: ${i + 1} May 2027.`);
+    const statement = `${lines.join("\n")}\nYour dental check-up is on 22 July 2027 at 09:30.`;
+    const read = Array.from({ length: 12 }, (_, i) => ({ value: `2027-05-${String(i + 1).padStart(2, "0")}` }));
+    expect(spotCandidates(statement, undefined, { read }).map((c) => c.value)).toEqual(["2027-07-22"]);
+  });
+});
+
 describe("the amounts a document holds", () => {
   it("each amount with its currency is a candidate", () => {
     expect(amounts(spotCandidates("Your water bill for the quarter is USD 64.10. Please pay by 15 May 2027."))).toEqual([["a1", "64.10", "USD"]]);
     expect(amounts(spotCandidates("Trattoria Sole\n2 x Pasta 32.00\n1 x Wine 18.00\nTotal EUR 50.00\nThank you"))).toEqual([["a1", "50.00", "EUR"]]);
+  });
+
+  it("an amount written with a decimal comma is a candidate, read as written", () => {
+    const text = "Total fare: €213,40\nOptional seat selection: €12,00\nBalance: EUR 1.250,00\nA rug costs $2,480.00.";
+    // The lines that say total or balance come first, then the rest as they stand.
+    expect(spotCandidates(text).map((c) => [c.value, c.unit])).toEqual([
+      ["213.40", "EUR"],
+      ["1250.00", "EUR"],
+      ["12.00", "EUR"],
+      ["2480.00", "USD"],
+    ]);
+    // Full stops between the thousands are not a decimal point.
+    expect(spotCandidates("Balance: €1.250,00").map((c) => c.value)).toEqual(["1250.00"]);
+    // Thousands with no decimals could be read two ways, and are not read.
+    expect(spotCandidates("The car costs €1,250 or so.")).toEqual([]);
+  });
+
+  it("a rate and a deposit are never a document's total, so they are not candidates", () => {
+    const text = [
+      "Room: lakeside double, 3 nights at $140.00 per night",
+      "Total for your stay: $453.60",
+      "A deposit of $100.00 was taken when you booked.",
+      "Rent: $1,650.00 per month",
+      "Security deposit: $1,700.00, paid on 25 June 2026",
+      "Your plan covers six sessions at $60.00 per session.",
+      "Seat selection: $12.00 a seat. Overdue items cost $0.25 per day.",
+    ].join("\n");
+    expect(spotCandidates(text).filter((c) => c.what === "amount").map((c) => c.value)).toEqual(["453.60"]);
+    // A total that only mentions a deposit is still the total.
+    expect(spotCandidates("Total due after your deposit: $353.60").map((c) => c.value)).toEqual(["353.60"]);
+    // A year's price is the whole price of the year.
+    expect(spotCandidates("Your new premium is USD 412.00 a year.").map((c) => c.value)).toEqual(["412.00"]);
+    expect(spotCandidates("The plan renews for USD 99.00 per year.").map((c) => c.value)).toEqual(["99.00"]);
   });
 
   it("an amount stands in its own sentence", () => {

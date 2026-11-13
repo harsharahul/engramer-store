@@ -3330,6 +3330,12 @@ export const useStore = create<StoreState>((set, get) => {
             withFacts: askFacts,
             mail,
             ...(message ? { message } : {}),
+            // A stored file is read from the day it was kept, as a message
+            // is from the day it was sent: what was over by then is not asked about.
+            ...(!mail && current.createdAt > 0 ? { keptAt: current.createdAt } : {}),
+            // What the rules and the file's own data already read is not
+            // asked of the model again: one moment is read once.
+            known: current.facts,
             signal,
           });
           if (readElsewhere()) {

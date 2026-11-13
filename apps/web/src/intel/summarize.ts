@@ -16,7 +16,7 @@ import { isReservedTag } from "../albums";
 import { AssistantError, generate, type GenerateRequest, type JsonSchema } from "./assistant";
 import { CATEGORIES } from "./categorize";
 import { spotCandidates } from "./candidates";
-import type { DocumentKind, Fact } from "./facts";
+import { alreadyRead, type DocumentKind, type Fact } from "./facts";
 import { judgeFingerprint, judgeRequest, judgedFacts } from "./judge";
 import { DOCUMENT_KINDS, documentKindProperty } from "./modelfacts";
 import { headChunk } from "./window";
@@ -187,6 +187,10 @@ export interface SummaryInput {
   /** For an email: what it is about, who sent it and when it was written.
    * A date in it with no year is read against that day. */
   message?: { subject: string; from: string; writtenAt: number };
+  /** For a stored file: the day it was kept. A date that was over by then is not asked about. */
+  keptAt?: number;
+  /** What the file's other readers already found: the model is asked only about the rest. */
+  known?: readonly Fact[];
   signal?: AbortSignal;
 }
 
@@ -250,7 +254,10 @@ async function summaryOf(input: SummaryInput, run: Runner): Promise<Summary | nu
  * is counted.
  */
 async function judged(input: SummaryInput, document: DocumentKind, run: Runner): Promise<Fact[]> {
-  const candidates = spotCandidates(input.text, input.message ? { writtenAt: input.message.writtenAt } : undefined);
+  const candidates = spotCandidates(input.text, input.message ? { writtenAt: input.message.writtenAt } : undefined, {
+    ...(input.keptAt !== undefined ? { keptAt: input.keptAt } : {}),
+    ...alreadyRead(input.known ?? []),
+  });
   if (candidates.length === 0) {
     return [];
   }

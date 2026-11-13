@@ -439,21 +439,41 @@ const CURRENCY_CODES = new Set([
   "CNY", "SEK", "NZD", "SGD", "AED", "ZAR", "NOK", "DKK",
 ]);
 
-const SYMBOL_AMOUNT = /([$£€₹¥])\s?([\d,]+\.\d{2})/g;
+// Two decimals and no digit after them: the "1.25" inside "€1.250,00" is not an amount.
+const SYMBOL_AMOUNT = /([$£€₹¥])\s?([\d,]+\.\d{2})(?!\d)/g;
 const CODE_AMOUNT = /\b([A-Z]{3})\s?([\d,]+\.\d{2})\b/g;
+
+// The same amounts as much of Europe writes them: a decimal comma, and full
+// stops between the thousands ("€213,40", "EUR 1.250,00"). Two decimals are
+// required, so "€1,250" (thousands, or a decimal comma cut short) is not read.
+const SYMBOL_AMOUNT_COMMA = /([$£€₹¥])\s?(\d{1,3}(?:\.\d{3})*,\d{2})(?![\d,.]*\d)/g;
+const CODE_AMOUNT_COMMA = /\b([A-Z]{3})\s?(\d{1,3}(?:\.\d{3})*,\d{2})(?![\d,.]*\d)/g;
+const plain = (written: string) => written.replace(/,/g, "");
+const fromComma = (written: string) => written.replace(/\./g, "").replace(",", ".");
 
 /** Every amount above zero a piece of text states with its currency, once per value, and where it stands. */
 export function moneyIn(text: string): { value: string; unit: string; at: number }[] {
   const found = new Map<string, { unit: string; at: number }>();
-  for (const match of text.matchAll(SYMBOL_AMOUNT)) {
-    found.set(match[2]!.replace(/,/g, ""), { unit: SYMBOL_CURRENCY[match[1]!] ?? match[1]!, at: match.index });
-  }
-  for (const match of text.matchAll(CODE_AMOUNT)) {
-    if (CURRENCY_CODES.has(match[1]!)) {
-      found.set(match[2]!.replace(/,/g, ""), { unit: match[1]!, at: match.index });
+  const forms: [RegExp, (written: string) => string, boolean][] = [
+    [SYMBOL_AMOUNT, plain, false],
+    [SYMBOL_AMOUNT_COMMA, fromComma, false],
+    [CODE_AMOUNT, plain, true],
+    [CODE_AMOUNT_COMMA, fromComma, true],
+  ];
+  for (const [form, read, coded] of forms) {
+    for (const match of text.matchAll(form)) {
+      if (!coded) {
+        found.set(read(match[2]!), { unit: SYMBOL_CURRENCY[match[1]!] ?? match[1]!, at: match.index });
+      } else if (CURRENCY_CODES.has(match[1]!)) {
+        found.set(read(match[2]!), { unit: match[1]!, at: match.index });
+      }
     }
   }
-  return [...found].filter(([value]) => Number(value) > 0).map(([value, { unit, at }]) => ({ value, unit, at }));
+  // In the order they stand in the text, whichever form found them.
+  return [...found]
+    .filter(([value]) => Number(value) > 0)
+    .map(([value, { unit, at }]) => ({ value, unit, at }))
+    .sort((a, b) => a.at - b.at);
 }
 
 const AMOUNT_DUE_LINE = /\b(?:(?:amount|total|balance)\s+due|amount\s+payable|(?:is|are)\s+due)\b/i;

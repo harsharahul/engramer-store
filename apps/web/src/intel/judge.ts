@@ -12,31 +12,40 @@
  */
 import type { GenerateRequest, JsonSchema, JsonSchemaProperty } from "./assistant";
 import type { Candidate } from "./candidates";
-import { documentLabel } from "./describe";
-import { factId, isStated, type DocumentKind, type Fact, type FactKind } from "./facts";
+import { findDates, findTimes } from "./dates";
+import { factId, isStated, type DocumentKind, type Fact } from "./facts";
 import { MODEL_CONFIDENCE } from "./modelfacts";
-import { cleanSubject, type Role } from "./subject";
+import { cleanSubject, placeNamed, type Role } from "./subject";
 import { CHARS_PER_TOKEN, headChunk } from "./window";
 
-export const DATE_ANSWERS = ["event", "check-in", "check-out", "depart", "arrive", "due", "expiry", "issued", "other"] as const;
-export const AMOUNT_ANSWERS = ["total", "other"] as const;
+/** What a date can be. An issue day is not among them: the label rules read
+ * the ones a document names, and in running words it is one more way to be
+ * wrong about a date that is nobody's business. */
+export const DATE_ANSWERS = ["event", "check-in", "check-out", "depart", "arrive", "due", "expiry", "other"] as const;
+/** The answer when no amount found is the document's total. */
+export const NO_TOTAL = "none";
 type DateAnswer = (typeof DATE_ANSWERS)[number];
 
 const WORDS_MAX = 6;
 const WORDS_CHARS = 60;
 
 const INSTRUCTIONS = [
-  "You label dates and amounts that were already found in a document. You never write or change a date or an amount.",
-  "For each date, answer with one of:",
-  "event: something happens then that the reader takes part in (an appointment, a meeting, a show, a class, a delivery arriving).",
-  "check-in: a stay begins then. check-out: a stay ends then.",
-  "depart: a journey leaves then. arrive: a journey arrives then.",
-  "due: the reader must pay or act by then, or money is taken then (a bill, a fine, a deadline, a renewal that charges, a book to return).",
-  "expiry: something of the reader's stops being valid then (a passport, a licence, a warranty, a policy, a membership, a lease).",
-  "issued: when the document itself was written, printed, sent or paid (a receipt's own date, the day a fine was issued, a letter's date).",
-  "other: none of these, or not about the reader (a shop's sale or opening hours, an offer, someone else's date, an example).",
-  "For an event, a check-in, a check-out, a departure or an arrival, also give the words: at most six words copied from the text that say what happens or where. Otherwise leave the words empty.",
-  "For each amount, answer total (the whole amount paid, refunded or owed) or other (one item, a subtotal, a fee inside a total, a price in an offer).",
+  "You are given a document and a list of dates and amounts found in it. You say what each one is. You never write or change a date or an amount.",
+  "Most dates in a document are not the reader's business. Answer other unless the text clearly gives the date one of these meanings:",
+  "event: the reader takes part in something or receives something that day (an appointment, a meeting, a class, a show, a parcel arriving).",
+  "check-in: the reader's stay begins. check-out: the reader's stay ends.",
+  "depart: the reader's journey leaves. arrive: the reader's journey arrives.",
+  "due: the reader must pay or act by that day, or money is taken that day (a bill, a fine, a deadline, a form to return, a renewal that charges).",
+  "expiry: something of the reader's stops being valid that day (a passport, a licence, a warranty, a policy, a membership, a lease).",
+  "other: everything else. The day the message or document was written, printed, sent or issued. The day something was ordered, booked, bought, paid, received or last visited. A statement date or a billing period. Opening hours and closures. A sale, an offer or a new price. A date for the public or for someone else.",
+  "Words: for an event, at most six words copied from the text that say what happens (dental check-up). For a check-in, a check-out, a departure or an arrival, the name of the place only (Casa Azulejo, SFO). Never a date or a time. Otherwise empty.",
+  "Pays: yes when the document states one whole amount the reader paid or has to pay (a bill, a receipt, the total of a booking, the price of a renewal, a refund). No for everything else: a price in an offer, a fee that may apply, an estimate, an account balance, points, a salary, or only the parts of a total.",
+  "The total: when pays is yes, which one of the amounts is that whole amount.",
+  "Examples.",
+  "Your statement dated 5 April is ready. Pay the balance by 28 April. 5 April is other. 28 April is due.",
+  "You ordered on 8 March. Your sofa will arrive on 6 April. 8 March is other. 6 April is event.",
+  "Subtotal 21.50, tax 1.72, total paid 23.22. The total is 23.22.",
+  "The sale runs until 31 March. 31 March is other.",
 ].join("\n");
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -62,36 +71,40 @@ export function judgeRequest(input: JudgeInput): GenerateRequest {
   const listed = input.candidates.map((candidate) => `${candidate.key}: ${candidate.printed} in: ${candidate.sentence}`).join("\n");
   const properties: Record<string, JsonSchemaProperty> = {};
   const order: string[] = [];
-  for (const candidate of input.candidates) {
-    const date = candidate.what === "date";
-    properties[candidate.key] = {
-      type: "string",
-      enum: date ? [...DATE_ANSWERS] : [...AMOUNT_ANSWERS],
-      description: `What ${candidate.printed} is`,
-    };
-    order.push(candidate.key);
-    if (date) {
-      properties[`${candidate.key}w`] = { type: "string", description: "At most six words from the text saying what happens or where, or empty" };
-      order.push(`${candidate.key}w`);
-    }
+  const dated = input.candidates.filter((candidate) => candidate.what === "date");
+  const amounts = input.candidates.filter((candidate) => candidate.what === "amount");
+  for (const candidate of dated) {
+    properties[candidate.key] = { type: "string", enum: [...DATE_ANSWERS], description: `What ${candidate.printed} is` };
+    properties[`${candidate.key}w`] = { type: "string", description: "What happens, or the place, in at most six words from the text; or empty" };
+    order.push(candidate.key, `${candidate.key}w`);
   }
-  const schema: JsonSchema = { type: "object", title: "Labels", properties, required: input.candidates.map((candidate) => candidate.key), order };
+  // First a plain yes or no: does the document state a whole amount at all.
+  // Asked to choose, the model always chooses; asked yes or no first, it can
+  // say no. Then one question for all the amounts: a document is about one
+  // total, so the model compares them and two can never both be it.
+  if (amounts.length > 0) {
+    properties["pays"] = { type: "string", enum: ["yes", "no"], description: "Does the document state one whole amount the reader paid or has to pay" };
+    properties["total"] = { type: "string", enum: [...amounts.map((candidate) => candidate.key), NO_TOTAL], description: "Which amount is the total, or none" };
+    order.push("pays", "total");
+  }
+  const required = [...dated.map((candidate) => candidate.key), ...(amounts.length > 0 ? ["pays", "total"] : [])];
+  const schema: JsonSchema = { type: "object", title: "Labels", properties, required, order };
   const head = [
     `Document: ${input.name}`,
     ...(input.mail ? [`Subject: ${input.mail.subject}`, `From: ${input.mail.from}`, `Written: ${written(input.mail.writtenAt)}`] : []),
   ].join("\n");
   // The opening gives the candidates their setting; each candidate's own
-  // sentence is listed whole, so the room they take comes off the opening.
-  const taken = Math.ceil((listed.length + head.length) / CHARS_PER_TOKEN);
+  // sentence is listed whole, so the room they and the instructions take
+  // comes off the opening.
+  const taken = Math.ceil((listed.length + head.length + INSTRUCTIONS.length) / CHARS_PER_TOKEN);
   const opening = headChunk(input.text, Math.max(1_024, input.contextSize - taken));
-  const dates = input.candidates.filter((candidate) => candidate.what === "date").length;
   return {
     instructions: INSTRUCTIONS,
     prompt: `${head}\nOpening text:\n${opening}\n\nFound in the document:\n${listed}`,
     priority: "background",
     schema,
     temperature: 0,
-    maxTokens: Math.min(400, 60 + 24 * dates + 8 * (input.candidates.length - dates)),
+    maxTokens: Math.min(400, 60 + 24 * dated.length + (amounts.length > 0 ? 16 : 0)),
   };
 }
 
@@ -103,7 +116,7 @@ export function judgeRequest(input: JudgeInput): GenerateRequest {
 export function judgeFingerprint(): string {
   const sample = judgeRequest({ name: "", text: "", contextSize: 4096, candidates: [] });
   let hash = 0x811c9dc5;
-  for (const char of JSON.stringify([sample.instructions, sample.prompt, DATE_ANSWERS, AMOUNT_ANSWERS, WORDS_MAX, WORDS_CHARS])) {
+  for (const char of JSON.stringify([sample.instructions, sample.prompt, DATE_ANSWERS, NO_TOTAL, WORDS_MAX, WORDS_CHARS])) {
     hash ^= char.charCodeAt(0);
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
@@ -112,16 +125,29 @@ export function judgeFingerprint(): string {
 
 const capitalised = (words: string) => words.charAt(0).toUpperCase() + words.slice(1);
 
-/** The model's words for a candidate, kept only when the text holds them. */
-function wordsFor(raw: unknown, text: string): string | undefined {
+/** Any day will do: only whether the words hold a date matters, a year or none. */
+const ANY_DAY = { writtenAt: Date.UTC(2000, 0, 1) };
+
+/**
+ * The model's words for a candidate, kept only when the text holds them and
+ * they name something. A date or a clock is the candidate's own and never
+ * part of its name; for a stay or a journey the words are the place, so a
+ * phrase that still holds the answer's own word ("Flight UA 123 departs
+ * SFO") is not one.
+ */
+function wordsFor(raw: unknown, text: string, place: boolean): string | undefined {
   if (typeof raw !== "string") {
     return undefined;
   }
-  const words = raw
+  const said = raw
     .replace(/\s+/g, " ")
     .replace(/^["'“”\s]+|["'“”\s.,;:!?]+$/g, "")
     .trim();
+  const words = place ? placeNamed(said) : said;
   if (!words || words.length > WORDS_CHARS || words.split(" ").length > WORDS_MAX || !isStated(words, text)) {
+    return undefined;
+  }
+  if (findDates(words, ANY_DAY).length > 0 || findTimes(words).length > 0) {
     return undefined;
   }
   return words;
@@ -151,44 +177,46 @@ export function judgedFacts(answer: unknown, candidates: readonly Candidate[], t
       });
     }
   };
-  for (const candidate of candidates) {
-    // The model's answer for this candidate: a word from the list, not a fact's label.
+  for (const candidate of candidates.filter((found) => found.what === "date")) {
+    // The model's answer for this candidate: a word from its own list, not a fact's label.
     const verdict = said[candidate.key];
-    if (candidate.what === "amount") {
-      if (verdict === "total" && candidate.unit) {
-        keep({ id: factId("amount", candidate.value), kind: "amount", value: candidate.value, unit: candidate.unit, label: "Total" }, candidate);
-      }
-      continue;
-    }
     if (typeof verdict !== "string" || !(DATE_ANSWERS as readonly string[]).includes(verdict) || verdict === "other") {
       continue;
     }
     const kind = verdict as Exclude<DateAnswer, "other">;
-    const words = wordsFor(said[`${candidate.key}w`], text);
-    if (kind === "due" || kind === "expiry" || kind === "issued") {
-      keep({ id: factId(kind as FactKind, candidate.value), kind: kind as FactKind, value: candidate.value, ...(words ? { label: capitalised(words) } : {}) }, candidate);
+    if (kind === "due" || kind === "expiry") {
+      keep({ id: factId(kind, candidate.value), kind, value: candidate.value }, candidate);
       continue;
     }
     // A moment: named by what it is, with the place or the happening the
-    // text states. The label joins the identity, as for every event.
+    // text states. The label joins the identity, as for every event. A
+    // moment the model found no words for carries none: the screen names it
+    // by its document, and nothing is made up here.
+    const words = wordsFor(said[`${candidate.key}w`], text, kind !== "event");
     const name =
       kind === "event"
-        ? capitalised(words ?? documentLabel(document))
+        ? words && capitalised(words)
         : kind === "check-in" || kind === "check-out"
           ? `${capitalised(kind)}${words ? `: ${words}` : ""}`
           : `${kind === "depart" ? "Departs" : "Arrives"}${words ? ` ${words}` : ""}`;
     const subject = kind === "event" ? undefined : cleanSubject({ role: kind as Role, ...(words ? { place: words } : {}) });
     keep(
       {
-        id: factId("event", `${candidate.value} ${name.toLowerCase()}${candidate.time ? ` ${candidate.time}` : ""}`),
+        id: factId("event", [candidate.value, name?.toLowerCase(), candidate.time].filter(Boolean).join(" ")),
         kind: "event",
         value: candidate.value,
-        label: name,
+        ...(name ? { label: name } : {}),
         ...(candidate.time ? { time: candidate.time } : {}),
         ...(subject ? { subject } : {}),
       },
       candidate,
     );
+  }
+  // The total is one of the amounts, named by its key, and only when the
+  // model first said the document states one.
+  const total = said["pays"] === "yes" ? candidates.find((found) => found.what === "amount" && found.key === said["total"]) : undefined;
+  if (total?.unit) {
+    keep({ id: factId("amount", total.value), kind: "amount", value: total.value, unit: total.unit, label: "Total" }, total);
   }
   return [...byId.values()];
 }

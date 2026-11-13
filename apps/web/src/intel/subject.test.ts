@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Fact } from "./facts";
-import { cleanSubject, designatorOf, subjectOf } from "./subject";
+import { cleanSubject, designatorOf, placeNamed, subjectOf } from "./subject";
 
 function event(label: string, overrides: Partial<Fact> = {}): Fact {
   return {
@@ -135,6 +135,21 @@ describe("ends", () => {
   it("an end that names a check-in is an end", () => {
     expect(subjectOf(event("Check-in: Casa do Rio ends", { source: "ics" }))).toEqual({ role: "end" });
     expect(subjectOf(event("Table at Taberna da Rua ends", { source: "ics" }))).toEqual({ role: "end" });
+  });
+});
+
+describe("placeNamed", () => {
+  it("the role's own word before a place is not part of its name", () => {
+    expect(placeNamed("Check-in: Harbor House")).toBe("Harbor House");
+    expect(placeNamed("Departs from Porto Campanha")).toBe("Porto Campanha");
+    expect(placeNamed("Casa Azulejo")).toBe("Casa Azulejo");
+    expect(placeNamed("SFO")).toBe("SFO");
+  });
+
+  it("words that still hold a role's word are a phrase about the moment, and name no place", () => {
+    expect(placeNamed("Flight UA 123 departs SFO")).toBeUndefined();
+    expect(placeNamed("your train leaves Gareth Central")).toBeUndefined();
+    expect(placeNamed("Check-in")).toBeUndefined();
   });
 });
 

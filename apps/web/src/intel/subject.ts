@@ -203,9 +203,25 @@ export function designatorOf(subject: Subject): string | undefined {
   return [subject.carrier, subject.number].filter(Boolean).join(" ") || undefined;
 }
 
+/** A role's own word standing before a place: "Check-in: Harbor House". */
+const ROLE_FIRST = /^(?:check[- ]?in|check[- ]?out|departs?|departure|arrives?|arrival)\b[\s:,-]*(?:(?:from|at|in|to)\s+)?/i;
+/** A role's own word anywhere. */
+const ROLE_WORD = /\b(?:check[- ]?in|check[- ]?out|departs?|departure|departing|leaves?|leaving|arrives?|arrival|arriving|lands?|landing)\b/i;
+
+/**
+ * The place in the words a reader gave for a stay or a journey. The role's
+ * own word before the place is not part of its name ("Check-in: Harbor
+ * House" names Harbor House); words that still hold one ("Flight UA 123
+ * departs SFO") are a phrase about the moment, and name no place.
+ */
+export function placeNamed(words: string): string | undefined {
+  const place = words.replace(ROLE_FIRST, "").trim();
+  return place && !ROLE_WORD.test(place) ? place : undefined;
+}
+
 // The label forms readers wrote before they stated subjects, read here and
 // nowhere else.
-const LEG = /^(flight|train|bus|boat)\b\s*(.*?)\s*\b(departs|arrives)\b\s*(.*)$/i;
+const LEG =/^(flight|train|bus|boat)\b\s*(.*?)\s*\b(departs|arrives)\b\s*(.*)$/i;
 const PASS = /^Flight\s+(.+?)\s+([A-Z]{3}) to ([A-Z]{3})$/;
 const STAY = /^check[- ]?(in|out)\b(?:[^:]*:\s*(.+))?/i;
 const CAR = /^(pick[- ]?up|drop[- ]?off)\b(?:[^:]*:\s*(.+))?/i;

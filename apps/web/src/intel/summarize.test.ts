@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AssistantError, type GenerateRequest } from "./assistant";
+import type { Fact } from "./facts";
 import {
   cleanTags,
   headChunk,
@@ -179,12 +180,12 @@ describe("summarize with facts", () => {
   };
 
   it("the summary names the document's kind and writes no value; a second call judges what the rules found", async () => {
-    const { asked, run } = model({ d1: "expiry", d2: "due", a1: "total" });
+    const { asked, run } = model({ d1: "expiry", d2: "due", pays: "yes", total: "a1" });
     const answer = await summarize({ text: POLICY, name: "policy.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true }, run);
     expect(asked).toHaveLength(2);
     expect(asked[0]!.schema).toBe(summaryWithFactsSchema);
     expect(Object.keys(asked[0]!.schema!.properties)).toEqual(["summary", "tags", "kind", "document"]);
-    expect(Object.keys(asked[1]!.schema!.properties)).toEqual(["d1", "d1w", "d2", "d2w", "a1"]);
+    expect(Object.keys(asked[1]!.schema!.properties)).toEqual(["d1", "d1w", "d2", "d2w", "pays", "total"]);
     expect(asked[1]!.temperature).toBe(0);
     expect(answer?.document).toBe("insurance");
     expect(answer?.facts.map((f) => [f.kind, f.value, f.unit, f.source, f.document])).toEqual([
@@ -205,6 +206,53 @@ describe("summarize with facts", () => {
     const answer = await summarize({ text: "A short note about nothing in particular. ".repeat(10), name: "note.txt", categories: ["Documents"], contextSize: 4096, withFacts: true }, run);
     expect(asked).toHaveLength(1);
     expect(answer?.facts).toEqual([]);
+  });
+
+  it("a stored file is not asked about a day that was over when it was kept", async () => {
+    const warranty = "Certificate of warranty. Purchase date: 3 August 2026. This warranty is valid until 2 August 2028.";
+    const { asked, run } = model({ d1: "expiry" });
+    const answer = await summarize(
+      { text: warranty, name: "warranty.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true, keptAt: Date.UTC(2026, 10, 9, 12) },
+      run,
+    );
+    expect(Object.keys(asked[1]!.schema!.properties)).toEqual(["d1", "d1w"]);
+    expect(asked[1]!.prompt).toContain("d1: 2 August 2028");
+    expect(answer?.facts.map((f) => [f.kind, f.value])).toEqual([["expiry", "2028-08-02"]]);
+  });
+
+  it("a document whose every day is over is not asked about its dates", async () => {
+    const minutes = "Minutes of the meeting held on 10 November 2025. The previous minutes of 3 October 2025 were approved.";
+    const { asked, run } = model({ d1: "event" });
+    const answer = await summarize({ text: minutes, name: "minutes.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true, keptAt: Date.UTC(2026, 10, 9, 12) }, run);
+    expect(asked).toHaveLength(1);
+    expect(answer?.facts).toEqual([]);
+  });
+
+  describe("what another reader already settled", () => {
+    const bill = "City Water. Amount due: $84.20. Due date: 20 November 2027. Your meter will be read on 3 December 2027 at 10:00.";
+    const known: Fact[] = [
+      { id: "due:2027-11-20", kind: "due", document: "invoice", value: "2027-11-20", source: "label", confidence: 0.7 },
+      { id: "amount:84.20", kind: "amount", document: "invoice", value: "84.20", unit: "USD", label: "Amount due", source: "label", confidence: 0.7 },
+    ];
+
+    it("the model is asked only about the rest", async () => {
+      const { asked, run } = model({ d1: "event", d1w: "meter" });
+      const answer = await summarize({ text: bill, name: "water.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true, known }, run);
+      // The due day and the total are the rule's: neither is put to the model.
+      expect(Object.keys(asked[1]!.schema!.properties)).toEqual(["d1", "d1w"]);
+      expect(asked[1]!.prompt).toContain("d1: 3 December 2027, 10:00");
+      expect(answer?.facts.map((f) => [f.kind, f.value, f.time])).toEqual([["event", "2027-12-03", "10:00"]]);
+    });
+
+    it("a document with nothing left to ask about is asked once", async () => {
+      const { asked, run } = model({ d1: "due" });
+      const answer = await summarize(
+        { text: "City Water. Amount due: $84.20. Due date: 20 November 2027.", name: "water.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true, known },
+        run,
+      );
+      expect(asked).toHaveLength(1);
+      expect(answer?.facts).toEqual([]);
+    });
   });
 
   it("with date reading off, nothing is judged", async () => {
@@ -273,7 +321,7 @@ describe("summarize with facts", () => {
       if (calls === 2) {
         throw new AssistantError("context-too-long", "");
       }
-      return { d1: "expiry", d2: "due", a1: "total" };
+      return { d1: "expiry", d2: "due", pays: "yes", total: "a1" };
     });
     expect(prompts).toHaveLength(2);
     expect(prompts[1]!).toBeLessThan(prompts[0]!);

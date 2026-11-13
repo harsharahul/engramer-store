@@ -189,7 +189,7 @@ const LINES: Line[] = [
     subject: "Your March invoice",
     text: "Your March invoice is ready and is payable by 10 April 2027. The total for the month comes to EUR 240.00.",
     document: "invoice",
-    judged: { d1: "due", a1: "total" },
+    judged: { d1: "due", pays: "yes", total: "a1" },
     rows: [row("due", "DUE", "2027-04-10", "", "Invoice due", "EUR 240.00", "asks")],
   },
   {

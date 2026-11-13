@@ -77,12 +77,52 @@ function shortened(text: string, sentence: Span, at: number, end: number): strin
   return text.slice(from, from + SENTENCE_MAX).trim();
 }
 
-export function spotCandidates(text: string, context?: DateContext): Candidate[] {
+/** The price of one of something, said straight after the amount ("$140.00 per night"). A year's price is the year's whole price. */
+const RATE_AFTER = /^\s*(?:(?:per|a|an|each|every)\s+|\/\s?)(?:night|month|week|day|hour|session|visit|class|lesson|seat|piece|person|guest|item|unit|mo)\b/i;
+/** Money set aside against a later bill, named straight before the amount ("a deposit of $100.00"). */
+const DEPOSIT_BEFORE = /\bdeposit(?:\s+(?:of|paid))?\s*:?\s*$/i;
+/** An amount as it stands in the text, from its currency to its last digit. */
+const AMOUNT_HERE = /^[^\d\n]{0,4}[\d.,]*\d/;
+
+/**
+ * Whether an amount is a rate or a deposit: a part of what a document
+ * costs, never the whole, so never the total it is about.
+ */
+function partOnly(text: string, at: number): boolean {
+  const end = at + (AMOUNT_HERE.exec(text.slice(at, at + 24))?.[0].length ?? 0);
+  const before = text.slice(text.lastIndexOf("\n", at - 1) + 1, at);
+  // "Total due after your deposit: $353.60" names the total, not the deposit.
+  return RATE_AFTER.test(text.slice(end, end + 16)) || (DEPOSIT_BEFORE.test(before) && !SUM_LINE.test(before));
+}
+
+/** What is already known of a document before anything is asked about it. */
+export interface Known {
+  /** For a stored file: the day it was kept. */
+  keptAt?: number;
+  /** Days a reader already gave a meaning, each with its clock when it has one. */
+  read?: readonly { value: string; time?: string }[];
+  /** A reader already named the document's total. */
+  total?: boolean;
+}
+
+/**
+ * The candidates of a text: what is still open to ask about.
+ *
+ * A message brings the day it was sent (in its context); a stored file may
+ * bring the day it was kept. A date that was over before that day is not a
+ * candidate: nothing can still happen then, and a day already behind the
+ * reader is never offered. Such days are most of what a document holds that
+ * is nobody's business (the order day, the statement date, the last visit).
+ *
+ * A day and clock a reader already gave a meaning is not a candidate either,
+ * and no amount is once a reader named the total: one moment is read once.
+ */
+export function spotCandidates(text: string, context?: DateContext, known: Known = {}): Candidate[] {
   if (!text) {
     return [];
   }
   const found = findDates(text, context);
-  const money = moneyIn(text);
+  const money = known.total ? [] : moneyIn(text).filter((amount) => !partOnly(text, amount.at));
   if (found.length === 0 && money.length === 0) {
     return [];
   }
@@ -130,12 +170,23 @@ export function spotCandidates(text: string, context?: DateContext): Candidate[]
     }
   }
 
+  // The day before a message was sent, in UTC: a day of doubt for the
+  // sender's zone, so "today" in the message is never taken for the past.
+  const since = context?.writtenAt ?? known.keptAt;
+  const earliest = since !== undefined ? new Date(since - 86_400_000).toISOString().slice(0, 10) : undefined;
+  // A day read with no clock covers the day; one read with a clock covers
+  // that clock, and the same day standing with no clock at all.
+  const settled = (value: string, time: string | undefined) =>
+    (known.read ?? []).some((read) => read.value === value && (read.time === undefined || time === undefined || read.time === time));
   const candidates: Candidate[] = [];
   const seen = new Set<string>();
   let dates = 0;
   for (const [index, hit] of found.entries()) {
     if (dates === MAX_DATES) {
       break;
+    }
+    if (earliest !== undefined && hit.date.iso < earliest) {
+      continue;
     }
     const printed = text.slice(hit.at, hit.end);
     const sentence = shortened(text, sentenceAt(hit.at), hit.at, hit.end);
@@ -147,7 +198,7 @@ export function spotCandidates(text: string, context?: DateContext): Candidate[]
       .sort((a, b) => a.order - b.order);
     for (const clock of clocks.length > 0 ? clocks : [undefined]) {
       const id = `${hit.date.iso}|${clock?.time ?? ""}`;
-      if (seen.has(id) || dates === MAX_DATES) {
+      if (seen.has(id) || dates === MAX_DATES || settled(hit.date.iso, clock?.time)) {
         continue;
       }
       seen.add(id);

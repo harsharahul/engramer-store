@@ -373,6 +373,32 @@ describe("reading mail", () => {
     expect(model.summarize.mock.calls[0]![0]).not.toHaveProperty("message");
   });
 
+  it("a reading is told what the file's other readers already found", async () => {
+    const due = {
+      id: "due:2027-11-20",
+      kind: "due" as const,
+      document: "invoice" as const,
+      value: "2027-11-20",
+      source: "label" as const,
+      confidence: 0.7,
+    };
+    library([note({ facts: [due] })]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize.mock.calls[0]![0]).toMatchObject({ known: [due] });
+  });
+
+  it("a stored file's reading is told the day the file was kept; an email's is not", async () => {
+    const kept = Date.UTC(2026, 10, 9, 12);
+    library([note({ createdAt: kept })]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize.mock.calls[0]![0]).toMatchObject({ keptAt: kept });
+    model.summarize.mockClear();
+    // An email is read from the day it was sent, which its headers give.
+    library([email({ mail: headers(Date.UTC(2027, 2, 2, 9)), createdAt: kept })]);
+    await useStore.getState().processFile("n1");
+    expect(model.summarize.mock.calls[0]![0]).not.toHaveProperty("keptAt");
+  });
+
   it("an email with booking data is summarized but not asked for dates", async () => {
     model.facts = true;
     const booked = {
