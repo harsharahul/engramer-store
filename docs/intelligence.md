@@ -179,7 +179,7 @@ dates and 80% of the amounts a careful reader would, and of what they
 offer 69% of the dates and 84% of the amounts are right; two of twelve
 documents that state nothing still get an offer. The model's own readings
 measure 68% right for dates and 82% for amounts, well below the bar, so
-they are offered for a yes, and naming an email's kind (84%) is below its
+they are offered for a yes, and naming an email's kind (86%) is below its
 bar too. The bar never moves: a task earns trust only by measuring above
 it.
 

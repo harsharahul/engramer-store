@@ -1,7 +1,7 @@
 {
   "reader": "apple",
   "version": 4,
-  "prompt": "5ba1c99d",
+  "prompt": "91930e36",
   "measuredAt": "2026-11-13",
   "contextSize": 8192,
   "cases": 92,
@@ -31,12 +31,12 @@
       "rate": 0.23076923076923078
     },
     "mailKind": {
-      "accuracy": 0.7285714285714285,
+      "accuracy": 0.7571428571428571,
       "cases": 70,
       "byKind": {
         "booking": {
-          "precision": 0.8,
-          "offered": 30
+          "precision": 0.8275862068965517,
+          "offered": 29
         },
         "bill": {
           "precision": 1,
@@ -44,19 +44,19 @@
         },
         "delivery": {
           "precision": 1,
-          "offered": 7
+          "offered": 8
         },
         "newsletter": {
-          "precision": 0.8,
-          "offered": 5
+          "precision": 1,
+          "offered": 4
         },
         "personal": {
           "precision": 0.2,
           "offered": 5
         },
         "other": {
-          "precision": 0.38461538461538464,
-          "offered": 13
+          "precision": 0.42857142857142855,
+          "offered": 14
         },
         "receipt": {
           "precision": 1,
@@ -64,6 +64,34 @@
         }
       }
     }
+  },
+  "together": {
+    "dates": {
+      "precision": 0.638095238095238,
+      "recall": 0.881578947368421,
+      "offered": 105,
+      "expected": 76
+    },
+    "amounts": {
+      "precision": 0.7272727272727273,
+      "recall": 0.96,
+      "offered": 33,
+      "expected": 25
+    },
+    "roles": {
+      "precision": 1,
+      "recall": 0.625,
+      "offered": 10,
+      "expected": 16
+    },
+    "noise": {
+      "cases": 13,
+      "loud": 4,
+      "offered": 12,
+      "rate": 0.3076923076923077
+    },
+    "documents": 81,
+    "readWhole": 58
   },
   "heldout": {
     "cases": 60,
@@ -93,7 +121,7 @@
         "rate": 0.16666666666666666
       },
       "mailKind": {
-        "accuracy": 0.8409090909090909,
+        "accuracy": 0.8636363636363636,
         "cases": 44,
         "byKind": {
           "booking": {
@@ -105,12 +133,12 @@
             "offered": 5
           },
           "other": {
-            "precision": 0.6666666666666666,
-            "offered": 6
+            "precision": 0.7142857142857143,
+            "offered": 7
           },
           "personal": {
-            "precision": 0.5,
-            "offered": 6
+            "precision": 0.6,
+            "offered": 5
           },
           "delivery": {
             "precision": 1,
@@ -126,6 +154,34 @@
           }
         }
       }
+    },
+    "together": {
+      "dates": {
+        "precision": 0.6923076923076923,
+        "recall": 0.8181818181818182,
+        "offered": 65,
+        "expected": 55
+      },
+      "amounts": {
+        "precision": 0.8421052631578947,
+        "recall": 0.8,
+        "offered": 19,
+        "expected": 20
+      },
+      "roles": {
+        "precision": 1,
+        "recall": 0.6666666666666666,
+        "offered": 8,
+        "expected": 12
+      },
+      "noise": {
+        "cases": 12,
+        "loud": 2,
+        "offered": 2,
+        "rate": 0.16666666666666666
+      },
+      "documents": 60,
+      "readWhole": 37
     }
   }
 }
