@@ -17,6 +17,12 @@ describe("the code editor's colours", () => {
     expect(Object.keys(EDITOR_THEME).some((key) => key.includes(".cm-selectionBackground"))).toBe(true);
   });
 
+  it("keeps the search panel's fields and boxes their own size, not the app's full-width inputs", () => {
+    const style = (part: string) => (EDITOR_THEME[part] ?? {}) as Record<string, string>;
+    expect(style(".cm-textfield").width).toBe("auto");
+    expect(style(".cm-panel.cm-search input[type=checkbox]")).toMatchObject({ width: "auto", padding: "0" });
+  });
+
   it("uses the app's colour tokens, never a fixed colour", () => {
     const fixed = Object.entries(EDITOR_THEME).flatMap(([part, style]) =>
       Object.entries(style as Record<string, string>)
