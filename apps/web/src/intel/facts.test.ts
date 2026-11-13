@@ -80,6 +80,15 @@ describe("groundFacts", () => {
     expect(groundFacts([flight], "Departs 12 March 2029 at 18:15")).toHaveLength(0);
   });
 
+  it("matches a morning clock written with one digit for the hour, as a clock and not as a run of characters", () => {
+    const exam = fact({ kind: "event", time: "09:40" });
+    expect(groundFacts([exam], "Exam 12 March 2029\nTime: 9:40")).toHaveLength(1);
+    // The tail of an evening clock, or a morning clock said of the evening, is another time.
+    expect(groundFacts([exam], "Exam 12 March 2029 at 19:40")).toHaveLength(0);
+    expect(groundFacts([exam], "Exam 12 March 2029 at 9:40 PM")).toHaveLength(0);
+    expect(groundFacts([exam], "Exam 12 March 2029 at 9:405")).toHaveLength(0);
+  });
+
   it("matches a whole hour the document wrote without a colon", () => {
     const stay = fact({ kind: "event", time: "15:00" });
     expect(groundFacts([stay], "Check-in 12 March 2029 from 3pm")).toHaveLength(1);
@@ -285,6 +294,25 @@ describe("a stored form line, read again by what its label means", () => {
     expect(mergeFacts([named()], [typed]).map((held) => [held.kind, held.value])).toEqual([["expiry", "2028-08-02"]]);
     // Whichever arrives first.
     expect(mergeFacts([typed], [named()]).map((held) => [held.kind, held.value])).toEqual([["expiry", "2028-08-02"]]);
+  });
+
+  it("the answer is for that line: another line of the same day is still read", () => {
+    const debit = fact({ id: "due:2028-08-02", kind: "due", document: "other", value: "2028-08-02", label: "Direct debit date" });
+    const merged = mergeFacts([named({ dismissed: true, label: "Statement date" })], [debit]);
+    expect(merged.filter((held) => !held.dismissed).map((held) => [held.kind, held.label])).toEqual([["due", "Direct debit date"]]);
+    // The same line, however its label is spaced or cased.
+    const again = { ...typed, label: "COVER  ENDS" };
+    expect(mergeFacts([named({ dismissed: true })], [again]).filter((held) => !held.dismissed)).toEqual([]);
+  });
+
+  it("a file saved again keeps the answer as well", () => {
+    const afterNo = reconcileFacts([named({ dismissed: true })], [typed], "d2");
+    expect(afterNo.filter((held) => !held.dismissed)).toEqual([]);
+    // A yes stays a yes, and is not marked as no longer said by the file.
+    const afterYes = reconcileFacts([named({ confirmed: true })], [typed], "d2");
+    expect(afterYes.map((held) => [held.kind, held.confirmed, held.stale, held.digest])).toEqual([["dated", true, undefined, "d2"]]);
+    // A line the file no longer holds at all is still marked.
+    expect(reconcileFacts([named({ confirmed: true })], [], "d2").map((held) => held.stale)).toEqual([true]);
   });
 
   it("booking data on a day the owner answered still stands", () => {

@@ -360,7 +360,12 @@ export function factId(kind: FactKind, value: string): string {
  * would lose the only evidence of the disagreement.
  */
 export function reconcileFacts(existing: Fact[], rescanned: Fact[], digest: string): Fact[] {
-  const found = new Map(rescanned.map((fact) => [fact.id, fact]));
+  // A form line the owner answered under its own words, now read by what
+  // its label means, is the same line: the answer stands and the typed
+  // reading is not added beside it.
+  const answered = answeredLines(existing);
+  const retyped = new Set(rescanned.filter(answered).map(lineOf));
+  const found = new Map(rescanned.filter((fact) => !answered(fact)).map((fact) => [fact.id, fact]));
   const kept: Fact[] = [];
   for (const fact of existing) {
     const again = found.get(fact.id);
@@ -373,6 +378,13 @@ export function reconcileFacts(existing: Fact[], rescanned: Fact[], digest: stri
     }
     if (again) {
       const forward: Fact = { ...withSubjectFrom(fact, again), digest };
+      delete forward.stale;
+      kept.push(forward);
+      continue;
+    }
+    if (fact.confirmed && fact.kind === "dated" && retyped.has(lineOf(fact))) {
+      // The new contents still hold the line; only its reading has a name now.
+      const forward: Fact = { ...fact, digest };
       delete forward.stale;
       kept.push(forward);
       continue;
@@ -447,7 +459,11 @@ export function groundFacts(facts: Fact[], source: string): Fact[] {
     // grounding exists to catch, and it is worse than the date alone because
     // it is the part someone would set an alarm by.
     if (fact.time !== undefined) {
-      return timeRenderings(fact.time).some((form) => haystack.includes(normalize(form))) || statesHour(fact.time, source);
+      return (
+        timeRenderings(fact.time).some((form) => haystack.includes(normalize(form))) ||
+        statesHour(fact.time, source) ||
+        statesMorningClock(fact.time, source)
+      );
     }
     return true;
   });
@@ -505,6 +521,20 @@ function statesHour(time: string, source: string): boolean {
   return new RegExp(`(?<![\\d.:,])\\b${half}\\s?${hour < 12 ? "a" : "p"}\\.?m(?![A-Za-z])`, "i").test(source);
 }
 
+/**
+ * Whether the document writes this morning clock with one digit for its
+ * hour ("9:40"). Read as a clock in the text itself, so it is never found
+ * in the tail of "19:40", and never where the text says it of the evening
+ * ("9:40 PM").
+ */
+function statesMorningClock(time: string, source: string): boolean {
+  const [hh, mm] = time.split(":") as [string, string];
+  if (!hh.startsWith("0")) {
+    return false;
+  }
+  return new RegExp(`(?<![\\d.:,])${Number(hh)}:${mm}(?!\\d)(?!\\s?p\\.?m(?![a-z]))`, "i").test(source);
+}
+
 function normalize(text: string): string {
   return text.toLowerCase().replace(/[\s.,/\\_:-]+/g, "");
 }
@@ -520,8 +550,8 @@ export function isStated(phrase: string, source: string): boolean {
  *
  * The unpadded twenty-four hour form ("9:40") is left out: once separators are
  * stripped it is a substring of "19:40", so including it would ground an
- * evening fact against a morning document. Missing a real match is the safer
- * direction to be wrong in.
+ * evening fact against a morning document. That form is looked for in the
+ * text as a clock instead (`statesMorningClock`).
  */
 function timeRenderings(time: string): string[] {
   const [hh, mm] = time.split(":") as [string, string];
@@ -570,6 +600,24 @@ function renderings(fact: Fact): string[] {
   ];
 }
 
+/** A form line by its day and its label, however the label is spaced or cased. */
+function lineOf(fact: Pick<Fact, "value" | "label">): string {
+  return `${fact.value}|${(fact.label ?? "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()}`;
+}
+
+/**
+ * Tells a typed reading of a form line the owner already answered, yes or
+ * no, while the line only named its date. The answer was for that line: a
+ * reading of the same day under another label is another line.
+ */
+function answeredLines(existing: readonly Fact[]): (fact: Fact) => boolean {
+  const lines = new Set(existing.filter((fact) => fact.kind === "dated" && ownerDecided(fact)).map(lineOf));
+  return (fact) => fact.source === "label" && MEANT_KINDS.has(fact.kind) && lines.has(lineOf(fact));
+}
+
 /**
  * What a file carries, less the form lines the rules no longer read.
  *
@@ -604,17 +652,17 @@ export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
   const confirmedValues = new Set(
     existing.filter((fact) => fact.confirmed).map((fact) => `${fact.kind}:${fact.value}`),
   );
-  // A form line the owner answered under its own words, yes or no, settles
-  // its day. The same line read later by what its label means is not news,
+  // A form line the owner answered under its own words, yes or no, is
+  // settled. The same line read later by what its label means is not news,
   // and is not asked about under a new name.
-  const answeredLines = new Set(existing.filter((fact) => fact.kind === "dated" && ownerDecided(fact)).map((fact) => fact.value));
+  const answered = answeredLines(existing);
   for (const fact of existing) {
     merged.set(fact.id, fact);
   }
   for (const fact of found) {
     const prior = merged.get(fact.id);
     if (!prior) {
-      if (fact.source === "label" && MEANT_KINDS.has(fact.kind) && answeredLines.has(fact.value)) {
+      if (answered(fact)) {
         continue;
       }
       if (!confirmedValues.has(`${fact.kind}:${fact.value}`)) {
