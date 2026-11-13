@@ -86,15 +86,59 @@ const SETS = [
   // Never printed case by case: a case that is looked at is a case that gets tuned on.
   { key: "heldout", title: "the held-out set", cases: HELDOUT_CASES, quiet: true },
 ] as const;
-const everyCase = SETS.flatMap((set) => set.cases.map((evalCase) => ({ evalCase, quiet: set.quiet })));
+// EVAL_SET=first reads one set and writes no scores: the way to work on the
+// instructions without touching the held-out set.
+const oneSet = process.env["EVAL_SET"];
+const sets = oneSet ? SETS.filter((set) => set.key === oneSet) : SETS;
+if (sets.length === 0) {
+  throw new Error(`EVAL_SET names no set: ${oneSet}`);
+}
+const everyCase = sets.flatMap((set) => set.cases.map((evalCase) => ({ evalCase, quiet: set.quiet })));
 
-/** A case as the app's reading pass is given it: a message carries its headers. */
-function inputOf(evalCase: EvalCase, withFacts: boolean): SummaryInput {
+// A stored file has a day it was kept, and the app reads it from that day. The
+// cases name none, so every file is taken as kept on the day of the earliest
+// message in the sets: early enough that no date a case expects lies behind it.
+const KEPT = Date.UTC(2026, 10, 9, 12);
+
+/** What the app's rules and exact readers find in a case, before any model is asked. */
+const scans = new Map<string, Fact[]>();
+async function scanned(evalCase: EvalCase): Promise<Fact[]> {
+  const held = scans.get(evalCase.id);
+  if (held) {
+    return held;
+  }
+  const { facts } = await scanForFacts({
+    name: evalCase.name,
+    mime: evalCase.mime,
+    text: evalCase.text,
+    ...(evalCase.raw ? { raw: evalCase.raw } : {}),
+    ...(evalCase.writtenAt !== undefined ? { writtenAt: evalCase.writtenAt } : {}),
+  });
+  scans.set(evalCase.id, facts);
+  return facts;
+}
+
+/**
+ * A case as the app's reading pass is given it: a message carries its
+ * headers, a stored file the day it was kept, and both what the rules
+ * already read, so the model is asked only about the rest.
+ */
+async function inputOf(evalCase: EvalCase, withFacts: boolean): Promise<SummaryInput> {
   const mail = evalCase.mime === EMAIL_MIME;
   const message = mail
     ? messageOf({ subject: evalCase.name.replace(/\.email$/, ""), from: evalCase.from ?? "", date: evalCase.writtenAt ?? 0 })
     : undefined;
-  return { text: evalCase.text, name: evalCase.name, categories: CATEGORIES, contextSize, withFacts, mail, ...(message ? { message } : {}) };
+  return {
+    text: evalCase.text,
+    name: evalCase.name,
+    categories: CATEGORIES,
+    contextSize,
+    withFacts,
+    mail,
+    ...(message ? { message } : {}),
+    ...(mail ? {} : { keptAt: KEPT }),
+    known: await scanned(evalCase),
+  };
 }
 
 // EVAL_ONLY=id,id reads a part of the sets. EVAL_TWICE=1 reads each case
@@ -108,7 +152,7 @@ if (process.env["EVAL_TWICE"]) {
     const answers: string[] = [];
     for (let run = 0; run < 2; run += 1) {
       reading = `${evalCase.id}.${run}`;
-      await summarize(inputOf(evalCase, true), (request) => generate({ ...request, temperature: 0 }, transport)).catch(() => null);
+      await summarize(await inputOf(evalCase, true), (request) => generate({ ...request, temperature: 0 }, transport)).catch(() => null);
       answers.push(canonical(raw.get(reading)));
     }
     const same = answers[0] === answers[1];
@@ -124,13 +168,13 @@ if (process.env["EVAL_TWICE"]) {
 
 // Each case is read as the app reads it: mail that states its facts as data
 // is asked its kind but not its dates; everything else is asked both.
-const asked = new Set(SETS.flatMap((set) => factCases(set.cases)).map((evalCase) => evalCase.id));
+const asked = new Set(sets.flatMap((set) => factCases(set.cases)).map((evalCase) => evalCase.id));
 const readings = new Map<string, Awaited<ReturnType<typeof summarize>>>();
 for (const { evalCase, quiet } of chosen) {
   reading = evalCase.id;
   let line: string;
   try {
-    const answer = await summarize(inputOf(evalCase, asked.has(evalCase.id)), (request) => generate(request, transport));
+    const answer = await summarize(await inputOf(evalCase, asked.has(evalCase.id)), (request) => generate(request, transport));
     readings.set(evalCase.id, answer);
     const facts = answer?.facts.map((f) => `${f.kind} ${f.value}${f.time ? ` ${f.time}` : ""}`).join(", ") || "(none)";
     line = `${evalCase.id}: ${facts} | kind ${answer?.mailKind ?? "-"} (want ${evalCase.mailKind ?? "-"})`;
@@ -150,17 +194,13 @@ if (only) {
 }
 
 // The model's own readings, and what the owner is shown: the rules' readings
-// and the model's together, as the app joins them.
+// and the model's together, as the app joins them. An amount no reader named
+// (the weakest harvest, listed in a file's details and never on the
+// Timeline) is not a reading of what the document is about, and is left out.
 const judged = async (evalCase: EvalCase): Promise<Fact[]> => readings.get(evalCase.id)?.facts ?? [];
 const shown = async (evalCase: EvalCase): Promise<Fact[]> => {
-  const scanned = await scanForFacts({
-    name: evalCase.name,
-    mime: evalCase.mime,
-    text: evalCase.text,
-    ...(evalCase.raw ? { raw: evalCase.raw } : {}),
-    ...(evalCase.writtenAt !== undefined ? { writtenAt: evalCase.writtenAt } : {}),
-  });
-  return mergeFacts(scanned.facts, (await judged(evalCase)).map((fact) => ({ ...fact, reader: MODEL_READER })));
+  const joined = mergeFacts(await scanned(evalCase), (await judged(evalCase)).map((fact) => ({ ...fact, reader: MODEL_READER })));
+  return joined.filter((fact) => !(fact.kind === "amount" && fact.source === "pattern"));
 };
 
 const stored = ({ wrong: _wrong, ...figures }: SetFigures) => figures;
@@ -172,7 +212,7 @@ const report = (title: string, figures: SetFigures, documents: number) =>
   `${documents - figures.wrong.length} of ${documents} documents read with nothing missed and nothing added`;
 
 const measured: Record<string, { cases: number; tasks: ReturnType<typeof stored> & { mailKind: Awaited<ReturnType<typeof scoreKinds>> } }> = {};
-for (const set of SETS) {
+for (const set of sets) {
   const model = await measure(set.cases, judged);
   const whole = await measure(set.cases, shown);
   const kinds = await scoreKinds(kindCases(set.cases), async (evalCase) => readings.get(evalCase.id)?.mailKind ?? null);
@@ -182,10 +222,17 @@ for (const set of SETS) {
   process.stdout.write(`${report(`${set.title}, rules and model together`, whole, documents)}\n`);
   process.stdout.write(`${set.title}, mail kind: right ${percent(kinds.accuracy)} of ${kinds.cases}\n`);
   if (!set.quiet) {
-    for (const c of model.wrong) {
-      process.stdout.write(`  ${c.id}: found ${c.found}, missed ${c.missed}, extra ${c.extra}\n`);
+    for (const [title, wrong] of [["the model alone", model.wrong], ["rules and model together", whole.wrong]] as const) {
+      process.stdout.write(`  ${title}, not read whole:\n`);
+      for (const c of wrong) {
+        process.stdout.write(`    ${c.id}: found ${c.found}, missed ${c.missed}, extra ${c.extra}\n`);
+      }
     }
   }
+}
+if (oneSet) {
+  // One set says nothing about the other: no scores are written.
+  process.exit(0);
 }
 
 const scores = {

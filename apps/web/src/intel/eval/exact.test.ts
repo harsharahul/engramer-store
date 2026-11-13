@@ -39,11 +39,16 @@ describe("exact readers on the eval set", () => {
 
 /**
  * The label rules against the eval set. A rule reads only where a document
- * labels its own date or amount, so what it offers must nearly always be
- * right; how much of the set it finds is printed, and is what the wider
- * vocabulary is for. Its readings still wait for a yes.
+ * labels its own date or amount with words the vocabulary knows, so what it
+ * offers must nearly always be right; how much of the set it finds is
+ * printed, and is what the wider vocabulary is for. Its readings still wait
+ * for a yes.
+ *
+ * A form line that only names a date ("Statement date: 3 February 2027") is
+ * kept with the document's own words and claims no meaning; those are
+ * counted apart and printed, never scored as a typed reading.
  */
-const labelReadings = async (evalCase: EvalCase) =>
+const labelFacts = async (evalCase: EvalCase) =>
   (
     await scanForFacts({
       name: evalCase.name,
@@ -53,6 +58,8 @@ const labelReadings = async (evalCase: EvalCase) =>
       ...(evalCase.writtenAt !== undefined ? { writtenAt: evalCase.writtenAt } : {}),
     })
   ).facts.filter((fact) => fact.source === "label");
+const NAMED_ONLY = new Set(["dated", "period"]);
+const labelReadings = async (evalCase: EvalCase) => (await labelFacts(evalCase)).filter((fact) => !NAMED_ONLY.has(fact.kind));
 
 describe("label rules on the eval set", () => {
   it("are right at least nine times in ten, on dates and on amounts", async () => {
@@ -73,6 +80,11 @@ describe("label rules on the eval set", () => {
       }
       precise[task] = all.precision >= 0.9;
     }
+    let named = 0;
+    for (const evalCase of EVAL_CASES) {
+      named += (await labelFacts(evalCase)).filter((fact) => NAMED_ONLY.has(fact.kind)).length;
+    }
+    lines.push(`form lines that only name a date, kept with their own words: ${named}`);
     console.info(lines.join("\n"));
     expect(precise).toEqual({ dates: true, amounts: true });
   });

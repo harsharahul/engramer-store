@@ -75,13 +75,21 @@ describe("the held-out set", () => {
       (await scanForFacts({ name: c.name, mime: c.mime, text: c.text, ...(c.writtenAt !== undefined ? { writtenAt: c.writtenAt } : {}) })).facts.filter(
         (fact) => fact.source === "label",
       );
+    // Form lines that only name a date claim no meaning: counted apart, as on the first set.
+    const namedOnly = new Set(["dated", "period"]);
+    const typed = async (c: EvalCase) => (await labels(c)).filter((fact) => !namedOnly.has(fact.kind));
     const lines: string[] = [];
     for (const task of ["dates", "amounts"] as const) {
-      const score = await scoreReader(HELDOUT_CASES, labels, task);
+      const score = await scoreReader(HELDOUT_CASES, typed, task);
       const offered = score.perCase.reduce((sum, c) => sum + c.found + c.extra, 0);
       lines.push(`label rules on the held-out set, ${task}: precision ${score.precision.toFixed(3)} over ${offered} readings, recall ${score.recall.toFixed(3)}`);
     }
+    let named = 0;
+    for (const c of HELDOUT_CASES) {
+      named += (await labels(c)).filter((fact) => namedOnly.has(fact.kind)).length;
+    }
+    lines.push(`form lines that only name a date, on the held-out set: ${named}`);
     console.info(lines.join("\n"));
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
   });
 });
