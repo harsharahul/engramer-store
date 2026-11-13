@@ -54,7 +54,7 @@ Files, names, folders, tags and search text are encrypted on your device before 
 ## How it stays private
 
 ```mermaid
-flowchart LR
+flowchart TB
   device["<b>Your device</b><br/>reads: text, OCR, dates, trips, search index<br/>encrypts: content, names, tags, index"]
   device -- "ciphertext only" --> server[("Server")]
   server --> store[("Disk, S3, or cloud storage<br/>you already pay for")]
