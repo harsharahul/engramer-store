@@ -83,7 +83,13 @@ describe("the shipped label table", () => {
   it("a list cannot silence a deadline: no nobody's-business label holds a word of paying, expiring, attending, travelling or delivering", () => {
     const deadline = /\b(?:pay|paid|due|owe|expir|valid|renew|deadline|appoint|meet|class|show|event|check|depart|arriv|deliver|return|repl|respond)/;
     const silenced = source.rows.filter(([, meaning]) => meaning === "none").map(([label]) => label);
-    expect(silenced.filter((label) => deadline.test(label))).toEqual([]);
+    // One way a paying word may stand here: the label says the money has
+    // already come in ("Payment received"), and says nothing of a day to come.
+    const done = /\b(?:received|posted|processed|credited)\b/;
+    const ahead = /\b(?:due|owe|expir\w*|valid|renew\w*|deadline|by|before|until|must|will|to be)\b/;
+    expect(silenced.filter((label) => deadline.test(label) && !(done.test(label) && !ahead.test(label)))).toEqual([]);
+    expect(done.test("payment received") && !ahead.test("payment received")).toBe(true);
+    expect(ahead.test("payment must be received by")).toBe(true);
     // Nor one that is about a birth, or that only opens a span ("valid from").
     expect(silenced.filter((label) => /\bbirth|\bborn\b/.test(label) || /\b(?:from|to|through|for|of)$/.test(label))).toEqual([]);
   });
@@ -115,6 +121,9 @@ describe("the shipped label table", () => {
       ["Billing period", "none"],
       ["Next statement date", "none"],
       ["Member since", "none"],
+      ["Payment received", "none"],
+      ["Last payment received", "none"],
+      ["Payment posted", "none"],
       ["Valid until", "expiry"],
       ["Valid Until Date", "expiry"],
       ["Expiry date", "expiry"],

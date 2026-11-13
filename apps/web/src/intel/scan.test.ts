@@ -68,6 +68,12 @@ describe("scanForFacts", () => {
     expect(out.facts.find((f) => f.kind === "identifier")?.masked).toBe("12B3");
   });
 
+  it("a statement's hundred lines of payments already received give nothing", async () => {
+    const lines = Array.from({ length: 100 }, (_, i) => `Payment received: ${(i % 28) + 1} January 2027`);
+    const out = await scanForFacts({ ...base, text: `Account statement\n${lines.join("\n")}` });
+    expect(out.facts).toEqual([]);
+  });
+
   it("keeps a moment whose clock is written with one digit for the hour", async () => {
     const moments = async (text: string) => (await scanForFacts({ ...base, text })).facts.filter((f) => f.kind === "event").map((f) => [f.value, f.time]);
     expect(await moments("Exam date: 12 June 2027\nTime: 9:00")).toEqual([["2027-06-12", "09:00"]]);
