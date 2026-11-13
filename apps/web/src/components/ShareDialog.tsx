@@ -425,7 +425,7 @@ export function ShareDialog(props: {
           <input
             type="email"
             value={inviteEmail}
-            placeholder="Their email — releases the key automatically (optional)"
+            placeholder="Their email (optional): releases the key automatically"
             onChange={(e) => setInviteEmail(e.target.value)}
           />
         </div>
