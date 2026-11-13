@@ -5,6 +5,8 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-11-13
+
 ### Added
 - **Bookings and orders bring their prices.** A booking's price is read
   with the booking and counts in a trip's spend, each in its own currency.
