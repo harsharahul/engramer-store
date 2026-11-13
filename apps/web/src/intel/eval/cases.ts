@@ -7,6 +7,7 @@
  */
 
 import { DISTRACTOR_CASES } from "./distractors";
+import { FORM_CASES } from "./forms";
 import type { EvalCase } from "./score";
 
 const EMAIL = "application/vnd.engram.email+json";
@@ -713,4 +714,6 @@ export const EVAL_CASES: readonly EvalCase[] = [
   },
   // Longer documents in which what matters stands among dates and amounts that do not.
   ...DISTRACTOR_CASES,
+  // Documents laid out as forms: nearly every date and amount on a labelled line.
+  ...FORM_CASES,
 ];
