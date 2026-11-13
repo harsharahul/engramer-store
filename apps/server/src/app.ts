@@ -84,6 +84,11 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   const requestLog: ConfigOverrides["requestLog"] | null =
     overrides.requestLog ?? (process.env.ENGRAMER_LOG_REQUESTS === "true" ? {} : null);
   const app = Fastify({
+    // A static path names one file however many slashes separate its parts,
+    // and the office editor asks for its fonts at /office/fonts//fonts/<name>.
+    // The path is put in its plain form here, before routing and before
+    // anything looks at its prefix, so every later check sees the same path.
+    rewriteUrl: (request) => plainPath(request.url ?? "/"),
     bodyLimit: 16 * 1024 * 1024,
     trustProxy: typeof trusted === "number" ? (_address: string, hop: number) => hop < trusted : trusted,
     // Longer than the reverse proxy's idle timeout for upstream sockets
@@ -545,6 +550,25 @@ export async function buildApp(overrides: ConfigOverrides = {}): Promise<Fastify
   }
 
   return app;
+}
+
+/**
+ * A request path with its empty segments dropped: "/office/fonts//fonts/a.ttf"
+ * names the file "/office/fonts/fonts/a.ttf". The query stays as written. A
+ * path that is, or would become, an API path is left alone, so no second
+ * spelling of an API route comes to exist.
+ */
+export function plainPath(url: string): string {
+  const at = url.indexOf("?");
+  const path = at === -1 ? url : url.slice(0, at);
+  if (!path.includes("//")) {
+    return url;
+  }
+  const plain = path.replace(/\/{2,}/g, "/");
+  if (plain === "/api" || plain.startsWith("/api/")) {
+    return url;
+  }
+  return at === -1 ? plain : plain + url.slice(at);
 }
 
 /** Content types for the file kinds the vendored editor serves compressed. */
