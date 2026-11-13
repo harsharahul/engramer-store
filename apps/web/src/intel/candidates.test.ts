@@ -162,6 +162,32 @@ describe("the amounts a document holds", () => {
     expect(spotCandidates("The plan renews for USD 99.00 per year.").map((c) => c.value)).toEqual(["99.00"]);
   });
 
+  it("a total printed again on the card line keeps its place as the total", () => {
+    const receipt = [
+      "Coffee $4.50",
+      "Tea $3.20",
+      "Bagel $2.80",
+      "Juice $5.10",
+      "Muffin $2.90",
+      "Cookie $1.50",
+      "Subtotal $20.00",
+      "Tax $1.60",
+      "TOTAL $21.60",
+      "VISA **** 1234 $21.60",
+    ].join("\n");
+    const amounts = spotCandidates(receipt).filter((c) => c.what === "amount");
+    // The line that says total comes first, inside the six-amount cap, and
+    // the sentence shown for 21.60 is the one that calls it the total.
+    expect(amounts).toHaveLength(6);
+    expect(amounts[0]).toMatchObject({ key: "a1", value: "21.60" });
+    expect(amounts[0]!.sentence).toContain("TOTAL $21.60");
+  });
+
+  it("a deposit that was paid is still a deposit, and the balance after it is the total", () => {
+    const booking = "Deposit paid: $100.00\nBalance due on arrival: $353.60";
+    expect(spotCandidates(booking).map((c) => c.value)).toEqual(["353.60"]);
+  });
+
   it("an amount stands in its own sentence", () => {
     const [amount] = spotCandidates("We have refunded USD 19.99 to your card. It can take 5 to 10 days to appear.");
     expect(amount).toMatchObject({ what: "amount", printed: "USD 19.99", sentence: "We have refunded USD 19.99 to your card." });

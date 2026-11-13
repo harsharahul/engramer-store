@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { spotCandidates } from "./candidates";
 import { isTracked, mergeFacts, type Fact } from "./facts";
-import { DATE_ANSWERS, NO_TOTAL, judgeFingerprint, judgeRequest, judgedFacts } from "./judge";
+import { DATE_ANSWERS, NO_TOTAL, fingerprintOf, judgeFingerprint, judgeRequest, judgeSample, judgedFacts } from "./judge";
 import { subjectOf } from "./subject";
 
 const TEXT = [
@@ -114,6 +114,39 @@ describe("what the judge is asked", () => {
   it("the fingerprint names the instructions and the lists, and is stable", () => {
     expect(judgeFingerprint()).toMatch(/^[0-9a-f]{8}$/);
     expect(judgeFingerprint()).toBe(judgeFingerprint());
+  });
+
+  it("the fingerprint covers everything the model is sent: what the schema says and the answer budget too", () => {
+    // Measured scores count only for the question as it is asked. The sample
+    // the fingerprint is taken from holds a date and an amount, so every
+    // part of the schema and the budget is in it.
+    const sample = judgeSample();
+    expect(Object.keys(sample.schema!.properties as object)).toEqual(["d1", "d1w", "pays", "total"]);
+    expect(sample.maxTokens).toBeGreaterThan(0);
+    expect(judgeFingerprint()).toBe(fingerprintOf(sample));
+    // A word changed in a description, or another budget, is another question.
+    const reworded = { ...sample, schema: { ...sample.schema!, properties: { ...sample.schema!.properties, pays: { type: "string" as const, enum: ["yes", "no"], description: "Another wording" } } } };
+    expect(fingerprintOf(reworded)).not.toBe(judgeFingerprint());
+    expect(fingerprintOf({ ...sample, maxTokens: sample.maxTokens! + 1 })).not.toBe(judgeFingerprint());
+  });
+
+  it("a stay or a journey needs its own word in the sentence, or the date is a plain event", () => {
+    // A model that calls a show an arrival is caught by the sentence: it holds no word of arriving.
+    const show = "Your tickets for The Evening Sparrows are confirmed. The show starts at 8:00 PM on Saturday, November 6, 2027.";
+    expect(judgedFacts({ d1: "arrive", d1w: "The Evening Sparrows" }, spotCandidates(show), show, "event-ticket").map((f) => [f.label, subjectOf(f)?.role])).toEqual([
+      ["The Evening Sparrows", undefined],
+    ]);
+    const train = "Your train from Leeds to London King's Cross runs on Fri 9 July 2027.";
+    expect(judgedFacts({ d1: "arrive", d1w: "Leeds to London King's Cross" }, spotCandidates(train), train, "other").map((f) => [f.label, subjectOf(f)?.role])).toEqual([
+      ["Leeds to London King's Cross", undefined],
+    ]);
+    // With its word in the sentence the role stands.
+    const landing = "Flight SW 212 lands in LIS on Saturday 20 March 2027 at 16:25.";
+    expect(judgedFacts({ d1: "arrive", d1w: "LIS" }, spotCandidates(landing), landing, "itinerary").map((f) => [f.label, subjectOf(f)?.role])).toEqual([["Arrives LIS", "arrive"]]);
+    const stay = "Hello! Your room at Casa Azulejo is ready for you from 15:00 on 8 April 2027.";
+    expect(judgedFacts({ d1: "check-in", d1w: "Casa Azulejo" }, spotCandidates(stay), stay, "hotel-booking").map((f) => [f.label, subjectOf(f)?.role])).toEqual([
+      ["Check-in: Casa Azulejo", "check-in"],
+    ]);
   });
 });
 

@@ -451,9 +451,9 @@ const CODE_AMOUNT_COMMA = /\b([A-Z]{3})\s?(\d{1,3}(?:\.\d{3})*,\d{2})(?![\d,.]*\
 const plain = (written: string) => written.replace(/,/g, "");
 const fromComma = (written: string) => written.replace(/\./g, "").replace(",", ".");
 
-/** Every amount above zero a piece of text states with its currency, once per value, and where it stands. */
-export function moneyIn(text: string): { value: string; unit: string; at: number }[] {
-  const found = new Map<string, { unit: string; at: number }>();
+/** Every place a piece of text states an amount above zero with its currency, in the order they stand. */
+export function moneyEvery(text: string): { value: string; unit: string; at: number }[] {
+  const found: { value: string; unit: string; at: number }[] = [];
   const forms: [RegExp, (written: string) => string, boolean][] = [
     [SYMBOL_AMOUNT, plain, false],
     [SYMBOL_AMOUNT_COMMA, fromComma, false],
@@ -463,17 +463,22 @@ export function moneyIn(text: string): { value: string; unit: string; at: number
   for (const [form, read, coded] of forms) {
     for (const match of text.matchAll(form)) {
       if (!coded) {
-        found.set(read(match[2]!), { unit: SYMBOL_CURRENCY[match[1]!] ?? match[1]!, at: match.index });
+        found.push({ value: read(match[2]!), unit: SYMBOL_CURRENCY[match[1]!] ?? match[1]!, at: match.index });
       } else if (CURRENCY_CODES.has(match[1]!)) {
-        found.set(read(match[2]!), { unit: match[1]!, at: match.index });
+        found.push({ value: read(match[2]!), unit: match[1]!, at: match.index });
       }
     }
   }
-  // In the order they stand in the text, whichever form found them.
-  return [...found]
-    .filter(([value]) => Number(value) > 0)
-    .map(([value, { unit, at }]) => ({ value, unit, at }))
-    .sort((a, b) => a.at - b.at);
+  return found.filter((amount) => Number(amount.value) > 0).sort((a, b) => a.at - b.at);
+}
+
+/** Every amount a piece of text states, once per value, at the last place it stands. */
+export function moneyIn(text: string): { value: string; unit: string; at: number }[] {
+  const last = new Map<string, { value: string; unit: string; at: number }>();
+  for (const amount of moneyEvery(text)) {
+    last.set(amount.value, amount);
+  }
+  return [...last.values()].sort((a, b) => a.at - b.at);
 }
 
 const AMOUNT_DUE_LINE = /\b(?:(?:amount|total|balance)\s+due|amount\s+payable|(?:is|are)\s+due)\b/i;

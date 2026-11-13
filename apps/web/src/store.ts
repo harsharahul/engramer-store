@@ -113,7 +113,7 @@ import {
 import { factsEnabled, scanForFacts } from "./intel/scan";
 import { assistantAvailableNow, assistantEnabled, lastAssistantState } from "./intel/assistant";
 import { CATEGORIES } from "./intel/categorize";
-import { MIN_MAIL_TEXT, MIN_TEXT, cleanTags, messageOf, outcomeFor, summarize } from "./intel/summarize";
+import { FactsOwed, MIN_MAIL_TEXT, MIN_TEXT, cleanTags, outcomeFor, readingContext, summarize, type Summary } from "./intel/summarize";
 import { isEmailRecord } from "./mail/kind";
 import { remainingModelReads, spendModelReads } from "./modelbudget";
 import { acceptance, modelScores, trustedKind, trustedMailKind } from "./intel/confidence";
@@ -3312,39 +3312,8 @@ export const useStore = create<StoreState>((set, get) => {
           stamp("short");
           return;
         }
-        // An email whose dates came from its own booking data needs only the
-        // summary; its dates are read, exactly, and the stamp says so.
-        const askFacts = factsWanted && !(mail && current.facts.some((fact) => fact.accepted === "exact"));
-        const state = lastAssistantState();
-        // What an email's headers say goes with it: the day it was sent is
-        // what a date written with no year is counted from.
-        const message = mail ? messageOf(current.mail) : undefined;
-        try {
-          const reading = await summarize({
-            text,
-            name: current.name,
-            categories: CATEGORIES,
-            contextSize: state.state === "available" ? state.contextSize : 4096,
-            // Date reading is its own switch; when it is on, the same
-            // reading proposes the document's dates, grounded and offered.
-            withFacts: askFacts,
-            mail,
-            ...(message ? { message } : {}),
-            // A stored file is read from the day it was kept, as a message
-            // is from the day it was sent: what was over by then is not asked about.
-            ...(!mail && current.createdAt > 0 ? { keptAt: current.createdAt } : {}),
-            // What the rules and the file's own data already read is not
-            // asked of the model again: one moment is read once.
-            known: current.facts,
-            signal,
-          });
-          if (readElsewhere()) {
-            return;
-          }
-          if (!reading) {
-            stamp("unsupported");
-            return;
-          }
+        /** Writes a finished reading: its summary, tags and kind, and the dates and amounts it offers. */
+        const keep = (reading: Summary) => {
           stamp("found");
           meta.summary = reading.summary;
           for (const tag of cleanTags(reading.tags, [...tags])) {
@@ -3384,6 +3353,29 @@ export const useStore = create<StoreState>((set, get) => {
             outcome.facts += fresh.length;
           }
           outcome.summaries = 1;
+        };
+        const state = lastAssistantState();
+        try {
+          const reading = await summarize({
+            text,
+            name: current.name,
+            categories: CATEGORIES,
+            contextSize: state.state === "available" ? state.contextSize : 4096,
+            // What the file brings with it: an email its headers, a stored
+            // file the day it was kept, and what its other readers found.
+            // What this pass has just read counts as found, so a new upload
+            // is read the way every later pass would read it.
+            ...readingContext(current, { mail, factsWanted, ...(meta.facts ? { soFar: asFacts(meta.facts) } : {}) }),
+            signal,
+          });
+          if (readElsewhere()) {
+            return;
+          }
+          if (!reading) {
+            stamp("unsupported");
+            return;
+          }
+          keep(reading);
         } catch (error) {
           if (signal?.aborted) {
             throw error;
@@ -3403,7 +3395,15 @@ export const useStore = create<StoreState>((set, get) => {
             const prior = stampOf(current);
             const tries =
               (prior?.outcome === "retrying" && prior.digest === current.digest ? prior.tries : 0) + 1;
-            const reason = (error instanceof Error ? error.message : String(error)).slice(0, 120);
+            if (tries >= MAX_TRIES && error instanceof FactsOwed) {
+              // The summary was read on every try; only the second call kept
+              // failing. The last try keeps the summary and gives up the
+              // dates, so the trouble never costs more than it touched.
+              keep(error.reading);
+              return;
+            }
+            const cause = error instanceof FactsOwed ? error.cause : error;
+            const reason = (cause instanceof Error ? cause.message : String(cause)).slice(0, 120);
             stampInto(
               meta,
               modelStamp({

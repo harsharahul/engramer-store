@@ -576,6 +576,16 @@ describe("what the model is not asked about again", () => {
     expect(alreadyRead([fact({ id: "dated:2027-05-15", kind: "dated", value: "2027-05-15", label: "Date", source: "label", confidence: 0.4 })]).read).toEqual([]);
   });
 
+  it("a date line the owner already answered is not asked about again under the model's words", () => {
+    const line = fact({ id: "dated:2027-05-15", kind: "dated", value: "2027-05-15", label: "Date", source: "label", confidence: 0.4 });
+    expect(alreadyRead([{ ...line, dismissed: true }]).read).toEqual([{ value: "2027-05-15" }]);
+    expect(alreadyRead([{ ...line, confirmed: true }]).read).toEqual([{ value: "2027-05-15" }]);
+    // So the answered day is no candidate, and nothing new asks about it.
+    const text = "Date: 15 May 2027. Bring the form with you.";
+    const asked = spotCandidates(text, undefined, alreadyRead([{ ...line, dismissed: true }]));
+    expect(asked).toEqual([]);
+  });
+
   it("a total a reader named is the total; an amount nobody named is not", () => {
     const amount = (over: Partial<Fact>): Fact => fact({ id: `amount:${over.value}`, kind: "amount", unit: "USD", ...over });
     expect(alreadyRead([amount({ value: "84.20", label: "Amount due", source: "label", confidence: 0.7 })]).total).toBe(true);

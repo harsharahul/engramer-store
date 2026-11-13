@@ -219,9 +219,29 @@ export function placeNamed(words: string): string | undefined {
   return place && !ROLE_WORD.test(place) ? place : undefined;
 }
 
+/** Words of leaving, and words of getting there. */
+const LEAVING = /\b(?:depart(?:s|ed|ing|ure)?|leav(?:e|es|ing)|sail(?:s|ing)?|takes?\s+off|sets?\s+off|boarding)\b/i;
+const GETTING_THERE = /\b(?:arriv(?:e|es|ed|ing|al)|land(?:s|ing)?|reach(?:es)?|gets?\s+in)\b/i;
+
+/**
+ * Which end of a journey a sentence states, given the end a reader named.
+ * A sentence that holds a word of only one end states that end, whatever
+ * the reader said; one that holds both leaves it to the reader, who saw
+ * which clock it was asked about; one that holds neither states no journey
+ * at all (a show that starts, a train that "runs"), and names a plain event.
+ */
+export function journeyRole(said: "depart" | "arrive", sentence: string): "depart" | "arrive" | undefined {
+  const leaving = LEAVING.test(sentence);
+  const there = GETTING_THERE.test(sentence);
+  if (leaving && there) {
+    return said;
+  }
+  return leaving ? "depart" : there ? "arrive" : undefined;
+}
+
 // The label forms readers wrote before they stated subjects, read here and
 // nowhere else.
-const LEG =/^(flight|train|bus|boat)\b\s*(.*?)\s*\b(departs|arrives)\b\s*(.*)$/i;
+const LEG = /^(flight|train|bus|boat)\b\s*(.*?)\s*\b(departs|arrives)\b\s*(.*)$/i;
 const PASS = /^Flight\s+(.+?)\s+([A-Z]{3}) to ([A-Z]{3})$/;
 const STAY = /^check[- ]?(in|out)\b(?:[^:]*:\s*(.+))?/i;
 const CAR = /^(pick[- ]?up|drop[- ]?off)\b(?:[^:]*:\s*(.+))?/i;

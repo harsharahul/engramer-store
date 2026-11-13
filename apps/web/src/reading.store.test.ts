@@ -66,7 +66,7 @@ vi.mock("./api", async (importOriginal) => {
 import { api, ApiError } from "./api";
 import { AssistantError } from "./intel/assistant";
 import { READER_VERSION } from "./intel/reading";
-import { readingFingerprint } from "./intel/summarize";
+import { FactsOwed, readingFingerprint } from "./intel/summarize";
 import { useStore, type FileEntry } from "./store";
 import { spendModelReads, startOfOpen } from "./modelbudget";
 
@@ -161,6 +161,40 @@ describe("a reading that keeps failing", () => {
     model.summarize.mockClear();
     expect(await useStore.getState().processFile("n1")).toBeNull();
     expect(model.summarize).not.toHaveBeenCalled();
+  });
+
+  it("a second call that keeps failing costs the dates, never the summary", async () => {
+    model.facts = true;
+    library([note()]);
+    const owed = () =>
+      new FactsOwed({ summary: "A synthetic note.", tags: [], facts: [] }, new AssistantError("timeout", "the reading took too long"));
+    model.summarize.mockImplementation(async () => {
+      throw owed();
+    });
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toMatchObject({ outcome: "retrying", tries: 1 });
+    expect(useStore.getState().files.get("n1")!.summary).toBeUndefined();
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toMatchObject({ outcome: "retrying", tries: 2 });
+    // The last try: the summary that was read each time is kept, the dates are given up.
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toMatchObject({ outcome: "found", tasks: ["summary", "facts"] });
+    expect(useStore.getState().files.get("n1")!.summary).toBe("A synthetic note.");
+    // Final: nothing asks the model about this file again.
+    model.summarize.mockClear();
+    await useStore.getState().processFile("n1");
+    expect(model.summarize).not.toHaveBeenCalled();
+  });
+
+  it("a model that went away between the two calls spends no try and stores nothing", async () => {
+    model.facts = true;
+    library([note()]);
+    model.summarize.mockImplementationOnce(async () => {
+      throw new FactsOwed({ summary: "A synthetic note.", tags: [], facts: [] }, new AssistantError("preempted", ""));
+    });
+    await useStore.getState().processFile("n1");
+    expect(stampOf()).toBeUndefined();
+    expect(useStore.getState().files.get("n1")!.summary).toBeUndefined();
   });
 
   it("a model that is off, busy or cancelled on this device spends no tries", async () => {

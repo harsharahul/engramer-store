@@ -15,7 +15,7 @@ import type { Candidate } from "./candidates";
 import { findDates, findTimes } from "./dates";
 import { factId, isStated, type DocumentKind, type Fact } from "./facts";
 import { MODEL_CONFIDENCE } from "./modelfacts";
-import { cleanSubject, placeNamed, type Role } from "./subject";
+import { cleanSubject, journeyRole, placeNamed, type Role } from "./subject";
 import { CHARS_PER_TOKEN, headChunk } from "./window";
 
 /** What a date can be. An issue day is not among them: the label rules read
@@ -109,18 +109,33 @@ export function judgeRequest(input: JudgeInput): GenerateRequest {
 }
 
 /**
- * A short name for the judge as it is asked: its instructions, its lists
- * and its limits. Measured scores carry it, and count only while it is
- * unchanged.
+ * The judge's request for one fixed document that holds a date and an
+ * amount, so every part of the request has its place in it: instructions,
+ * the listing, each kind of question the schema asks, and the answer budget.
  */
-export function judgeFingerprint(): string {
-  const sample = judgeRequest({ name: "", text: "", contextSize: 4096, candidates: [] });
+export function judgeSample(): GenerateRequest {
+  const date: Candidate = { key: "d1", what: "date", value: "2027-01-01", printed: "1 January 2027", sentence: "It is on 1 January 2027." };
+  const amount: Candidate = { key: "a1", what: "amount", value: "1.00", unit: "USD", printed: "USD 1.00", sentence: "The total is USD 1.00." };
+  return judgeRequest({ name: "", text: "", contextSize: 4096, candidates: [date, amount] });
+}
+
+/** A short name for a request as it is sent, whole. */
+export function fingerprintOf(request: GenerateRequest): string {
   let hash = 0x811c9dc5;
-  for (const char of JSON.stringify([sample.instructions, sample.prompt, DATE_ANSWERS, NO_TOTAL, WORDS_MAX, WORDS_CHARS])) {
+  for (const char of JSON.stringify([request.instructions, request.prompt, request.schema, request.maxTokens, request.temperature, WORDS_MAX, WORDS_CHARS])) {
     hash ^= char.charCodeAt(0);
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return hash.toString(16).padStart(8, "0");
+}
+
+/**
+ * A short name for the judge as it is asked: its instructions, its lists,
+ * what its schema says and its limits. Measured scores carry it, and count
+ * only while it is unchanged.
+ */
+export function judgeFingerprint(): string {
+  return fingerprintOf(judgeSample());
 }
 
 const capitalised = (words: string) => words.charAt(0).toUpperCase() + words.slice(1);
@@ -183,11 +198,15 @@ export function judgedFacts(answer: unknown, candidates: readonly Candidate[], t
     if (typeof verdict !== "string" || !(DATE_ANSWERS as readonly string[]).includes(verdict) || verdict === "other") {
       continue;
     }
-    const kind = verdict as Exclude<DateAnswer, "other">;
-    if (kind === "due" || kind === "expiry") {
-      keep({ id: factId(kind, candidate.value), kind, value: candidate.value }, candidate);
+    const answered = verdict as Exclude<DateAnswer, "other">;
+    if (answered === "due" || answered === "expiry") {
+      keep({ id: factId(answered, candidate.value), kind: answered, value: candidate.value }, candidate);
       continue;
     }
+    // A journey's end needs its own word in the candidate's sentence: a
+    // model that calls a show an arrival is caught by the sentence, and the
+    // date stays a plain event.
+    const kind = answered === "depart" || answered === "arrive" ? (journeyRole(answered, candidate.sentence) ?? "event") : answered;
     // A moment: named by what it is, with the place or the happening the
     // text states. The label joins the identity, as for every event. A
     // moment the model found no words for carries none: the screen names it

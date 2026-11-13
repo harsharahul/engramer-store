@@ -3,9 +3,11 @@ import { AssistantError, type GenerateRequest } from "./assistant";
 import type { Fact } from "./facts";
 import {
   cleanTags,
+  FactsOwed,
   headChunk,
   messageOf,
   outcomeFor,
+  readingContext,
   sanitizeSummary,
   readingFingerprint,
   readingSchema,
@@ -295,17 +297,48 @@ describe("summarize with facts", () => {
     expect(answer).toMatchObject({ summary: "A home insurance policy.", facts: [] });
   });
 
-  it("a judge that only ran out of time fails the reading, so it is owed again", async () => {
+  it("a judge that only ran out of time leaves the reading owed, and hands back the summary it had", async () => {
     let calls = 0;
-    await expect(
-      summarize({ text: POLICY, name: "policy.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true }, async () => {
-        calls += 1;
-        if (calls === 2) {
-          throw new AssistantError("timeout", "");
-        }
-        return SUMMARY;
-      }),
-    ).rejects.toMatchObject({ code: "timeout" });
+    const failure = await summarize({ text: POLICY, name: "policy.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true }, async () => {
+      calls += 1;
+      if (calls === 2) {
+        throw new AssistantError("timeout", "");
+      }
+      return SUMMARY;
+    }).catch((error: unknown) => error);
+    // The summary was read; only the dates are owed. Whoever counts the
+    // tries can keep it when the last one is spent.
+    expect(failure).toBeInstanceOf(FactsOwed);
+    expect((failure as FactsOwed).reading).toMatchObject({ summary: "A home insurance policy.", facts: [] });
+    expect((failure as FactsOwed).cause).toMatchObject({ code: "timeout" });
+    // What it means for the file is what its cause means: a timeout is a try.
+    expect(outcomeFor(failure)).toBeNull();
+  });
+
+  it("a model that went away between the two calls is a pause, not a try", async () => {
+    let calls = 0;
+    const failure = await summarize({ text: POLICY, name: "policy.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true }, async () => {
+      calls += 1;
+      if (calls === 2) {
+        throw new AssistantError("preempted", "");
+      }
+      return SUMMARY;
+    }).catch((error: unknown) => error);
+    expect(outcomeFor(failure)).toBe("paused");
+  });
+
+  it("a judge request that still overflows with the shorter opening gives no facts and keeps the summary", async () => {
+    let calls = 0;
+    const answer = await summarize({ text: POLICY, name: "policy.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true }, async () => {
+      calls += 1;
+      if (calls >= 2) {
+        throw new AssistantError("context-too-long", "");
+      }
+      return SUMMARY;
+    });
+    // Asked twice, never a third time: the same request cannot fit later either.
+    expect(calls).toBe(3);
+    expect(answer).toMatchObject({ summary: "A home insurance policy.", facts: [] });
   });
 
   it("a judge whose request overflows the window is asked once more with a shorter opening", async () => {
@@ -326,6 +359,37 @@ describe("summarize with facts", () => {
     expect(prompts).toHaveLength(2);
     expect(prompts[1]!).toBeLessThan(prompts[0]!);
     expect(answer?.facts).toHaveLength(3);
+  });
+});
+
+describe("what a file brings to its reading", () => {
+  const due: Fact = { id: "due:2027-11-20", kind: "due", document: "invoice", value: "2027-11-20", source: "label", confidence: 0.7 };
+  const booked: Fact = { id: "event:2027-04-08 check-in", kind: "event", document: "hotel-booking", value: "2027-04-08", label: "Check-in", source: "jsonld", confidence: 1, accepted: "exact" };
+  const stored = { createdAt: Date.UTC(2026, 10, 9, 12), facts: [] as Fact[] };
+  const sent = { subject: "Your stay", from: "Casa Azulejo", date: Date.UTC(2027, 2, 2, 9) };
+
+  it("what this same pass already read is what the reading knows, not only what was stored before it", () => {
+    // A new upload: the rules have just read the due day; nothing is stored on the file yet.
+    expect(readingContext(stored, { mail: false, factsWanted: true, soFar: [due] })).toMatchObject({ known: [due], withFacts: true });
+    // A later pass with nothing new: what the file carries.
+    expect(readingContext({ ...stored, facts: [due] }, { mail: false, factsWanted: true })).toMatchObject({ known: [due] });
+  });
+
+  it("an email whose booking data was read in this same pass is not asked for dates", () => {
+    expect(readingContext({ ...stored, mail: sent }, { mail: true, factsWanted: true, soFar: [booked] })).toMatchObject({ withFacts: false });
+    expect(readingContext({ ...stored, mail: sent, facts: [booked] }, { mail: true, factsWanted: true })).toMatchObject({ withFacts: false });
+    // A stored file with exact data may still hold running words the model can read.
+    expect(readingContext(stored, { mail: false, factsWanted: true, soFar: [booked] })).toMatchObject({ withFacts: true });
+    expect(readingContext(stored, { mail: false, factsWanted: false })).toMatchObject({ withFacts: false });
+  });
+
+  it("an email brings its headers, a stored file the day it was kept", () => {
+    const message = readingContext({ ...stored, mail: sent }, { mail: true, factsWanted: true });
+    expect(message).toMatchObject({ mail: true, message: { subject: "Your stay", from: "Casa Azulejo", writtenAt: sent.date } });
+    expect(message).not.toHaveProperty("keptAt");
+    const file = readingContext(stored, { mail: false, factsWanted: true });
+    expect(file).toMatchObject({ mail: false, keptAt: stored.createdAt });
+    expect(file).not.toHaveProperty("message");
   });
 });
 

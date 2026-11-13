@@ -10,7 +10,7 @@ process.env.TZ = "America/Los_Angeles";
 import { describe, expect, it } from "vitest";
 import { rowsOf, type AgendaRow, type RowContext, type RowFile } from "./agendarows";
 import { spotCandidates } from "./candidates";
-import { mergeFacts, type DocumentKind, type Fact } from "./facts";
+import { alreadyRead, mergeFacts, type DocumentKind, type Fact } from "./facts";
 import { judgedFacts } from "./judge";
 import { scanForFacts } from "./scan";
 
@@ -227,8 +227,9 @@ describe("what the Timeline shows for everyday documents", () => {
       });
       // The model's reading joins the rules' the way the reading pass joins it.
       const context = line.subject ? { writtenAt: WRITTEN } : undefined;
+      // As in the app: the model is asked only about what the rules did not settle.
       const read = line.judged
-        ? judgedFacts(line.judged, spotCandidates(line.text ?? "", context), line.text ?? "", line.document ?? "other").map(
+        ? judgedFacts(line.judged, spotCandidates(line.text ?? "", context, alreadyRead(facts)), line.text ?? "", line.document ?? "other").map(
             (fact): Fact => ({ ...fact, reader: "apple" }),
           )
         : [];

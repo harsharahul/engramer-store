@@ -9,7 +9,7 @@
  * must not become a hundred questions.
  */
 import { findDates, findTimes, type DateContext } from "./dates";
-import { moneyIn } from "./labels";
+import { moneyEvery } from "./labels";
 
 export interface Candidate {
   /** "d1".."d10" for dates, "a1".."a6" for amounts: the name a reader answers by. */
@@ -91,8 +91,35 @@ const AMOUNT_HERE = /^[^\d\n]{0,4}[\d.,]*\d/;
 function partOnly(text: string, at: number): boolean {
   const end = at + (AMOUNT_HERE.exec(text.slice(at, at + 24))?.[0].length ?? 0);
   const before = text.slice(text.lastIndexOf("\n", at - 1) + 1, at);
-  // "Total due after your deposit: $353.60" names the total, not the deposit.
-  return RATE_AFTER.test(text.slice(end, end + 16)) || (DEPOSIT_BEFORE.test(before) && !SUM_LINE.test(before));
+  const deposit = DEPOSIT_BEFORE.exec(before);
+  // "Total due after your deposit: $353.60" names the total, not the deposit:
+  // only what stands before the word says so ("Deposit paid" is a deposit).
+  return RATE_AFTER.test(text.slice(end, end + 16)) || (deposit !== null && !SUM_LINE.test(before.slice(0, deposit.index)));
+}
+
+const lineAt = (text: string, at: number) => {
+  const end = text.indexOf("\n", at);
+  return text.slice(text.lastIndexOf("\n", at - 1) + 1, end === -1 ? text.length : end);
+};
+
+/**
+ * The amounts open to be a document's total, once per value. A value printed
+ * more than once (the total, and again on the card line) stands where a line
+ * calls it a sum, if any does; a rate or a deposit is no place for it.
+ */
+function amountsOf(text: string): { value: string; unit: string; at: number; sum: boolean }[] {
+  const placed = new Map<string, { value: string; unit: string; at: number; sum: boolean }>();
+  for (const amount of moneyEvery(text)) {
+    if (partOnly(text, amount.at)) {
+      continue;
+    }
+    const sum = SUM_LINE.test(lineAt(text, amount.at));
+    const held = placed.get(amount.value);
+    if (!held || (sum && !held.sum)) {
+      placed.set(amount.value, { ...amount, sum });
+    }
+  }
+  return [...placed.values()].sort((a, b) => a.at - b.at);
 }
 
 /** What is already known of a document before anything is asked about it. */
@@ -122,7 +149,7 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
     return [];
   }
   const found = findDates(text, context);
-  const money = known.total ? [] : moneyIn(text).filter((amount) => !partOnly(text, amount.at));
+  const money = known.total ? [] : amountsOf(text);
   if (found.length === 0 && money.length === 0) {
     return [];
   }
@@ -217,9 +244,8 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
   }
 
   // The amounts a document is about come before its line items.
-  const lineOf = (at: number) => text.slice(text.lastIndexOf("\n", at - 1) + 1, text.indexOf("\n", at) === -1 ? text.length : text.indexOf("\n", at));
   const ranked = money
-    .map((amount, order) => ({ ...amount, order, sum: SUM_LINE.test(lineOf(amount.at)) }))
+    .map((amount, order) => ({ ...amount, order }))
     .sort((a, b) => Number(b.sum) - Number(a.sum) || a.order - b.order)
     .slice(0, MAX_AMOUNTS);
   cursor = 0;

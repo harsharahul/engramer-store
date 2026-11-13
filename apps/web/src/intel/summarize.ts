@@ -153,6 +153,10 @@ export { headChunk };
 /** What a refusal means for the file: a stored reason, a pause of the
  * pass, or nothing (the file stays owed for a later attempt). */
 export function outcomeFor(error: unknown): NoSummary | "paused" | null {
+  // A reading whose dates are owed means for the file what its cause means.
+  if (error instanceof FactsOwed) {
+    return outcomeFor(error.cause);
+  }
   if (!(error instanceof AssistantError)) {
     return null;
   }
@@ -194,6 +198,31 @@ export interface SummaryInput {
   signal?: AbortSignal;
 }
 
+/**
+ * What a file brings to its reading beyond its text: for an email its
+ * headers, for a stored file the day it was kept, and what its other
+ * readers already found. `soFar` is what this same pass has read up to now
+ * (a new upload's rules run moments before the model); it stands in for what
+ * the file carried before the pass, so the model is never asked about a date
+ * the rules have just read, and an email whose booking data was just read is
+ * not asked for dates at all.
+ */
+export function readingContext(
+  file: { mail?: { subject: string; from: string; date: number }; createdAt: number; facts: readonly Fact[] },
+  opts: { mail: boolean; factsWanted: boolean; soFar?: readonly Fact[] },
+): Pick<SummaryInput, "withFacts" | "mail" | "message" | "keptAt" | "known"> {
+  const known = opts.soFar ?? file.facts;
+  const message = opts.mail ? messageOf(file.mail) : undefined;
+  return {
+    mail: opts.mail,
+    // An email whose dates came from its own booking data needs only the summary.
+    withFacts: opts.factsWanted && !(opts.mail && known.some((fact) => fact.accepted === "exact")),
+    ...(message ? { message } : {}),
+    ...(!opts.mail && file.createdAt > 0 ? { keptAt: file.createdAt } : {}),
+    known,
+  };
+}
+
 /** What an email's headers add to its reading. An email with no readable
  * sending day adds nothing: a date with no year has no day to be counted from. */
 export function messageOf(
@@ -217,16 +246,41 @@ export interface Summary {
 type Runner = (request: GenerateRequest) => Promise<unknown>;
 
 /**
+ * The summary was read and the dates and amounts are still owed: the second
+ * call met passing trouble (a deadline, a model that went away). It carries
+ * the reading, so whoever counts the tries can keep the summary when the
+ * last one is spent, and its cause, which says what the trouble means for
+ * the file.
+ */
+export class FactsOwed extends Error {
+  constructor(
+    readonly reading: Summary,
+    override readonly cause: unknown,
+  ) {
+    super("the summary was read; the dates and amounts are owed");
+    this.name = "FactsOwed";
+  }
+}
+
+/**
  * One reading. Resolves null when the model returned nothing usable;
  * rejects with the assistant's error when it refused. A window overflow
- * is retried once with half the text, then given up on.
+ * is retried once with half the text, then given up on. Trouble in the
+ * second call rejects with FactsOwed, which holds the summary already read.
  */
 export async function summarize(input: SummaryInput, run: Runner = generate): Promise<Summary | null> {
   const reading = await summaryOf(input, run);
   if (!reading || input.withFacts !== true) {
     return reading;
   }
-  return { ...reading, facts: await judged(input, reading.document ?? "other", run) };
+  try {
+    return { ...reading, facts: await judged(input, reading.document ?? "other", run) };
+  } catch (error) {
+    if (input.signal?.aborted) {
+      throw error;
+    }
+    throw new FactsOwed({ ...reading, facts: [] }, error);
+  }
 }
 
 async function summaryOf(input: SummaryInput, run: Runner): Promise<Summary | null> {
@@ -268,9 +322,14 @@ async function judged(input: SummaryInput, document: DocumentKind, run: Runner):
       const answer = await run({ ...request, signal: input.signal });
       return judgedFacts(answer, candidates, input.text, document);
     } catch (error) {
-      if (error instanceof AssistantError && error.code === "context-too-long" && attempt === 0) {
-        contextSize = Math.floor(contextSize / 2);
-        continue;
+      if (error instanceof AssistantError && error.code === "context-too-long") {
+        if (attempt === 0) {
+          contextSize = Math.floor(contextSize / 2);
+          continue;
+        }
+        // Too long with half the opening as well: the same request cannot
+        // fit on a later try either. No facts, and the summary stands.
+        return [];
       }
       const verdict = outcomeFor(error);
       if (verdict === "declined" || verdict === "language") {

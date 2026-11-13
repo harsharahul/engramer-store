@@ -664,12 +664,15 @@ const MEANT_KINDS: ReadonlySet<FactKind> = new Set(["event", "due", "expiry", "i
  * about it again: each date a rule, booking data or the owner settled (with
  * its clock when it has one), and whether a reader named the total. The
  * model's own earlier reading does not count: a new reading judges it afresh,
- * unless the owner answered it.
+ * unless the owner answered it. A form line that only names a date has no
+ * meaning yet, so the model is asked what it is; once the owner answered that
+ * line, yes or no, the day is settled and is not asked about under new words.
  */
 export function alreadyRead(facts: readonly Fact[]): { read: { value: string; time?: string }[]; total: boolean } {
   const settled = facts.filter((fact) => fact.source !== "model" || ownerDecided(fact));
+  const read = settled.filter((fact) => MEANT_KINDS.has(fact.kind) || (fact.kind === "dated" && ownerDecided(fact)));
   return {
-    read: settled.filter((fact) => MEANT_KINDS.has(fact.kind)).map((fact) => ({ value: fact.value, ...(fact.time ? { time: fact.time } : {}) })),
+    read: read.map((fact) => ({ value: fact.value, ...(fact.time ? { time: fact.time } : {}) })),
     total: settled.some((fact) => slotOf(fact) === "amount"),
   };
 }
