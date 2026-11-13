@@ -11,7 +11,7 @@
  */
 
 import { type DocumentKind, type Fact, factId, maskTail } from "./facts";
-import { findDates, findTimes, parseDate, parseTime, type ParsedDate } from "./dates";
+import { findDates, findTimes, parseDate, parseTime, type DateContext, type ParsedDate } from "./dates";
 import { meaningOf, type LabelMeaning, type Lexicon } from "./lexicon";
 import { serviceOf, type Role, type Subject } from "./subject";
 
@@ -651,13 +651,25 @@ export function fieldLines(text: string): FieldLine[] {
 }
 
 /**
- * The lines whose label the table says are nobody's business. Nothing is
- * read from them here, and nothing else should ask about a date on one.
+ * The places whose date the table says is nobody's business: each such
+ * line, from its label to the end of the date the label names. Nothing is
+ * read there, and nothing else should ask about that date. What stands
+ * further along the line ("..., please pay before 20 Feb 2027", or a second
+ * column the text extraction joined on) is not the label's, and stays open.
  */
-export function settledNowhere(text: string, lexicon: Lexicon): { at: number; end: number }[] {
-  return fieldLines(text)
-    .filter((line) => meaningOf(lexicon, line.label) === "none")
-    .map(({ at, end }) => ({ at, end }));
+export function settledNowhere(text: string, lexicon: Lexicon, context?: DateContext): { at: number; end: number }[] {
+  const spans: { at: number; end: number }[] = [];
+  for (const line of fieldLines(text)) {
+    if (meaningOf(lexicon, line.label) !== "none") {
+      continue;
+    }
+    const [own] = findDates(line.value, context);
+    if (own) {
+      // The value runs to the end of its line.
+      spans.push({ at: line.at, end: line.end - line.value.length + own.end });
+    }
+  }
+  return spans;
 }
 
 const SYMBOL_CURRENCY: Record<string, string> = {

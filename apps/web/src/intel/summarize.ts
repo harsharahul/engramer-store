@@ -311,12 +311,13 @@ async function summaryOf(input: SummaryInput, run: Runner): Promise<Summary | nu
  */
 async function judged(input: SummaryInput, document: DocumentKind, run: Runner): Promise<Fact[]> {
   const lexicon = await loadLexicon();
-  const candidates = spotCandidates(input.text, input.message ? { writtenAt: input.message.writtenAt } : undefined, {
+  const context = input.message ? { writtenAt: input.message.writtenAt } : undefined;
+  const candidates = spotCandidates(input.text, context, {
     ...(input.keptAt !== undefined ? { keptAt: input.keptAt } : {}),
     ...alreadyRead(input.known ?? []),
-    // A form line whose date needs no reminder ("Statement date: ...") is
-    // not put to the model either.
-    ...(lexicon ? { skip: settledNowhere(input.text, lexicon) } : {}),
+    // The date a form line's label says needs no reminder ("Statement
+    // date: ...") is not put to the model either.
+    ...(lexicon ? { skip: settledNowhere(input.text, lexicon, context) } : {}),
   });
   if (candidates.length === 0) {
     return [];

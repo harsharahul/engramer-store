@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { spotCandidates, type Candidate } from "./candidates";
+import { settledNowhere } from "./labels";
+import { lexiconFrom } from "./lexicon";
 
 const dates = (found: Candidate[]) => found.filter((c) => c.what === "date").map((c) => [c.key, c.value, c.time]);
 const amounts = (found: Candidate[]) => found.filter((c) => c.what === "amount").map((c) => [c.key, c.value, c.unit]);
@@ -128,6 +130,24 @@ describe("what a reader already settled is not a candidate", () => {
     // The same day stated again in a sentence of its own is still a candidate.
     const twice = "Statement date: 3 February 2027\nPlease pay by 3 February 2027.";
     expect(spotCandidates(twice, undefined, { skip: [{ at: 0, end: 31 }] }).map((c) => [c.value, c.sentence])).toEqual([["2027-02-03", "Please pay by 3 February 2027."]]);
+  });
+
+  it("a second date on such a line is still asked about: only the line's own date is nobody's business", () => {
+    const table = lexiconFrom([
+      ["statement", "none"],
+      ["invoice", "none"],
+      ["booked", "none"],
+    ]);
+    const asked = (words: string) =>
+      spotCandidates(words, undefined, { skip: settledNowhere(words, table) })
+        .filter((c) => c.what === "date")
+        .map((c) => c.value);
+    expect(asked("Statement date: 3 Feb 2027, please pay before 20 Feb 2027")).toEqual(["2027-02-20"]);
+    // Two columns that the text extraction put on one line.
+    expect(asked("Invoice date: 1 Feb 2027    Due: 15 Feb 2027")).toEqual(["2027-02-15"]);
+    expect(asked("Booked on: 10 Feb 2027   Travel date: 12 Apr 2027")).toEqual(["2027-04-12"]);
+    // A line of this kind that states no date keeps nothing from being asked.
+    expect(settledNowhere("Statement date: see overleaf", table)).toEqual([]);
   });
 
   it("what is left out does not use up the ten", () => {
