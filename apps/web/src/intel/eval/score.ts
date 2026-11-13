@@ -8,7 +8,7 @@
  * not wrong, only incomplete.
  */
 
-import type { Fact, FactKind } from "../facts";
+import { isDated, offeredFacts, type Fact, type FactKind } from "../facts";
 import { EMAIL_MIME } from "../../mail/kind";
 import { subjectOf, type Role } from "../subject";
 
@@ -153,6 +153,114 @@ export async function scoreNoise(cases: readonly EvalCase[], read: (evalCase: Ev
   return { cases: empty.length, loud, offered, rate: empty.length === 0 ? 0 : loud / empty.length };
 }
 
+export type ErrorClass = "named-only line" | "wrong meaning" | "clock missing" | "part for the total" | "not the reader's business" | "missed";
+
+const ERROR_CLASSES: readonly ErrorClass[] = ["named-only line", "wrong meaning", "clock missing", "part for the total", "not the reader's business", "missed"];
+
+/**
+ * What kind of error each wrong reading is, so the work goes where the
+ * errors are. A reading that matches nothing the case expects falls in one
+ * class, tried in this order: a form line that only names a date; the right
+ * day under another meaning; the right day and meaning with another clock or
+ * none; an amount; else a day that is nobody's business. An expected fact
+ * that no reading found, rightly or wrongly, is missed.
+ */
+export async function errorsByClass(
+  cases: readonly EvalCase[],
+  read: (evalCase: EvalCase) => Promise<Fact[]>,
+): Promise<Record<ErrorClass, { count: number; cases: string[] }>> {
+  const classes = Object.fromEntries(ERROR_CLASSES.map((name) => [name, { count: 0, cases: [] as string[] }])) as Record<
+    ErrorClass,
+    { count: number; cases: string[] }
+  >;
+  const note = (name: ErrorClass, id: string) => {
+    classes[name].count++;
+    if (!classes[name].cases.includes(id)) {
+      classes[name].cases.push(id);
+    }
+  };
+  const scored = (kind: FactKind) => TASK_KINDS.dates.has(kind) || TASK_KINDS.amounts.has(kind);
+  for (const evalCase of cases) {
+    const facts = (await read(evalCase)).filter((fact) => scored(fact.kind));
+    // An expected fact a reading found under another meaning or clock is explained, not missed.
+    const explained = new Set<number>();
+    for (const fact of facts) {
+      if (evalCase.expected.some((expected) => matches(fact, expected))) {
+        continue;
+      }
+      const sameDay = evalCase.expected.findIndex((expected) => expected.kind !== "amount" && expected.value === fact.value);
+      if (fact.kind === "dated" || fact.kind === "period") {
+        note("named-only line", evalCase.id);
+      } else if (fact.kind === "amount") {
+        note("part for the total", evalCase.id);
+      } else if (sameDay >= 0 && evalCase.expected[sameDay]!.kind !== fact.kind) {
+        explained.add(sameDay);
+        note("wrong meaning", evalCase.id);
+      } else if (sameDay >= 0) {
+        explained.add(sameDay);
+        note("clock missing", evalCase.id);
+      } else {
+        note("not the reader's business", evalCase.id);
+      }
+    }
+    evalCase.expected.forEach((expected, index) => {
+      if (!explained.has(index) && !facts.some((fact) => matches(fact, expected))) {
+        note("missed", evalCase.id);
+      }
+    });
+  }
+  return classes;
+}
+
+export interface AskedScore {
+  documents: number;
+  /** Readings the app would ask the reader about on the day the document reached them. */
+  asked: number;
+  /** Of those: a day the document does not state for the reader, or the right day under the wrong meaning. */
+  wrong: number;
+  /** Of those: a line that only names a date, on a day the reader does care about. */
+  untyped: number;
+  askedPer100: number;
+  wrongPer100: number;
+}
+
+const per100 = (count: number, documents: number) => (documents === 0 ? 0 : Math.round((count * 1000) / documents) / 10);
+
+/**
+ * The questions a person would be shown. A question is counted the way the
+ * app asks it (`offeredFacts`: unanswered, a date, still ahead or lately
+ * behind), on the day each document reached its reader, so the number means
+ * the same thing here as on the screen.
+ */
+export async function scoreAsked(
+  cases: readonly EvalCase[],
+  read: (evalCase: EvalCase) => Promise<Fact[]>,
+  dayOf: (evalCase: EvalCase) => number,
+): Promise<AskedScore> {
+  let asked = 0;
+  let wrong = 0;
+  let untyped = 0;
+  for (const evalCase of cases) {
+    const file = { id: evalCase.id, trashed: false, facts: await read(evalCase) };
+    for (const { fact } of offeredFacts([file], dayOf(evalCase))) {
+      if (!isDated(fact)) {
+        continue;
+      }
+      asked++;
+      if (evalCase.expected.some((expected) => matches(fact, expected))) {
+        continue;
+      }
+      const dayExpected = evalCase.expected.some((expected) => expected.kind !== "amount" && expected.value === fact.value);
+      if (fact.kind === "dated" && dayExpected) {
+        untyped++;
+      } else {
+        wrong++;
+      }
+    }
+  }
+  return { documents: cases.length, asked, wrong, untyped, askedPer100: per100(asked, cases.length), wrongPer100: per100(wrong, cases.length) };
+}
+
 export interface Measured {
   precision: number;
   recall: number;
@@ -166,12 +274,22 @@ export interface SetFigures {
   amounts: Measured;
   roles: Measured;
   noise: NoiseScore;
+  /** The questions a person would be shown, counted on the day each document reached them. */
+  asked: AskedScore;
   /** Each case that missed or added something, dates and amounts together. */
   wrong: CaseScore[];
 }
 
-/** One set's figures for a reader, over the cases the app asks it for dates and amounts. */
-export async function measure(cases: readonly EvalCase[], read: (evalCase: EvalCase) => Promise<Fact[]>): Promise<SetFigures> {
+/**
+ * One set's figures for a reader, over the cases the app asks it for dates
+ * and amounts. `dayOf` is the day a document reached its reader: the day a
+ * message was sent, or a file was kept.
+ */
+export async function measure(
+  cases: readonly EvalCase[],
+  read: (evalCase: EvalCase) => Promise<Fact[]>,
+  dayOf: (evalCase: EvalCase) => number,
+): Promise<SetFigures> {
   const asked = factCases(cases);
   const figures = (score: ReaderScore): Measured => ({
     precision: score.precision,
@@ -187,7 +305,14 @@ export async function measure(cases: readonly EvalCase[], read: (evalCase: EvalC
       return { id: date.id, found: date.found + amount.found, missed: date.missed + amount.missed, extra: date.extra + amount.extra };
     })
     .filter((c) => c.missed > 0 || c.extra > 0);
-  return { dates: figures(dates), amounts: figures(amounts), roles: await scoreRoles(asked, read), noise: await scoreNoise(asked, read), wrong };
+  return {
+    dates: figures(dates),
+    amounts: figures(amounts),
+    roles: await scoreRoles(asked, read),
+    noise: await scoreNoise(asked, read),
+    asked: await scoreAsked(asked, read, dayOf),
+    wrong,
+  };
 }
 
 /** Cases the app asks a model for dates and amounts: all but mail that states them as data. */
