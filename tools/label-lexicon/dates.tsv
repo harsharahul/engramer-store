@@ -1,0 +1,1895 @@
+# Bills and payments in general
+Payment due	due
+Due date	due
+Pay by	due
+Amount due by	due
+Payable by	due
+Due by	due
+Payment due by	due
+Payment due on receipt	due
+Minimum payment due by	due
+Total due by	due
+Balance due by	due
+Last day to pay	due
+Final payment date	due
+Final due date	due
+Next instalment due	due
+Next installment due	due
+Instalment due	due
+Instalment date	due
+Direct debit date	due
+Autopay date	due
+Autopay scheduled for	due
+Scheduled payment date	due
+Automatic payment date	due
+Standing order date	due
+Cheque must reach us by	due
+Remit by	due
+Remittance due	due
+Full payment due	due
+Full payment by	due
+Deposit payable by	due
+Balance payable by	due
+Balance due	due
+Balance payment due	due
+Remaining balance due	due
+Amount payable by	due
+Amount owing by	due
+Paying by	due
+Cleared funds required by	due
+Top up by	due
+Top-up due	due
+Date we will charge you	due
+Date of next charge	due
+Date of next payment	due
+Next charge date	due
+Next debit date	due
+Next collection	due
+Next direct debit	due
+Next autopay	due
+Next instalment	due
+Next installment	due
+Next card payment	due
+Next billing date	due
+Next bill due	due
+Next invoice due	due
+Billing renews on	due
+# Utility bills
+Gas payment due	due
+Electricity payment due	due
+Energy bill due	due
+Gas bill due	due
+Electricity bill due	due
+Sewerage payment due	due
+Council tax due	due
+Council tax payment due	due
+Council tax instalment due	due
+Next council tax payment	due
+Rates due	due
+Rates payment due	due
+Rates instalment due	due
+Service charge due	due
+Ground rent due	due
+Ground rent payable by	due
+Maintenance fee due	due
+Maintenance payment due	due
+HOA fee due	due
+HOA dues payable by	due
+Rent due	due
+Rent payable by	due
+Rent payment date	due
+Next rent due	due
+Next rent payment	due
+Meter reading due	due
+Submit meter reading by	due
+Give a reading by	due
+Meter reading required by	due
+Reading must be submitted by	due
+Disconnection date	due
+Disconnection after	due
+Service will be suspended on	due
+Service suspension date	due
+Fixed rate ends	expiry
+Fixed term ends	expiry
+Fixed price ends	expiry
+Tariff ends	expiry
+Tariff expires	expiry
+Your tariff ends on	expiry
+Fixed tariff end date	expiry
+Contract end date	expiry
+Energy contract ends	expiry
+Gas contract ends	expiry
+Electricity contract ends	expiry
+Broadband contract ends	expiry
+Minimum term ends	expiry
+Minimum contract ends	expiry
+Minimum term end date	expiry
+Initial term ends	expiry
+End of minimum term	expiry
+End of contract	expiry
+End of fixed term	expiry
+End of tariff	expiry
+Tariff end date	expiry
+# Phone and internet
+Mobile payment due	due
+Broadband bill due	due
+Broadband payment due	due
+Internet bill due	due
+Line rental due	due
+Monthly bill due	due
+Next monthly payment	due
+Your next bill is due	due
+Your next payment is due	due
+Your next payment is on	due
+Plan renews on	due
+Plan renewal	due
+Plan expires	expiry
+Plan ends	expiry
+Plan end date	expiry
+Data plan expires	expiry
+Data expires	expiry
+Data allowance expires	expiry
+Credit expires	expiry
+Airtime expires	expiry
+Balance expires	expiry
+Credit expiry	expiry
+SIM expires	expiry
+SIM expiry	expiry
+SIM card expires	expiry
+Number expires	expiry
+Roaming pass expires	expiry
+Add-on expires	expiry
+Bundle expires	expiry
+Bundle ends	expiry
+Bolt-on expires	expiry
+Package expires	expiry
+Package ends	expiry
+Contract ends	expiry
+Mobile contract ends	expiry
+Upgrade available on	event
+Upgrade date	event
+Early upgrade date	event
+Out of contract on	expiry
+Free from contract on	expiry
+Domain expires	expiry
+Domain renewal	due
+Domain renews on	due
+Domain expiry	expiry
+Hosting expires	expiry
+Hosting renews on	due
+Hosting renewal date	due
+Email plan renews	due
+Certificate expires	expiry
+SSL certificate expires	expiry
+SSL expiry	expiry
+Engineer visit date	event
+Engineer appointment	event
+Engineer arrives	event
+Engineer will arrive on	event
+Technician visit	event
+Router delivery	event
+New line activation	event
+Line activation date	event
+Go live date	event
+Connection date	event
+Service connection date	event
+# Card and bank statements
+Minimum payment due	due
+Minimum due by	due
+Statement balance due by	due
+New balance due by	due
+Cardholder payment due	due
+Credit card payment due	due
+Card payment due	due
+Card payment due by	due
+Overdraft limit expires	expiry
+Overdraft expires	expiry
+Arranged overdraft ends	expiry
+Overdraft ends	expiry
+Card expires	expiry
+Card expiry	expiry
+Card valid until	expiry
+Card valid thru	expiry
+Card valid through	expiry
+Card good thru	expiry
+Debit card expires	expiry
+Credit card expires	expiry
+Credit card expiry	expiry
+Debit card expiry	expiry
+Expiry date of card	expiry
+Valid thru	expiry
+Good thru	expiry
+Good through	expiry
+Month and year of expiry	expiry
+Exp date	expiry
+Cheque book expires	expiry
+Cheque validity ends	expiry
+Cheque stale after	expiry
+Account closes on	expiry
+Account closure date	expiry
+Account will close on	expiry
+Account closing date	expiry
+Account expires	expiry
+Account expiry	expiry
+Standing order next payment	due
+Standing order ends	expiry
+Standing order end date	expiry
+Direct debit ends	expiry
+Direct debit end date	expiry
+Mandate expires	expiry
+Mandate end date	expiry
+Interest rate ends	expiry
+Introductory rate ends	expiry
+Fixed rate period ends	expiry
+Bonus rate ends	expiry
+Bonus interest ends	expiry
+Savings bonus ends	expiry
+Maturity date	expiry
+Matures on	expiry
+Fixed term deposit matures	expiry
+Deposit matures	expiry
+Bond matures	expiry
+Bond maturity	expiry
+Certificate of deposit matures	expiry
+Savings maturity date	expiry
+ISA deadline	due
+ISA subscription deadline	due
+ISA transfer deadline	due
+# Loans and mortgages
+Loan payment due	due
+Loan instalment due	due
+Loan installment due	due
+Loan repayment due	due
+Next loan payment	due
+Next loan repayment	due
+Next repayment	due
+Next repayment due	due
+Repayment due	due
+Repayment date	due
+Monthly repayment due	due
+Monthly payment due	due
+Monthly payment date	due
+Mortgage payment due	due
+Mortgage payment date	due
+Next mortgage payment	due
+Next mortgage payment due	due
+Mortgage instalment due	due
+Mortgage installment due	due
+Mortgage direct debit date	due
+Mortgage due	due
+Payment day	due
+Payment day of month	due
+Monthly payment day	due
+Repayment day	due
+Collection date of payment	due
+Final payment due	due
+Final instalment due	due
+Final installment due	due
+Last payment due	due
+Last instalment due	due
+Last installment due	due
+Balloon payment due	due
+Balloon payment date	due
+Payoff by	due
+Pay off by	due
+Payoff quote valid until	expiry
+Payoff quote expires	expiry
+Redemption statement valid until	expiry
+Redemption figure valid until	expiry
+Early repayment charge ends	expiry
+Early repayment charges end	expiry
+Early repayment charge period ends	expiry
+ERC ends	expiry
+ERC expiry	expiry
+Fixed rate expiry	expiry
+Fixed rate expires	expiry
+Fixed rate end date	expiry
+Initial rate ends	expiry
+Initial rate period ends	expiry
+Initial period ends	expiry
+Introductory period ends	expiry
+Product ends	expiry
+Product expires	expiry
+Product end date	expiry
+Product expiry date	expiry
+Mortgage product ends	expiry
+Mortgage term ends	expiry
+Mortgage ends	expiry
+Mortgage end date	expiry
+Mortgage maturity date	expiry
+Loan ends	expiry
+Loan end date	expiry
+Loan term ends	expiry
+Loan maturity date	expiry
+Loan matures	expiry
+Loan expiry	expiry
+Loan expires	expiry
+Loan approval expires	expiry
+Loan approval valid until	expiry
+Approval valid until	expiry
+Approval expires	expiry
+Approval expiry	expiry
+Agreement ends	expiry
+Agreement end date	expiry
+Agreement expires	expiry
+Agreement expiry	expiry
+Finance agreement ends	expiry
+Finance ends	expiry
+Finance end date	expiry
+HP agreement ends	expiry
+PCP ends	expiry
+PCP end date	expiry
+Lease ends	expiry
+Lease expires	expiry
+Lease expiry	expiry
+Lease expiration	expiry
+Lease end date	expiry
+Car lease ends	expiry
+Vehicle lease ends	expiry
+Vehicle finance ends	expiry
+Car finance ends	expiry
+Payment holiday ends	expiry
+Payment holiday end date	expiry
+Payment break ends	expiry
+Deferral ends	expiry
+Forbearance ends	expiry
+Interest-only period ends	expiry
+Moratorium ends	expiry
+Student loan repayment due	due
+Next student loan payment	due
+# Taxes and government notices
+Tax payment due	due
+Tax due	due
+Tax due by	due
+Tax bill due	due
+Tax return due	due
+Tax return deadline	due
+Tax return due by	due
+File by	due
+File your return by	due
+File return by	due
+Filing deadline	due
+Filing due date	due
+Return due	due
+Return must be filed by	due
+Return deadline	due
+Submit return by	due
+Submit by	due
+Payment on account due	due
+Rates bill due	due
+Vehicle tax expires	expiry
+Registration expires	expiry
+Registration expiry	expiry
+Registration valid until	expiry
+Registration valid to	expiry
+Registration renewal due	due
+Registration renews on	due
+Register by	due
+Register before	due
+Claim by	due
+Claim deadline	due
+Claim before	due
+Apply by	due
+Application deadline	due
+Book by	due
+Booking deadline	due
+Booking closes	due
+Reservation deadline	due
+Order by	due
+Last orders	due
+Last day to order	due
+Last day to apply	due
+Last day to claim	due
+Last day to register	due
+Last day to cancel	due
+Last day to return	due
+Cut-off date	due
+Cutoff date	due
+Deadline	due
+Completion deadline	due
+Return by	due
+Due back	due
+Due back by	due
+Collect by	due
+Collect before	due
+Collect on or before	due
+Collect no later than	due
+Collection deadline	due
+Collection by	due
+Date of termination	expiry
+# Expiry, general wording
+Expires	expiry
+Expiry	expiry
+Date of expiry	expiry
+Expiration date	expiry
+Expires at	expiry
+Expires by	expiry
+Expires after	expiry
+Expiring	expiry
+Expiring at	expiry
+Expires end of	expiry
+Expiry day	expiry
+Expiration day	expiry
+Date of expiration	expiry
+Valid until	expiry
+Valid to	expiry
+Valid through	expiry
+Not valid after	expiry
+Validity ends	expiry
+Validity period ends	expiry
+Validity expires	expiry
+Validity end date	expiry
+Use by	expiry
+Use before	expiry
+Best before end	expiry
+Last date of validity	expiry
+Lapse date	expiry
+End of cover	expiry
+End of coverage	expiry
+End of warranty	expiry
+End of lease	expiry
+End of tenancy	expiry
+End of membership	expiry
+End of subscription	expiry
+# Invoices and quotes
+Invoice due	due
+Invoice due by	due
+Invoice payable by	due
+Invoice payment due	due
+Invoice payment terms	due
+Invoice to be paid by	due
+Terms due	due
+Net 30 due	due
+Terms of payment	due
+Quote valid until	expiry
+Quote expires	expiry
+Quote expiry	expiry
+Quote expiration	expiry
+Quotation valid until	expiry
+Quotation expires	expiry
+Quotation expiry	expiry
+Estimate valid until	expiry
+Estimate expires	expiry
+Estimate expiry	expiry
+Quote accepted by	due
+Accept by	due
+Accept before	due
+Accept this quote by	due
+Accept this estimate by	due
+Countersign by	due
+Execute by	due
+Approval needed by	due
+Approval required by	due
+Approve by	due
+Approve before	due
+Invoice date	none
+Date invoiced	none
+Invoiced on	none
+# Receipts and orders
+Order date	none
+Date ordered	none
+Order placed	none
+Date of order	none
+Ordered on	none
+Purchase date	none
+Date of purchase	none
+Purchased	none
+Date purchased	none
+Bought on	none
+Sold on	none
+Date sold	none
+Receipt date	none
+Date of receipt	none
+Return window ends	due
+Return window closes	due
+Return period ends	due
+Return period expires	due
+Return eligible until	due
+Eligible for return until	due
+Eligible for refund until	due
+Eligible for exchange until	due
+Refund by	due
+Refund before	due
+Refund window ends	due
+Refund period ends	due
+Refund deadline	due
+Refund available until	due
+Refund issued on	none
+Refund processed on	none
+Refunded on	none
+Date refunded	none
+Warranty registration deadline	due
+Register your product by	due
+Register your warranty by	due
+Register this product by	due
+Cancel by	due
+Cancel before	due
+Cancel no later than	due
+Cancel on or before	due
+Cancellation deadline	due
+Free cancellation until	due
+Free cancellation before	due
+Free cancellation ends	due
+Free cancellation expires	due
+Free cancellation available until	due
+Free cancellation by	due
+Free cancellation up to	due
+Confirm by	due
+Confirm before	due
+Confirm your booking by	due
+Confirm your attendance by	due
+Confirm attendance by	due
+Confirmation needed by	due
+Confirmation required by	due
+Confirmation due	due
+Confirmation deadline	due
+Confirm receipt by	due
+RSVP by	due
+RSVP before	due
+RSVP date	due
+RSVP deadline	due
+Kindly RSVP by	due
+Regrets by	due
+Regrets only by	due
+Let us know by	due
+Let us know before	due
+Notify us by	due
+Notify us before	due
+Tell us by	due
+Tell us before	due
+Inform us by	due
+Advise by	due
+Advise us by	due
+Choose by	due
+Select by	due
+Decide by	due
+Decision needed by	due
+Decision required by	due
+Return ballot by	due
+Return your ballot by	due
+# Deliveries and parcels
+Delivery date	event
+Delivery day	event
+Delivery by	event
+Delivery scheduled for	event
+Expected delivery	event
+Expected arrival	event
+Will arrive on	event
+Arriving by	event
+Arriving on	event
+Arrives by	event
+You should receive it by	event
+Should arrive by	event
+Should arrive on	event
+Next delivery	event
+Next delivery day	event
+Out for delivery on	event
+Next delivery attempt	event
+Second delivery attempt	event
+Final delivery attempt	event
+Dispatch by	event
+Ship date	event
+Dispatch date	event
+Dispatched on	none
+Date dispatched	none
+Shipped on	none
+Date shipped	none
+Date despatched	none
+Posted on	none
+Date posted	none
+Sent on	none
+Date sent	none
+Collected on	none
+Pick up date	event
+Pickup date	event
+Releases on	event
+Launch date	event
+Launches on	event
+Launching on	event
+Bin collection	event
+Bin collection day	event
+Bin day	event
+Next collection day	event
+# Subscriptions and memberships
+Subscription renews	due
+Subscription renewal	due
+Subscription expires	expiry
+Subscription expiry	expiry
+Subscription ends	expiry
+Subscription end date	expiry
+Subscription valid until	expiry
+Membership renews	due
+Membership renewal	due
+Membership renewal due	due
+Membership renewal deadline	due
+Membership due	due
+Membership fee due	due
+Membership fees due	due
+Membership dues	due
+Membership dues payable by	due
+Membership payment due	due
+Membership expires	expiry
+Membership expiry	expiry
+Membership expiration	expiry
+Membership ends	expiry
+Membership end date	expiry
+Membership valid until	expiry
+Member expires	expiry
+Member expiry	expiry
+Member valid until	expiry
+Membership card expires	expiry
+Membership card expiry	expiry
+Membership card valid until	expiry
+Membership card valid through	expiry
+Membership pass expires	expiry
+Membership pass expiry	expiry
+Gym membership expires	expiry
+Gym membership ends	expiry
+Gym membership renews	due
+Gym contract ends	expiry
+Gym contract end date	expiry
+Club membership expires	expiry
+Club membership renews	due
+Club membership due	due
+Club subscription due	due
+Annual subscription due	due
+Annual membership due	due
+Annual fee due	due
+Annual renewal	due
+Annual renewal due	due
+Annual plan renews	due
+Annual plan expires	expiry
+Annual pass expires	expiry
+Annual pass expiry	expiry
+Annual pass valid until	expiry
+Annual pass renews	due
+Annual pass renewal date	due
+Season ticket expires	expiry
+Season ticket valid until	expiry
+Season pass expires	expiry
+Season pass valid until	expiry
+Monthly pass expires	expiry
+Monthly pass valid until	expiry
+Weekly pass expires	expiry
+Weekly pass valid until	expiry
+Pass expires	expiry
+Pass valid until	expiry
+Travelcard expires	expiry
+Travelcard valid until	expiry
+Railcard expires	expiry
+Railcard valid until	expiry
+Oyster expires	expiry
+Oyster card expires	expiry
+Bus pass expires	expiry
+Bus pass valid until	expiry
+Parking permit expires	expiry
+Parking permit valid until	expiry
+Parking pass expires	expiry
+Parking pass valid until	expiry
+Parking expires	expiry
+Parking valid until	expiry
+Pay and display expires	expiry
+Pay and display valid until	expiry
+Void after	expiry
+Void on	expiry
+Void if not used by	expiry
+Void if not used before	expiry
+Voided on	none
+Date voided	none
+Activate by	due
+Activation deadline	due
+Activation required by	due
+Activate your card by	due
+# Insurance
+Policy end date	expiry
+Policy expires	expiry
+Policy expiry	expiry
+Policy ends	expiry
+Policy valid until	expiry
+Policy renewal date	due
+Policy renews	due
+Policy renewal due	due
+Policy lapses	expiry
+Cover ends	expiry
+Cover expires	expiry
+Cover expiry	expiry
+Cover end date	expiry
+Cover valid until	expiry
+Cover renews	due
+Cover renewal date	due
+Coverage ends	expiry
+Coverage expires	expiry
+Coverage end date	expiry
+Coverage expiry	expiry
+Coverage renews	due
+Coverage renewal date	due
+Insurance expires	expiry
+Insurance expiry	expiry
+Insurance ends	expiry
+Insurance end date	expiry
+Insurance valid until	expiry
+Insurance renews	due
+Insurance renewal	due
+Insurance premium due	due
+Premium due	due
+Premium due by	due
+Premium payment due	due
+Premium payable by	due
+Next premium due	due
+Next premium payment	due
+Next premium date	due
+Renewal premium due	due
+Renewal due	due
+Renewal due by	due
+Renewal date	due
+Renewal day	due
+Renewal deadline	due
+Renewal notice due	due
+Renewal quote valid until	expiry
+Renews on	due
+Renewing on	due
+Renews by	due
+Renew by	due
+Renew before	due
+Renew on	due
+Renew now by	due
+Renew your policy by	due
+Must renew by	due
+To renew by	due
+Auto-renews on	due
+Auto-renewal date	due
+Automatic renewal date	due
+Automatically renews on	due
+Will renew on	due
+Will automatically renew on	due
+Will auto-renew on	due
+Set to renew on	due
+Scheduled to renew on	due
+Next renewal	due
+Next renewal due	due
+Upcoming renewal	due
+Last day to renew	due
+Cancel renewal by	due
+Cancel auto-renewal by	due
+Cancel before renewal	due
+Cancel before it renews on	due
+Excess due	due
+Claim excess due	due
+Report claim by	due
+Report a claim by	due
+Notify claim by	due
+Cooling-off period ends	due
+Travel insurance expires	expiry
+Travel insurance valid until	expiry
+Travel insurance valid to	expiry
+Travel cover ends	expiry
+Travel cover expires	expiry
+Car insurance expires	expiry
+Car insurance renewal	due
+Car insurance renews	due
+Car insurance expiry	expiry
+Motor insurance expires	expiry
+Motor insurance renewal	due
+Motor insurance renews	due
+Motor insurance expiry	expiry
+Home insurance expires	expiry
+Home insurance renewal	due
+Home insurance renews	due
+Home insurance expiry	expiry
+Home insurance ends	expiry
+Health insurance expires	expiry
+Health insurance renewal	due
+Health insurance renews	due
+Health insurance expiry	expiry
+Pet insurance expires	expiry
+Pet insurance renewal	due
+Pet insurance renews	due
+Pet insurance expiry	expiry
+Pet insurance ends	expiry
+Life insurance expires	expiry
+Life insurance ends	expiry
+Life insurance term ends	expiry
+Life insurance renewal	due
+Life insurance premium due	due
+Breakdown cover expires	expiry
+Breakdown cover ends	expiry
+Breakdown cover renews	due
+Breakdown cover renewal date	due
+Breakdown cover expiry	expiry
+Breakdown cover valid until	expiry
+Insurance certificate expires	expiry
+Insurance certificate valid until	expiry
+Certificate of insurance expires	expiry
+Certificate of insurance expiry	expiry
+Insurance certificate expiry	expiry
+Insurance certificate valid to	expiry
+Policy start date	none
+Policy inception	none
+Policy effective	none
+Policy commences	none
+Policy commencement date	none
+Cover starts	none
+Cover start date	none
+Cover commences	none
+Cover commencement date	none
+Cover effective	none
+Start of cover	none
+Start of policy	none
+Start of insurance	none
+Coverage starts	none
+Coverage start date	none
+Coverage begins	none
+Coverage effective	none
+Insurance start date	none
+Insurance starts	none
+Insurance begins	none
+Insurance effective	none
+Date of loss	none
+Loss date	none
+Date of incident	none
+Incident date	none
+Date of accident	none
+Accident date	none
+Date of damage	none
+Damage date	none
+Date of theft	none
+Theft date	none
+Date reported	none
+Reported on	none
+Report date	none
+Date of report	none
+Date of claim	none
+Claim date	none
+Date claim submitted	none
+Date claim opened	none
+Date claim received	none
+Date claim registered	none
+Date claim closed	none
+Date claim settled	none
+Claim reference date	none
+Policy issued	issued
+Policy issue date	issued
+Certificate issue date	issued
+# Warranties
+Warranty expires	expiry
+Warranty expiry	expiry
+Warranty ends	expiry
+Warranty end date	expiry
+Warranty valid until	expiry
+Warranty renews	due
+Warranty renewal	due
+Extended warranty expires	expiry
+Extended warranty ends	expiry
+Extended warranty expiry	expiry
+Extended warranty valid until	expiry
+Extended warranty renews	due
+Guarantee expires	expiry
+Guarantee expiry	expiry
+Guarantee ends	expiry
+Guarantee valid until	expiry
+Guarantee valid to	expiry
+Guarantee period ends	expiry
+Guarantee runs until	expiry
+Guarantee end date	expiry
+Guarantee covers until	expiry
+Boiler warranty expires	expiry
+Boiler guarantee expires	expiry
+Boiler warranty ends	expiry
+Boiler cover ends	expiry
+Boiler cover expires	expiry
+Boiler cover renewal	due
+Boiler cover renews	due
+Boiler service due	due
+Boiler service due by	due
+Next boiler service	due
+Annual service due	due
+Next service due	due
+Next service date	due
+Service due	due
+Warranty start date	none
+Warranty starts	none
+Warranty begins	none
+Warranty commences	none
+Warranty effective	none
+Warranty registered on	none
+Warranty registration date	none
+Date warranty registered	none
+Date of warranty registration	none
+Warranty activated	none
+Warranty activation date	none
+Date warranty activated	none
+Warranty purchased	none
+Warranty purchase date	none
+Date warranty purchased	none
+Date of warranty purchase	none
+Warranty issue date	issued
+# Identity documents, licences, permits and visas
+Passport expiry date	expiry
+Passport expires	expiry
+Passport valid until	expiry
+Passport valid to	expiry
+Passport issue date	issued
+Passport renewal due	due
+Renew passport by	due
+ID card expires	expiry
+ID card expiry date	expiry
+ID expires	expiry
+ID expiry	expiry
+Identity card expires	expiry
+National ID expires	expiry
+Driving licence expires	expiry
+Driving license expires	expiry
+Driving licence expiry	expiry
+Driver licence expiry	expiry
+Driver's licence expires	expiry
+Driver's license expires	expiry
+Driver license expiration	expiry
+Driving licence valid until	expiry
+Driving licence photocard expires	expiry
+Licence expires	expiry
+License expires	expiry
+Licence expiry	expiry
+License expiry	expiry
+License expiration date	expiry
+Licence valid until	expiry
+License valid until	expiry
+Licence valid to	expiry
+License valid through	expiry
+Licence renewal due	due
+License renewal due	due
+Licence renewal date	due
+License renewal date	due
+Licence renews	due
+License renews	due
+Licence renewal deadline	due
+License renewal deadline	due
+Renew licence by	due
+Renew license by	due
+Licence issue date	issued
+License issue date	issued
+Date of issue	issued
+Issue date	issued
+Issued	issued
+Date issued	issued
+Visa expires	expiry
+Visa expiry	expiry
+Visa valid until	expiry
+Visa valid to	expiry
+Visa valid through	expiry
+Visa issue date	issued
+Visa issued	issued
+Work permit expires	expiry
+Work permit expiry	expiry
+Work permit valid until	expiry
+Residence permit expires	expiry
+Residence permit expiry	expiry
+Residence permit valid until	expiry
+Permit expires	expiry
+Permit expiry	expiry
+Permit valid until	expiry
+Permit valid to	expiry
+Permit valid through	expiry
+Permit renewal date	due
+Permit renewal due	due
+Permit renews	due
+Permit end date	expiry
+Permit issue date	issued
+Must leave by	due
+Depart by	due
+Visa appointment	event
+Visa interview	event
+Passport appointment	event
+Passport collection date	event
+Licence test date	event
+License test date	event
+Driving test date	event
+Theory test date	event
+Practical test date	event
+Blue badge expires	expiry
+Blue badge expiry	expiry
+Blue badge valid until	expiry
+Certificate expiry	expiry
+Certificate valid until	expiry
+Certificate valid to	expiry
+Certificate valid through	expiry
+Certification expires	expiry
+Certification expiry	expiry
+Certification valid until	expiry
+Certification renewal due	due
+Certificate renewal due	due
+Certificate renewal date	due
+Recertification due	due
+Recertification due by	due
+Recertify by	due
+Revalidation due	due
+Revalidation due by	due
+Revalidate by	due
+Re-registration due	due
+Re-registration deadline	due
+Reregistration due	due
+Annual registration due	due
+Annual registration renewal	due
+Annual practising certificate expires	expiry
+Annual practicing certificate expires	expiry
+Practising certificate expires	expiry
+Practicing certificate expires	expiry
+Professional registration expires	expiry
+Professional registration renewal	due
+Professional membership expires	expiry
+Professional membership renews	due
+Professional membership due	due
+# Vehicles
+MOT due	due
+MOT due by	due
+MOT expires	expiry
+MOT expiry	expiry
+MOT valid until	expiry
+MOT test date	event
+Next MOT due	due
+Next MOT	due
+Inspection due	due
+Next inspection	due
+Vehicle purchase date	none
+Date vehicle purchased	none
+Date of vehicle purchase	none
+Car purchase date	none
+Date car purchased	none
+Date of car purchase	none
+First registration	none
+First registered	none
+Date of first registration	none
+Registered on	none
+Date registered	none
+Date of manufacture	none
+Build date	none
+Last MOT date	none
+Last inspection date	none
+Last service	none
+Last serviced	none
+Date of last service	none
+# Property and tenancy
+Tenancy end date	expiry
+Tenancy ends	expiry
+Tenancy expires	expiry
+Tenancy expiry	expiry
+Fixed term end date	expiry
+Fixed term expires	expiry
+Tenancy renewal date	due
+Tenancy renews	due
+Tenancy renewal due	due
+Tenancy break date	due
+Break clause date	due
+Break clause deadline	due
+Break clause notice by	due
+Break clause expires	expiry
+Notice to quit by	due
+Notice to vacate by	due
+Notice to leave by	due
+Give notice by	due
+Give notice before	due
+Notice must be given by	due
+Notice deadline	due
+Notice due	due
+Notice due by	due
+Notice required by	due
+Lease renewal date	due
+Lease renews	due
+Lease terminates	expiry
+Rent payment due	due
+Rent payment due by	due
+Deposit return date	event
+Deposit returned by	event
+Deposit must be protected by	due
+Move-in date	event
+Move-in day	event
+Move-out date	event
+Move-out day	event
+Date of possession	event
+Viewing date	event
+Viewing booked for	event
+Viewing scheduled	event
+Viewing scheduled for	event
+Viewing time	event
+Viewing appointment	event
+Viewing day	event
+Inspection scheduled	event
+Inspection scheduled for	event
+Inspection booked for	event
+Inspection appointment	event
+Inspection day	event
+Next PAT test	due
+# Air travel
+Departs	depart
+Departing	depart
+Departure time	depart
+Outbound departure	depart
+Outbound flight	depart
+Flight date	depart
+Flight departs	depart
+Flight departure	depart
+Flight leaves	depart
+Travel date	depart
+Travelling on	depart
+Traveling on	depart
+Date of travel	depart
+Date of journey	depart
+Date of flight	depart
+Date of departure	depart
+Journey date	depart
+Sailing date	depart
+Sails	depart
+Cruise departs	depart
+Cruise departure	depart
+Embarkation	depart
+Embarks	depart
+Embarking	depart
+Outward journey	depart
+Outward date	depart
+Outward travel	depart
+Outward flight	depart
+Flying out	depart
+Flying on	depart
+Flights depart	depart
+Arrives	arrive
+Arriving at	arrive
+Lands	arrive
+Landing	arrive
+Landing at	arrive
+Scheduled arrival	arrive
+Scheduled landing	arrive
+Arrival time	arrive
+Flight arrives	arrive
+Flight arrival	arrive
+Flight lands	arrive
+Arrives at	arrive
+Due to arrive	arrive
+Due to land	arrive
+Disembark	arrive
+Disembarks	arrive
+Disembarkation	arrive
+Cruise ends	arrive
+Return flight	depart
+Return flight departs	depart
+Return departure	depart
+Return journey	depart
+Return trip	depart
+Flying back	depart
+Flying home	depart
+Check-in opens	event
+Check-in closes	event
+Online check-in opens	event
+Online check-in closes	event
+Check-in opens at	event
+Check-in closes at	event
+Bag drop opens	event
+Bag drop closes	event
+Baggage drop closes	event
+Gate closes	event
+Gate opens	event
+Boarding closes	event
+Boarding opens	event
+Boarding starts	event
+Boarding begins	event
+Boarding time	event
+Boarding at	event
+Check-in	check-in
+Checking in	check-in
+Check-in day	check-in
+Check-in time	check-in
+Check-out	check-out
+Checking out	check-out
+Check-out by	check-out
+Check-out day	check-out
+Check-out time	check-out
+Seat selection closes	due
+Seat selection deadline	due
+Online check-in deadline	due
+Check-in deadline	due
+Check-in cut-off	due
+Checking in by	due
+Check in by	due
+Check in before	due
+Check in no later than	due
+Please check in by	due
+Please check in before	due
+# Rail, coach and ferry
+Train departs	depart
+Train departure	depart
+Train leaves	depart
+Train departing	depart
+Train date	depart
+Train travel date	depart
+Train journey	depart
+Rail journey	depart
+Rail travel date	depart
+Travel by train on	depart
+Coach departs	depart
+Coach departure	depart
+Coach leaves	depart
+Coach date	depart
+Coach travel date	depart
+Coach journey	depart
+Bus departs	depart
+Bus departure	depart
+Bus leaves	depart
+Bus date	depart
+Bus travel date	depart
+Bus journey	depart
+Ferry departs	depart
+Ferry departure	depart
+Ferry leaves	depart
+Ferry date	depart
+Ferry sailing	depart
+Ferry crossing	depart
+Ferry journey	depart
+Crossing date	depart
+Sailing time	depart
+Outbound journey	depart
+Outbound train	depart
+Outbound coach	depart
+Outbound ferry	depart
+Return train	depart
+Return coach	depart
+Return ferry	depart
+Return sailing	depart
+Return crossing	depart
+Train arrives	arrive
+Train arrival	arrive
+Train arrives at	arrive
+Coach arrives	arrive
+Coach arrival	arrive
+Bus arrives	arrive
+Bus arrival	arrive
+Ferry arrives	arrive
+Ferry arrival	arrive
+Return ticket valid until	expiry
+Return ticket valid to	expiry
+Return ticket expires	expiry
+Season ticket purchased	none
+Season ticket purchase date	none
+Season ticket issued	issued
+Season ticket issue date	issued
+# Car hire
+Pick-up time	event
+Pickup time	event
+Pick-up day	event
+Pickup day	event
+# Hotels and stays
+Check-in after	check-in
+Check-in from time	check-in
+Check-out before	check-out
+Check-out until	check-out
+# Event tickets
+Event date	event
+Show date	event
+Concert date	event
+Match date	event
+Game date	event
+Race date	event
+Festival dates	event
+Festival date	event
+Date of event	event
+Date of performance	event
+Date of show	event
+Event starts	event
+Event begins	event
+Event day	event
+Show starts	event
+Tour date	event
+Screening date	event
+Exhibition date	event
+Exhibition opens	event
+Exhibition ends	expiry
+Exhibition runs until	expiry
+Wedding date	event
+Date of wedding	event
+Ceremony date	event
+Reception date	event
+Party date	event
+Date of party	event
+Birthday party	event
+Funeral date	event
+Funeral service	event
+Memorial date	event
+Memorial service	event
+Graduation date	event
+Graduation ceremony	event
+Graduation day	event
+Commencement ceremony	event
+Prize giving	event
+Awards ceremony	event
+Conference date	event
+Conference dates	event
+Conference starts	event
+Conference begins	event
+Seminar date	event
+Workshop date	event
+Webinar date	event
+Webinar starts	event
+Talk date	event
+Lecture date	event
+Meeting date	event
+Next meeting	event
+AGM date	event
+Annual general meeting	event
+General meeting	event
+Board meeting	event
+Meeting scheduled	event
+Meeting scheduled for	event
+Call date	event
+Call scheduled	event
+Call scheduled for	event
+Video call	event
+# Appointments
+Appointment	event
+Appointment time	event
+Appointment scheduled	event
+Appointment scheduled for	event
+Appointment booked for	event
+Appointment confirmed for	event
+Your appointment	event
+Your appointment is on	event
+Your next appointment	event
+Next appointment	event
+Next visit	event
+Upcoming appointment	event
+Follow-up appointment	event
+Follow-up date	event
+Follow-up visit	event
+Review appointment	event
+Consultation date	event
+Consultation scheduled	event
+Consultation scheduled for	event
+Consult date	event
+Visit date	event
+Visit scheduled	event
+Visit scheduled for	event
+Home visit	event
+Doctor appointment	event
+Doctor's appointment	event
+GP appointment	event
+Dentist appointment	event
+Dental appointment	event
+Hygienist appointment	event
+Optician appointment	event
+Eye test date	event
+Eye test appointment	event
+Eye test due	due
+Hospital appointment	event
+Clinic appointment	event
+Clinic date	event
+Clinic visit	event
+Outpatient appointment	event
+Specialist appointment	event
+Surgery date	event
+Operation date	event
+Procedure date	event
+Scan date	event
+Scan appointment	event
+Screening appointment	event
+Test appointment	event
+Blood test appointment	event
+Blood test date	event
+Vaccination date	event
+Vaccination appointment	event
+Vaccine appointment	event
+Vaccine date	event
+Jab date	event
+Booster due	due
+Booster date	event
+Booster appointment	event
+Injection date	event
+Physio appointment	event
+Physiotherapy appointment	event
+Therapy appointment	event
+Therapy session	event
+Counselling appointment	event
+Counselling session	event
+Session date	event
+Session scheduled	event
+Session scheduled for	event
+Next session	event
+First session	event
+First appointment	event
+First visit	event
+Lesson date	event
+Lesson scheduled	event
+Lesson scheduled for	event
+Next lesson	event
+First lesson	event
+Class begins	event
+Class starts	event
+Class date	event
+Next class	event
+First class	event
+Course starts	event
+Course begins	event
+Course start date	event
+Course date	event
+Course dates	event
+Training date	event
+Training dates	event
+Training starts	event
+Interview date	event
+Interview scheduled	event
+Interview scheduled for	event
+Interview time	event
+Your interview	event
+Hearing date	event
+Hearing scheduled	event
+Hearing scheduled for	event
+Court date	event
+Court hearing	event
+Tribunal date	event
+Tribunal hearing	event
+Mediation date	event
+Mediation session	event
+Meeting with solicitor	event
+Solicitor appointment	event
+Lawyer appointment	event
+Legal appointment	event
+Bank appointment	event
+Branch appointment	event
+Mortgage appointment	event
+Mortgage advice appointment	event
+Review meeting	event
+Adviser appointment	event
+Advisor appointment	event
+Accountant appointment	event
+Vet appointment	event
+Vet visit	event
+Grooming appointment	event
+Grooming date	event
+Kennel check-in	event
+Kennel check-out	event
+Cattery check-in	event
+Cattery check-out	event
+Repair appointment	event
+Repair visit	event
+Repair date	event
+Repair booked for	event
+Maintenance visit	event
+Maintenance date	event
+Maintenance scheduled	event
+Maintenance scheduled for	event
+Engineer date	event
+Engineer booked for	event
+Engineer scheduled	event
+Engineer scheduled for	event
+Engineer arriving	event
+Engineer attending	event
+Boiler service appointment	event
+Boiler service date	event
+Boiler service booked for	event
+Service visit	event
+Service call	event
+Site visit	event
+Survey visit	event
+Fitting visit	event
+Fitter visit	event
+Cleaning date	event
+Cleaning appointment	event
+Cleaning visit	event
+Gardening date	event
+Start on site	event
+Work starts	event
+Work begins	event
+Works start	event
+Works begin	event
+Works commence	event
+Work start date	event
+Work to start	event
+Works to start	event
+Work due to start	event
+Works due to start	event
+Works due to finish	event
+Work due to finish	event
+Work completion date	event
+Works completion date	event
+Estimated start date	event
+Estimated completion date	event
+Estimated finish	event
+Expected start	event
+Expected completion	event
+Expected finish	event
+Power outage date	event
+# General letters and notices
+Please pay by	due
+Respond by	due
+Reply by	due
+Please reply by	due
+Please respond by	due
+Please confirm by	due
+Please confirm before	due
+Please contact us by	due
+Hand in by	due
+Hand-in date	due
+Return before	due
+Please let us know by	due
+Estimated delivery	event
+Exam date	event
+Exam starts	event
+Exam scheduled	event
+Exam scheduled for	event
+Exam time	event
+Examination date	event
+Assessment date	event
+Next exam	event
+Term starts	event
+Term begins	event
+Start of term	event
+First day of term	event
+First day of school	event
+First day at school	event
+Orientation date	event
+Orientation day	event
+Induction date	event
+Induction day	event
+Prom date	event
+Degree ceremony	event
+Enrolment day	event
+Enrollment day	event
+Registration day	event
+Half term starts	event
+Half term begins	event
+School holiday starts	event
+Holiday starts on	event
+Last day of term	event
+Last day of school	event
+Term ends	event
+End of term date	event
+First day at work	event
+First day of work	event
+First day of employment	event
+Onboarding date	event
+Last working day	event
+Last day of work	event
+Last day of employment	event
+Last day at work	event
+Date of leaving	event
+Leave starts	event
+Leave begins	event
+Annual leave starts	event
+Return to work	event
+Returning to work	event
+Back at work	event
+Probation review date	event
+Performance review date	event
+Pay review date	event
+Salary review date	event
+Library card expires	expiry
+Library card expiry	expiry
+Library membership expires	expiry
+Hold pickup deadline	due
+Training course date	event
+Course ends	expiry
+Course end date	expiry
+Course finishes	expiry
+Training expires	expiry
+Training expiry	expiry
+Training valid until	expiry
+Application closing date	due
+Applications close on	due
+# Healthcare, prescriptions and pets
+Prescription expires	expiry
+Prescription valid until	expiry
+Prescription expiry	expiry
+Repeat prescription due	due
+Repeat prescription due by	due
+Prescription renewal due	due
+Order repeat prescription by	due
+Prescription ready	event
+Prescription collection date	event
+Medication due	due
+Medication expires	expiry
+Medicine expires	expiry
+Medicine expiry	expiry
+Medicine use by	expiry
+Vaccination due	due
+Vaccination due by	due
+Vaccination expires	expiry
+Vaccination valid until	expiry
+Vaccine due	due
+Vaccine expires	expiry
+Booster due by	due
+Next vaccination due	due
+Next vaccination	due
+Next booster due	due
+Check-up due	due
+Checkup due	due
+Check-up due by	due
+Next check-up	event
+Next checkup	event
+Annual check-up due	due
+Screening due	due
+Screening invitation expires	expiry
+Referral expires	expiry
+Referral valid until	expiry
+Referral expiry	expiry
+Authorisation valid until	expiry
+Authorization valid until	expiry
+Authorisation expires	expiry
+Authorization expires	expiry
+Pre-authorisation expires	expiry
+Pre-authorization expires	expiry
+Treatment plan expires	expiry
+Treatment plan ends	expiry
+Treatment ends	expiry
+Course of treatment ends	expiry
+Medical card expires	expiry
+Health card expires	expiry
+Health card expiry	expiry
+EHIC expires	expiry
+GHIC expires	expiry
+Vet booster due	due
+Pet vaccination due	due
+Pet vaccination expires	expiry
+Next pet vaccination	due
+Pet passport expires	expiry
+Pet passport valid until	expiry
+Prescribed on	none
+Date of result	none
+# Charities, investments and pensions
+Date of donation	none
+Donation date	none
+Grant date	none
+Award date	none
+Contribution deadline	due
+Contribution due	due
+Pension contribution due	due
+Pension contribution deadline	due
+Top up deadline	due
+Tax relief claim deadline	due
+Gift Aid claim deadline	due
+Subscription deadline	due
+Bond renewal date	due
+Bond renews	due
+Fixed rate bond matures	expiry
+Fixed rate bond ends	expiry
+Notice account notice ends	expiry
+Policy matures	expiry
+Policy maturity date	expiry
+Endowment matures	expiry
+Endowment maturity date	expiry
+Plan matures	expiry
+Plan maturity date	expiry
+Investment matures	expiry
+Investment maturity date	expiry
+Fund closes	expiry
+Account matures	expiry
+Account maturity date	expiry
+# Courts and legal papers
+Hearing time	event
+Hearing day	event
+Court appearance	event
+Court date set	event
+Appear before court on	event
+Appear on	event
+Appear at court on	event
+Appear in court on	event
+Date of hearing	event
+Date of trial	event
+Date of tribunal	event
+Date of mediation	event
+Case management conference	event
+Case conference	event
+Pre-trial hearing	event
+Pre-trial date	event
+Directions hearing	event
+Sentencing date	event
+Date of sentencing	event
+Jury service date	event
+Jury service starts	event
+Jury duty date	event
+Jury duty starts	event
+Report to court on	event
+Report to court by	due
+Witness attendance date	event
+Deposition date	event
+Date of deposition	event
+Date of probate	none
+Date of death	none
+Case opened	none
+Case closed	none
+Date of service of claim	none
+Date served	none
+Date observed	none
+# Administrative dates
+Statement date	none
+Date of statement	none
+Invoice dated	none
+Date of invoice	none
+Bill date	none
+Date of bill	none
+Date printed	none
+Printed on	none
+Print date	none
+Date of printing	none
+Date generated	none
+Generated on	none
+Date of generation	none
+Date prepared	none
+Prepared on	none
+Date of preparation	none
+Date created	none
+Created on	none
+Creation date	none
+Date of creation	none
+Compiled on	none
+Date produced	none
+Produced on	none
+Written on	none
+Drafted on	none
+Date of letter	none
+Letter date	none
+Date of this letter	none
+Date of this notice	none
+Date of notice	none
+Date of this statement	none
+Date of this document	none
+Document date	none
+Date of document	none
+Date of certificate	none
+Certificate date	none
+Date of this report	none
+Version date	none
+Revision date	none
+Date of revision	none
+Last updated	none
+Last modified	none
+Last reviewed	none
+Rates as at	none
+Balance as at	none
+As at	none
+Date of enquiry	none
+Enquiry date	none
+Date of request	none
+Request date	none
+Requested on	none
+Date requested	none
+Date of application	none
+Application date	none
+Applied on	none
+Date applied	none
+Date submitted	none
+Submitted on	none
+Lodged on	none
+Filed on	none
+Logged on	none
+Recorded on	none
+Entered on	none
+Date received	none
+Received on	none
+Date of receipt of order	none
+Date processed	none
+Processed on	none
+Date of processing	none
+Date posted to account	none
+Posting date	none
+Transaction date	none
+Date of transaction	none
+Transaction dated	none
+Transaction time	none
+Trade date	none
+Date of trade	none
+Traded on	none
+Settled on	none
+Cleared on	none
+Booked on	none
+Confirmed on	none
+Booking confirmation date	none
+Confirmation date	none
+Reservation made	none
+Reserved on	none
+Date enrolled	none
+Enrolled on	none
+Date signed	none
+Signed on	none
+Date of signature	none
+Signature date	none
+Opened on	none
+Account opened	none
+Date account opened	none
+Account opening date	none
+Date of opening	none
+Date joined	none
+Joined on	none
+Member since	none
+Customer since	none
+Visited on	none
+Attended on	none
+Seen on	none
+Treated on	none
+Date admitted	none
+Admitted on	none
+Date discharged	none
+Discharged on	none
+Examined on	none
+Tested on	none
+Inspected on	none
+Surveyed on	none
+Serviced on	none
+Repaired on	none
+Installed on	none
+Fitted on	none
+Date completed	none
+Completed on	none
+Finished on	none
+Date of completion of work	none
+Date approved	none
+Approved on	none
+Authorised on	none
+Authorized on	none
+Accepted on	none
+Declined on	none
+Rejected on	none
+Terminated on	none
+Closed on	none
+Account closed	none
+Date account closed	none
+Date of deposit	none
+Deposit date	none
+Deposited on	none
+Credited on	none
+Debited on	none
+Transferred on	none
+Date of quote	none
+Quote date	none
+Quoted on	none
+Quotation date	none
+Estimate date	none
+Proposal date	none
+Date of proposal	none
+Date of enquiry made	none
+Billing period	none
+Billing cycle	none
+Statement period	none
+Period covered	none
+Period covered by this statement	none
+Period covered by this bill	none
+Period covered by this invoice	none
+Service period	none
+Reading period	none
+Tax year	none
+Period ending	none
+Period end	none
+Valuation date	none
+Date of valuation	none
+Last statement date	none
+Previous statement date	none
+Last bill date	none
+Previous bill date	none
+Last reading	none
+Last meter reading	none
+Date of reading	none
+Date of meter reading	none
+Last visit	none
+Last activity	none
+Last login	none
+Last transaction	none
+Last valuation date	none
+Date of contract	none
+Contract date	none
+Agreement date	none
+Date of agreement	none
+Account start date	none
+Plan start date	none
+Tariff start date	none
+Date of lease	none
+Membership start date	none
+Subscription start date	none
+Loan start date	none
+Loan date	none
+Date of loan	none
+Mortgage start date	none
+Mortgage date	none
+Date of mortgage	none
+Next statement date	none
+Next statement closing date	none
+Next statement closes	none
+Next meter reading	none
+Next reading	none
+Tier review date	none
+Next invoice date	none
+Check-in from	check-in
+Leaving	depart
