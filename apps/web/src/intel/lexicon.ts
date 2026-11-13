@@ -83,10 +83,10 @@ export function parseLabelTable(source: string): { rows: [string, LabelMeaning][
   return { rows, problems: [...clashes, ...problems] };
 }
 
-export function lexiconFrom(rows: readonly (readonly [string, string])[]): Lexicon {
+export function lexiconFrom(rows: readonly (readonly string[])[]): Lexicon {
   const dates = new Map<string, LabelMeaning>();
   for (const [label, meaning] of rows) {
-    if (isMeaning(meaning)) {
+    if (label !== undefined && meaning !== undefined && isMeaning(meaning)) {
       dates.set(label, meaning);
     }
   }
@@ -104,7 +104,7 @@ let loading: Promise<Lexicon> | null = null;
 /** The shipped table, loaded on first use and kept. */
 export function loadLexicon(): Promise<Lexicon> {
   loading ??= import("./tables/labels.json").then((mod) => {
-    const table = (mod.default ?? mod) as { dates: [string, string][] };
+    const table: { dates: readonly (readonly string[])[] } = mod.default ?? mod;
     return lexiconFrom(table.dates);
   });
   return loading;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { guessDocumentKind, harvestFacts, labelledFacts, structuralDatedFacts } from "./labels";
+import { fieldLines, guessDocumentKind, harvestFacts, labelledFacts, settledNowhere, structuralDatedFacts } from "./labels";
+import { lexiconFrom } from "./lexicon";
 import { subjectOf } from "./subject";
 
 describe("labelledFacts", () => {
@@ -694,5 +695,133 @@ describe("a date line and the clock lines under it", () => {
     const notice = "Reply by 12 March 2027. Our office is open 9:00 to 17:00.";
     expect(labelledFacts(notice).find((fact) => fact.kind === "due")).toMatchObject({ value: "2027-03-12" });
     expect(labelledFacts(notice).find((fact) => fact.kind === "due")?.time).toBeUndefined();
+  });
+});
+
+describe("a form line read by what its label means", () => {
+  // A small table, as the shipped one is shaped: normalized label to meaning.
+  const table = lexiconFrom([
+    ["statement", "none"],
+    ["booked", "none"],
+    ["order", "none"],
+    ["date processed", "none"],
+    ["cover ends", "expiry"],
+    ["good through", "expiry"],
+    ["direct debit", "due"],
+    ["class begins", "event"],
+    ["delivery", "event"],
+    ["sailing", "depart"],
+  ]);
+  const read = (text: string, writtenAt?: number, claimed: string[] = []) =>
+    structuralDatedFacts(text, new Set(claimed), { lexicon: table, ...(writtenAt !== undefined ? { writtenAt } : {}) }).map((fact) => [
+      fact.kind,
+      fact.value,
+      fact.time,
+      fact.label,
+      fact.confidence,
+    ]);
+
+  it("a statement's own day is nobody's business: nothing is read from its line", () => {
+    expect(read("Statement date: 3 February 2027\nBooked on: 10 Feb 2027\nOrder date: 12 January 2027")).toEqual([]);
+  });
+
+  it("a label the table knows is a typed reading, under the document's own words", () => {
+    expect(read("Cover ends: 30 November 2027")).toEqual([["expiry", "2027-11-30", undefined, "Cover ends", 0.7]]);
+    expect(read("Direct debit date: 18 March 2027")).toEqual([["due", "2027-03-18", undefined, "Direct debit date", 0.7]]);
+    expect(read("Class begins: Tuesday 2 November 2027 at 6:30 PM")).toEqual([["event", "2027-11-02", "18:30", "Class begins", 0.7]]);
+  });
+
+  it("an end of a journey or a stay carries its role", () => {
+    const [sailing] = structuralDatedFacts("Sailing date: 2 July 2027, 07:30", new Set(), { lexicon: table });
+    expect(sailing).toMatchObject({ kind: "event", value: "2027-07-02", time: "07:30", label: "Sailing date" });
+    expect(subjectOf(sailing!)).toMatchObject({ role: "depart" });
+  });
+
+  it("a label the table does not hold is kept with its own words, as before", () => {
+    expect(read("Boarding group: 12 March 2027")).toEqual([["dated", "2027-03-12", undefined, "Boarding group", 0.4]]);
+    // And with no table at all, every line is read as before.
+    expect(structuralDatedFacts("Statement date: 3 February 2027", new Set()).map((fact) => [fact.kind, fact.label])).toEqual([["dated", "Statement date"]]);
+  });
+
+  it("a line that is nobody's business and also states a deadline keeps the deadline", () => {
+    const text = "Statement date: 3 Feb 2027, pay by 20 Feb 2027";
+    const typed = labelledFacts(text);
+    expect(typed.map((fact) => [fact.kind, fact.value])).toEqual([["due", "2027-02-20"]]);
+    expect(read(text, undefined, typed.map((fact) => fact.value))).toEqual([]);
+  });
+
+  it("a date with no year on a typed line in a message is read; an expiry never, and an unknown label never", () => {
+    const sent = Date.UTC(2026, 10, 9, 12);
+    expect(read("Delivery: Thursday, November 12", sent)).toEqual([["event", "2026-11-12", undefined, "Delivery", 0.5]]);
+    expect(read("Good through: November 12", sent)).toEqual([]);
+    expect(read("Boarding group: November 12", sent)).toEqual([]);
+    // In a stored file no year is known.
+    expect(read("Delivery: Thursday, November 12")).toEqual([]);
+  });
+
+  it("one date, one reading: a typed line wins over a line that only names the same day, and a claimed day is not read again", () => {
+    expect(read("Renewal reminder: 30 November 2027\nCover ends: 30 November 2027")).toEqual([["expiry", "2027-11-30", undefined, "Cover ends", 0.7]]);
+    expect(read("Cover ends: 30 November 2027", undefined, ["2027-11-30"])).toEqual([]);
+  });
+
+  it("a hundred lines of past processing give nothing, in one pass", () => {
+    const statement = Array.from({ length: 100 }, (_, i) => `Date processed: ${(i % 28) + 1} ${["January", "February", "March", "April"][i % 4]} 2027`).join("\n");
+    const started = performance.now();
+    expect(read(statement)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  it("names the lines that are nobody's business, so nothing else asks about them either", () => {
+    const text = "Statement date: 3 February 2027\nCover ends: 30 November 2027\nBooked on: 10 Feb 2027";
+    const spans = settledNowhere(text, table);
+    expect(spans.map((span) => text.slice(span.at, span.end))).toEqual(["Statement date: 3 February 2027", "Booked on: 10 Feb 2027"]);
+  });
+
+  it("a clock line does not take the day of a line that is nobody's business", () => {
+    const moments = (text: string) => labelledFacts(text, undefined, table).filter((fact) => fact.kind === "event").map((fact) => [fact.value, fact.time]);
+    expect(moments("Booked on: 10 Feb 2027\nDeparts: 14:20")).toEqual([]);
+    // The day of the journey stands further up, past the booking line.
+    expect(moments("Outbound: Mon 12 Apr 2027\nBooked on: 10 Feb 2027\nDeparts: 14:20")).toEqual([["2027-04-12", "14:20"]]);
+  });
+
+  it("a clock line under a typed line gives the moment its clock", () => {
+    expect(read("Class begins: Tuesday 2 November 2027\nClass time: 6:30 PM")).toEqual([["event", "2027-11-02", "18:30", "Class begins", 0.7]]);
+    // Past a line that says nothing of time.
+    expect(read("Class begins: 2 November 2027\nRoom: Studio 4\nTime: 18:30")).toEqual([["event", "2027-11-02", "18:30", "Class begins", 0.7]]);
+  });
+
+  it("a clock that is not the moment's own lends nothing", () => {
+    const bare = [["event", "2027-11-02", undefined, "Class begins", 0.7]];
+    // The table gives the clock line a meaning of its own.
+    expect(read("Class begins: 2 November 2027\nDirect debit: 9:00 AM")).toEqual(bare);
+    // Past a blank line the block is over.
+    expect(read("Class begins: 2 November 2027\n\nTime: 18:30")).toEqual(bare);
+    // Hours are a span, not a moment; a sentence is no clock line.
+    expect(read("Class begins: 2 November 2027\nOffice open: 9:00 to 17:00")).toEqual(bare);
+    expect(read("Class begins: 2 November 2027\nPlease arrive by 6:15 PM to set up.")).toEqual(bare);
+    // A clock under another date line is that line's.
+    expect(read("Class begins: 2 November 2027\nCover ends: 30 November 2027\nTime: 18:30")).toEqual([
+      bare[0],
+      ["expiry", "2027-11-30", undefined, "Cover ends", 0.7],
+    ]);
+  });
+});
+
+describe("fieldLines", () => {
+  it("gives each form line its label, its value and its place", () => {
+    const text = "Rail ticket\nDate: Saturday 15 May 2027\n  Fare :  £48.50\nfrom 15:00 on 8 April 2027";
+    const lines = fieldLines(text);
+    expect(lines.map((line) => [line.label, line.value])).toEqual([
+      ["Date", "Saturday 15 May 2027"],
+      ["Fare", "£48.50"],
+    ]);
+    expect(text.slice(lines[0]!.at, lines[0]!.end)).toBe("Date: Saturday 15 May 2027");
+  });
+
+  it("leaves out what the reader never read: a birth date, a print stamp, and a quoted message's header block", () => {
+    expect(fieldLines("Date of birth: 3 March 1990\nPrinted: 4 March 2027").map((line) => line.label)).toEqual([]);
+    expect(fieldLines("From: a@example.com\nDate: 3 March 2027\nSubject: hello").map((line) => line.label)).toEqual([]);
+    // A lone Date line is a ticket's.
+    expect(fieldLines("Rail ticket\nDate: 3 March 2027").map((line) => line.label)).toEqual(["Date"]);
   });
 });

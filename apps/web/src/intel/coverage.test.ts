@@ -167,6 +167,24 @@ const LINES: Line[] = [
     text: "Your order has shipped.\nArriving Thursday, November 12",
     rows: [row("parcel", "DELIVERY", "2026-11-12", "", "It is on the way", "", "asks")],
   },
+  // Form lines, read by what their label means. The day a statement was
+  // made, a ticket booked or an order placed is nobody's reminder.
+  {
+    what: "a statement: its own date gives nothing, its debit day is due",
+    text: "City Power\nStatement date: 2 November 2026\nDirect debit date: 27 November 2026",
+    rows: [row("due", "DUE", "2026-11-27", "", "Direct debit date", "", "asks")],
+  },
+  {
+    what: "a pass: the day it was booked gives nothing, the day it ends counts",
+    text: "Museum annual pass\nBooked on: 3 November 2026\nPass valid until: 2 August 2028",
+    rows: [row("due", "DUE", "2028-08-02", "", "Document expiring", "", "asks")],
+  },
+  {
+    what: "a delivery note: the order's date gives nothing, the delivery is a row",
+    subject: "Your order",
+    text: "Order date: 6 November 2026\nEstimated delivery: 12 November 2026",
+    rows: [row("parcel", "DELIVERY", "2026-11-12", "", "Your order", "", "asks")],
+  },
   // Running words no rule reads: the rules find the date or the amount, and
   // the on-device model says what it is. Its answer is stated here.
   {
