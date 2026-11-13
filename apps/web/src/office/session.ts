@@ -152,6 +152,20 @@ export function answerServerMessage(message: OOMessage, collab?: CollabBridge): 
   }
 }
 
+/**
+ * The editor's error text as the app shows it: the engine writes its
+ * messages for an HTML page ("...loaded.<br>Please contact..."), and the
+ * app shows plain text, so a line break becomes a space and any other tag
+ * is dropped.
+ */
+function plainError(description: string): string {
+  return description
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]*>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export class EditorSession {
   private readonly frame: HTMLIFrameElement;
   private readonly fileType: FileType;
@@ -399,7 +413,7 @@ export class EditorSession {
         return;
       case "onError": {
         const detail = message.data as { errorDescription?: string } | undefined;
-        this.handlers.onFailed(detail?.errorDescription || "the editor reported an error");
+        this.handlers.onFailed(plainError(detail?.errorDescription ?? "") || "the editor reported an error");
         return;
       }
       case "cryptPadSendMessageFromOO": {

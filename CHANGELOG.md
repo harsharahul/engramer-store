@@ -74,6 +74,16 @@ All notable changes to Engram Store are documented here, following
   slash, and the server refused such a path. It now names the same file,
   as it already did on the on-device backend. A path that climbs out of its
   folder is still refused, and API routes keep their one spelling.
+- **The code editor follows the theme.** In the Night theme the note and
+  code editor kept a white line-number gutter, a light active line and a
+  dark cursor. The gutter, the cursor, the selection, the search panel
+  and tooltips now take the app's colours in Night and in Day.
+- **The office editor's errors read as plain text.** A message from the
+  editor showed its markup ("Fonts are not loaded.<br>Please contact...");
+  a line break is now a space.
+- **The share dialog's email field reads plainly**: "Their email
+  (optional): releases the key automatically". A test keeps em and en
+  dashes out of every word the app shows.
 - **A meeting's invite shows your time.** An invite written in UTC or in
   a named zone such as `America/New_York` showed that zone's clock, so a
   14:00 meeting in San Francisco read 22:00 and a late one landed on the

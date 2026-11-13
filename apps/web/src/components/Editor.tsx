@@ -10,6 +10,7 @@ import { formatBytes } from "../format";
 import { languageFor, renderMarkdown } from "../textkinds";
 import { XGlyph } from "./Icon";
 import { Confirm } from "./Dialogs";
+import { editorTheme } from "./editortheme";
 import { Button } from "./ui/button";
 import { IconButton } from "./ui/icon-button";
 
@@ -108,10 +109,7 @@ export function Editor(props: {
             setText(update.state.doc.toString());
           }
         }),
-        EditorView.theme({
-          "&": { height: "100%", fontSize: "14px" },
-          ".cm-scroller": { fontFamily: "var(--font-mono)" },
-        }),
+        editorTheme,
       ];
       const support = await languageSupport(language);
       if (support) {

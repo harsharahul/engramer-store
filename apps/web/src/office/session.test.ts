@@ -207,6 +207,26 @@ describe("the announce handshake", () => {
     session.close();
   });
 
+  it("passes on the editor's error as plain text: its line breaks become spaces and no markup is shown", () => {
+    const { frame, contentWindow } = fakeFrame();
+    const failures: string[] = [];
+    const session = new EditorSession(frame, "docx", "doc", { ...handlers(), onFailed: (message) => failures.push(message) });
+    const report = (errorDescription: string) => {
+      for (const listener of [...listeners]) {
+        listener({ source: contentWindow, data: JSON.stringify({ event: "onError", data: { errorDescription } }) });
+      }
+    };
+    report("Fonts are not loaded.<br>Please contact your Document Server administrator.");
+    report("The file <b>cannot</b> be opened.<br/><br />Try again.");
+    report("<br>");
+    expect(failures).toEqual([
+      "Fonts are not loaded. Please contact your Document Server administrator.",
+      "The file cannot be opened. Try again.",
+      "the editor reported an error",
+    ]);
+    session.close();
+  });
+
   it("never starts a second session over a frame that already announced", () => {
     const { frame, sent, contentWindow } = fakeFrame();
     const first = new EditorSession(frame, "docx", "doc", handlers());
