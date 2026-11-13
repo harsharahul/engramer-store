@@ -29,13 +29,19 @@ together (what the owner is shown). Each reports dates and amounts found,
 how many of those offered were right, and the noise: documents that state
 nothing and still got an offer.
 
-While working on the instructions, read a part of the first set without
-writing scores, or check that a document is read the same way twice:
+While working on the instructions, read the first set alone or a few of its
+cases without writing scores, or check that a document is read the same way
+twice:
 
 ```
+EVAL_SET=first tools/eval/apple/run.sh
 EVAL_ONLY=dentist,rent-reminder tools/eval/apple/run.sh
 EVAL_TWICE=1 tools/eval/apple/run.sh
 ```
+
+Each case is given what the app gives a reading: a message's subject, sender
+and sending day, what the rules already found, and for a stored file the day
+it was kept (the cases name none, so one fixed early day stands for all).
 
 Every raw answer is kept in `out/` (not committed), one file per case.
 

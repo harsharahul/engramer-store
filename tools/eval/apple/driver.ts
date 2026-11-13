@@ -211,13 +211,24 @@ const report = (title: string, figures: SetFigures, documents: number) =>
   `noise ${figures.noise.loud} of ${figures.noise.cases} empty documents; ` +
   `${documents - figures.wrong.length} of ${documents} documents read with nothing missed and nothing added`;
 
-const measured: Record<string, { cases: number; tasks: ReturnType<typeof stored> & { mailKind: Awaited<ReturnType<typeof scoreKinds>> } }> = {};
+interface SetScores {
+  cases: number;
+  /** The model's own readings: what the app's trust rests on. */
+  tasks: ReturnType<typeof stored> & { mailKind: Awaited<ReturnType<typeof scoreKinds>> };
+  /** The rules' readings and the model's together: what the owner is shown. Not read by the app. */
+  together: ReturnType<typeof stored> & { documents: number; readWhole: number };
+}
+const measured: Record<string, SetScores> = {};
 for (const set of sets) {
   const model = await measure(set.cases, judged);
   const whole = await measure(set.cases, shown);
   const kinds = await scoreKinds(kindCases(set.cases), async (evalCase) => readings.get(evalCase.id)?.mailKind ?? null);
-  measured[set.key] = { cases: set.cases.length, tasks: { ...stored(model), mailKind: kinds } };
   const documents = factCases(set.cases).length;
+  measured[set.key] = {
+    cases: set.cases.length,
+    tasks: { ...stored(model), mailKind: kinds },
+    together: { ...stored(whole), documents, readWhole: documents - whole.wrong.length },
+  };
   process.stdout.write(`\n${report(`${set.title}, the model alone`, model, documents)}\n`);
   process.stdout.write(`${report(`${set.title}, rules and model together`, whole, documents)}\n`);
   process.stdout.write(`${set.title}, mail kind: right ${percent(kinds.accuracy)} of ${kinds.cases}\n`);
@@ -245,7 +256,9 @@ const scores = {
   // Each figure carries the readings it rests on: a precision over a handful
   // says nothing, and the app requires a minimum before trusting it.
   tasks: measured["first"]!.tasks,
-  // The same tasks on documents nothing was tuned on. A model reading counts
+  // What the owner is shown for the first set: rules and model together.
+  together: measured["first"]!.together,
+  // The same on documents nothing was tuned on. A model reading counts
   // without a yes only where both sets clear the bar.
   heldout: measured["heldout"]!,
 };
