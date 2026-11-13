@@ -9,7 +9,7 @@
  * must not become a hundred questions.
  */
 import { findDates, findTimes, type DateContext } from "./dates";
-import { moneyEvery } from "./labels";
+import { clockLineTime, moneyEvery } from "./labels";
 
 export interface Candidate {
   /** "d1".."d10" for dates, "a1".."a6" for amounts: the name a reader answers by. */
@@ -122,6 +122,48 @@ function amountsOf(text: string): { value: string; unit: string; at: number; sum
   return [...placed.values()].sort((a, b) => a.at - b.at);
 }
 
+/** How many lines up a clock line looks for its date, as the form reader does. */
+const CLOCK_LINE_REACH = 3;
+
+/**
+ * The date a clock line belongs to: the last date on the nearest line above
+ * that holds one, no blank line between, at most three lines up. The clock
+ * line is a short line with one clock and no date or sentence. A date that
+ * is nobody's business lends its clock line to nothing.
+ */
+function dateLineAbove(
+  text: string,
+  at: number,
+  found: readonly { at: number; end: number }[],
+  writtenAt: number | undefined,
+  skip: Known["skip"],
+): number | null {
+  const start = text.lastIndexOf("\n", at - 1) + 1;
+  const stop = text.indexOf("\n", at);
+  if (clockLineTime(text.slice(start, stop === -1 ? text.length : stop), writtenAt) === null) {
+    return null;
+  }
+  let end = start - 1;
+  for (let step = 0; step < CLOCK_LINE_REACH && end > 0; step += 1) {
+    const lineStart = text.lastIndexOf("\n", end - 1) + 1;
+    if (!text.slice(lineStart, end).trim()) {
+      return null;
+    }
+    let last = -1;
+    for (let i = 0; i < found.length; i += 1) {
+      if (found[i]!.at >= lineStart && found[i]!.at < end) {
+        last = i;
+      }
+    }
+    if (last >= 0) {
+      const date = found[last]!;
+      return skip?.some((span) => date.at >= span.at && date.at < span.end) ? null : last;
+    }
+    end = lineStart - 1;
+  }
+  return null;
+}
+
 /** What is already known of a document before anything is asked about it. */
 export interface Known {
   /** For a stored file: the day it was kept. */
@@ -189,6 +231,15 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
         if (between >= 0 && between < gap) {
           gap = between;
           nearest = i;
+        }
+      }
+      if (nearest < 0) {
+        // A clock alone on its line ("8:00 PM" under "Sat 14 Nov 2026")
+        // belongs to the date line above it, in the same block.
+        const above = dateLineAbove(text, clock.at, found, context?.writtenAt, known.skip);
+        if (above !== null) {
+          nearest = above;
+          gap = clock.at - found[above]!.end;
         }
       }
       if (nearest >= 0) {

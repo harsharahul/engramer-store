@@ -205,7 +205,7 @@ const BLOCK_REACH = 3;
  * 3 PM"): a short line that is no sentence and holds a clock and no date of
  * its own. A clock inside a sentence is not one.
  */
-function clockLineTime(line: string, writtenAt?: number): string | null {
+export function clockLineTime(line: string, writtenAt?: number): string | null {
   const plain = line.trim();
   if (!plain || plain.length > CLOCK_LINE_MAX || /[.!?]$/.test(plain) || /[.!?]\s+[A-Z]/.test(plain)) {
     return null;
