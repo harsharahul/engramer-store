@@ -115,6 +115,21 @@ describe("what a reader already settled is not a candidate", () => {
     expect(found.filter((c) => c.what === "date")).toHaveLength(4);
   });
 
+  it("a date on a line that is nobody's business is not a candidate, and does not use up the ten", () => {
+    const text = "Statement date: 3 February 2027\nYour dental check-up is on 22 July 2027 at 09:30.\nBooked on: 10 February 2027";
+    const line = (words: string) => ({ at: text.indexOf(words), end: text.indexOf(words) + words.length });
+    const skip = [line("Statement date: 3 February 2027"), line("Booked on: 10 February 2027")];
+    expect(spotCandidates(text, undefined, { skip }).map((c) => [c.key, c.value])).toEqual([["d1", "2027-07-22"]]);
+    // Twelve such lines and one real date: the real one is still asked about.
+    const many = Array.from({ length: 12 }, (_, i) => `Statement date: ${i + 1} February 2027`);
+    const long = `${many.join("\n")}\nYour dental check-up is on 22 July 2027 at 09:30.`;
+    const spans = many.map((words) => ({ at: long.indexOf(words), end: long.indexOf(words) + words.length }));
+    expect(spotCandidates(long, undefined, { skip: spans }).map((c) => c.value)).toEqual(["2027-07-22"]);
+    // The same day stated again in a sentence of its own is still a candidate.
+    const twice = "Statement date: 3 February 2027\nPlease pay by 3 February 2027.";
+    expect(spotCandidates(twice, undefined, { skip: [{ at: 0, end: 31 }] }).map((c) => [c.value, c.sentence])).toEqual([["2027-02-03", "Please pay by 3 February 2027."]]);
+  });
+
   it("what is left out does not use up the ten", () => {
     const lines = Array.from({ length: 12 }, (_, i) => `Payment due: ${i + 1} May 2027.`);
     const statement = `${lines.join("\n")}\nYour dental check-up is on 22 July 2027 at 09:30.`;

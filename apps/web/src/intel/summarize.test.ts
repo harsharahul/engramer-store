@@ -231,6 +231,22 @@ describe("summarize with facts", () => {
     expect(answer?.facts).toEqual([]);
   });
 
+  it("a document whose only dates stand on lines that are nobody's business is asked once", async () => {
+    const statement = "Account summary\nStatement date: 3 February 2027\nBooked on: 10 February 2027\nThank you for being a member.";
+    const { asked, run } = model({ d1: "due" });
+    const answer = await summarize({ text: statement, name: "statement.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true }, run);
+    expect(asked).toHaveLength(1);
+    expect(answer?.facts).toEqual([]);
+  });
+
+  it("a line that is nobody's business is left out of what the model is asked; the rest is asked", async () => {
+    const letter = "Statement date: 3 February 2027\nWe will visit to read your meter on 9 March 2027.";
+    const { asked, run } = model({ d1: "event", d1w: "meter reading" });
+    await summarize({ text: letter, name: "letter.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true }, run);
+    expect(Object.keys(asked[1]!.schema!.properties)).toEqual(["d1", "d1w"]);
+    expect(asked[1]!.prompt).toContain("d1: 9 March 2027");
+  });
+
   describe("what another reader already settled", () => {
     const bill = "City Water. Amount due: $84.20. Due date: 20 November 2027. Your meter will be read on 3 December 2027 at 10:00.";
     const known: Fact[] = [
