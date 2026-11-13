@@ -33,42 +33,43 @@
     "asked": {
       "documents": 121,
       "asked": 50,
-      "wrong": 25,
+      "wrong": 19,
+      "clock": 6,
       "untyped": 0,
       "askedPer100": 41.3,
-      "wrongPer100": 20.7
+      "wrongPer100": 15.7
     },
     "mailKind": {
       "accuracy": 0.7472527472527473,
       "cases": 91,
       "byKind": {
         "booking": {
-          "precision": 0.8157894736842105,
-          "offered": 38
+          "precision": 0.7948717948717948,
+          "offered": 39
         },
         "bill": {
           "precision": 1,
-          "offered": 12
+          "offered": 13
         },
         "delivery": {
           "precision": 1,
-          "offered": 9
+          "offered": 8
         },
         "newsletter": {
           "precision": 1,
-          "offered": 4
-        },
-        "personal": {
-          "precision": 0.2,
           "offered": 5
         },
+        "personal": {
+          "precision": 0.14285714285714285,
+          "offered": 7
+        },
         "other": {
-          "precision": 0.45,
-          "offered": 20
+          "precision": 0.47058823529411764,
+          "offered": 17
         },
         "receipt": {
-          "precision": 0.6666666666666666,
-          "offered": 3
+          "precision": 1,
+          "offered": 2
         }
       }
     }
@@ -101,10 +102,11 @@
     "asked": {
       "documents": 121,
       "asked": 195,
-      "wrong": 98,
+      "wrong": 83,
+      "clock": 15,
       "untyped": 10,
       "askedPer100": 161.2,
-      "wrongPer100": 81
+      "wrongPer100": 68.6
     },
     "documents": 121,
     "readWhole": 58
@@ -139,10 +141,11 @@
       "asked": {
         "documents": 60,
         "asked": 31,
-        "wrong": 9,
+        "wrong": 2,
+        "clock": 7,
         "untyped": 0,
         "askedPer100": 51.7,
-        "wrongPer100": 15
+        "wrongPer100": 3.3
       },
       "mailKind": {
         "accuracy": 0.8409090909090909,
@@ -156,13 +159,13 @@
             "precision": 1,
             "offered": 5
           },
-          "personal": {
-            "precision": 0.42857142857142855,
-            "offered": 7
-          },
           "other": {
-            "precision": 0.8,
-            "offered": 5
+            "precision": 0.6666666666666666,
+            "offered": 6
+          },
+          "personal": {
+            "precision": 0.5,
+            "offered": 6
           },
           "delivery": {
             "precision": 1,
@@ -207,10 +210,11 @@
       "asked": {
         "documents": 60,
         "asked": 62,
-        "wrong": 18,
+        "wrong": 8,
+        "clock": 10,
         "untyped": 0,
         "askedPer100": 103.3,
-        "wrongPer100": 30
+        "wrongPer100": 13.3
       },
       "documents": 60,
       "readWhole": 37
