@@ -51,6 +51,20 @@ describe("the dates a document holds, each with the clock beside it", () => {
     expect(spotCandidates("Thanks, noted.\n\nOn Mon, 9 Nov 2026 at 09:00, Alex wrote:\n> Dinner tomorrow at 7pm?", sent)).toEqual([]);
   });
 
+  it("a day in words beside a written date in the same sentence gives way to it, whatever the sending day", () => {
+    // Sent on Thursday evening in California: already Friday in UTC.
+    const lateSent = { writtenAt: Date.UTC(2026, 10, 13, 4) };
+    expect(dates(spotCandidates("Reminder: dinner is tomorrow, Friday 13 November, at 7pm.", lateSent))).toEqual([["d1", "2026-11-13", "19:00"]]);
+  });
+
+  it("written dates come first when there are more than ten: a day in words never pushes one out", () => {
+    const sent = { writtenAt: Date.UTC(2026, 11, 1, 9) };
+    const intro = "Today's picks, tonight's show, tomorrow's market, this Saturday's fair and next Sunday's run.";
+    const events = Array.from({ length: 10 }, (_, i) => `Event ${i + 1}: ${i + 10} December 2026.`).join("\n");
+    const found = spotCandidates(`${intro}\n${events}`, sent).filter((c) => c.what === "date");
+    expect(found.filter((c) => !c.relative).map((c) => c.value)).toHaveLength(10);
+  });
+
   it("both ends of a range of hours are offered: a journey's second clock is its arrival", () => {
     expect(dates(spotCandidates("Train on 14 Nov 2026, 10:30 - 12:45, platform 4"))).toEqual([
       ["d1", "2026-11-14", "10:30"],

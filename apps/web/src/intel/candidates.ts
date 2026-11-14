@@ -198,11 +198,23 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
   // In a message, a day said in words is a date too, unless a written date
   // stands there or the message writes the same day out elsewhere
   // ("Tomorrow, Friday 13 November"): the written date is the reading.
+  const writtenSentences = sentencesOf(text, written);
   const said =
     context?.writtenAt === undefined
       ? []
       : findRelativeDays(text, context.writtenAt)
-          .filter((day) => !written.some((hit) => (day.at < hit.end && hit.at < day.end) || hit.date.iso === day.iso))
+          .filter((day) => {
+            // A written date in the same sentence is what the words point at
+            // ("dinner is tomorrow, Friday 13 November"), whatever day the
+            // sending moment falls on in UTC.
+            const sentence = writtenSentences.find((span) => day.at >= span.at && day.at < span.end);
+            return !written.some(
+              (hit) =>
+                (day.at < hit.end && hit.at < day.end) ||
+                hit.date.iso === day.iso ||
+                (sentence !== undefined && hit.at >= sentence.at && hit.at < sentence.end),
+            );
+          })
           .map((day) => ({ at: day.at, end: day.end, date: { iso: day.iso, ambiguous: false }, relative: true as const }));
   const found: (FoundDate & { relative?: true })[] = [...written, ...said].sort((a, b) => a.at - b.at);
   const money = known.total ? [] : amountsOf(text);
@@ -278,7 +290,10 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
   const candidates: Candidate[] = [];
   const seen = new Set<string>();
   let dates = 0;
-  for (const [index, hit] of found.entries()) {
+  // Written dates first, then days in words: under the cap, a day said in
+  // words never takes the place of a date the message writes out.
+  const order = [...found.entries()].sort(([, a], [, b]) => Number(a.relative === true) - Number(b.relative === true));
+  for (const [index, hit] of order) {
     if (dates === MAX_DATES) {
       break;
     }
