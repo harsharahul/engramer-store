@@ -270,6 +270,17 @@ describe("days said in words, in mail", () => {
     expect(days("Can we meet on Monday?")).toEqual([["on Monday", "2026-11-16"]]);
   });
 
+  it("a day in words in a sentence about an offer, or about what was already done, is not read", () => {
+    expect(days("Offer ends 15h30 on Friday.")).toEqual([]);
+    expect(days("Today only: 20% off all boots.")).toEqual([]);
+    expect(days("Free delivery this Saturday on every order.")).toEqual([]);
+    expect(days("You earned 23 points today and now have 140 points.")).toEqual([]);
+    expect(days("We received your payment today.")).toEqual([]);
+    // A plan or a delivery still reads.
+    expect(days("It arrives today.")).toEqual([["today", "2026-11-12"]]);
+    expect(days("Dinner tomorrow at 7pm?")).toEqual([["tomorrow", "2026-11-13"]]);
+  });
+
   it("'the day after tomorrow' and 'a week from today' are not today or tomorrow", () => {
     expect(days("See you the day after tomorrow")).toEqual([]);
     expect(days("A week from today we fly")).toEqual([]);

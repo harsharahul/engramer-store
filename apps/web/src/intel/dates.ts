@@ -268,7 +268,10 @@ const NAMED_WEEKDAY = new RegExp(
   "gi",
 );
 /** Words before a weekday in its sentence that say it was said of the past. */
-const PAST_BEFORE = /\b(?:was|were|had|did|sent|went|met|discussed|spoke|talked|called|following|after)\b[^.!?\n]*$/i;
+const PAST_BEFORE =
+  /\b(?:was|were|had|did|sent|went|met|discussed|spoke|talked|called|following|after|earned|paid|purchased|bought|ordered|received)\b[^.!?\n]*$/i;
+/** A sentence about an offer: its days are a sale's, nobody's plan. */
+const OFFER = /\b(?:offers?|on sale|discount|deals?|promo(?:tion)?|coupon|voucher|free (?:delivery|shipping)|points)\b|\d+\s?% off/i;
 /** A sentence that says it is done. */
 const DONE_AFTER = /^[^.!?\n]*\balready\b/i;
 /** "Saturday the 5th". */
@@ -308,7 +311,21 @@ export function findRelativeDays(text: string, writtenAt: number): { at: number;
   const today = new Date(writtenAt).getUTCDay();
   const ahead = (name: string) => (DAY_NAMES.indexOf(name.toLowerCase()) - today + 7) % 7;
   const days: { at: number; end: number; iso: string; relative: true }[] = [];
+  /** The sentence a place in the text stands in, as its start and end. */
+  const sentenceAround = (at: number, end: number) => {
+    const start = Math.max(own.lastIndexOf(".", at - 1), own.lastIndexOf("!", at - 1), own.lastIndexOf("?", at - 1), own.lastIndexOf("\n", at - 1)) + 1;
+    const stops = [".", "!", "?", "\n"].map((stop) => own.indexOf(stop, end)).filter((index) => index !== -1);
+    return { start, stop: stops.length > 0 ? Math.min(...stops) : own.length };
+  };
+  /** Said of an offer, or of what was already done. */
+  const notAPlan = (at: number, end: number) => {
+    const { start, stop } = sentenceAround(at, end);
+    return OFFER.test(own.slice(start, stop)) || PAST_BEFORE.test(own.slice(start, at)) || DONE_AFTER.test(own.slice(end));
+  };
   for (const match of own.matchAll(NEAR_DAY)) {
+    if (notAPlan(match.index, match.index + match[0].length)) {
+      continue;
+    }
     const word = match[1]!.toLowerCase();
     days.push({ at: match.index, end: match.index + match[0].length, iso: dayAfter(writtenAt, word === "tomorrow" ? 1 : 0), relative: true });
   }
@@ -317,12 +334,7 @@ export function findRelativeDays(text: string, writtenAt: number): { at: number;
   for (const match of own.matchAll(NAMED_WEEKDAY)) {
     const at = match.index;
     const end = at + match[0].length;
-    const sentenceStart = Math.max(own.lastIndexOf(".", at - 1), own.lastIndexOf("!", at - 1), own.lastIndexOf("?", at - 1), own.lastIndexOf("\n", at - 1)) + 1;
-    if (
-      dayOfMonthSpans.some((span) => at < span.end && span.at < end) ||
-      PAST_BEFORE.test(own.slice(sentenceStart, at)) ||
-      DONE_AFTER.test(own.slice(end))
-    ) {
+    if (dayOfMonthSpans.some((span) => at < span.end && span.at < end) || notAPlan(at, end)) {
       continue;
     }
     const d = ahead(match[2]!);
@@ -331,6 +343,9 @@ export function findRelativeDays(text: string, writtenAt: number): { at: number;
     days.push({ at: match.index, end: match.index + match[0].length, iso: dayAfter(writtenAt, offset), relative: true });
   }
   for (const match of own.matchAll(WEEKDAY_THE_DAY)) {
+    if (notAPlan(match.index, match.index + match[0].length)) {
+      continue;
+    }
     const weekday = DAY_NAMES.indexOf(match[1]!.toLowerCase());
     const dayOfMonth = Number(match[2]);
     for (let offset = 0; offset <= WEEKDAY_THE_DAY_REACH; offset += 1) {

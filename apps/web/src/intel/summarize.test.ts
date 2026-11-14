@@ -322,7 +322,8 @@ describe("summarize with facts", () => {
 
     it("a promotion's 'tomorrow only' that the model calls nothing stores nothing", async () => {
       const { asked, answer } = await read("Tomorrow only: 20% off all boots. Shop now.", { d1: "other" }, "Weekend deals");
-      expect(Object.keys(asked[1]!.schema!.properties)).toContain("d1");
+      // A sentence about an offer gives no date to ask about: the model is asked once, for the summary.
+      expect(asked).toHaveLength(1);
       expect(answer?.facts).toEqual([]);
     });
   });
