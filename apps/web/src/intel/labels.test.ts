@@ -721,6 +721,15 @@ describe("a show's start and its doors", () => {
     expect(moments("Sat 14 Nov 2026, doors 7:00 PM")).toEqual([["2026-11-14", "19:00"]]);
   });
 
+  it("showing an ID or buying a curtain is no show", () => {
+    expect(moments("Please show 1 photo ID when collecting on 14 November 2026")).toEqual([]);
+    expect(moments("Blackout curtain 140x230, delivery 14 November 2026")).toEqual([]);
+    expect(moments("Show this pass at the door on 14 November 2026")).toEqual([]);
+    // The words still read when they say when.
+    expect(moments("Thursday 3 December 2026\nDoors: 6:30 PM\nShow 8:30 PM")).toEqual([["2026-12-03", "20:30"]]);
+    expect(moments("Saturday 21 November 2026\nCurtain: 19:30")).toEqual([["2026-11-21", "19:30"]]);
+  });
+
   it("a sale or a season that starts is no show", () => {
     expect(moments("Sale starts Friday 20 November 2026 at 9am")).toEqual([]);
     expect(moments("The season starts on 1 December 2026.")).toEqual([]);

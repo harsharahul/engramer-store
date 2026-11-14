@@ -58,7 +58,7 @@ const START_LABELS = /\b(?:appointment|doors)\b/gi;
  * sale or a season that "starts" is no show, so the bare word is not read.
  */
 const SHOW_LABELS =
-  /\b(?:show(?:\s+starts?)?(?=\s*:|\s+\d|\s+at\b|\s+starts?\b)|curtain(?:\s+up)?|kick[- ]?off|(?:talk|performance|concert|event|lecture|match|game)\s+(?:starts?|begins?)|start\s+time)\b/gi;
+  /\b(?:show(?:\s+starts?)?(?=\s*:|\s+\d{1,2}(?::[0-5]\d|\s?[ap]\.?m\b)|\s+at\s+\d|\s+starts?\b)|curtain(?:\s+(?:up|call)|(?=\s*:))|kick[- ]?off|(?:talk|performance|concert|event|lecture|match|game)\s+(?:starts?|begins?)|start\s+time)\b/gi;
 const DOORS = /^doors\b/i;
 /** Start readings that are not a show's start. */
 const NOT_A_SHOW = /^(?:doors|appointment)\b/i;
