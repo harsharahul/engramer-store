@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fieldLines, guessDocumentKind, harvestFacts, labelledFacts, moneyEvery, settledNowhere, structuralDatedFacts } from "./labels";
+import { amountLines, fieldLines, guessDocumentKind, harvestFacts, labelledFacts, moneyEvery, settledNowhere, structuralDatedFacts } from "./labels";
 import { lexiconFrom } from "./lexicon";
 import { subjectOf } from "./subject";
 
@@ -936,5 +936,92 @@ describe("money as documents write it", () => {
   it("says where each amount stands, from its currency to its last character", () => {
     const text = "Fare: £33.00, total 27.50 GBP.";
     expect(moneyEvery(text).map((amount) => text.slice(amount.at, amount.end))).toEqual(["£33.00", "27.50 GBP"]);
+  });
+});
+
+describe("an amount with its label and what the label means", () => {
+  // A small table, as the shipped one is shaped: normalized label to meaning.
+  const table = lexiconFrom(
+    [],
+    [
+      ["subtotal", "part"],
+      ["vat", "part"],
+      ["service fees", "part"],
+      ["railcard discount", "part"],
+      ["sales tax", "part"],
+      ["total to pay", "due"],
+      ["amount due", "due"],
+      ["total stay", "total"],
+      ["total paid", "total"],
+      ["total incl vat", "total"],
+    ],
+  );
+  const read = (text: string) => amountLines(text, table).map((amount) => [amount.value, amount.label, amount.meaning]);
+
+  it("the label is the words before the amount on its line, and the table says what they mean", () => {
+    expect(read("Subtotal £118.40\nVAT £5.92\nTotal to pay: £124.32")).toEqual([
+      ["118.40", "Subtotal", "part"],
+      ["5.92", "VAT", "part"],
+      ["124.32", "Total to pay", "due"],
+    ]);
+    expect(read("Total stay USD 450.00")).toEqual([["450.00", "Total stay", "total"]]);
+    expect(read("Subtotal ........ $35.00")).toEqual([["35.00", "Subtotal", "part"]]);
+    expect(read("Total (incl. VAT)   €240.00")).toEqual([["240.00", "Total (incl. VAT)", "total"]]);
+    expect(read("VAT 20%   €40.00")).toEqual([["40.00", "VAT 20%", "part"]]);
+  });
+
+  it("two amounts on one line have a label each", () => {
+    expect(read("Fare: £33.00, railcard discount: -£5.50")).toEqual([
+      ["33.00", "Fare", undefined],
+      ["5.50", "railcard discount", "part"],
+    ]);
+    expect(read("Subtotal 120.00 GBP  VAT 24.00 GBP")).toEqual([
+      ["120.00", "Subtotal", "part"],
+      ["24.00", "VAT", "part"],
+    ]);
+  });
+
+  it("an amount alone on its line takes the label on the line above", () => {
+    expect(read("Subtotal\n$50.00\nSales tax\n$4.00\nAmount due\n$54.00")).toEqual([
+      ["50.00", "Subtotal", "part"],
+      ["4.00", "Sales tax", "part"],
+      ["54.00", "Amount due", "due"],
+    ]);
+    // Words the table does not hold, an amount above, or an empty line above give no meaning.
+    expect(read("Thank you\n$57.45")).toEqual([["57.45", "Thank you", undefined]]);
+    expect(read("Amount due $10.00\n$57.45")).toEqual([
+      ["10.00", "Amount due", "due"],
+      ["57.45", undefined, undefined],
+    ]);
+    expect(read("Amount due\n\n$57.45")).toEqual([["57.45", undefined, undefined]]);
+    // An amount with words behind it on its line is not alone.
+    expect(read("Amount due\n$57.45 was paid")).toEqual([["57.45", undefined, undefined]]);
+  });
+
+  it("a minus, a rate, a deposit and a price for one of several are parts, whatever the table holds", () => {
+    expect(read("Total paid: -$20.00")).toEqual([["20.00", "Total paid", "part"]]);
+    expect(read("Room rate per night USD 150.00")[0]![2]).toBe("part");
+    expect(read("Total paid: $140.00 per night")[0]![2]).toBe("part");
+    expect(read("A deposit of $100.00 holds your booking.")[0]![2]).toBe("part");
+    expect(read("Deposit paid: $100.00")[0]![2]).toBe("part");
+    expect(read("Tickets: 2 x $55.00, service fees: $11.00")).toEqual([
+      ["55.00", "Tickets: 2 x", "part"],
+      ["11.00", "service fees", "part"],
+    ]);
+    // The total that is left after a deposit is not the deposit.
+    expect(read("Total due after your deposit: $353.60")[0]![2]).toBeUndefined();
+  });
+
+  it("a sentence is not a label", () => {
+    expect(read("Any change to your booking carries a change fee of CAD 35.00 and more words.")).toEqual([["35.00", undefined, undefined]]);
+  });
+
+  it("with no table, only what the amount itself shows is known", () => {
+    const bare = amountLines("Subtotal £118.40\nDiscount -£5.00\nTotal to pay: £113.40").map((amount) => [amount.value, amount.label, amount.meaning]);
+    expect(bare).toEqual([
+      ["118.40", "Subtotal", undefined],
+      ["5.00", "Discount", "part"],
+      ["113.40", "Total to pay", undefined],
+    ]);
   });
 });

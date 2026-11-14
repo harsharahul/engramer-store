@@ -183,7 +183,7 @@ describe("the shipped amount table", () => {
 
   it("a sum's label holds a word of a sum, and opens with no word of a part", () => {
     const sums = [...labels("due"), ...labels("total")];
-    const sum = /\b(?:total|due|balance|pay|paid|payable|payment|owe|owed|owing|outstanding|charged|charge|amount|fare|price|cost|premium|refund|refunded|collect|collected|responsibility|bill|unpaid)\b/;
+    const sum = /\b(?:total|due|balance|pay|paid|payable|payment|owe|owed|owing|outstanding|charged|charge|amount|fare|price|cost|premium|refund|refunded|collect|collected|responsibility|bill|unpaid|prepaid)\b/;
     const part = /^(?:sub|previous|prior|last|minimum|min|tax|vat|discount|shipping|deposit|fee|net|opening|closing|available)\b/;
     expect(sums.filter((label) => !sum.test(label))).toEqual([]);
     expect(sums.filter((label) => part.test(label))).toEqual([]);
@@ -229,6 +229,11 @@ describe("the shipped amount table", () => {
       ["Previous balance", "part"],
       ["Minimum payment due", "part"],
       ["Total before tax", "part"],
+      ["Total this bill", "total"],
+      ["Prepaid", "total"],
+      ["Deposit at desk", "part"],
+      ["Loan balance", "part"],
+      ["Reservation fee", "part"],
       // Unknown is an answer too: the amount is then read as before.
       ["Balance", undefined],
       ["Fare", undefined],

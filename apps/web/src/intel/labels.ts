@@ -13,7 +13,7 @@
 import { CURRENCY_CODES, SYMBOL_CURRENCY, SYMBOL_FAMILY } from "./currency";
 import { type DocumentKind, type Fact, factId, maskTail } from "./facts";
 import { findDates, findTimes, parseDate, parseTime, type DateContext, type ParsedDate } from "./dates";
-import { meaningOf, type LabelMeaning, type Lexicon } from "./lexicon";
+import { amountMeaningOf, meaningOf, type AmountMeaning, type LabelMeaning, type Lexicon } from "./lexicon";
 import { serviceOf, type Role, type Subject } from "./subject";
 
 /** How far past a label to look for its date. */
@@ -795,6 +795,82 @@ export function moneyIn(text: string): Money[] {
     last.set(amount.value, amount);
   }
   return [...last.values()].sort((a, b) => a.at - b.at);
+}
+
+/** Words that mark the amount a document is about, before its line items. */
+export const SUM_LINE = /\b(?:total|due|balance|paid|charged|refund(?:ed)?|fare|price|premium)\b/i;
+/** What one of something costs, as the words after or before an amount say it ("per night", "a month", "/mo"). */
+const RATE_UNIT = "(?:night|month|week|day|hour|session|visit|class|lesson|seat|piece|person|guest|item|unit|mo)";
+/** The price of one of something, said straight after the amount ("$140.00 per night"). A year's price is the year's whole price. */
+const RATE_AFTER = new RegExp(`^\\s*(?:(?:per|a|an|each|every)\\s+|/\\s?)${RATE_UNIT}\\b`, "i");
+/** The same, said by the label before it ("Room rate per night USD 150.00"). */
+const RATE_BEFORE = new RegExp(`\\b(?:per|each|every)\\s+${RATE_UNIT}$`, "i");
+/** Money set aside against a later bill, named straight before the amount ("a deposit of $100.00"). */
+const DEPOSIT_BEFORE = /\bdeposit(?:\s+(?:of|paid))?\s*:?\s*$/i;
+/** A count straight before the amount: the price of one of several ("2 x $55.00"). */
+const COUNT_BEFORE = /\b\d+\s?[x×]\s*$/i;
+/** What closes a label before its amount: a colon, leader dots, a dash, a bar. */
+const LABEL_CLOSE = /[\s:.=|;,-]+$/;
+/** What parts one label from the one before it on a line. */
+const LABEL_BREAK = /[,;|\t]|\s{2,}/g;
+
+/** An amount with the words that name it, and what the label table says those words mean. */
+export interface AmountLine extends Money {
+  /** The document's own words for the amount: before it on its line, or on the line above an amount that stands alone. */
+  label?: string;
+  /** What the amount is, where its own marks or the table say so; a part is never the whole. */
+  meaning?: AmountMeaning;
+}
+
+/** The words that close a stretch of text, as a label: after the last break, without what closes it. */
+function closingLabel(words: string): string | undefined {
+  const closed = words.replace(LABEL_CLOSE, "");
+  let from = 0;
+  for (const cut of closed.matchAll(LABEL_BREAK)) {
+    from = cut.index + cut[0].length;
+  }
+  const label = closed.slice(from).trim();
+  return label.length <= MAX_LABEL_CHARS && /[A-Za-z]/.test(label) ? label : undefined;
+}
+
+/**
+ * Every amount a text states, each with its label and what the label means.
+ *
+ * The label is the words before the amount on its line, back to the amount
+ * or the break before them; an amount alone on its line takes the line
+ * above, as a table read out cell by cell prints it. A minus sign, a rate
+ * ("per night"), a deposit and the price of one of several ("2 x") make a
+ * part, whatever the words say. Otherwise the table decides, and words it
+ * does not hold decide nothing.
+ */
+export function amountLines(text: string, lexicon?: Lexicon): AmountLine[] {
+  const found = moneyEvery(text);
+  return found.map((amount, index) => {
+    const lineStart = text.lastIndexOf("\n", amount.at - 1) + 1;
+    const stop = text.indexOf("\n", amount.end);
+    const lineEnd = stop === -1 ? text.length : stop;
+    const lineBefore = text.slice(lineStart, amount.at);
+    const earlier = found[index - 1];
+    const own = closingLabel(text.slice(Math.max(lineStart, earlier ? earlier.end : 0), amount.at));
+    let label = own;
+    if (!label && lineStart > 0 && !lineBefore.trim() && !text.slice(amount.end, lineEnd).trim()) {
+      const aboveStart = text.lastIndexOf("\n", lineStart - 2) + 1;
+      if (!found.some((other) => other.at >= aboveStart && other.at < lineStart)) {
+        label = closingLabel(text.slice(aboveStart, lineStart - 1));
+      }
+    }
+    const deposit = DEPOSIT_BEFORE.exec(lineBefore);
+    const part =
+      amount.minus ||
+      RATE_AFTER.test(text.slice(amount.end, amount.end + 16)) ||
+      (own !== undefined && RATE_BEFORE.test(own)) ||
+      COUNT_BEFORE.test(lineBefore) ||
+      // "Total due after your deposit: $353.60" names the total, not the
+      // deposit: only what stands before the word says so.
+      (deposit !== null && !SUM_LINE.test(lineBefore.slice(0, deposit.index)));
+    const meaning = part ? "part" : label && lexicon ? amountMeaningOf(lexicon, label) : undefined;
+    return { ...amount, ...(label ? { label } : {}), ...(meaning ? { meaning } : {}) };
+  });
 }
 
 const AMOUNT_DUE_LINE = /\b(?:(?:amount|total|balance)\s+due|amount\s+payable|(?:is|are)\s+due)\b/i;

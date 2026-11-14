@@ -112,6 +112,9 @@ Total invoice	total
 Total invoice amount	total
 Invoice amount	total
 Total this invoice	total
+Total this bill	total
+Total for this bill	total
+This bill total	total
 Total for this invoice	total
 Total for this order	total
 Total for this booking	total
@@ -174,6 +177,7 @@ Amount charged today	total
 Total charged today	total
 Total price paid	total
 Price paid	total
+Prepaid	total
 # Total: what was refunded
 Total refund	total
 Refund total	total
@@ -416,6 +420,10 @@ Return fee	part
 Overdraft fee	part
 Platform fee	part
 Marketplace fee	part
+Reservation fee	part
+Sewer charge	part
+Router rental	part
+Device installment	part
 Policy fee	part
 Standing charge	part
 Usage charge	part
@@ -445,6 +453,10 @@ Booking deposit	part
 Reservation deposit	part
 Initial deposit	part
 Deposit already paid	part
+Deposit at desk	part
+Deposit on arrival	part
+Deposit at pick up	part
+Deposit at check in	part
 Down payment	part
 Amount deposited	part
 # Part: earlier states of an account
@@ -471,6 +483,12 @@ Total credits	part
 Insurance paid	part
 Insurance adjustment	part
 Insurance payment	part
+Loan balance	part
+Principal balance	part
+Outstanding principal	part
+Principal outstanding	part
+Remaining principal	part
+Mortgage balance	part
 Paid by insurance	part
 Plan paid	part
 Amount brought forward	part
@@ -531,6 +549,9 @@ Price per liter	part
 Excess	part
 Deductible	part
 Interest charged	part
+Interest earned	part
+Interest paid	part
+Insurance excess	part
 Interest	part
 Finance charge	part
 Interest rate	part

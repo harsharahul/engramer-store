@@ -9,7 +9,7 @@
  * must not become a hundred questions.
  */
 import { findDates, findRelativeDays, findTimes, type DateContext, type FoundDate } from "./dates";
-import { clockLineTime, moneyEvery } from "./labels";
+import { amountLines, clockLineTime, SUM_LINE } from "./labels";
 
 export interface Candidate {
   /** "d1".."d10" for dates, "a1".."a6" for amounts: the name a reader answers by. */
@@ -38,8 +38,6 @@ const MAX_AMOUNTS = 6;
 /** A date in a table of times is the day of each; two are enough to say what the day is. */
 const CLOCKS_PER_DATE = 2;
 const SENTENCE_MAX = 200;
-/** Words that mark the amount a document is about, before its line items. */
-const SUM_LINE = /\b(?:total|due|balance|paid|charged|refund(?:ed)?|fare|price|premium)\b/i;
 /** A sentence ends at a line's end, or at a full stop before a new start. */
 const SENTENCE_END = /\n+|[.!?]\s+(?=[A-Z0-9"'(])/g;
 
@@ -79,26 +77,6 @@ function shortened(text: string, sentence: Span, at: number, end: number): strin
   return text.slice(from, from + SENTENCE_MAX).trim();
 }
 
-/** The price of one of something, said straight after the amount ("$140.00 per night"). A year's price is the year's whole price. */
-const RATE_AFTER = /^\s*(?:(?:per|a|an|each|every)\s+|\/\s?)(?:night|month|week|day|hour|session|visit|class|lesson|seat|piece|person|guest|item|unit|mo)\b/i;
-/** Money set aside against a later bill, named straight before the amount ("a deposit of $100.00"). */
-const DEPOSIT_BEFORE = /\bdeposit(?:\s+(?:of|paid))?\s*:?\s*$/i;
-/** An amount as it stands in the text, from its currency to its last digit. */
-const AMOUNT_HERE = /^[^\d\n]{0,4}[\d.,]*\d/;
-
-/**
- * Whether an amount is a rate or a deposit: a part of what a document
- * costs, never the whole, so never the total it is about.
- */
-function partOnly(text: string, at: number): boolean {
-  const end = at + (AMOUNT_HERE.exec(text.slice(at, at + 24))?.[0].length ?? 0);
-  const before = text.slice(text.lastIndexOf("\n", at - 1) + 1, at);
-  const deposit = DEPOSIT_BEFORE.exec(before);
-  // "Total due after your deposit: $353.60" names the total, not the deposit:
-  // only what stands before the word says so ("Deposit paid" is a deposit).
-  return RATE_AFTER.test(text.slice(end, end + 16)) || (deposit !== null && !SUM_LINE.test(before.slice(0, deposit.index)));
-}
-
 const lineAt = (text: string, at: number) => {
   const end = text.indexOf("\n", at);
   return text.slice(text.lastIndexOf("\n", at - 1) + 1, end === -1 ? text.length : end);
@@ -107,12 +85,14 @@ const lineAt = (text: string, at: number) => {
 /**
  * The amounts open to be a document's total, once per value. A value printed
  * more than once (the total, and again on the card line) stands where a line
- * calls it a sum, if any does; a rate or a deposit is no place for it.
+ * calls it a sum, if any does. A part of what a document costs (a rate, a
+ * deposit, an amount with a minus sign, the price of one of several) is
+ * never the whole, so it is no candidate and no place for a value.
  */
 function amountsOf(text: string): { value: string; unit: string; at: number; sum: boolean }[] {
   const placed = new Map<string, { value: string; unit: string; at: number; sum: boolean }>();
-  for (const amount of moneyEvery(text)) {
-    if (partOnly(text, amount.at)) {
+  for (const amount of amountLines(text)) {
+    if (amount.meaning === "part") {
       continue;
     }
     const sum = SUM_LINE.test(lineAt(text, amount.at));

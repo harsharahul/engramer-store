@@ -256,6 +256,21 @@ describe("the amounts a document holds", () => {
     expect(spotCandidates("The plan renews for USD 99.00 per year.").map((c) => c.value)).toEqual(["99.00"]);
   });
 
+  it("an amount with a minus sign and the price of one of several are never a total, so they are not candidates", () => {
+    const text = ["Tickets: 2 x $55.00", "Railcard discount: -$5.50", "Insurance adjustment: -CAD 190.00", "Total paid: $104.50"].join("\n");
+    expect(spotCandidates(text).filter((c) => c.what === "amount").map((c) => c.value)).toEqual(["104.50"]);
+    // A dash between a label and its amount is not a minus sign.
+    expect(spotCandidates("Shipping - $4.90").map((c) => c.value)).toEqual(["4.90"]);
+  });
+
+  it("an amount with its currency behind it is a candidate", () => {
+    expect(spotCandidates("Amount due: 86.40 GBP\nTotal to pay 1.234,50 EUR\nTotal charged: 29,99 €").map((c) => [c.value, c.unit, c.printed])).toEqual([
+      ["86.40", "GBP", "GBP 86.40"],
+      ["1234.50", "EUR", "EUR 1234.50"],
+      ["29.99", "EUR", "EUR 29.99"],
+    ]);
+  });
+
   it("a total printed again on the card line keeps its place as the total", () => {
     const receipt = [
       "Coffee $4.50",
