@@ -1,4 +1,4 @@
-import { daysUntil } from "./dates";
+import { daysUntil, findTimes } from "./dates";
 import type { Subject } from "./subject";
 
 /**
@@ -137,6 +137,12 @@ export interface Fact {
    * answers, whoever else reads the same day.
    */
   assumedYear?: boolean;
+  /**
+   * The day was said in words ("tomorrow", "this Saturday") and read against
+   * the day the message was sent. Like an assumed year, a second reader does
+   * not settle it, so it always asks.
+   */
+  relative?: boolean;
   /** Pinned by the owner. Never overwritten by a later scan. */
   confirmed?: boolean;
   /**
@@ -468,7 +474,10 @@ export function groundFacts(facts: Fact[], source: string): Fact[] {
       return (
         timeRenderings(fact.time).some((form) => haystack.includes(normalize(form))) ||
         statesHour(fact.time, source) ||
-        statesMorningClock(fact.time, source)
+        statesMorningClock(fact.time, source) ||
+        // A clock in words or with an h ("noon", "9 o'clock in the
+        // evening", "15h30") is found as the readers find it.
+        findTimes(source).some((clock) => clock.time === fact.time)
       );
     }
     return true;
@@ -509,7 +518,8 @@ function statesMonthDay(isoDate: string, source: string): boolean {
   }
   const month = `(?:${monthForms(MONTHS[Number(parts[1]) - 1]!).join("|")})\\.?`;
   const day = `0?${Number(parts[2])}(?:st|nd|rd|th)?`;
-  return new RegExp(`\\b${month}\\s+${day}\\b(?!\\d)|(?<!\\d)\\b${day}\\s+${month}(?![a-z])`, "i").test(source);
+  // "5 December", "5th December" and "the 5th of December" are one day.
+  return new RegExp(`\\b${month}\\s+${day}\\b(?!\\d)|(?<!\\d)\\b${day}(?:\\s+of)?\\s+${month}(?![a-z])`, "i").test(source);
 }
 
 /**
@@ -789,9 +799,12 @@ function pick(prior: Fact, fact: Fact): Fact {
     prior.source !== fact.source &&
     !prior.ambiguous &&
     !fact.ambiguous &&
-    // Nor does a second reader settle which year a date with none means.
+    // Nor does a second reader settle which year a date with none means,
+    // or which day a day said in words is.
     !prior.assumedYear &&
-    !fact.assumedYear
+    !fact.assumedYear &&
+    !prior.relative &&
+    !fact.relative
   ) {
     const names = [...new Set([...readers(prior), ...readers(fact)])].sort();
     return { ...winner, accepted: winner.accepted ?? "agreement", reader: names.join(" + ") };

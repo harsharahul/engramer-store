@@ -41,6 +41,11 @@ describe("acceptance", () => {
     expect(acceptance(fact({}), { scores: trusted, siblings: [], now: NOW })).toBe("grounded");
   });
 
+  it("a day said in words, or a year the text left out, always waits for a yes, however well the reader measures", () => {
+    expect(acceptance(fact({ relative: true }), { scores: trusted, siblings: [], now: NOW })).toBeNull();
+    expect(acceptance(fact({ assumedYear: true }), { scores: trusted, siblings: [], now: NOW })).toBeNull();
+  });
+
   it("the same date stays offered when the task measured below 98%", () => {
     expect(acceptance(fact({}), { scores: scores({ precision: 0.69, offered: 40 }), siblings: [], now: NOW })).toBeNull();
   });

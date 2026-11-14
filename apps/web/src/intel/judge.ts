@@ -187,6 +187,7 @@ export function judgedFacts(answer: unknown, candidates: readonly Candidate[], t
         document,
         ...(candidate.assumedYear ? { assumedYear: true } : {}),
         ...(candidate.ambiguous ? { ambiguous: true } : {}),
+        ...(candidate.relative ? { relative: true } : {}),
         source: "model",
         confidence: MODEL_CONFIDENCE,
       });

@@ -698,6 +698,44 @@ describe("a date line and the clock lines under it", () => {
   });
 });
 
+describe("a show's start and its doors", () => {
+  const moments = (text: string) =>
+    labelledFacts(text)
+      .filter((fact) => fact.kind === "event")
+      .map((fact) => [fact.value, fact.time]);
+
+  it("the start outranks the doors: one moment, at the start", () => {
+    expect(moments("Example Quartet\nSaturday 14 November 2026\nDoors: 7:00 PM\nShow starts: 8:00 PM")).toEqual([["2026-11-14", "20:00"]]);
+    expect(moments("Friday 20 November 2026, doors 7pm, show 8pm.")).toEqual([["2026-11-20", "20:00"]]);
+    expect(moments("Saturday 21 November 2026\nDoors open 18:45\nCurtain up 19:30")).toEqual([["2026-11-21", "19:30"]]);
+    expect(moments("Thursday 3 December 2026\nDoors: 6:30 PM\nShow: 8:30 PM")).toEqual([["2026-12-03", "20:30"]]);
+  });
+
+  it("a start said alone is the moment", () => {
+    expect(moments("Example United v Sample Town\nSunday 22 November 2026\nKick-off: 3pm")).toEqual([["2026-11-22", "15:00"]]);
+    expect(moments("Wednesday 25 November 2026\nTalk begins 18:00")).toEqual([["2026-11-25", "18:00"]]);
+  });
+
+  it("doors alone keep the doors time", () => {
+    expect(moments("Saturday 5 December 2026\nDoors: 7:30 PM")).toEqual([["2026-12-05", "19:30"]]);
+    expect(moments("Sat 14 Nov 2026, doors 7:00 PM")).toEqual([["2026-11-14", "19:00"]]);
+  });
+
+  it("showing an ID or buying a curtain is no show", () => {
+    expect(moments("Please show 1 photo ID when collecting on 14 November 2026")).toEqual([]);
+    expect(moments("Blackout curtain 140x230, delivery 14 November 2026")).toEqual([]);
+    expect(moments("Show this pass at the door on 14 November 2026")).toEqual([]);
+    // The words still read when they say when.
+    expect(moments("Thursday 3 December 2026\nDoors: 6:30 PM\nShow 8:30 PM")).toEqual([["2026-12-03", "20:30"]]);
+    expect(moments("Saturday 21 November 2026\nCurtain: 19:30")).toEqual([["2026-11-21", "19:30"]]);
+  });
+
+  it("a sale or a season that starts is no show", () => {
+    expect(moments("Sale starts Friday 20 November 2026 at 9am")).toEqual([]);
+    expect(moments("The season starts on 1 December 2026.")).toEqual([]);
+  });
+});
+
 describe("a form line read by what its label means", () => {
   // A small table, as the shipped one is shaped: normalized label to meaning.
   const table = lexiconFrom([
@@ -761,6 +799,8 @@ describe("a form line read by what its label means", () => {
     expect(read("Certificate issued: 12 November 2026", sent)).toEqual([["issued", "2026-11-12", undefined, "Certificate issued", 0.7]]);
     // In a stored file no year is known.
     expect(read("Delivery: Thursday, November 12")).toEqual([]);
+    // A day said with "of" keeps the year written after it.
+    expect(read("Direct debit: the 5th of December 2028", sent)).toEqual([["due", "2028-12-05", undefined, "Direct debit", 0.7]]);
   });
 
   it("one date, one reading: a typed line wins over a line that only names the same day, and a claimed day is not read again", () => {

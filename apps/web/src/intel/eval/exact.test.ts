@@ -22,10 +22,11 @@ describe("exact readers on the eval set", () => {
     expect(new Set(EVAL_CASES.map((c) => c.id)).size).toBe(EVAL_CASES.length);
   });
 
-  it("the first set holds the distractor and the form cases, each id once, none shared with the held-out set", () => {
-    expect(EVAL_CASES).toHaveLength(132);
+  it("the first set holds the distractor, the form and the time-language cases, each id once, none shared with the held-out set", () => {
+    expect(EVAL_CASES).toHaveLength(162);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("x-"))).toHaveLength(30);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("f-"))).toHaveLength(40);
+    expect(EVAL_CASES.filter((c) => c.id.startsWith("t-"))).toHaveLength(30);
     const heldout = new Set(HELDOUT_CASES.map((c) => c.id));
     expect(EVAL_CASES.filter((c) => heldout.has(c.id))).toEqual([]);
   });
@@ -72,7 +73,8 @@ const labelReadings = async (evalCase: EvalCase) => (await labelFacts(evalCase))
 
 describe("label rules on the eval set", () => {
   it("are right at least nine times in ten, on dates and on amounts", async () => {
-    // Every case of the first set: running words, distractors and forms alike.
+    // Every case of the first set: running words, distractors, forms and
+    // time language alike.
     const written = EVAL_CASES;
     const plain = written.filter((c) => !c.exact);
     const lines: string[] = [];

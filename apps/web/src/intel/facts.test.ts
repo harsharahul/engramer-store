@@ -89,11 +89,30 @@ describe("groundFacts", () => {
     expect(groundFacts([exam], "Exam 12 March 2029 at 9:405")).toHaveLength(0);
   });
 
+  it("finds a clock again in the words or the h form the document wrote it in", () => {
+    const at = (time: string) => fact({ kind: "event", time });
+    expect(groundFacts([at("12:00")], "Lunch 12 March 2029 at noon")).toHaveLength(1);
+    expect(groundFacts([at("12:00")], "Collection 12 March 2029 from midday")).toHaveLength(1);
+    expect(groundFacts([at("12:00")], "Lunch 12 March 2029 at 12:30")).toHaveLength(0);
+    expect(groundFacts([at("15:00")], "Rendez-vous 12 March 2029, 15h00")).toHaveLength(1);
+    expect(groundFacts([at("15:00")], "Opening 12 March 2029 at 15h")).toHaveLength(1);
+    expect(groundFacts([at("15:30")], "Rendez-vous 12 March 2029, 15h30")).toHaveLength(1);
+    expect(groundFacts([at("09:00")], "Starts 12 March 2029 at 9 o'clock in the morning")).toHaveLength(1);
+    expect(groundFacts([at("21:00")], "Starts 12 March 2029 at 9 o'clock in the evening")).toHaveLength(1);
+    expect(groundFacts([at("09:00")], "Starts 12 March 2029 at 9 o'clock in the evening")).toHaveLength(0);
+  });
+
   it("matches a whole hour the document wrote without a colon", () => {
     const stay = fact({ kind: "event", time: "15:00" });
     expect(groundFacts([stay], "Check-in 12 March 2029 from 3pm")).toHaveLength(1);
     expect(groundFacts([stay], "Check-in 12 March 2029 from 3 p.m.")).toHaveLength(1);
     expect(groundFacts([fact({ kind: "event", time: "00:00" })], "Ends 12 March 2029 at 12am")).toHaveLength(1);
+  });
+
+  it("a date whose year was assumed is found when its day is said with 'of'", () => {
+    const sale = fact({ kind: "event", value: "2026-12-05", assumedYear: true });
+    expect(groundFacts([sale], "The cake sale is on the 5th of December")).toHaveLength(1);
+    expect(groundFacts([sale], "The cake sale is on the 5th of November")).toHaveLength(0);
   });
 
   it("a date whose year was assumed is found by its month and day, as a date and not as a run of characters", () => {

@@ -165,23 +165,24 @@ for the version and the exact prompt of the reader that ships, over at
 least 30 readings, on each of two synthetic sets; never for a travel time,
 an identity document's expiry or a legal deadline, which need exact data;
 and only when the value passes sanity checks (the day exists, a stay ends
-after it begins, an amount names its currency). The first set is 132
+after it begins, an amount names its currency). The first set is 162
 invented emails and documents: a third of them written so that the date or
-amount that matters stands among others that do not, and forty written as
+amount that matters stands among others that do not, forty written as
 forms (labels and values, flattened tables, a time on the line under its
-date); the rules, the label table and the model's instructions are written
-against it. The second is 60 more,
+date), and thirty about time (doors and a show's start, ranges of hours,
+clocks in words, days said in words); the rules, the label table and the
+model's instructions are written against it. The second is 60 more,
 written without sight of the readers: nothing is ever tuned on it, and it
 is the one that says how unseen documents are read. The exact readers are
 scored in the test suite, and Apple's on-device model is scored on a Mac
 by a harness that runs the app's own reading code (`tools/eval/apple`).
 
-On the second set today, the rules and the model together find 82% of the
+On the second set today, the rules and the model together find 85% of the
 dates and 80% of the amounts a careful reader would, and of what they
-offer 70% of the dates and 84% of the amounts are right; two of twelve
+offer 73% of the dates and 84% of the amounts are right; two of twelve
 documents that state nothing still get an offer. The model's own readings
-measure 67% right for dates and 82% for amounts, well below the bar, so
-they are offered for a yes, and naming an email's kind (84%) is below its
+measure 72% right for dates and 82% for amounts, well below the bar, so
+they are offered for a yes, and naming an email's kind (86%) is below its
 bar too. The bar never moves: a task earns trust only by measuring above
 it.
 
@@ -352,6 +353,28 @@ metadata and index blob like every other derived signal.
   table on the next date sweep, and a line you already answered stays as
   you answered it. If the table cannot be loaded, every line is read with
   its own words.
+
+  Clocks are read as "14:30", "2:30 PM" and "3pm", and also as "noon",
+  "midday", "9 o'clock in the evening" and "15h30". An hour o'clock with no
+  word for the half of the day ("dinner at 7 o'clock") is not read, and
+  neither is "midnight" (which day it closes is unclear), a length of time
+  ("Running time: 2h30") or an amount shaped like a clock ("Total: 14.30").
+  A range of hours ("7-9pm", "between 10:00 and 14:00") is read from its
+  start: the start takes the end's half of the day, a range never crosses
+  a line, and a range elsewhere on a line never replaces the clock beside
+  a date. A show's start ("Show starts", "Curtain up", "Kick-off") is its
+  moment, and its doors are not a second one. A clock alone on the line
+  under a date line ("Sat 14 Nov 2026", then "8:00 PM") belongs to that
+  date, for the rules and for the on-device model.
+
+  In a message, days said in words are read against the day it was sent:
+  "today", "tonight", "tomorrow", "this Saturday", "on Saturday", "next
+  Friday" and "Saturday the 5th". They go to the on-device model as dates
+  to judge, never as rule readings, and a reading of one always waits for
+  your yes. A date the message writes out in the same sentence is the
+  reading instead. Not read: a weekday said of the past or of a schedule,
+  "the day after tomorrow", and anything a reply quotes or a message
+  forwards, which was said on another day.
 - **Amounts and reference numbers**, at low confidence, from any document,
   including kinds no rule anticipated.
 - **The assistant's judgement**, at the lowest confidence of all, on the Mac

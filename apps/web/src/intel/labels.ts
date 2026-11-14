@@ -52,6 +52,16 @@ const EVENT_LABELS =
   /\b(?:check[- ]?in|check[- ]?out|departure|departs|boarding(?:\s+time)?(?!\s+pass)|arrival|arrives|pick[- ]?up|drop[- ]?off)\b/gi;
 /** Something that starts then. A poster prints the date first ("Sat 14 Nov, doors 7 PM"), so these also look back along their own line. */
 const START_LABELS = /\b(?:appointment|doors)\b/gi;
+/**
+ * The start of a show, a match or a talk. When a document gives one beside
+ * its doors, the start is the moment and the doors are not a second one. A
+ * sale or a season that "starts" is no show, so the bare word is not read.
+ */
+const SHOW_LABELS =
+  /\b(?:show(?:\s+starts?)?(?=\s*:|\s+\d{1,2}(?::[0-5]\d|\s?[ap]\.?m\b)|\s+at\s+\d|\s+starts?\b)|curtain(?:\s+(?:up|call)|(?=\s*:))|kick[- ]?off|(?:talk|performance|concert|event|lecture|match|game)\s+(?:starts?|begins?)|start\s+time)\b/gi;
+const DOORS = /^doors\b/i;
+/** Start readings that are not a show's start. */
+const NOT_A_SHOW = /^(?:doors|appointment)\b/i;
 /** A line that says it is a delivery, in any message. */
 const DELIVERY_LABELS = /\b(?:(?:estimated|expected)\s+delivery(?:\s+date)?|delivery\s+date|delivered\s+by)\b/gi;
 /** Words that mean a delivery only in a message about one: a flight arrives too. */
@@ -101,6 +111,7 @@ const EVENTS: {
 }[] = [
   { labels: EVENT_LABELS, reach: "below", travel: true },
   { labels: START_LABELS, reach: "line", label: sentenceCase, role: "start", lookBack: true },
+  { labels: SHOW_LABELS, reach: "line", label: sentenceCase, role: "start", lookBack: true },
   { labels: DELIVERY_LABELS, reach: "line", label: () => "Delivery expected by", role: "by", document: "delivery" },
   { labels: ARRIVING_LABELS, reach: "line", label: () => "Delivery expected by", role: "by", document: "delivery", only: "delivery" },
 ];
@@ -194,7 +205,7 @@ const BLOCK_REACH = 3;
  * 3 PM"): a short line that is no sentence and holds a clock and no date of
  * its own. A clock inside a sentence is not one.
  */
-function clockLineTime(line: string, writtenAt?: number): string | null {
+export function clockLineTime(line: string, writtenAt?: number): string | null {
   const plain = line.trim();
   if (!plain || plain.length > CLOCK_LINE_MAX || /[.!?]$/.test(plain) || /[.!?]\s+[A-Z]/.test(plain)) {
     return null;
@@ -492,6 +503,17 @@ export function labelledFacts(text: string, writtenAt?: number, lexicon?: Lexico
       if (!byId.get(id)?.time) {
         byId.delete(id);
       }
+    }
+  }
+  // A show's start and its doors on one day are one moment: the start.
+  const started = new Set(
+    [...byId.values()]
+      .filter((fact) => fact.kind === "event" && fact.time && fact.subject?.role === "start" && !NOT_A_SHOW.test(fact.label ?? ""))
+      .map((fact) => fact.value),
+  );
+  for (const [id, fact] of byId) {
+    if (fact.kind === "event" && fact.label && DOORS.test(fact.label) && started.has(fact.value)) {
+      byId.delete(id);
     }
   }
   const asked = amountDue(text, document);

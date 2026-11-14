@@ -154,6 +154,11 @@ export function acceptance(
   if (fact.confidence === 1 && fact.source !== "user" && EXACT_SOURCES.has(fact.source)) {
     return "exact";
   }
+  // A day said in words, or a year the text left out, is the reader's
+  // inference from when the message was sent: never settled without a yes.
+  if (fact.relative || fact.assumedYear) {
+    return null;
+  }
   // Scores measured for another version of the reader, or another prompt,
   // say nothing about this one.
   if (fact.source !== "model" || !current(ctx.scores) || stakesOf(fact) === "high") {
