@@ -296,7 +296,6 @@ describe("parseTime", () => {
   it("reads noon, midday, an hour o'clock and the hour written with an h", () => {
     expect(parseTime("Lunch at noon")).toBe("12:00");
     expect(parseTime("Collection from midday")).toBe("12:00");
-    expect(parseTime("Starts at 9 o'clock")).toBe("09:00");
     expect(parseTime("Starts at 9 o'clock in the evening")).toBe("21:00");
     expect(parseTime("Dinner at 8 o'clock tonight")).toBe("20:00");
     expect(parseTime("7 o'clock pm")).toBe("19:00");
@@ -332,6 +331,48 @@ describe("parseTime", () => {
     expect(findTimes("Pages 7-9")).toEqual([]);
     expect(findTimes("Ages 7-9 years, class at 4pm").map(({ time }) => time)).toEqual(["16:00"]);
     expect(findTimes("Score 2-1pm").map(({ time }) => time)).toEqual(["13:00"]);
+  });
+
+  it("a range later on the line does not take the place of the clock beside the date", () => {
+    expect(parseTime("Your appointment is on 8 Dec 2026 at 14:30, clinic open 9:00-17:00")).toBe("14:30");
+    expect(parseTime("Check-in: 12 March 2027 from 15:00 (reception 8:00-22:00)")).toBe("15:00");
+    expect(parseTime("Appointment: 8 Dec 2026 at 14:30 (arrive 10 min early; desk 8-9am)")).toBe("14:30");
+    expect(parseTime("Class 7-9pm")).toBe("19:00");
+    expect(parseTime("Class 7:00-9:00 PM")).toBe("19:00");
+  });
+
+  it("a day of the month, a slash date or a room number before a dash is not a range's start", () => {
+    expect(parseTime("Doors: Thursday, December 3 - 7:00 PM")).toBe("19:00");
+    expect(findTimes("Concert Thursday, December 3 - 7:00 PM").map(({ time, endTime }) => [time, endTime])).toEqual([["19:00", undefined]]);
+    expect(findTimes("Party 5/12 - 7pm").map(({ time }) => time)).toEqual(["19:00"]);
+    expect(findTimes("Room 3 - 7pm").map(({ time }) => time)).toEqual(["19:00"]);
+  });
+
+  it("a range does not reach across a line, and long runs of spaces stay fast", () => {
+    expect(findTimes("Saturday 14 November 2026, Day 1\n- 9am Breakfast").map(({ time }) => time)).toEqual(["09:00"]);
+    expect(findTimes("Party for guests aged 4\n- 7pm").map(({ time }) => time)).toEqual(["19:00"]);
+    expect(findTimes("at 3\n\n- 5pm").map(({ time }) => time)).toEqual(["17:00"]);
+    for (const padding of [" ", "\t"]) {
+      const started = performance.now();
+      findTimes(`12${padding.repeat(50_000)}`);
+      parseTime(`12${padding.repeat(50_000)}`);
+      expect(performance.now() - started).toBeLessThan(200);
+    }
+  });
+
+  it("a duration written with an h is not a clock", () => {
+    const not = ["Running time: 2h30", "Flight time 1h45", "Journey time 3h", "up to 2h", "It takes 3h", "Lasts 2h15", "Durée 1h30"];
+    expect(not.map((text) => findTimes(text).map(({ time }) => time))).toEqual(not.map(() => []));
+    expect(parseTime("Rendez-vous 15h30")).toBe("15:30");
+    expect(parseTime("Opening at 15h")).toBe("15:00");
+  });
+
+  it("an hour o'clock with nothing to say which half of the day is not read", () => {
+    expect(parseTime("Tea at 4 o'clock")).toBeNull();
+    expect(parseTime("Dinner at 7 o'clock")).toBeNull();
+    expect(parseTime("The site visit is at 9 o'clock sharp")).toBeNull();
+    expect(parseTime("Starts at 9 o'clock in the morning")).toBe("09:00");
+    expect(parseTime("Starts at 9 o'clock in the evening")).toBe("21:00");
   });
 
   it("finds the new forms in running text, in order", () => {

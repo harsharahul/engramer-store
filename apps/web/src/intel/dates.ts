@@ -419,25 +419,39 @@ const TIME_HOUR = /(?<![\d.:,])\b(\d{1,2})\s?([ap])\.?m(?![A-Za-z])/i;
 /**
  * An hour said with "o'clock", and what after it says which half of the day
  * ("9 o'clock in the evening", "8 o'clock tonight", "7 o'clock pm"). With
- * nothing after it, the hour is read as written.
+ * nothing after it the half of the day is unknown ("dinner at 7 o'clock"),
+ * and no clock is read rather than a wrong one.
  */
 const TIME_OCLOCK = /\b(\d{1,2})\s?o[’']?\s?clock\b(?:\s*(?:([ap])\.?m\.?(?![A-Za-z])|in the (morning|afternoon|evening)|(tonight|at night)))?/i;
+/** Words before a length of time, not a time of day ("Running time: 2h30", "up to 2h"). */
+const DURATION_BEFORE = String.raw`(?<!(?:duration|running time|flight time|journey time|travel time|takes|lasts|up to|dur[eé]e|about|approx\.?|around)[ \t]*:?[ \t]*)`;
 /**
  * The hour written with an h ("15h00", "15h30"), as much of Europe writes it.
  * A bare "15h" is a clock only after a word that says when ("at 15h",
  * "from 9h"): "Room 15h" and "a 24h service" are not.
  */
-const TIME_H = /(?<![\d.:,])\b([01]?\d|2[0-3])h([0-5]\d)(?![\dA-Za-z])/i;
-const TIME_H_BARE = /\b(?:at|from|until|till|by|before|after|to|à|dès|vers)\s+([01]?\d|2[0-3])h(?![\dA-Za-z])/i;
+const TIME_H = new RegExp(String.raw`${DURATION_BEFORE}(?<![\d.:,])\b([01]?\d|2[0-3])h([0-5]\d)(?![\dA-Za-z])`, "i");
+const TIME_H_BARE = /\b(?:at|from|until|till|by|before|after|à|dès|vers)\s+([01]?\d|2[0-3])h(?![\dA-Za-z])/i;
 /** Noon said in words. Midnight is not read: which day it closes is unclear. */
 const TIME_NOON = /\b(?:noon|midday)\b/i;
 
-/** One end of a range: an hour, its minutes, its half of the day. */
-const RANGE_END = String.raw`(\d{1,2})(?::([0-5]\d))?\s*(?:([ap])\.?m\.?(?![A-Za-z]))?`;
+/**
+ * One end of a range: an hour, its minutes, its half of the day. Spaces
+ * are bounded and never a line break, so a range stays on its line and a
+ * long run of blanks costs nothing.
+ */
+const RANGE_END = String.raw`(\d{1,2})(?::([0-5]\d))?(?:[ \t]{0,2}([ap])\.?m\.?(?![A-Za-z]))?`;
+/** Not after a month's name, a slash or a digit: "December 3 - 7:00 PM" and "5/12 - 7pm" are a day and a clock. */
+const RANGE_NOT_AFTER = String.raw`(?<!(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?[ \t]{1,3})(?<![\d.:,/\-])`;
 /** "7-9pm", "7:00-9:00 PM", "11am to 1pm", "14:00 until 17:30". */
-const RANGE_TO = new RegExp(String.raw`(?<![\d.:,])\b${RANGE_END}\s*(?:-|\u2013|to|until|till)\s*${RANGE_END}(?![\dA-Za-z:])`, "i");
+const RANGE_TO = new RegExp(
+  String.raw`${RANGE_NOT_AFTER}\b${RANGE_END}([ \t]{0,3}(?:-|\u2013|to|until|till)[ \t]{0,3})${RANGE_END}(?![\dA-Za-z:])`,
+  "i",
+);
 /** "between 10:00 and 14:00": "and" joins a range only after "between". */
-const RANGE_BETWEEN = new RegExp(String.raw`\bbetween\s+${RANGE_END}\s*and\s*${RANGE_END}(?![\dA-Za-z:])`, "i");
+const RANGE_BETWEEN = new RegExp(String.raw`\bbetween[ \t]{1,3}${RANGE_END}([ \t]{1,3}and[ \t]{1,3})${RANGE_END}(?![\dA-Za-z:])`, "i");
+/** A dash with a space beside it. */
+const SPACED_DASH = /[ \t][-\u2013]|[-\u2013][ \t]/;
 /** How long a range may run when its start leaves its half of the day unsaid ("11-1pm"). */
 const IMPLIED_SPAN_MINUTES = 6 * 60;
 
@@ -461,11 +475,17 @@ function inHalf(hour: number, minute: number, half: string | undefined): number 
  * says its half of the day, or both ends carry minutes. A start that leaves
  * its half unsaid takes the end's ("7-9pm" is the evening), or the other
  * half when that would put it after the end ("11-1pm"), and then only for a
- * short span. A range that would end before it starts is none.
+ * short span. A range that would end before it starts is none. A start
+ * that is only a number ("3", no minutes, no half of the day) joins its end
+ * only by an unspaced dash or a word ("7-9pm", "7 to 9pm"): "Room 3 - 7pm"
+ * is a room and a clock.
  */
 function rangeIn(match: RegExpExecArray): { start: string; end: string } | null {
-  const [, h1, m1, half1, h2, m2, half2] = match;
+  const [, h1, m1, half1, joined = "", h2, m2, half2] = match;
   if (!half2 && !(m1 && m2)) {
+    return null;
+  }
+  if (!m1 && !half1 && SPACED_DASH.test(joined)) {
     return null;
   }
   const end = inHalf(Number(h2), Number(m2 ?? 0), half2);
@@ -481,13 +501,16 @@ function rangeIn(match: RegExpExecArray): { start: string; end: string } | null 
   return start !== null && start < end ? { start: clockOf(start), end: clockOf(end) } : null;
 }
 
-/** The first range of hours in a text, if any. */
-function firstRange(text: string): { start: string; end: string } | null {
-  for (const form of [RANGE_BETWEEN, RANGE_TO]) {
-    const match = form.exec(text);
-    const range = match ? rangeIn(match) : null;
-    if (range) {
-      return range;
+/** The start of a range of hours that holds the given place in a text, if one does. */
+function rangeAround(text: string, at: number): string | null {
+  for (const form of RANGE_FORMS) {
+    for (const match of text.matchAll(form)) {
+      if (at >= match.index && at < match.index + match[0].length) {
+        const range = rangeIn(match);
+        if (range) {
+          return range.start;
+        }
+      }
     }
   }
   return null;
@@ -505,11 +528,18 @@ export function parseTime(text: string): string | null {
   if (!text) {
     return null;
   }
-  // A range is its start, whatever form its ends are written in.
-  const range = firstRange(text);
-  if (range) {
-    return range.start;
+  const pick = clockPick(text);
+  if (!pick) {
+    return null;
   }
+  // A clock that is one end of a range ("9pm" in "7-9pm") stands for the
+  // range, which is its start. A range elsewhere on the line (opening hours
+  // after an appointment) takes nothing from the clock that was picked.
+  return rangeAround(text, pick.at) ?? pick.time;
+}
+
+/** The clock a text states, in the order of the forms, with where it stands. */
+function clockPick(text: string): { time: string; at: number } | null {
   const meridiem = TIME.exec(text);
   if (meridiem) {
     const raw = Number(meridiem[1]);
@@ -518,11 +548,11 @@ export function parseTime(text: string): string | null {
     }
     const pm = meridiem[3]!.toLowerCase() === "p";
     const hour = raw === 12 ? (pm ? 12 : 0) : pm ? raw + 12 : raw;
-    return `${String(hour).padStart(2, "0")}:${meridiem[2]}`;
+    return { time: `${String(hour).padStart(2, "0")}:${meridiem[2]}`, at: meridiem.index };
   }
   const plain = TIME_24.exec(text);
   if (plain) {
-    return `${String(Number(plain[1])).padStart(2, "0")}:${plain[2]}`;
+    return { time: `${String(Number(plain[1])).padStart(2, "0")}:${plain[2]}`, at: plain.index };
   }
   // After the colon forms, so a clock written with a colon always wins.
   const hourOnly = TIME_HOUR.exec(text);
@@ -533,31 +563,31 @@ export function parseTime(text: string): string | null {
     }
     const pm = hourOnly[2]!.toLowerCase() === "p";
     const hour = raw === 12 ? (pm ? 12 : 0) : pm ? raw + 12 : raw;
-    return `${String(hour).padStart(2, "0")}:00`;
+    return { time: `${String(hour).padStart(2, "0")}:00`, at: hourOnly.index };
   }
   const oclock = TIME_OCLOCK.exec(text);
   if (oclock) {
     const raw = Number(oclock[1]);
-    if (raw < 1 || raw > 12) {
-      return null;
-    }
     const half = (oclock[2] ?? "").toLowerCase();
     const part = (oclock[3] ?? "").toLowerCase();
     const pm = half === "p" || part === "afternoon" || part === "evening" || oclock[4] !== undefined;
     const am = half === "a" || part === "morning";
-    const hour = raw === 12 ? (am ? 0 : 12) : pm ? raw + 12 : raw;
-    return `${String(hour).padStart(2, "0")}:00`;
+    if (raw >= 1 && raw <= 12 && (pm || am)) {
+      const hour = raw === 12 ? (am ? 0 : 12) : pm ? raw + 12 : raw;
+      return { time: `${String(hour).padStart(2, "0")}:00`, at: oclock.index };
+    }
   }
   const withH = TIME_H.exec(text);
   if (withH) {
-    return `${String(Number(withH[1])).padStart(2, "0")}:${withH[2]}`;
+    return { time: `${String(Number(withH[1])).padStart(2, "0")}:${withH[2]}`, at: withH.index };
   }
   const bareH = TIME_H_BARE.exec(text);
   if (bareH) {
-    return `${String(Number(bareH[1])).padStart(2, "0")}:00`;
+    return { time: `${String(Number(bareH[1])).padStart(2, "0")}:00`, at: bareH.index };
   }
-  if (TIME_NOON.test(text)) {
-    return "12:00";
+  const noon = TIME_NOON.exec(text);
+  if (noon) {
+    return { time: "12:00", at: noon.index };
   }
   return null;
 }

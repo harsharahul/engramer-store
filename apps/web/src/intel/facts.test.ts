@@ -97,7 +97,7 @@ describe("groundFacts", () => {
     expect(groundFacts([at("15:00")], "Rendez-vous 12 March 2029, 15h00")).toHaveLength(1);
     expect(groundFacts([at("15:00")], "Opening 12 March 2029 at 15h")).toHaveLength(1);
     expect(groundFacts([at("15:30")], "Rendez-vous 12 March 2029, 15h30")).toHaveLength(1);
-    expect(groundFacts([at("09:00")], "Starts 12 March 2029 at 9 o'clock")).toHaveLength(1);
+    expect(groundFacts([at("09:00")], "Starts 12 March 2029 at 9 o'clock in the morning")).toHaveLength(1);
     expect(groundFacts([at("21:00")], "Starts 12 March 2029 at 9 o'clock in the evening")).toHaveLength(1);
     expect(groundFacts([at("09:00")], "Starts 12 March 2029 at 9 o'clock in the evening")).toHaveLength(0);
   });
