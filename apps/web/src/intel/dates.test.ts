@@ -2,7 +2,7 @@
 process.env.TZ = "UTC";
 
 import { describe, expect, it } from "vitest";
-import { daysUntil, findDates, findTimes, parseDate, parseTime, swappedReading } from "./dates";
+import { daysUntil, findDates, findRelativeDays, findTimes, parseDate, parseTime, swappedReading } from "./dates";
 
 describe("parseDate", () => {
   it("reads an unambiguous slash date, where the first number cannot be a month", () => {
@@ -218,6 +218,44 @@ describe("a date with no year", () => {
     for (const text of ["Mayor 12", "Room 12", "may 12", "12 marchers", "Suite 5", "March 2029"]) {
       expect(parseDate(text, at), text).toBeNull();
     }
+  });
+
+  it("reads the day of the month said with 'of'", () => {
+    expect(parseDate("the cake sale on the 5th of December", at)).toEqual({ iso: "2026-12-05", ambiguous: false, assumedYear: true });
+    expect(parseDate("see you on 12th of November", at)?.iso).toBe("2026-11-12");
+    expect(findDates("Dinner on the 5th of December at 18:00", at).map((hit) => hit.date.iso)).toEqual(["2026-12-05"]);
+  });
+});
+
+describe("days said in words, in mail", () => {
+  // Thursday 12 November 2026, in the morning.
+  const SENT = Date.UTC(2026, 10, 12, 9);
+  const days = (text: string, sent = SENT) => findRelativeDays(text, sent).map((day) => [text.slice(day.at, day.end), day.iso]);
+
+  it("reads a day said in words against the day the message was sent", () => {
+    expect(days("Dinner tomorrow at 7pm?")).toEqual([["tomorrow", "2026-11-13"]]);
+    expect(days("Are you free tonight?")).toEqual([["tonight", "2026-11-12"]]);
+    expect(days("It arrives today.")).toEqual([["today", "2026-11-12"]]);
+    expect(days("See you this Saturday at 10:30")).toEqual([["this Saturday", "2026-11-14"]]);
+    expect(days("Can we meet next Friday at 9am?")).toEqual([["next Friday", "2026-11-20"]]);
+    expect(days("How about next Saturday?")).toEqual([["next Saturday", "2026-11-21"]]);
+    expect(days("Lunch on Saturday?")).toEqual([["on Saturday", "2026-11-14"]]);
+    expect(days("lunch on saturday?")).toEqual([["on saturday", "2026-11-14"]]);
+    expect(days("The cake sale is on Saturday the 5th, from 4pm.")).toEqual([["Saturday the 5th", "2026-12-05"]]);
+  });
+
+  it("a weekday and a day of the month that never meet within six weeks, or a weekday said for every week, are not read", () => {
+    expect(days("Friday the 5th")).toEqual([]);
+    expect(days("We are open on Saturdays.")).toEqual([]);
+    expect(days("Every Saturday from 10am.")).toEqual([]);
+  });
+
+  it("a quoted or forwarded message's days are its own, not this one's", () => {
+    expect(days("Thanks, noted.\n\nOn Mon, 9 Nov 2026 at 09:00, Alex Sample wrote:\n> Dinner tomorrow at 7pm?")).toEqual([]);
+    expect(days("Thanks!\n> Dinner tomorrow at 7pm?")).toEqual([]);
+    expect(days("FYI\n\nFrom: Sam Example\nSent: Monday, 9 November 2026 09:00\nSubject: Dinner\n\nDinner tomorrow?")).toEqual([]);
+    // What this message says before the quote still counts.
+    expect(days("Yes, tomorrow works.\n\nOn Mon, 9 Nov 2026, Alex wrote:\n> Dinner tomorrow?")).toEqual([["tomorrow", "2026-11-13"]]);
   });
 });
 

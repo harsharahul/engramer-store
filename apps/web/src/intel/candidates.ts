@@ -8,7 +8,7 @@
  * list here is short on purpose: a statement with a hundred dated lines
  * must not become a hundred questions.
  */
-import { findDates, findTimes, type DateContext } from "./dates";
+import { findDates, findRelativeDays, findTimes, type DateContext, type FoundDate } from "./dates";
 import { clockLineTime, moneyEvery } from "./labels";
 
 export interface Candidate {
@@ -25,6 +25,8 @@ export interface Candidate {
   assumedYear?: true;
   /** The date could be read two ways. */
   ambiguous?: true;
+  /** A day said in words ("tomorrow", "this Saturday"), read against the day the message was sent. */
+  relative?: true;
   /** As the text prints it. */
   printed: string;
   /** The sentence it stands in, at most 200 characters. */
@@ -192,7 +194,17 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
   if (!text) {
     return [];
   }
-  const found = findDates(text, context);
+  const written = findDates(text, context);
+  // In a message, a day said in words is a date too, unless a written date
+  // stands there or the message writes the same day out elsewhere
+  // ("Tomorrow, Friday 13 November"): the written date is the reading.
+  const said =
+    context?.writtenAt === undefined
+      ? []
+      : findRelativeDays(text, context.writtenAt)
+          .filter((day) => !written.some((hit) => (day.at < hit.end && hit.at < day.end) || hit.date.iso === day.iso))
+          .map((day) => ({ at: day.at, end: day.end, date: { iso: day.iso, ambiguous: false }, relative: true as const }));
+  const found: (FoundDate & { relative?: true })[] = [...written, ...said].sort((a, b) => a.at - b.at);
   const money = known.total ? [] : amountsOf(text);
   if (found.length === 0 && money.length === 0) {
     return [];
@@ -298,6 +310,7 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
         ...(clock ? { time: clock.time } : {}),
         ...(hit.date.assumedYear ? { assumedYear: true as const } : {}),
         ...(hit.date.ambiguous ? { ambiguous: true as const } : {}),
+        ...(hit.relative ? { relative: true as const } : {}),
         printed: clock ? `${printed}, ${clock.time}` : printed,
         sentence,
       });

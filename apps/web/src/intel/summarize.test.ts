@@ -301,6 +301,32 @@ describe("summarize with facts", () => {
     expect(answer?.facts).toEqual([expect.objectContaining({ kind: "event", value: "2026-11-12", assumedYear: true, label: "Arriving" })]);
   });
 
+  describe("a day said in words", () => {
+    // Thursday 12 November 2026.
+    const message = (subject: string) => ({ subject, from: "Sam Example", writtenAt: Date.UTC(2026, 10, 12, 9) });
+    const read = async (text: string, judged: unknown, subject: string) => {
+      const { asked, run } = model(judged);
+      const answer = await summarize(
+        { text, name: `${subject}.email`, categories: ["Documents"], contextSize: 4096, withFacts: true, mail: true, message: message(subject) },
+        async (request) => (await run(request)) ?? null,
+      );
+      return { asked, answer };
+    };
+
+    it("a plan said with 'tomorrow' is read as the day after sending, marked so it asks", async () => {
+      const { asked, answer } = await read("Dinner tomorrow at 7pm? I found a place near the station.", { d1: "event", d1w: "Dinner" }, "Dinner?");
+      expect(asked[1]!.prompt).toContain("tomorrow, 19:00");
+      expect(answer?.facts).toEqual([expect.objectContaining({ kind: "event", value: "2026-11-13", time: "19:00", relative: true })]);
+      expect(answer?.facts[0]?.accepted).toBeUndefined();
+    });
+
+    it("a promotion's 'tomorrow only' that the model calls nothing stores nothing", async () => {
+      const { asked, answer } = await read("Tomorrow only: 20% off all boots. Shop now.", { d1: "other" }, "Weekend deals");
+      expect(Object.keys(asked[1]!.schema!.properties)).toContain("d1");
+      expect(answer?.facts).toEqual([]);
+    });
+  });
+
   it("a judge that declines leaves the summary, with no facts", async () => {
     let calls = 0;
     const answer = await summarize({ text: POLICY, name: "policy.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true }, async () => {

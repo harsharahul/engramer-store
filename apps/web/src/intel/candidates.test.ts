@@ -38,6 +38,19 @@ describe("the dates a document holds, each with the clock beside it", () => {
     expect(dates(spotCandidates("Thursday 3 December 2026\nGreat Hall\n7pm"))).toEqual([["d1", "2026-12-03", "19:00"]]);
   });
 
+  it("a day said in words in a message is a candidate, marked as read against the sending day", () => {
+    const sent = { writtenAt: Date.UTC(2026, 10, 12, 9) };
+    const dinner = spotCandidates("Hi,\n\nDinner tomorrow at 7pm? I found a place near the station.", sent);
+    expect(dates(dinner)).toEqual([["d1", "2026-11-13", "19:00"]]);
+    expect(dinner[0]).toMatchObject({ relative: true, printed: "tomorrow, 19:00" });
+    // In a stored file no sending day is known: nothing is read.
+    expect(spotCandidates("Dinner tomorrow at 7pm?")).toEqual([]);
+    // The same day said twice is one candidate.
+    expect(dates(spotCandidates("Tomorrow, Friday 13 November 2026, at 7pm.", sent))).toEqual([["d1", "2026-11-13", "19:00"]]);
+    // What a reply quotes is not this message's day.
+    expect(spotCandidates("Thanks, noted.\n\nOn Mon, 9 Nov 2026 at 09:00, Alex wrote:\n> Dinner tomorrow at 7pm?", sent)).toEqual([]);
+  });
+
   it("both ends of a range of hours are offered: a journey's second clock is its arrival", () => {
     expect(dates(spotCandidates("Train on 14 Nov 2026, 10:30 - 12:45, platform 4"))).toEqual([
       ["d1", "2026-11-14", "10:30"],

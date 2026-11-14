@@ -109,6 +109,12 @@ describe("groundFacts", () => {
     expect(groundFacts([fact({ kind: "event", time: "00:00" })], "Ends 12 March 2029 at 12am")).toHaveLength(1);
   });
 
+  it("a date whose year was assumed is found when its day is said with 'of'", () => {
+    const sale = fact({ kind: "event", value: "2026-12-05", assumedYear: true });
+    expect(groundFacts([sale], "The cake sale is on the 5th of December")).toHaveLength(1);
+    expect(groundFacts([sale], "The cake sale is on the 5th of November")).toHaveLength(0);
+  });
+
   it("a date whose year was assumed is found by its month and day, as a date and not as a run of characters", () => {
     const arriving = fact({ kind: "event", value: "2026-11-12", assumedYear: true });
     for (const text of ["Arriving Thursday, November 12", "Arriving Thu 12 Nov", "Arriving Nov. 12th", "Arriving 12th November"]) {

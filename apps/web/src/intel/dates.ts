@@ -66,7 +66,8 @@ const MONTH_FIRST_NAMED = /\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+
 const WEEKDAY = "(?:(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\\.?,?\\s+)?";
 const MONTH_DAY = new RegExp(`\\b${WEEKDAY}([A-Z][a-z]{2,8})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?![\\d/:-]|\\.\\d)`, "g");
 // The last day of a range ("5-7 June") is not the day it starts.
-const DAY_MONTH = new RegExp(`(?<!\\d[-–/.])\\b${WEEKDAY}(\\d{1,2})(?:st|nd|rd|th)?\\s+([A-Z][a-z]{2,8})\\b`, "g");
+// "the 5th of December" says the same day with "of".
+const DAY_MONTH = new RegExp(`(?<!\\d[-–/.])\\b${WEEKDAY}(\\d{1,2})(?:(?:st|nd|rd|th)\\s+of|(?:st|nd|rd|th)?)\\s+([A-Z][a-z]{2,8})\\b`, "g");
 const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 // Year-first numeric only reads one way: nobody writes year, day, month.
 const YEAR_FIRST_NUMERIC = /\b(\d{4})[/.](\d{1,2})[/.](\d{1,2})\b/;
@@ -250,6 +251,77 @@ export function findDates(text: string, context: DateContext = {}): FoundDate[] 
     if (!taken && hit.at >= end) {
       placed.push(hit);
       end = hit.end;
+    }
+  }
+  return placed.sort((a, b) => a.at - b.at);
+}
+
+const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const WEEKDAY_NAME = String.raw`(sunday|monday|tuesday|wednesday|thursday|friday|saturday)`;
+/** "today", "tonight", "tomorrow". */
+const NEAR_DAY = /\b(today|tonight|tomorrow)\b/gi;
+/** "this Saturday", "next Friday", "on Saturday"; "on Saturdays" is every week and no day. */
+const NAMED_WEEKDAY = new RegExp(String.raw`\b(this|next|on)\s+${WEEKDAY_NAME}\b`, "gi");
+/** "Saturday the 5th". */
+const WEEKDAY_THE_DAY = new RegExp(String.raw`\b${WEEKDAY_NAME}\s+the\s+(\d{1,2})(?:st|nd|rd|th)\b`, "gi");
+/** How far ahead "Saturday the 5th" is looked for. */
+const WEEKDAY_THE_DAY_REACH = 42;
+/** A reply's quoted message starts here: "On Mon, 9 Nov 2026, Alex wrote:". */
+const QUOTE_HEADER = /^On\s.{1,200}\bwrote:\s*$/im;
+/** A forwarded message starts at a "From:" line with its "Sent:" or "Date:" line close below. */
+const FORWARD_HEADER = /^From:[^\n]*\n(?:[^\n]*\n){0,3}?(?:Sent|Date):/im;
+
+/** The UTC day a number of days after a moment, as YYYY-MM-DD. */
+function dayAfter(writtenAt: number, days: number): string {
+  const written = new Date(writtenAt);
+  return new Date(Date.UTC(written.getUTCFullYear(), written.getUTCMonth(), written.getUTCDate() + days)).toISOString().slice(0, 10);
+}
+
+/**
+ * The days a message says in words, each read against the day it was sent
+ * (its UTC day): "today" and "tonight" are that day, "tomorrow" the next,
+ * "this Saturday" and "on Saturday" the coming one, "next Saturday" the one
+ * a week after, and "Saturday the 5th" the next 5th that falls on a
+ * Saturday, within six weeks. What a reply quotes or a message forwards
+ * was said on another day, so the text stops where the quote starts, and a
+ * line that begins with ">" is never read.
+ */
+export function findRelativeDays(text: string, writtenAt: number): { at: number; end: number; iso: string; relative: true }[] {
+  const cut = Math.min(
+    ...[QUOTE_HEADER.exec(text)?.index, FORWARD_HEADER.exec(text)?.index, text.length].filter((at): at is number => at !== undefined),
+  );
+  const own = text.slice(0, cut).replace(/^>[^\n]*/gm, (quoted) => " ".repeat(quoted.length));
+  const today = new Date(writtenAt).getUTCDay();
+  const ahead = (name: string) => (DAY_NAMES.indexOf(name.toLowerCase()) - today + 7) % 7;
+  const days: { at: number; end: number; iso: string; relative: true }[] = [];
+  for (const match of own.matchAll(NEAR_DAY)) {
+    const word = match[1]!.toLowerCase();
+    days.push({ at: match.index, end: match.index + match[0].length, iso: dayAfter(writtenAt, word === "tomorrow" ? 1 : 0), relative: true });
+  }
+  for (const match of own.matchAll(NAMED_WEEKDAY)) {
+    const d = ahead(match[2]!);
+    const which = match[1]!.toLowerCase();
+    const offset = which === "this" ? d : which === "next" ? (d === 0 ? 7 : d + 7) : d === 0 ? 7 : d;
+    days.push({ at: match.index, end: match.index + match[0].length, iso: dayAfter(writtenAt, offset), relative: true });
+  }
+  for (const match of own.matchAll(WEEKDAY_THE_DAY)) {
+    const weekday = DAY_NAMES.indexOf(match[1]!.toLowerCase());
+    const dayOfMonth = Number(match[2]);
+    for (let offset = 0; offset <= WEEKDAY_THE_DAY_REACH; offset += 1) {
+      const iso = dayAfter(writtenAt, offset);
+      const date = new Date(`${iso}T00:00:00Z`);
+      if (date.getUTCDate() === dayOfMonth && date.getUTCDay() === weekday) {
+        days.push({ at: match.index, end: match.index + match[0].length, iso, relative: true });
+        break;
+      }
+    }
+  }
+  // Where two readings overlap ("on Saturday the 5th"), the one that names
+  // the day of the month is the exact one; it was added last.
+  const placed: { at: number; end: number; iso: string; relative: true }[] = [];
+  for (const day of [...days].reverse()) {
+    if (!placed.some((held) => day.at < held.end && held.at < day.end)) {
+      placed.push(day);
     }
   }
   return placed.sort((a, b) => a.at - b.at);
