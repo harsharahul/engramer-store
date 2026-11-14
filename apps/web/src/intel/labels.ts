@@ -813,15 +813,28 @@ export interface AmountLine extends Money {
   meaning?: AmountMeaning;
 }
 
-/** The words that close a stretch of text, as a label: after the last break, without what closes it. */
-function closingLabel(words: string): string | undefined {
+/** Words as a label: without the break that opens them, short, and with a letter. */
+function asLabel(words: string): string | undefined {
+  const label = words.replace(/^[\s,;|]+/, "").trim();
+  return label.length <= MAX_LABEL_CHARS && /[A-Za-z]/.test(label) ? label : undefined;
+}
+
+/**
+ * The words that close a stretch of text, as a label: without what closes
+ * them, and from the last break on. The whole stretch is the label when
+ * the table knows it as one ("Taxes, fees and charges").
+ */
+function closingLabel(words: string, lexicon?: Lexicon): string | undefined {
   const closed = words.replace(LABEL_CLOSE, "");
+  const whole = asLabel(closed);
+  if (whole && lexicon && amountMeaningOf(lexicon, whole)) {
+    return whole;
+  }
   let from = 0;
   for (const cut of closed.matchAll(LABEL_BREAK)) {
     from = cut.index + cut[0].length;
   }
-  const label = closed.slice(from).trim();
-  return label.length <= MAX_LABEL_CHARS && /[A-Za-z]/.test(label) ? label : undefined;
+  return asLabel(closed.slice(from));
 }
 
 /**
@@ -842,12 +855,12 @@ export function amountLines(text: string, lexicon?: Lexicon): AmountLine[] {
     const lineEnd = stop === -1 ? text.length : stop;
     const lineBefore = text.slice(lineStart, amount.at);
     const earlier = found[index - 1];
-    const own = closingLabel(text.slice(Math.max(lineStart, earlier ? earlier.end : 0), amount.at));
+    const own = closingLabel(text.slice(Math.max(lineStart, earlier ? earlier.end : 0), amount.at), lexicon);
     let label = own;
     if (!label && lineStart > 0 && !lineBefore.trim() && !text.slice(amount.end, lineEnd).trim()) {
       const aboveStart = text.lastIndexOf("\n", lineStart - 2) + 1;
       if (!found.some((other) => other.at >= aboveStart && other.at < lineStart)) {
-        label = closingLabel(text.slice(aboveStart, lineStart - 1));
+        label = closingLabel(text.slice(aboveStart, lineStart - 1), lexicon);
       }
     }
     const deposit = DEPOSIT_BEFORE.exec(lineBefore);

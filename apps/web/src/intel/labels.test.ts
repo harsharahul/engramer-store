@@ -950,6 +950,7 @@ describe("an amount with its label and what the label means", () => {
       ["service fees", "part"],
       ["railcard discount", "part"],
       ["sales tax", "part"],
+      ["taxes fees and charges", "part"],
       ["total to pay", "due"],
       ["amount due", "due"],
       ["total stay", "total"],
@@ -958,6 +959,12 @@ describe("an amount with its label and what the label means", () => {
     ],
   );
   const read = (text: string) => amountLines(text, table).map((amount) => [amount.value, amount.label, amount.meaning]);
+
+  it("a label with a comma in it is one label when the table knows it whole", () => {
+    expect(read("Taxes, fees and charges: $12.00")).toEqual([["12.00", "Taxes, fees and charges", "part"]]);
+    // Words the table does not know whole are still parted at the comma.
+    expect(read("Return trip, total paid: $80.00")).toEqual([["80.00", "total paid", "total"]]);
+  });
 
   it("the label is the words before the amount on its line, and the table says what they mean", () => {
     expect(read("Subtotal £118.40\nVAT £5.92\nTotal to pay: £124.32")).toEqual([
