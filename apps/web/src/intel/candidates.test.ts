@@ -297,6 +297,49 @@ describe("the amounts a document holds", () => {
     expect(spotCandidates(booking).map((c) => c.value)).toEqual(["353.60"]);
   });
 
+  it("an amount whose label the table calls a part is no candidate; one it does not know is offered as before", () => {
+    const table = lexiconFrom(
+      [],
+      [
+        ["subtotal", "part"],
+        ["vat", "part"],
+        ["reschedule fee", "part"],
+        ["items", "part"],
+        ["shipping", "part"],
+      ],
+    );
+    const known = { lexicon: table };
+    expect(amounts(spotCandidates("Reschedule fee: $25.00 within 24 hours", undefined, known))).toEqual([]);
+    expect(amounts(spotCandidates("Items: $62.40, shipping: $6.00", undefined, known))).toEqual([]);
+    const bill = "Subtotal £118.40\nVAT £5.92\nPlease send: £124.32";
+    expect(amounts(spotCandidates(bill, undefined, known))).toEqual([["a1", "124.32", "GBP"]]);
+    // With no table every amount is offered, as before.
+    expect(amounts(spotCandidates(bill)).map(([, value]) => value)).toEqual(["118.40", "5.92", "124.32"]);
+  });
+
+  it("when the totals a label names differ, only they are offered", () => {
+    const table = lexiconFrom(
+      [],
+      [
+        ["total fare", "total"],
+        ["total paid", "total"],
+        ["amount due", "due"],
+        ["balance due", "due"],
+      ],
+    );
+    const known = { lexicon: table };
+    const ticket = "Coffee on board: €4,00\nTotal fare: €213,40\nTotal paid: €225,40";
+    expect(amounts(spotCandidates(ticket, undefined, known))).toEqual([
+      ["a1", "213.40", "EUR"],
+      ["a2", "225.40", "EUR"],
+    ]);
+    // Two amounts due that differ stand before any total.
+    const bill = "Total paid: $10.00\nTotal fare: $12.00\nAmount due: $50.00\nBalance due: $75.00";
+    expect(amounts(spotCandidates(bill, undefined, known)).map(([, value]) => value)).toEqual(["50.00", "75.00"]);
+    // One named total beside an amount nobody named: both are offered, the named one first.
+    expect(amounts(spotCandidates("Coffee on board: €4,00\nTotal fare: €213,40", undefined, known)).map(([, value]) => value)).toEqual(["213.40", "4.00"]);
+  });
+
   it("an amount stands in its own sentence", () => {
     const [amount] = spotCandidates("We have refunded USD 19.99 to your card. It can take 5 to 10 days to appear.");
     expect(amount).toMatchObject({ what: "amount", printed: "USD 19.99", sentence: "We have refunded USD 19.99 to your card." });

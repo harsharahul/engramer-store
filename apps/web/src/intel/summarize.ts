@@ -316,8 +316,9 @@ async function judged(input: SummaryInput, document: DocumentKind, run: Runner):
     ...(input.keptAt !== undefined ? { keptAt: input.keptAt } : {}),
     ...alreadyRead(input.known ?? []),
     // The date a form line's label says needs no reminder ("Statement
-    // date: ...") is not put to the model either.
-    ...(lexicon ? { skip: settledNowhere(input.text, lexicon, context) } : {}),
+    // date: ...") is not put to the model either, and neither is an amount
+    // whose label says it is a part of the bill.
+    ...(lexicon ? { skip: settledNowhere(input.text, lexicon, context), lexicon } : {}),
   });
   if (candidates.length === 0) {
     return [];

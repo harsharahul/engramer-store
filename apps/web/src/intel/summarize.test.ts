@@ -247,6 +247,24 @@ describe("summarize with facts", () => {
     expect(asked[1]!.prompt).toContain("d1: 9 March 2027");
   });
 
+  it("a document that prints only parts of a bill is not asked about an amount", async () => {
+    const notice = "Booking update\nReschedule fee: $25.00\nService fee: $3.00\nThank you for choosing us.";
+    const { asked, run } = model({ pays: "yes", total: "a1" });
+    const answer = await summarize({ text: notice, name: "notice.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true }, run);
+    expect(asked).toHaveLength(1);
+    expect(answer?.facts).toEqual([]);
+  });
+
+  it("when the totals a label names differ, the model chooses between those alone", async () => {
+    const ticket = "Coffee on board: €4,00\nTotal fare: €213,40\nTotal paid: €225,40";
+    const { asked, run } = model({ pays: "yes", total: "a2" });
+    const answer = await summarize({ text: ticket, name: "ticket.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true }, run);
+    const properties = asked[1]!.schema!.properties as Record<string, { enum?: string[] }>;
+    expect(properties["total"]!.enum).toHaveLength(3);
+    expect(asked[1]!.prompt).not.toContain("4.00");
+    expect(answer?.facts.map((f) => [f.kind, f.value, f.unit])).toEqual([["amount", "225.40", "EUR"]]);
+  });
+
   describe("what another reader already settled", () => {
     const bill = "City Water. Amount due: $84.20. Due date: 20 November 2027. Your meter will be read on 3 December 2027 at 10:00.";
     const known: Fact[] = [

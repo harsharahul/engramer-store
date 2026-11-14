@@ -10,6 +10,7 @@
  */
 import { findDates, findRelativeDays, findTimes, type DateContext, type FoundDate } from "./dates";
 import { amountLines, clockLineTime, SUM_LINE } from "./labels";
+import type { Lexicon } from "./lexicon";
 
 export interface Candidate {
   /** "d1".."d10" for dates, "a1".."a6" for amounts: the name a reader answers by. */
@@ -82,26 +83,45 @@ const lineAt = (text: string, at: number) => {
   return text.slice(text.lastIndexOf("\n", at - 1) + 1, end === -1 ? text.length : end);
 };
 
+/** An amount still open to be a document's total. */
+interface OpenAmount {
+  value: string;
+  unit: string;
+  at: number;
+  /** It stands where a line calls it a sum, or its label names one. */
+  sum: boolean;
+  /** What the label table says its label names. */
+  named?: "due" | "total";
+}
+
 /**
  * The amounts open to be a document's total, once per value. A value printed
- * more than once (the total, and again on the card line) stands where a line
- * calls it a sum, if any does. A part of what a document costs (a rate, a
- * deposit, an amount with a minus sign, the price of one of several) is
- * never the whole, so it is no candidate and no place for a value.
+ * more than once (the total, and again on the card line) stands where its
+ * label names a sum, or else where a line calls it one. A part of what a
+ * document costs is never the whole, so it is no candidate and no place for
+ * a value: a rate, a deposit, an amount with a minus sign, the price of one
+ * of several, and any amount whose label the table calls a part ("Subtotal",
+ * "Tax", a fee). Where the table names more than one sum and they differ,
+ * the total is one of those and nothing else is offered: the amounts due
+ * when more than one is due, else every named sum.
  */
-function amountsOf(text: string): { value: string; unit: string; at: number; sum: boolean }[] {
-  const placed = new Map<string, { value: string; unit: string; at: number; sum: boolean }>();
-  for (const amount of amountLines(text)) {
+function amountsOf(text: string, lexicon?: Lexicon): OpenAmount[] {
+  const placed = new Map<string, OpenAmount>();
+  for (const amount of amountLines(text, lexicon)) {
     if (amount.meaning === "part") {
       continue;
     }
-    const sum = SUM_LINE.test(lineAt(text, amount.at));
+    const named = amount.meaning;
+    const sum = named !== undefined || SUM_LINE.test(lineAt(text, amount.at));
     const held = placed.get(amount.value);
-    if (!held || (sum && !held.sum)) {
-      placed.set(amount.value, { ...amount, sum });
+    if (!held || (named !== undefined && !held.named) || (sum && !held.sum)) {
+      placed.set(amount.value, { value: amount.value, unit: amount.unit, at: amount.at, sum, ...(named ? { named } : {}) });
     }
   }
-  return [...placed.values()].sort((a, b) => a.at - b.at);
+  const open = [...placed.values()].sort((a, b) => a.at - b.at);
+  const due = open.filter((amount) => amount.named === "due");
+  const named = due.length > 1 ? due : open.filter((amount) => amount.named !== undefined);
+  return named.length > 1 ? named : open;
 }
 
 /** How many lines up a clock line looks for its date, as the form reader does. */
@@ -156,6 +176,8 @@ export interface Known {
   total?: boolean;
   /** Places whose dates are nobody's business (a form line such as "Statement date: ..."): nothing is asked about a date found there. */
   skip?: readonly { at: number; end: number }[];
+  /** The label table: an amount whose label it calls a part is not offered as the total. */
+  lexicon?: Lexicon;
 }
 
 /**
@@ -197,7 +219,7 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
           })
           .map((day) => ({ at: day.at, end: day.end, date: { iso: day.iso, ambiguous: false }, relative: true as const }));
   const found: (FoundDate & { relative?: true })[] = [...written, ...said].sort((a, b) => a.at - b.at);
-  const money = known.total ? [] : amountsOf(text);
+  const money = known.total ? [] : amountsOf(text, known.lexicon);
   if (found.length === 0 && money.length === 0) {
     return [];
   }
