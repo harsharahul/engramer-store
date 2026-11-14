@@ -102,4 +102,13 @@ describe("label rules on the eval set", () => {
     console.info(lines.join("\n"));
     expect(precise).toEqual({ dates: true, amounts: true });
   });
+
+  it("the whole amount is read by its label on at least fifty documents, and right at least 95 times in 100", async () => {
+    // What the amount label table adds: without it a rule names an amount
+    // only on a line that says it is due.
+    const all = await scoreReader(EVAL_CASES, labelReadings, "amounts");
+    const offered = all.perCase.reduce((sum, c) => sum + c.found + c.extra, 0);
+    expect(offered).toBeGreaterThanOrEqual(50);
+    expect(all.precision).toBeGreaterThanOrEqual(0.95);
+  });
 });
