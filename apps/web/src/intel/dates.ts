@@ -57,7 +57,7 @@ const ISO = /\b(\d{4})-(\d{2})-(\d{2})\b/;
 const YEAR_FIRST_NAMED = /\b(\d{4})\s+([A-Za-z]{3,9})\.?\s+(\d{1,2})\b/;
 // A number followed by a colon is a clock, never a year: "November 12, 10:30"
 // names no year, and reading one out of its hour would say 2010.
-const DAY_FIRST_NAMED = /\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{2,4})\b(?!:\d)/;
+const DAY_FIRST_NAMED = /\b(\d{1,2})(?:(?:st|nd|rd|th)\s+of|(?:st|nd|rd|th)?)\s+([A-Za-z]{3,9})\.?,?\s+(\d{2,4})\b(?!:\d)/;
 const MONTH_FIRST_NAMED = /\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{2,4})\b(?!:\d)/;
 // A month and a day with no year, as a message writes them ("Thursday,
 // November 12", "Thu 12 Nov"). The month is capitalised and is a month's
@@ -259,17 +259,29 @@ export function findDates(text: string, context: DateContext = {}): FoundDate[] 
 const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 const WEEKDAY_NAME = String.raw`(sunday|monday|tuesday|wednesday|thursday|friday|saturday)`;
 /** "today", "tonight", "tomorrow". */
-const NEAR_DAY = /\b(today|tonight|tomorrow)\b/gi;
+// Not "the day after tomorrow", "a week from today" or "a week tomorrow": another day.
+const NEAR_DAY = /(?<!\b(?:after|from|week)\s)\b(today|tonight|tomorrow)\b/gi;
 /** "this Saturday", "next Friday", "on Saturday"; "on Saturdays" is every week and no day. */
-const NAMED_WEEKDAY = new RegExp(String.raw`\b(this|next|on)\s+${WEEKDAY_NAME}\b`, "gi");
+// Not "Monday's call" (said of a call, often past) or "on Monday, Wednesday and Friday" (a schedule).
+const NAMED_WEEKDAY = new RegExp(
+  String.raw`\b(this|next|on)\s+${WEEKDAY_NAME}\b(?!['\u2019]s)(?![ \t]*(?:,|and|or|to|through|-|\u2013)[ \t]*${WEEKDAY_NAME})`,
+  "gi",
+);
+/** Words before a weekday in its sentence that say it was said of the past. */
+const PAST_BEFORE = /\b(?:was|were|had|did|sent|went|met|discussed|spoke|talked|called|following|after)\b[^.!?\n]*$/i;
+/** A sentence that says it is done. */
+const DONE_AFTER = /^[^.!?\n]*\balready\b/i;
 /** "Saturday the 5th". */
 const WEEKDAY_THE_DAY = new RegExp(String.raw`\b${WEEKDAY_NAME}\s+the\s+(\d{1,2})(?:st|nd|rd|th)\b`, "gi");
 /** How far ahead "Saturday the 5th" is looked for. */
 const WEEKDAY_THE_DAY_REACH = 42;
 /** A reply's quoted message starts here: "On Mon, 9 Nov 2026, Alex wrote:". */
 const QUOTE_HEADER = /^On\s.{1,200}\bwrote:\s*$/im;
+/** A forward's separator line, as mail programs write it. */
+const FORWARD_LINE = /^[ \t]*[-_]*[ \t]*(?:forwarded message|original message|begin forwarded message:)/im;
 /** A forwarded message starts at a "From:" line with its "Sent:" or "Date:" line close below. */
-const FORWARD_HEADER = /^From:[^\n]*\n(?:[^\n]*\n){0,3}?(?:Sent|Date):/im;
+const FORWARD_HEADER =
+  /^\*?From:\*?[^\n]*\n(?:[^\n]*\n){0,3}?\*?(?:Sent|Date):|^\*?(?:Sent|Date):\*?[^\n]*\n(?:[^\n]*\n){0,3}?\*?From:/im;
 
 /** The UTC day a number of days after a moment, as YYYY-MM-DD. */
 function dayAfter(writtenAt: number, days: number): string {
@@ -288,7 +300,9 @@ function dayAfter(writtenAt: number, days: number): string {
  */
 export function findRelativeDays(text: string, writtenAt: number): { at: number; end: number; iso: string; relative: true }[] {
   const cut = Math.min(
-    ...[QUOTE_HEADER.exec(text)?.index, FORWARD_HEADER.exec(text)?.index, text.length].filter((at): at is number => at !== undefined),
+    ...[QUOTE_HEADER, FORWARD_LINE, FORWARD_HEADER, /$(?![\s\S])/]
+      .map((form) => form.exec(text)?.index)
+      .filter((at): at is number => at !== undefined),
   );
   const own = text.slice(0, cut).replace(/^>[^\n]*/gm, (quoted) => " ".repeat(quoted.length));
   const today = new Date(writtenAt).getUTCDay();
@@ -298,7 +312,19 @@ export function findRelativeDays(text: string, writtenAt: number): { at: number;
     const word = match[1]!.toLowerCase();
     days.push({ at: match.index, end: match.index + match[0].length, iso: dayAfter(writtenAt, word === "tomorrow" ? 1 : 0), relative: true });
   }
+  // "Friday the 5th" names its own day, found or not: "on Friday" there is not the coming Friday.
+  const dayOfMonthSpans = [...own.matchAll(WEEKDAY_THE_DAY)].map((match) => ({ at: match.index, end: match.index + match[0].length }));
   for (const match of own.matchAll(NAMED_WEEKDAY)) {
+    const at = match.index;
+    const end = at + match[0].length;
+    const sentenceStart = Math.max(own.lastIndexOf(".", at - 1), own.lastIndexOf("!", at - 1), own.lastIndexOf("?", at - 1), own.lastIndexOf("\n", at - 1)) + 1;
+    if (
+      dayOfMonthSpans.some((span) => at < span.end && span.at < end) ||
+      PAST_BEFORE.test(own.slice(sentenceStart, at)) ||
+      DONE_AFTER.test(own.slice(end))
+    ) {
+      continue;
+    }
     const d = ahead(match[2]!);
     const which = match[1]!.toLowerCase();
     const offset = which === "this" ? d : which === "next" ? (d === 0 ? 7 : d + 7) : d === 0 ? 7 : d;

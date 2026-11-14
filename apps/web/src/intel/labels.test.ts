@@ -799,6 +799,8 @@ describe("a form line read by what its label means", () => {
     expect(read("Certificate issued: 12 November 2026", sent)).toEqual([["issued", "2026-11-12", undefined, "Certificate issued", 0.7]]);
     // In a stored file no year is known.
     expect(read("Delivery: Thursday, November 12")).toEqual([]);
+    // A day said with "of" keeps the year written after it.
+    expect(read("Direct debit: the 5th of December 2028", sent)).toEqual([["due", "2028-12-05", undefined, "Direct debit", 0.7]]);
   });
 
   it("one date, one reading: a typed line wins over a line that only names the same day, and a claimed day is not read again", () => {

@@ -225,6 +225,12 @@ describe("a date with no year", () => {
     expect(parseDate("see you on 12th of November", at)?.iso).toBe("2026-11-12");
     expect(findDates("Dinner on the 5th of December at 18:00", at).map((hit) => hit.date.iso)).toEqual(["2026-12-05"]);
   });
+
+  it("a day said with 'of' keeps the year written after it", () => {
+    expect(parseDate("Our next meeting is on the 5th of December 2027.", at)).toEqual({ iso: "2027-12-05", ambiguous: false });
+    expect(parseDate("opened on the 3rd of March 2019", at)).toEqual({ iso: "2019-03-03", ambiguous: false });
+    expect(findDates("You were born on the 5th of December 1990.", at).map((hit) => hit.date.iso)).toEqual(["1990-12-05"]);
+  });
 });
 
 describe("days said in words, in mail", () => {
@@ -248,6 +254,39 @@ describe("days said in words, in mail", () => {
     expect(days("Friday the 5th")).toEqual([]);
     expect(days("We are open on Saturdays.")).toEqual([]);
     expect(days("Every Saturday from 10am.")).toEqual([]);
+  });
+
+  it("a weekday that does not match its day of the month gives nothing, not the coming weekday", () => {
+    expect(days("Lunch on Friday the 5th?")).toEqual([]);
+    expect(days("See you this Friday the 5th")).toEqual([]);
+  });
+
+  it("a weekday said of the past, of a call, or in a list of days is not read", () => {
+    expect(days("Following our call on Monday, here are the notes.")).toEqual([]);
+    expect(days("As discussed on Monday's call")).toEqual([]);
+    expect(days("I sent it this Monday already.")).toEqual([]);
+    expect(days("Classes are on Monday, Wednesday and Friday.")).toEqual([]);
+    expect(days("Open on Monday to Friday.")).toEqual([]);
+    expect(days("Can we meet on Monday?")).toEqual([["on Monday", "2026-11-16"]]);
+  });
+
+  it("'the day after tomorrow' and 'a week from today' are not today or tomorrow", () => {
+    expect(days("See you the day after tomorrow")).toEqual([]);
+    expect(days("A week from today we fly")).toEqual([]);
+    expect(days("Back a week tomorrow")).toEqual([]);
+  });
+
+  it("a forward is cut at its separator line and at a header block in either order", () => {
+    const thunderbird = "Dinner tomorrow?\n\n-------- Forwarded Message --------\nSubject: Lunch\nDate: Mon, 9 Nov 2026 09:00\nFrom: Sam <sam@example.com>\nTo: Alex\n\nLunch tomorrow at 1pm?";
+    expect(days(thunderbird)).toEqual([["tomorrow", "2026-11-13"]]);
+    const gmail = "FYI\n\n---------- Forwarded message ---------\nFrom: Sam\nDate: Mon, 9 Nov 2026\n\nLunch tomorrow?";
+    expect(days(gmail)).toEqual([]);
+    const outlook = "See below.\n\n-----Original Message-----\nFrom: Sam\nSent: Monday, 9 November 2026\n\nLunch tomorrow?";
+    expect(days(outlook)).toEqual([]);
+    const starred = "See below.\n\n*From:* Sam\n*Sent:* Monday, 9 November 2026\n*Subject:* Lunch\n\nLunch tomorrow?";
+    expect(days(starred)).toEqual([]);
+    const apple = "FYI\n\nBegin forwarded message:\n\nFrom: Sam\nDate: 9 November 2026\n\nLunch tomorrow?";
+    expect(days(apple)).toEqual([]);
   });
 
   it("a quoted or forwarded message's days are its own, not this one's", () => {
