@@ -720,42 +720,98 @@ const CURRENCY_CODES = new Set([
   "CNY", "SEK", "NZD", "SGD", "AED", "ZAR", "NOK", "DKK",
 ]);
 
-// Two decimals and no digit after them: the "1.25" inside "€1.250,00" is not an amount.
+/** The currencies a symbol can stand for: a code behind the amount says which ("$35.00 CAD"). */
+const SYMBOL_FAMILY: Record<string, readonly string[]> = {
+  $: ["USD", "CAD", "AUD", "NZD", "SGD"],
+  "£": ["GBP"],
+  "€": ["EUR"],
+  "₹": ["INR"],
+  "¥": ["JPY", "CNY"],
+};
+
+// The two forms the harvest reads. Two decimals and no digit after them.
 const SYMBOL_AMOUNT = /([$£€₹¥])\s?([\d,]+\.\d{2})(?!\d)/g;
 const CODE_AMOUNT = /\b([A-Z]{3})\s?([\d,]+\.\d{2})\b/g;
 
-// The same amounts as much of Europe writes them: a decimal comma, and full
-// stops between the thousands ("€213,40", "EUR 1.250,00"). Two decimals are
-// required, so "€1,250" (thousands, or a decimal comma cut short) is not read.
-const SYMBOL_AMOUNT_COMMA = /([$£€₹¥])\s?(\d{1,3}(?:\.\d{3})*,\d{2})(?![\d,.]*\d)/g;
-const CODE_AMOUNT_COMMA = /\b([A-Z]{3})\s?(\d{1,3}(?:\.\d{3})*,\d{2})(?![\d,.]*\d)/g;
+/**
+ * A number shaped like money: two decimals behind a full stop ("1,250.50"),
+ * or behind a decimal comma with full stops between the thousands
+ * ("1.250,00"), as much of Europe writes it. Two decimals are required, so
+ * "1,250" (thousands, or a decimal comma cut short) is no amount, and
+ * neither is the "1.25" inside "1.250,00".
+ */
+const MONEY_NUMBER = /(?<![\d.,])(?:(\d{1,3}(?:\.\d{3})*,\d{2})(?![\d,.]*\d)|(\d[\d,]*\.\d{2})(?!\d))/g;
+/** A hyphen, or the minus sign some statements print. */
+const MINUS = `[-${String.fromCharCode(0x2212)}]`;
+/** A minus sign on an amount: nothing but a space or a mark before it ("10.00-20.00" is a range). */
+const SIGN = `(?:(?<![\\dA-Za-z])(${MINUS}))?`;
+/** A currency straight before a number, with its minus sign before or behind it ("-£5.50", "CAD -20.00"). */
+const SYMBOL_BEFORE = new RegExp(`${SIGN}([$£€₹¥])\\s?(${MINUS})?$`);
+const CODE_BEFORE = new RegExp(`${SIGN}(?<![A-Za-z0-9_])([A-Z]{3})\\s?(${MINUS})?$`);
+/** A minus sign straight before a number whose currency stands behind it ("-20,00 €"). */
+const SIGN_BEFORE = new RegExp(`(?<![\\dA-Za-z])${MINUS}$`);
+/** A currency straight behind a number, on the same line. */
+const UNIT_AFTER = /^[ \t]?(?:([$£€₹¥])|([A-Z]{3})(?![A-Za-z0-9_]))/;
+/** How far before a number its currency and sign can reach. */
+const UNIT_REACH = 12;
 const plain = (written: string) => written.replace(/,/g, "");
 const fromComma = (written: string) => written.replace(/\./g, "").replace(",", ".");
 
-/** Every place a piece of text states an amount above zero with its currency, in the order they stand. */
-export function moneyEvery(text: string): { value: string; unit: string; at: number }[] {
-  const found: { value: string; unit: string; at: number }[] = [];
-  const forms: [RegExp, (written: string) => string, boolean][] = [
-    [SYMBOL_AMOUNT, plain, false],
-    [SYMBOL_AMOUNT_COMMA, fromComma, false],
-    [CODE_AMOUNT, plain, true],
-    [CODE_AMOUNT_COMMA, fromComma, true],
-  ];
-  for (const [form, read, coded] of forms) {
-    for (const match of text.matchAll(form)) {
-      if (!coded) {
-        found.push({ value: read(match[2]!), unit: SYMBOL_CURRENCY[match[1]!] ?? match[1]!, at: match.index });
-      } else if (CURRENCY_CODES.has(match[1]!)) {
-        found.push({ value: read(match[2]!), unit: match[1]!, at: match.index });
+/** An amount where a text states it: from its currency (or its sign) to its last character. */
+export interface Money {
+  value: string;
+  unit: string;
+  at: number;
+  end: number;
+  /** A minus sign stands on it: an adjustment, never a sum. */
+  minus?: true;
+}
+
+/**
+ * Every place a piece of text states an amount above zero with its
+ * currency, in the order they stand. The currency is a symbol or a code,
+ * straight before the number or straight behind it. Each number has one
+ * currency and each currency belongs to one number: a code between two
+ * numbers is the first one's when that number has no other.
+ */
+export function moneyEvery(text: string): Money[] {
+  const found: Money[] = [];
+  // Where the last currency taken from behind a number ends.
+  let taken = 0;
+  for (const match of text.matchAll(MONEY_NUMBER)) {
+    const start = match.index;
+    const stop = start + match[0].length;
+    const value = match[1] !== undefined ? fromComma(match[1]) : plain(match[2]!);
+    const before = text.slice(Math.max(0, start - UNIT_REACH), start);
+    const offset = start - before.length;
+    const symbol = SYMBOL_BEFORE.exec(before);
+    const lead = symbol ?? CODE_BEFORE.exec(before);
+    const leadUnit = symbol ? SYMBOL_CURRENCY[symbol[2]!] : lead && CURRENCY_CODES.has(lead[2]!) ? lead[2]! : undefined;
+    const after = UNIT_AFTER.exec(text.slice(stop, stop + 5));
+    const behind = after?.[1] ? SYMBOL_CURRENCY[after[1]] : after?.[2] && CURRENCY_CODES.has(after[2]) ? after[2] : undefined;
+    let amount: Money | undefined;
+    if (lead && leadUnit && offset + lead.index + (lead[1] ? 1 : 0) >= taken) {
+      amount = { value, unit: leadUnit, at: offset + lead.index, end: stop, ...(lead[1] || lead[3] ? { minus: true as const } : {}) };
+      // "$35.00 CAD": the code says which dollar, and is not the next number's.
+      if (symbol && after?.[2] && SYMBOL_FAMILY[symbol[2]!]?.includes(after[2])) {
+        amount = { ...amount, unit: after[2], end: stop + after[0].length };
+        taken = amount.end;
       }
+    } else if (after && behind && !/[A-Za-z]/.test(text[start - 1] ?? "")) {
+      const signed = SIGN_BEFORE.test(before);
+      amount = { value, unit: behind, at: signed ? start - 1 : start, end: stop + after[0].length, ...(signed ? { minus: true as const } : {}) };
+      taken = amount.end;
+    }
+    if (amount && Number(value) > 0) {
+      found.push(amount);
     }
   }
-  return found.filter((amount) => Number(amount.value) > 0).sort((a, b) => a.at - b.at);
+  return found;
 }
 
 /** Every amount a piece of text states, once per value, at the last place it stands. */
-export function moneyIn(text: string): { value: string; unit: string; at: number }[] {
-  const last = new Map<string, { value: string; unit: string; at: number }>();
+export function moneyIn(text: string): Money[] {
+  const last = new Map<string, Money>();
   for (const amount of moneyEvery(text)) {
     last.set(amount.value, amount);
   }

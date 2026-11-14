@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fieldLines, guessDocumentKind, harvestFacts, labelledFacts, settledNowhere, structuralDatedFacts } from "./labels";
+import { fieldLines, guessDocumentKind, harvestFacts, labelledFacts, moneyEvery, settledNowhere, structuralDatedFacts } from "./labels";
 import { lexiconFrom } from "./lexicon";
 import { subjectOf } from "./subject";
 
@@ -876,5 +876,65 @@ describe("fieldLines", () => {
     expect(fieldLines("From: a@example.com\nDate: 3 March 2027\nSubject: hello").map((line) => line.label)).toEqual([]);
     // A lone Date line is a ticket's.
     expect(fieldLines("Rail ticket\nDate: 3 March 2027").map((line) => line.label)).toEqual(["Date"]);
+  });
+});
+
+describe("money as documents write it", () => {
+  const read = (text: string) => moneyEvery(text).map((amount) => `${amount.unit} ${amount.value}${amount.minus ? " minus" : ""}`);
+
+  it("reads the currency before the number, as a symbol or a code, with either decimal mark", () => {
+    expect(read("Total $1,250.50")).toEqual(["USD 1250.50"]);
+    expect(read("Total: EUR 1.250,00")).toEqual(["EUR 1250.00"]);
+    expect(read("Total fare: €213,40")).toEqual(["EUR 213.40"]);
+    expect(read("USD12.00 and CHF 9.00")).toEqual(["USD 12.00", "CHF 9.00"]);
+  });
+
+  it("reads the currency after the number, as a code or a symbol", () => {
+    expect(read("Amount due: 86.40 GBP")).toEqual(["GBP 86.40"]);
+    expect(read("Total to pay 1.234,50 EUR")).toEqual(["EUR 1234.50"]);
+    expect(read("Total charged: 29,99 €")).toEqual(["EUR 29.99"]);
+    expect(read("Amount payable 48.50€")).toEqual(["EUR 48.50"]);
+    expect(read("450.00 CAD")).toEqual(["CAD 450.00"]);
+  });
+
+  it("gives each number one currency, and each currency to one number", () => {
+    expect(read("Subtotal 10.00 GBP  VAT 12.00 EUR")).toEqual(["GBP 10.00", "EUR 12.00"]);
+    expect(read("GBP 10.00 EUR 12.00")).toEqual(["GBP 10.00", "EUR 12.00"]);
+    expect(read("120.00 GBP 24.00 GBP 144.00 GBP")).toEqual(["GBP 120.00", "GBP 24.00", "GBP 144.00"]);
+    // The code between the two numbers is the first one's; the second has none.
+    expect(read("Total 12.00 EUR 13.00")).toEqual(["EUR 12.00"]);
+    // A currency on the line above is not the number's.
+    expect(read("Subtotal 72.00\nUSD 14.40")).toEqual(["USD 14.40"]);
+  });
+
+  it("takes the code after a dollar amount as its currency", () => {
+    expect(read("Total: $35.00 CAD")).toEqual(["CAD 35.00"]);
+    expect(read("$35.00 CAD $4.90 CAD")).toEqual(["CAD 35.00", "CAD 4.90"]);
+    expect(read("£12.00 GBP")).toEqual(["GBP 12.00"]);
+  });
+
+  it("reads no amount from a clock, a weight, a version or a number with no currency", () => {
+    expect(read("Doors at 12.00 PM")).toEqual([]);
+    expect(read("Weight 3.50 kg")).toEqual([]);
+    expect(read("Total: 14.30")).toEqual([]);
+    expect(read("Firmware v2.10 USB")).toEqual([]);
+    expect(read("Paid USD 0.00")).toEqual([]);
+  });
+
+  it("marks an amount with a minus sign on it, and no other", () => {
+    expect(read("Discount: -£5.50")).toEqual(["GBP 5.50 minus"]);
+    expect(read("Insurance adjustment: -CAD 190.00")).toEqual(["CAD 190.00 minus"]);
+    expect(read("Insurance adjustment: \u2212CAD 190.00")).toEqual(["CAD 190.00 minus"]);
+    expect(read("Credit $-12.50")).toEqual(["USD 12.50 minus"]);
+    expect(read("Refund -20,00 €")).toEqual(["EUR 20.00 minus"]);
+    // A range, a dash between a label and its amount, and brackets are not a minus.
+    expect(read("Tickets £10.00-£20.00")).toEqual(["GBP 10.00", "GBP 20.00"]);
+    expect(read("Shipping - $4.90")).toEqual(["USD 4.90"]);
+    expect(read("your plan (USD 59.99)")).toEqual(["USD 59.99"]);
+  });
+
+  it("says where each amount stands, from its currency to its last character", () => {
+    const text = "Fare: £33.00, total 27.50 GBP.";
+    expect(moneyEvery(text).map((amount) => text.slice(amount.at, amount.end))).toEqual(["£33.00", "27.50 GBP"]);
   });
 });
