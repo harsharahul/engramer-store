@@ -517,7 +517,7 @@ export function labelledFacts(text: string, writtenAt?: number, lexicon?: Lexico
       byId.delete(id);
     }
   }
-  const asked = amountDue(text, document);
+  const asked = statedTotal(text, document, lexicon);
   if (asked) {
     byId.set(asked.id, asked);
   }
@@ -788,15 +788,6 @@ export function moneyEvery(text: string): Money[] {
   return found;
 }
 
-/** Every amount a piece of text states, once per value, at the last place it stands. */
-export function moneyIn(text: string): Money[] {
-  const last = new Map<string, Money>();
-  for (const amount of moneyEvery(text)) {
-    last.set(amount.value, amount);
-  }
-  return [...last.values()].sort((a, b) => a.at - b.at);
-}
-
 /** Words that mark the amount a document is about, before its line items. */
 export const SUM_LINE = /\b(?:total|due|balance|paid|charged|refund(?:ed)?|fare|price|premium)\b/i;
 /** What one of something costs, as the words after or before an amount say it ("per night", "a month", "/mo"). */
@@ -878,40 +869,76 @@ const AMOUNT_DUE_LINE = /\b(?:(?:amount|total|balance)\s+due|amount\s+payable|(?
 const MINIMUM = /\bmin(?:imum|\.)?\s/i;
 
 /**
- * The one amount a bill asks for: alone with its currency on a line that
- * says it is due. A line with two amounts, two lines that disagree, or a
- * minimum anywhere beside a balance name no single amount, and then none is
- * stated. Nothing due (0.00) is not an amount due.
+ * The whole amount a document states: what is still due, or else what it
+ * came to.
+ *
+ * An amount is due where its line says so ("Amount due $84.20", "Rent of
+ * USD 2,400.00 is due") or where the label table says its label means that
+ * ("Total to pay", "Patient balance"). With nothing due, the amount whose
+ * label means the total is it ("Total paid", "Order total"). A part is
+ * never either. Two different amounts due, or two different totals, are not
+ * guessed between; a line that says an amount is due and holds two that
+ * could be it, or a minimum anywhere beside a balance, names no single
+ * amount, and then none is stated. Nothing due (0.00) is not an amount due.
  */
-function amountDue(text: string, document: DocumentKind): Fact | undefined {
-  const lines = text.split(/\r?\n/);
-  if (lines.some((line) => MINIMUM.test(line) && moneyIn(line).length > 0)) {
-    return undefined;
-  }
-  const stated = new Map<string, string>();
-  for (const line of lines) {
-    const says = AMOUNT_DUE_LINE.exec(line);
-    const onLine = says ? moneyIn(line) : [];
-    // A line that only says something is due names no amount, and is not a
-    // second answer.
-    if (!says || onLine.length === 0) {
-      continue;
+function statedTotal(text: string, document: DocumentKind, lexicon?: Lexicon): Fact | undefined {
+  const amounts = amountLines(text, lexicon);
+  // Each value once, under the first name the document gives it.
+  const due = new Map<string, { unit: string; label: string }>();
+  const total = new Map<string, { unit: string; label: string }>();
+  const keep = (into: Map<string, { unit: string; label: string }>, amount: AmountLine, label: string) => {
+    if (!into.has(amount.value)) {
+      into.set(amount.value, { unit: amount.unit, label });
     }
-    if (onLine.length > 1) {
+  };
+  let lineStart = 0;
+  for (const line of text.split("\n")) {
+    const lineEnd = lineStart + line.length;
+    const here = amounts.filter((amount) => amount.at >= lineStart && amount.at < lineEnd);
+    if (here.length > 0 && MINIMUM.test(line)) {
       return undefined;
     }
-    // "Rent of USD 2,400.00 is due": the amount stands before the words. A
-    // prize named after them ("Your feedback is due! Win $50.00") is not it.
-    if (/^(?:is|are)\s/i.test(says[0]) && onLine[0]!.at > says.index) {
-      continue;
+    // What the line could be saying is due: each value once, and never a part.
+    const open = [...new Map(here.filter((amount) => amount.meaning !== "part").map((amount) => [amount.value, amount])).values()];
+    const says = AMOUNT_DUE_LINE.exec(line);
+    // A line that only says something is due names no amount, and is not a
+    // second answer.
+    if (says && open.length > 0) {
+      if (open.length > 1) {
+        return undefined;
+      }
+      const [one] = open as [AmountLine];
+      // "Rent of USD 2,400.00 is due": the amount stands before the words. A
+      // prize named after them ("Your feedback is due! Win $50.00") is not it.
+      if (!(/^(?:is|are)\s/i.test(says[0]) && one.at - lineStart > says.index)) {
+        keep(due, one, one.meaning === "due" && one.label ? one.label : "Amount due");
+      }
     }
-    stated.set(onLine[0]!.value, onLine[0]!.unit);
+    for (const amount of here) {
+      if (amount.label && amount.meaning === "due") {
+        keep(due, amount, amount.label);
+      } else if (amount.label && amount.meaning === "total") {
+        keep(total, amount, amount.label);
+      }
+    }
+    lineStart = lineEnd + 1;
   }
+  const stated = due.size > 0 ? due : total;
   if (stated.size !== 1) {
     return undefined;
   }
-  const [[value, unit]] = [...stated] as [[string, string]];
-  return { id: factId("amount", value), kind: "amount", document, value, unit, label: "Amount due", sum: "due", source: "label", confidence: 0.7 };
+  const [[value, named]] = [...stated] as [[string, { unit: string; label: string }]];
+  return {
+    id: factId("amount", value),
+    kind: "amount",
+    document,
+    value,
+    unit: named.unit,
+    label: named.label,
+    sum: due.size > 0 ? "due" : "total",
+    source: "label",
+    confidence: 0.7,
+  };
 }
 const TOKEN = /\b[A-Za-z0-9][A-Za-z0-9-]{5,}\b/g;
 // A date and a clock joined by T, as invites and mail headers write them
