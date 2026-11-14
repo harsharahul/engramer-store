@@ -245,6 +245,11 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
       if (nearest >= 0) {
         const held = clocksOf.get(nearest) ?? [];
         held.push({ time: clock.time, printed: text.slice(clock.at, clock.end), gap });
+        // A range's end is offered too: on a journey ("10:30 - 12:45") it is
+        // the arrival, and the model says which end is what.
+        if (clock.endTime) {
+          held.push({ time: clock.endTime, printed: text.slice(clock.at, clock.end), gap: gap + 1 });
+        }
         clocksOf.set(nearest, held);
       }
     }

@@ -38,6 +38,17 @@ describe("the dates a document holds, each with the clock beside it", () => {
     expect(dates(spotCandidates("Thursday 3 December 2026\nGreat Hall\n7pm"))).toEqual([["d1", "2026-12-03", "19:00"]]);
   });
 
+  it("both ends of a range of hours are offered: a journey's second clock is its arrival", () => {
+    expect(dates(spotCandidates("Train on 14 Nov 2026, 10:30 - 12:45, platform 4"))).toEqual([
+      ["d1", "2026-11-14", "10:30"],
+      ["d2", "2026-11-14", "12:45"],
+    ]);
+    expect(dates(spotCandidates("Class on 18 Nov 2026, 7-9pm"))).toEqual([
+      ["d1", "2026-11-18", "19:00"],
+      ["d2", "2026-11-18", "21:00"],
+    ]);
+  });
+
   it("a blank line, a sentence or a date in between keeps a clock line from a date above", () => {
     expect(dates(spotCandidates("Saturday 21 November 2026\n\n8:00 PM"))).toEqual([["d1", "2026-11-21", undefined]]);
     expect(dates(spotCandidates("Saturday 21 November 2026\n8:00 PM is when the evening lecture series moves to its new room."))).toEqual([
