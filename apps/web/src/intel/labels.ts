@@ -800,7 +800,7 @@ function amountDue(text: string, document: DocumentKind): Fact | undefined {
     return undefined;
   }
   const [[value, unit]] = [...stated] as [[string, string]];
-  return { id: factId("amount", value), kind: "amount", document, value, unit, label: "Amount due", source: "label", confidence: 0.7 };
+  return { id: factId("amount", value), kind: "amount", document, value, unit, label: "Amount due", sum: "due", source: "label", confidence: 0.7 };
 }
 const TOKEN = /\b[A-Za-z0-9][A-Za-z0-9-]{5,}\b/g;
 // A date and a clock joined by T, as invites and mail headers write them

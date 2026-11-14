@@ -184,6 +184,11 @@ describe("what the judge's answers become", () => {
     ]);
   });
 
+  it("the amount the model names is stated as the total", () => {
+    const facts = read({ pays: "yes", total: "a1" });
+    expect(facts.find((f) => f.kind === "amount")).toMatchObject({ value: "64.10", label: "Total", sum: "total" });
+  });
+
   it("words the text does not hold are dropped, and the fact stays", () => {
     const facts = read({ d3: "event", d3w: "annual board meeting", d1: "check-in", d1w: "Grand Hotel Lisboa" });
     expect(brief(facts)).toEqual([

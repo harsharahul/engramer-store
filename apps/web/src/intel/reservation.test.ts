@@ -494,6 +494,14 @@ describe("what a booking cost", () => {
     ]);
   });
 
+  it("an amount from booking data says what it is: a booking's total, an invoice's amount due, an order's total", () => {
+    expect(amounts(ld(flight({ totalPrice: "1184.00", priceCurrency: "USD" })))[0]).toMatchObject({ sum: "total" });
+    const invoice = structuredDataFacts(ld({ "@type": "Invoice", totalPaymentDue: { price: 65, priceCurrency: "EUR" } }));
+    expect(invoice.find((f) => f.kind === "amount")).toMatchObject({ sum: "due" });
+    const order = structuredDataFacts(ld({ "@type": "Order", orderNumber: "EX-20391", price: "148.00", priceCurrency: "USD" }));
+    expect(order.find((f) => f.kind === "amount")).toMatchObject({ sum: "order" });
+  });
+
   it("a price written as a number, with thousands commas, or nested with its currency reads the same", () => {
     expect(amounts(ld(flight({ totalPrice: 1184, priceCurrency: "usd" })))[0]).toMatchObject({ value: "1184.00", unit: "USD" });
     expect(amounts(ld(flight({ totalPrice: "1,184.50", priceCurrency: "USD" })))[0]).toMatchObject({ value: "1184.50" });

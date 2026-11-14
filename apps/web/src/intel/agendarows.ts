@@ -16,7 +16,7 @@ import { lookupAirport, placeForCity } from "./airports";
 import { deviceZone, instantOf, localDay, localTime, shownWhen, zoneOf } from "./instants";
 import { legsOf, type DatedEntry, type Leg } from "./legs";
 import { documentLabel } from "./describe";
-import { basisOf, isDated, isTracked, offeredFacts, type Fact } from "./facts";
+import { basisOf, isDated, isTracked, offeredFacts, sumOf, type AmountSum, type Fact } from "./facts";
 import { isTripTag, tripTitle } from "./trips";
 import { isLegEnd, subjectOf } from "./subject";
 
@@ -210,8 +210,8 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
   // with its own); else the first amount it holds.
   const pricesOf = (file: RowFile): { currency: string; value: string }[] => {
     const tracked = file.facts.filter((candidate) => candidate.kind === "amount" && isTracked(candidate) && candidate.unit);
-    const labelled = (label: string) => tracked.filter((candidate) => candidate.label?.toLowerCase() === label);
-    const stated = [labelled("amount due"), labelled("order total"), labelled("total")].find((group) => group.length > 0) ?? tracked.slice(0, 1);
+    const named = (sum: AmountSum) => tracked.filter((candidate) => sumOf(candidate) === sum);
+    const stated = [named("due"), named("order"), named("total")].find((group) => group.length > 0) ?? tracked.slice(0, 1);
     return stated.map((fact) => ({ currency: fact.unit!, value: fact.value }));
   };
   const amountOf = (file: RowFile) => pricesOf(file)[0];
@@ -219,9 +219,9 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
   // the one total it states. Two totals are not guessed between.
   const askedAmount = (file: RowFile): Fact | undefined => {
     const open = file.facts.filter((candidate) => candidate.kind === "amount" && candidate.unit && !candidate.dismissed && !isTracked(candidate));
-    const labelled = (label: string) => open.filter((candidate) => candidate.label?.toLowerCase() === label);
-    const totals = labelled("total");
-    return labelled("amount due")[0] ?? (totals.length === 1 ? totals[0] : undefined);
+    const named = (sum: AmountSum) => open.filter((candidate) => sumOf(candidate) === sum);
+    const totals = named("total");
+    return named("due")[0] ?? (totals.length === 1 ? totals[0] : undefined);
   };
 
   // The trip each file belongs to, and the trips a date only suggests.

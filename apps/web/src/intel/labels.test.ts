@@ -475,6 +475,10 @@ describe("the amount a bill asks for", () => {
     expect(due("Amount due $84.20\nTotal due: $84.20")).toHaveLength(1);
   });
 
+  it("the bill's amount says it is the amount due", () => {
+    expect(due("Amount due $84.20\nDue date: November 20, 2026")[0]).toMatchObject({ sum: "due" });
+  });
+
   it("a statement with a minimum and a balance names no single amount", () => {
     expect(due("Minimum payment due $35.00. New balance $1,240.18")).toEqual([]);
     expect(due("Minimum amount due $35.00\nTotal amount due $1,240.18")).toEqual([]);

@@ -654,6 +654,35 @@ describe("plain words reach the Timeline", () => {
     expect(row).toMatchObject({ kind: "due", amount: { currency: "USD", value: "148.00" } });
   });
 
+  it("what a reader says an amount is decides the row's amount, in the document's own words", async () => {
+    const statement = email("clinic", "Your statement", [
+      exact("due", "2026-09-20", "Payment due", { document: "invoice" }),
+      amount("320.00", "CAD", { label: "Total charges", sum: "total" }),
+      amount("130.00", "CAD", { label: "Patient balance", sum: "due" }),
+    ]);
+    const [row] = await rowsOf([statement], none, NOW);
+    expect(row).toMatchObject({ kind: "due", amount: { currency: "CAD", value: "130.00" } });
+
+    const order = email("order", "Your order", [
+      exact("due", "2026-09-21", "Payment due", { document: "invoice" }),
+      amount("41.00", "USD", { label: "Flight", sum: "total" }),
+      amount("148.00", "USD", { label: "Your basket", sum: "order" }),
+    ]);
+    const [second] = await rowsOf([order], none, NOW);
+    expect(second).toMatchObject({ kind: "due", amount: { currency: "USD", value: "148.00" } });
+  });
+
+  it("a bill that asks carries the amount a reader called due, whatever the document's words", async () => {
+    const invoice = email("inv", "Your March invoice", [
+      judged("due", "2027-04-10"),
+      judged("amount", "310.00", { unit: "EUR", label: "Invoice total", sum: "total", source: "label", confidence: 0.7 }),
+      judged("amount", "240.00", { unit: "EUR", label: "Still to pay", sum: "due", source: "label", confidence: 0.7 }),
+    ]);
+    const [row] = await rowsOf([invoice], none, NOW);
+    expect(row).toMatchObject({ amount: { currency: "EUR", value: "240.00" } });
+    expect(row!.factIds).toEqual(["due:2027-04-10", "amount:240.00"]);
+  });
+
   it("an appointment and a renewal are rows that ask", async () => {
     const rows = await rowsOf(
       [

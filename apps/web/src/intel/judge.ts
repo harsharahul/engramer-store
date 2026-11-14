@@ -236,7 +236,7 @@ export function judgedFacts(answer: unknown, candidates: readonly Candidate[], t
   // model first said the document states one.
   const total = said["pays"] === "yes" ? candidates.find((found) => found.what === "amount" && found.key === said["total"]) : undefined;
   if (total?.unit) {
-    keep({ id: factId("amount", total.value), kind: "amount", value: total.value, unit: total.unit, label: "Total" }, total);
+    keep({ id: factId("amount", total.value), kind: "amount", value: total.value, unit: total.unit, label: "Total", sum: "total" }, total);
   }
   return [...byId.values()];
 }
