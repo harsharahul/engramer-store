@@ -729,8 +729,11 @@ const SYMBOL_BEFORE = new RegExp(`${SIGN}([$£€₹¥])\\s?(${MINUS})?$`);
 const CODE_BEFORE = new RegExp(`${SIGN}(?<![A-Za-z0-9_])([A-Z]{3})\\s?(${MINUS})?$`);
 /** A minus sign straight before a number whose currency stands behind it ("-20,00 €"). */
 const SIGN_BEFORE = new RegExp(`(?<![\\dA-Za-z])${MINUS}$`);
-/** A currency straight behind a number, on the same line. */
-const UNIT_AFTER = /^[ \t]?(?:([$£€₹¥])|([A-Z]{3})(?![A-Za-z0-9_]))/;
+/**
+ * A currency straight behind a number, on the same line. A symbol glued to
+ * the number after it is that number's ("2.50 £40.00"), not this one's.
+ */
+const UNIT_AFTER = new RegExp(`^[ \\t]?(?:([$£€₹¥])(?!${MINUS}?\\d)|([A-Z]{3})(?![A-Za-z0-9_]))`);
 /** How far before a number its currency and sign can reach. */
 const UNIT_REACH = 12;
 const plain = (written: string) => written.replace(/,/g, "");
@@ -821,15 +824,12 @@ function asLabel(words: string): string | undefined {
 
 /**
  * The words that close a stretch of text, as a label: without what closes
- * them, and from the last break on. The whole stretch is the label when
- * the table knows it as one ("Taxes, fees and charges").
+ * them, and from the last break on. A comma is always a break: the words
+ * before it are another thing ("3 items, total"), and joined to the label
+ * they would name something else.
  */
-function closingLabel(words: string, lexicon?: Lexicon): string | undefined {
+function closingLabel(words: string): string | undefined {
   const closed = words.replace(LABEL_CLOSE, "");
-  const whole = asLabel(closed);
-  if (whole && lexicon && amountMeaningOf(lexicon, whole)) {
-    return whole;
-  }
   let from = 0;
   for (const cut of closed.matchAll(LABEL_BREAK)) {
     from = cut.index + cut[0].length;
@@ -855,12 +855,12 @@ export function amountLines(text: string, lexicon?: Lexicon): AmountLine[] {
     const lineEnd = stop === -1 ? text.length : stop;
     const lineBefore = text.slice(lineStart, amount.at);
     const earlier = found[index - 1];
-    const own = closingLabel(text.slice(Math.max(lineStart, earlier ? earlier.end : 0), amount.at), lexicon);
+    const own = closingLabel(text.slice(Math.max(lineStart, earlier ? earlier.end : 0), amount.at));
     let label = own;
     if (!label && lineStart > 0 && !lineBefore.trim() && !text.slice(amount.end, lineEnd).trim()) {
       const aboveStart = text.lastIndexOf("\n", lineStart - 2) + 1;
       if (!found.some((other) => other.at >= aboveStart && other.at < lineStart)) {
-        label = closingLabel(text.slice(aboveStart, lineStart - 1), lexicon);
+        label = closingLabel(text.slice(aboveStart, lineStart - 1));
       }
     }
     const deposit = DEPOSIT_BEFORE.exec(lineBefore);
@@ -878,8 +878,10 @@ export function amountLines(text: string, lexicon?: Lexicon): AmountLine[] {
 }
 
 const AMOUNT_DUE_LINE = /\b(?:(?:amount|total|balance)\s+due|amount\s+payable|(?:is|are)\s+due)\b/i;
+/** Words of a payslip or of a bank account's statement, whose totals are no bill's. */
+const NOT_A_BILL = /\b(?:pay\s?slip|pay\s?stub|net pay|gross pay|take[- ]home pay|opening balance|closing balance|paid in|paid out|money in|money out|withdrawals?)\b/i;
 /** A statement's minimum is due as well as its balance: two answers to one question. */
-const MINIMUM = /\bmin(?:imum|\.)?\s/i;
+const MINIMUM = /\bmin(?:imum\b|\.|\b)/i;
 
 /**
  * The whole amount a document states: what is still due, or else what it
@@ -908,7 +910,8 @@ function statedTotal(text: string, document: DocumentKind, lexicon?: Lexicon): F
   for (const line of text.split("\n")) {
     const lineEnd = lineStart + line.length;
     const here = amounts.filter((amount) => amount.at >= lineStart && amount.at < lineEnd);
-    if (here.length > 0 && MINIMUM.test(line)) {
+    // A minimum on the amount's own line, or in the label a line above it.
+    if (here.length > 0 && (MINIMUM.test(line) || here.some((amount) => MINIMUM.test(amount.label ?? "")))) {
       return undefined;
     }
     // What the line could be saying is due: each value once, and never a part.
@@ -936,7 +939,9 @@ function statedTotal(text: string, document: DocumentKind, lexicon?: Lexicon): F
     }
     lineStart = lineEnd + 1;
   }
-  const stated = due.size > 0 ? due : total;
+  // A payslip's total, or a bank account's, is what was earned or moved:
+  // only an amount that is due is such a document's to state.
+  const stated = due.size > 0 ? due : NOT_A_BILL.test(text) ? new Map<string, { unit: string; label: string }>() : total;
   if (stated.size !== 1) {
     return undefined;
   }

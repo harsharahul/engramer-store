@@ -134,13 +134,18 @@ const CODE_WORDS: ReadonlySet<string> = new Set([...CURRENCY_CODES].map((code) =
  * ("Total (USD)", "Amount due in EUR").
  */
 export function amountMeaningOf(lexicon: Lexicon, label: string): AmountMeaning | undefined {
-  const words = normalizeLabel(label)
-    .split(" ")
-    .filter((word) => word && !CODE_WORDS.has(word));
-  if (words.length > 1 && words[words.length - 1] === "in") {
-    words.pop();
+  const words: string[] = [];
+  for (const word of normalizeLabel(label).split(" ")) {
+    if (!CODE_WORDS.has(word)) {
+      words.push(word);
+    } else if (words[words.length - 1] === "in") {
+      // "Total in USD": the "in" goes with the currency. Where no currency
+      // follows it, it is the label's own word ("Paid in").
+      words.pop();
+    }
   }
-  return words.length > 0 ? lexicon.amounts.get(words.join(" ")) : undefined;
+  const key = words.filter(Boolean).join(" ");
+  return key ? lexicon.amounts.get(key) : undefined;
 }
 
 let loading: Promise<Lexicon | undefined> | null = null;

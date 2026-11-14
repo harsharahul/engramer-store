@@ -906,6 +906,13 @@ describe("money as documents write it", () => {
     expect(read("Total 12.00 EUR 13.00")).toEqual(["EUR 12.00"]);
     // A currency on the line above is not the number's.
     expect(read("Subtotal 72.00\nUSD 14.40")).toEqual(["USD 14.40"]);
+    // A symbol glued to the next number is that number's, never the one before it.
+    expect(read("Hours 2.50 £40.00 £100.00")).toEqual(["GBP 40.00", "GBP 100.00"]);
+    expect(read("Unleaded 45.20 £62.15")).toEqual(["GBP 62.15"]);
+    expect(read("Consulting 10.00 $150.00 $1,500.00")).toEqual(["USD 150.00", "USD 1500.00"]);
+    expect(read("Credit 10.00 $-5.00")).toEqual(["USD 5.00 minus"]);
+    // A symbol that stands free after a number still closes it.
+    expect(read("29,99 € 15,00 €")).toEqual(["EUR 29.99", "EUR 15.00"]);
   });
 
   it("takes the code after a dollar amount as its currency", () => {
@@ -950,7 +957,9 @@ describe("an amount with its label and what the label means", () => {
       ["service fees", "part"],
       ["railcard discount", "part"],
       ["sales tax", "part"],
-      ["taxes fees and charges", "part"],
+      ["items total", "part"],
+      ["delivery total", "part"],
+      ["total", "total"],
       ["total to pay", "due"],
       ["amount due", "due"],
       ["total stay", "total"],
@@ -960,9 +969,10 @@ describe("an amount with its label and what the label means", () => {
   );
   const read = (text: string) => amountLines(text, table).map((amount) => [amount.value, amount.label, amount.meaning]);
 
-  it("a label with a comma in it is one label when the table knows it whole", () => {
-    expect(read("Taxes, fees and charges: $12.00")).toEqual([["12.00", "Taxes, fees and charges", "part"]]);
-    // Words the table does not know whole are still parted at the comma.
+  it("a comma parts a label from the words before it, whatever those words and the label make together", () => {
+    // "Items total" and "Delivery total" are parts; a total named after a comma is not.
+    expect(read("3 items, total: $45.00")).toEqual([["45.00", "total", "total"]]);
+    expect(read("Delivery, total $45.00")).toEqual([["45.00", "total", "total"]]);
     expect(read("Return trip, total paid: $80.00")).toEqual([["80.00", "total paid", "total"]]);
   });
 
@@ -1083,6 +1093,20 @@ describe("the whole amount of a document, by its label", () => {
   it("a statement with a minimum beside its balance still names no single amount", () => {
     expect(whole("Minimum payment due $35.00\nNew balance $1,240.18")).toEqual([]);
     expect(whole("Statement balance: CAD 615.40\nMinimum payment: CAD 20.00")).toEqual([]);
+    // A minimum whose label stands on the line above, or is closed by a colon, is a minimum still.
+    expect(whole("Amount due\n$1,234.56\nMinimum payment\n$35.00")).toEqual([]);
+    expect(whole("Minimum payment\n$35.00\nAmount due\n$1,234.56")).toEqual([]);
+    expect(whole("Amount due $1,234.56\nMinimum: $35.00")).toEqual([]);
+    // A word that only begins like it is none.
+    expect(whole("Parking: 45 minutes\nTotal paid: $6.00")).toEqual([["6.00", "USD", "total", "Total paid"]]);
+  });
+
+  it("a payslip's total and a bank account's totals are not a bill's whole amount", () => {
+    expect(whole("Payslip for November\nBasic £3,000.00\nTotal £3,000.00\nNet pay £2,400.00")).toEqual([]);
+    expect(whole("Current account\nOpening balance £1,000.00\nWithdrawals\nTotal £5,000.00\nClosing balance £1,200.00")).toEqual([]);
+    expect(whole("Paid in\n£2,400.00\nPaid out\n£500.00")).toEqual([]);
+    // A bill that shows where its balance came from still asks for its amount.
+    expect(whole("Opening balance £30.00\nPayments -£30.00\nNew charges £55.20\nTotal due £55.20")).toEqual([["55.20", "GBP", "due", "Total due"]]);
   });
 
   it("an amount a sentence says is due is still read, under the reader's own name for it", () => {

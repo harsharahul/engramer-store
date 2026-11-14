@@ -13,8 +13,6 @@ Total to pay	due
 Total amount to pay	due
 Please pay	due
 Pay this amount	due
-Pay now	due
-Pay today	due
 Amount owing	due
 Amount owed	due
 Total owed	due
@@ -28,20 +26,8 @@ Patient balance	due
 Patient responsibility	due
 You owe	due
 You owe us	due
-Statement balance	due
-New balance	due
 Payment due	due
 Total payment due	due
-Amount due now	due
-Amount now due	due
-Due now	due
-Due today	due
-Amount due today	due
-Total due today	due
-Total due now	due
-Total now due	due
-Balance due now	due
-Amount payable now	due
 Balance payable	due
 Invoice balance	due
 Remaining to pay	due
@@ -158,26 +144,16 @@ Estimated total	total
 Estimated order total	total
 # Total: what was paid or charged
 Total paid	total
-Amount paid	total
 Total charged	total
 Amount charged	total
 Total charge	total
-Paid	total
-You paid	total
 Charged to card	total
 Amount charged to card	total
 Total charged to card	total
-Card payment	total
-Transaction amount	total
 Total amount paid	total
-Total paid today	total
-Amount paid today	total
 Total amount charged	total
-Amount charged today	total
-Total charged today	total
 Total price paid	total
 Price paid	total
-Prepaid	total
 # Total: what was refunded
 Total refund	total
 Refund total	total
@@ -262,7 +238,7 @@ Taxes and fees	part
 Tax and fees	part
 Taxes and charges	part
 Taxes and surcharges	part
-Taxes, fees and charges	part
+Fees and charges	part
 Estimated tax	part
 Estimated taxes	part
 Tax amount	part

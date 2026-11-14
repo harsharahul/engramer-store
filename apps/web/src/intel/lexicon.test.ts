@@ -200,6 +200,9 @@ describe("the shipped amount table", () => {
       "Price", "Fare", "Cost", "Charge", "Charges", "Total charges", "New charges", "Current charges", "Fee", "Fees", "Premium",
       "Annual premium", "Rent", "Past due", "Overdue amount", "Course fee", "Registration fee", "Application fee", "Membership fee",
       "Tickets", "Ticket price", "Room", "Refund", "Credit", "Insurance", "Copay", "Prepayment", "Parking fee",
+      // A bank account's balance, a share paid so far, and what a booking takes today are not a bill's whole amount.
+      "New balance", "Statement balance", "Prepaid", "Paid", "You paid", "Amount paid", "Amount paid today", "Total paid today",
+      "Pay now", "Pay today", "Due now", "Due today", "Amount due now", "Total due today", "Card payment", "Transaction amount",
     ];
     expect(depends.filter((label) => amountMeaningOf(lexicon, label) !== undefined)).toEqual([]);
   });
@@ -230,7 +233,6 @@ describe("the shipped amount table", () => {
       ["Minimum payment due", "part"],
       ["Total before tax", "part"],
       ["Total this bill", "total"],
-      ["Prepaid", "total"],
       ["Deposit at desk", "part"],
       ["Loan balance", "part"],
       ["Reservation fee", "part"],
@@ -245,6 +247,11 @@ describe("the shipped amount table", () => {
     expect(amountMeaningOf(lexicon, "Total (USD)")).toBe("total");
     expect(amountMeaningOf(lexicon, "Amount due EUR:")).toBe("due");
     expect(amountMeaningOf(lexicon, "Total in GBP")).toBe("total");
+    expect(amountMeaningOf(lexicon, "Amount due (in EUR)")).toBe("due");
+    // "in" is the label's own word where no currency follows it: what a bank
+    // account was paid is not what a bill came to.
+    expect(amountMeaningOf(lexicon, "Total paid in")).toBeUndefined();
+    expect(amountMeaningOf(lexicon, "Paid in")).toBeUndefined();
     expect(amountMeaningOf(lexicon, "USD")).toBeUndefined();
     expect(amountMeaningOf(lexicon, "")).toBeUndefined();
   });
