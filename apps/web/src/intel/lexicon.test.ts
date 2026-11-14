@@ -2,14 +2,16 @@ import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LABEL_MEANINGS, lexiconFrom, loadLexicon, meaningOf, normalizeLabel, parseLabelTable } from "./lexicon";
+import { AMOUNT_MEANINGS, LABEL_MEANINGS, amountMeaningOf, lexiconFrom, loadLexicon, meaningOf, normalizeLabel, parseLabelTable } from "./lexicon";
 import shipped from "./tables/labels.json";
 
 // The table's source, as people edit it. Tests run from apps/web.
 const SOURCE = resolve(process.cwd(), "../../tools/label-lexicon/dates.tsv");
+const AMOUNT_SOURCE = resolve(process.cwd(), "../../tools/label-lexicon/amounts.tsv");
 const SHIPPED = resolve(process.cwd(), "src/intel/tables/labels.json");
 const source = parseLabelTable(readFileSync(SOURCE, "utf8"));
-const lexicon = lexiconFrom(source.rows);
+const amountSource = parseLabelTable(readFileSync(AMOUNT_SOURCE, "utf8"), AMOUNT_MEANINGS);
+const lexicon = lexiconFrom(source.rows, amountSource.rows);
 
 describe("normalizeLabel", () => {
   it("a label is known by what it says, not how it is written", () => {
@@ -58,6 +60,16 @@ describe("parseLabelTable", () => {
     // A label with two meanings is in neither: unknown is safe.
     expect(parsed.rows).toEqual([]);
   });
+
+  it("reads a table of amount labels with the amount meanings, and refuses a date's meaning there", () => {
+    const parsed = parseLabelTable("# Sums\nTotal paid\ttotal\nSub-total\tpart\nAmount due\tdue\nStatement date\tnone\n", AMOUNT_MEANINGS);
+    expect(parsed.rows).toEqual([
+      ["amount due", "due"],
+      ["sub total", "part"],
+      ["total paid", "total"],
+    ]);
+    expect(parsed.problems).toEqual(['unknown meaning "none" for "Statement date"']);
+  });
 });
 
 describe("the shipped label table", () => {
@@ -67,9 +79,11 @@ describe("the shipped label table", () => {
 
   it("is what its source says, and small enough to ship", () => {
     // The edition names the table's contents: any change to a row changes it.
+    // It names the date rows only: no stored file is owed a second look for
+    // a change to an amount row.
     const edition = createHash("sha256").update(JSON.stringify(source.rows)).digest("hex").slice(0, 8);
-    expect(shipped).toEqual({ v: 1, edition, dates: source.rows });
-    expect(statSync(SHIPPED).size).toBeLessThan(120_000);
+    expect(shipped).toEqual({ v: 1, edition, dates: source.rows, amounts: amountSource.rows });
+    expect(statSync(SHIPPED).size).toBeLessThan(140_000);
   });
 
   it("holds at least 1,200 labels, a nobody's-business list small enough to read whole, and few issue labels", () => {
@@ -153,12 +167,96 @@ describe("the shipped label table", () => {
   });
 });
 
+describe("the shipped amount table", () => {
+  const labels = (meaning: string) => amountSource.rows.filter(([, held]) => held === meaning).map(([label]) => label);
+
+  it("has one meaning per label and nothing it cannot read", () => {
+    expect(amountSource.problems).toEqual([]);
+  });
+
+  it("holds at least 350 labels: what is due, what it came to, and far more parts than sums", () => {
+    expect(amountSource.rows.length).toBeGreaterThanOrEqual(350);
+    expect(labels("due").length).toBeGreaterThanOrEqual(40);
+    expect(labels("total").length).toBeGreaterThanOrEqual(100);
+    expect(labels("part").length).toBeGreaterThanOrEqual(200);
+  });
+
+  it("a sum's label holds a word of a sum, and opens with no word of a part", () => {
+    const sums = [...labels("due"), ...labels("total")];
+    const sum = /\b(?:total|due|balance|pay|paid|payable|payment|owe|owed|owing|outstanding|charged|charge|amount|fare|price|cost|premium|refund|refunded|collect|collected|responsibility|bill|unpaid)\b/;
+    const part = /^(?:sub|previous|prior|last|minimum|min|tax|vat|discount|shipping|deposit|fee|net|opening|closing|available)\b/;
+    expect(sums.filter((label) => !sum.test(label))).toEqual([]);
+    expect(sums.filter((label) => part.test(label))).toEqual([]);
+  });
+
+  it("a sum is never among the parts: no part is a sum's plain name", () => {
+    const plain = ["total", "grand total", "amount due", "balance due", "total paid", "total due", "order total", "invoice total"];
+    expect(labels("part").filter((label) => plain.includes(label))).toEqual([]);
+  });
+
+  it("a label whose meaning depends on the document is not in the table", () => {
+    const depends = [
+      "Balance", "Current balance", "Remaining balance", "Outstanding balance", "Amount", "Payment", "Payment amount", "Payment received",
+      "Price", "Fare", "Cost", "Charge", "Charges", "Total charges", "New charges", "Current charges", "Fee", "Fees", "Premium",
+      "Annual premium", "Rent", "Past due", "Overdue amount", "Course fee", "Registration fee", "Application fee", "Membership fee",
+      "Tickets", "Ticket price", "Room", "Refund", "Credit", "Insurance", "Copay", "Prepayment", "Parking fee",
+    ];
+    expect(depends.filter((label) => amountMeaningOf(lexicon, label) !== undefined)).toEqual([]);
+  });
+
+  it("answers the labels a bill or a receipt really prints", () => {
+    const known: [string, string | undefined][] = [
+      ["Amount due", "due"],
+      ["Total to pay:", "due"],
+      ["Balance due", "due"],
+      ["Amount payable", "due"],
+      ["Patient balance", "due"],
+      ["Total", "total"],
+      ["Grand total", "total"],
+      ["Order total", "total"],
+      ["Total paid", "total"],
+      ["Amount charged", "total"],
+      ["Total (incl. VAT)", "total"],
+      ["Invoice total", "total"],
+      ["Subtotal", "part"],
+      ["Sub-total", "part"],
+      ["VAT 20%", "part"],
+      ["Sales tax", "part"],
+      ["Shipping & handling", "part"],
+      ["Discount", "part"],
+      ["Service fees", "part"],
+      ["Deposit paid", "part"],
+      ["Previous balance", "part"],
+      ["Minimum payment due", "part"],
+      ["Total before tax", "part"],
+      // Unknown is an answer too: the amount is then read as before.
+      ["Balance", undefined],
+      ["Fare", undefined],
+    ];
+    expect(known.map(([label]) => [label, amountMeaningOf(lexicon, label)])).toEqual(known);
+  });
+
+  it("a currency named in a label is not part of the label", () => {
+    expect(amountMeaningOf(lexicon, "Total (USD)")).toBe("total");
+    expect(amountMeaningOf(lexicon, "Amount due EUR:")).toBe("due");
+    expect(amountMeaningOf(lexicon, "Total in GBP")).toBe("total");
+    expect(amountMeaningOf(lexicon, "USD")).toBeUndefined();
+    expect(amountMeaningOf(lexicon, "")).toBeUndefined();
+  });
+
+  it("a table of dates alone knows no amount label", () => {
+    expect(amountMeaningOf(lexiconFrom(source.rows), "Total")).toBeUndefined();
+  });
+});
+
 describe("loadLexicon", () => {
   it("loads the shipped table once and answers from it", async () => {
     const loaded = (await loadLexicon())!;
     expect(loaded).toBeDefined();
     expect(loaded).toBe(await loadLexicon());
     expect(meaningOf(loaded, "Statement date")).toBe("none");
+    expect(amountMeaningOf(loaded, "Subtotal")).toBe("part");
+    expect(loaded.amounts.size).toBe(amountSource.rows.length);
     expect(loaded.dates.size).toBe(source.rows.length);
     expect(loaded.edition).toBe(shipped.edition);
     expect(loaded.edition).toMatch(/^[0-9a-f]{8}$/);

@@ -10,6 +10,7 @@
  * wrong expiry is the failure this whole design exists to avoid.
  */
 
+import { CURRENCY_CODES, SYMBOL_CURRENCY, SYMBOL_FAMILY } from "./currency";
 import { type DocumentKind, type Fact, factId, maskTail } from "./facts";
 import { findDates, findTimes, parseDate, parseTime, type DateContext, type ParsedDate } from "./dates";
 import { meaningOf, type LabelMeaning, type Lexicon } from "./lexicon";
@@ -706,28 +707,6 @@ export function settledNowhere(text: string, lexicon: Lexicon, context?: DateCon
   }
   return spans;
 }
-
-const SYMBOL_CURRENCY: Record<string, string> = {
-  $: "USD",
-  "£": "GBP",
-  "€": "EUR",
-  "₹": "INR",
-  "¥": "JPY",
-};
-
-const CURRENCY_CODES = new Set([
-  "USD", "EUR", "GBP", "INR", "JPY", "CAD", "AUD", "CHF",
-  "CNY", "SEK", "NZD", "SGD", "AED", "ZAR", "NOK", "DKK",
-]);
-
-/** The currencies a symbol can stand for: a code behind the amount says which ("$35.00 CAD"). */
-const SYMBOL_FAMILY: Record<string, readonly string[]> = {
-  $: ["USD", "CAD", "AUD", "NZD", "SGD"],
-  "£": ["GBP"],
-  "€": ["EUR"],
-  "₹": ["INR"],
-  "¥": ["JPY", "CNY"],
-};
 
 // The two forms the harvest reads. Two decimals and no digit after them.
 const SYMBOL_AMOUNT = /([$£€₹¥])\s?([\d,]+\.\d{2})(?!\d)/g;

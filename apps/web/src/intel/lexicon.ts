@@ -8,18 +8,34 @@
  * day to pay or act by, an expiry, an issue day, something that happens, one
  * end of a stay or a journey, or nobody's business as a reminder.
  *
+ * A second table does the same for the labels beside amounts: "Subtotal" is
+ * a part of a bill on every bill, and "Total to pay" is the whole of it.
+ *
  * A label is looked up exactly, after it is normalized; nothing is guessed
  * from a label that only resembles one in the table. A label the table does
  * not hold has no meaning here, and its line is read as it was before.
  */
 
+import { CURRENCY_CODES } from "./currency";
+
 export const LABEL_MEANINGS = ["event", "check-in", "check-out", "depart", "arrive", "due", "expiry", "issued", "none"] as const;
 export type LabelMeaning = (typeof LABEL_MEANINGS)[number];
+
+/**
+ * What the label beside an amount means: the whole amount still to pay, the
+ * whole amount a document came to or was paid, or a part of it (a subtotal,
+ * a tax, a fee, a discount, a deposit, an earlier balance, a rate), which is
+ * never the whole.
+ */
+export const AMOUNT_MEANINGS = ["due", "total", "part"] as const;
+export type AmountMeaning = (typeof AMOUNT_MEANINGS)[number];
 
 export interface Lexicon {
   /** Normalized label to meaning. */
   dates: ReadonlyMap<string, LabelMeaning>;
-  /** A short name for the shipped table's contents: it changes when any row does. */
+  /** Normalized label of an amount to what the amount is. */
+  amounts: ReadonlyMap<string, AmountMeaning>;
+  /** A short name for the shipped table's date rows: it changes when any of them does. */
   edition?: string;
 }
 
@@ -42,16 +58,19 @@ export function normalizeLabel(label: string): string {
 }
 
 const isMeaning = (word: string): word is LabelMeaning => (LABEL_MEANINGS as readonly string[]).includes(word);
+const isAmountMeaning = (word: string): word is AmountMeaning => (AMOUNT_MEANINGS as readonly string[]).includes(word);
 
 /**
- * Reads the table's source: one label and its meaning on a line, a tab
+ * Reads a table's source: one label and its meaning on a line, a tab
  * between them; a line that starts with # is a heading. The same label
  * written twice with one meaning is one row. A label written with two
  * meanings is a problem and is in no row: unknown is safe, a wrong meaning
- * is not.
+ * is not. The meanings are a date label's unless the table's own are given.
  */
-export function parseLabelTable(source: string): { rows: [string, LabelMeaning][]; problems: string[] } {
-  const meanings = new Map<string, Set<LabelMeaning>>();
+export function parseLabelTable(source: string): { rows: [string, LabelMeaning][]; problems: string[] };
+export function parseLabelTable<M extends string>(source: string, known: readonly M[]): { rows: [string, M][]; problems: string[] };
+export function parseLabelTable(source: string, known: readonly string[] = LABEL_MEANINGS): { rows: [string, string][]; problems: string[] } {
+  const meanings = new Map<string, Set<string>>();
   const problems: string[] = [];
   for (const line of source.split(/\r?\n/)) {
     if (!line.trim() || line.startsWith("#")) {
@@ -62,7 +81,7 @@ export function parseLabelTable(source: string): { rows: [string, LabelMeaning][
       problems.push(`no label and meaning in "${line.trim()}"`);
       continue;
     }
-    if (!isMeaning(meaning)) {
+    if (!known.includes(meaning)) {
       problems.push(`unknown meaning "${meaning}" for "${label}"`);
       continue;
     }
@@ -73,7 +92,7 @@ export function parseLabelTable(source: string): { rows: [string, LabelMeaning][
     }
     meanings.set(key, (meanings.get(key) ?? new Set()).add(meaning));
   }
-  const rows: [string, LabelMeaning][] = [];
+  const rows: [string, string][] = [];
   const clashes: string[] = [];
   for (const [key, held] of [...meanings].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     if (held.size > 1) {
@@ -85,20 +104,43 @@ export function parseLabelTable(source: string): { rows: [string, LabelMeaning][
   return { rows, problems: [...clashes, ...problems] };
 }
 
-export function lexiconFrom(rows: readonly (readonly string[])[]): Lexicon {
+export function lexiconFrom(rows: readonly (readonly string[])[], amountRows: readonly (readonly string[])[] = []): Lexicon {
   const dates = new Map<string, LabelMeaning>();
   for (const [label, meaning] of rows) {
     if (label !== undefined && meaning !== undefined && isMeaning(meaning)) {
       dates.set(label, meaning);
     }
   }
-  return { dates };
+  const amounts = new Map<string, AmountMeaning>();
+  for (const [label, meaning] of amountRows) {
+    if (label !== undefined && meaning !== undefined && isAmountMeaning(meaning)) {
+      amounts.set(label, meaning);
+    }
+  }
+  return { dates, amounts };
 }
 
 /** What the table says a label means; undefined when it does not hold the label. */
 export function meaningOf(lexicon: Lexicon, label: string): LabelMeaning | undefined {
   const key = normalizeLabel(label);
   return key ? lexicon.dates.get(key) : undefined;
+}
+
+const CODE_WORDS: ReadonlySet<string> = new Set([...CURRENCY_CODES].map((code) => code.toLowerCase()));
+
+/**
+ * What the table says the label beside an amount means; undefined when it
+ * does not hold the label. A currency named in the label is not part of it
+ * ("Total (USD)", "Amount due in EUR").
+ */
+export function amountMeaningOf(lexicon: Lexicon, label: string): AmountMeaning | undefined {
+  const words = normalizeLabel(label)
+    .split(" ")
+    .filter((word) => word && !CODE_WORDS.has(word));
+  if (words.length > 1 && words[words.length - 1] === "in") {
+    words.pop();
+  }
+  return words.length > 0 ? lexicon.amounts.get(words.join(" ")) : undefined;
 }
 
 let loading: Promise<Lexicon | undefined> | null = null;
@@ -111,8 +153,8 @@ let loading: Promise<Lexicon | undefined> | null = null;
 export function loadLexicon(): Promise<Lexicon | undefined> {
   loading ??= import("./tables/labels.json").then(
     (mod) => {
-      const table: { edition?: string; dates: readonly (readonly string[])[] } = mod.default ?? mod;
-      return { ...lexiconFrom(table.dates), ...(table.edition ? { edition: table.edition } : {}) };
+      const table: { edition?: string; dates: readonly (readonly string[])[]; amounts?: readonly (readonly string[])[] } = mod.default ?? mod;
+      return { ...lexiconFrom(table.dates, table.amounts), ...(table.edition ? { edition: table.edition } : {}) };
     },
     () => {
       loading = null;
