@@ -165,23 +165,24 @@ for the version and the exact prompt of the reader that ships, over at
 least 30 readings, on each of two synthetic sets; never for a travel time,
 an identity document's expiry or a legal deadline, which need exact data;
 and only when the value passes sanity checks (the day exists, a stay ends
-after it begins, an amount names its currency). The first set is 132
+after it begins, an amount names its currency). The first set is 162
 invented emails and documents: a third of them written so that the date or
-amount that matters stands among others that do not, and forty written as
+amount that matters stands among others that do not, forty written as
 forms (labels and values, flattened tables, a time on the line under its
-date); the rules, the label table and the model's instructions are written
-against it. The second is 60 more,
+date), and thirty about time (doors and a show's start, ranges of hours,
+clocks in words, days said in words); the rules, the label table and the
+model's instructions are written against it. The second is 60 more,
 written without sight of the readers: nothing is ever tuned on it, and it
 is the one that says how unseen documents are read. The exact readers are
 scored in the test suite, and Apple's on-device model is scored on a Mac
 by a harness that runs the app's own reading code (`tools/eval/apple`).
 
-On the second set today, the rules and the model together find 82% of the
+On the second set today, the rules and the model together find 85% of the
 dates and 80% of the amounts a careful reader would, and of what they
-offer 70% of the dates and 84% of the amounts are right; two of twelve
+offer 73% of the dates and 84% of the amounts are right; two of twelve
 documents that state nothing still get an offer. The model's own readings
-measure 67% right for dates and 82% for amounts, well below the bar, so
-they are offered for a yes, and naming an email's kind (84%) is below its
+measure 72% right for dates and 82% for amounts, well below the bar, so
+they are offered for a yes, and naming an email's kind (86%) is below its
 bar too. The bar never moves: a task earns trust only by measuring above
 it.
 
