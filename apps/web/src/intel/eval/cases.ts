@@ -6,6 +6,7 @@
  * plain text, where only a model can find what is there.
  */
 
+import { AMOUNT_CASES } from "./amountcases";
 import { DISTRACTOR_CASES } from "./distractors";
 import { FORM_CASES } from "./forms";
 import { TIME_CASES } from "./timecases";
@@ -719,4 +720,6 @@ export const EVAL_CASES: readonly EvalCase[] = [
   ...FORM_CASES,
   // Time language: clocks written many ways, ranges, doors and show, days in words.
   ...TIME_CASES,
+  // Amounts: the whole amount against its parts, the currency after the number, a label on the line above.
+  ...AMOUNT_CASES,
 ];

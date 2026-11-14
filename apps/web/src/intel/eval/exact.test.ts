@@ -22,11 +22,12 @@ describe("exact readers on the eval set", () => {
     expect(new Set(EVAL_CASES.map((c) => c.id)).size).toBe(EVAL_CASES.length);
   });
 
-  it("the first set holds the distractor, the form and the time-language cases, each id once, none shared with the held-out set", () => {
-    expect(EVAL_CASES).toHaveLength(162);
+  it("the first set holds the distractor, the form, the time-language and the amount cases, each id once, none shared with the held-out set", () => {
+    expect(EVAL_CASES).toHaveLength(192);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("x-"))).toHaveLength(30);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("f-"))).toHaveLength(40);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("t-"))).toHaveLength(30);
+    expect(EVAL_CASES.filter((c) => c.id.startsWith("a-"))).toHaveLength(30);
     const heldout = new Set(HELDOUT_CASES.map((c) => c.id));
     expect(EVAL_CASES.filter((c) => heldout.has(c.id))).toEqual([]);
   });
