@@ -10,7 +10,7 @@
 
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { formatBytes } from "../format";
-import { htmlToText } from "../intel/extract";
+import { mailBodyText } from "../intel/htmltext";
 import type { EmailRecord } from "./record";
 
 const PAGE = { width: 612, height: 792 };
@@ -172,7 +172,7 @@ export async function emailToPdf(
   });
   y -= 6;
 
-  const body = record.text ?? (record.html ? htmlToText(record.html) : "");
+  const body = mailBodyText(record);
   for (const text of body.replace(/\r\n?/g, "\n").split("\n")) {
     if (text.trim() === "") {
       y -= BODY_LEADING / 2;

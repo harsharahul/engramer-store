@@ -1,6 +1,8 @@
 import type { ExifSignals } from "./categorize";
 import type { UploadSource } from "../transfer";
 import { isEmailRecord, parseEmailRecord } from "../mail/kind";
+import { mailBodyText, xmlToText } from "./htmltext";
+import { pdfItemsOf, pdfLines } from "./pdftext";
 
 const TEXT_READ_LIMIT = 512 * 1024;
 const TEXT_STORE_LIMIT = 100_000;
@@ -76,8 +78,9 @@ export async function extractText(file: UploadSource): Promise<string | undefine
 
 /**
  * An email's searchable text: subject, sender and recipients first, so a
- * search by person or subject meets them before the body, then the plain
- * body, or the HTML body read as text when the message has no plain one.
+ * search by person or subject meets them before the body, then the body as
+ * `mailBodyText` chooses it: the plain part, or the HTML part read as text
+ * when that holds rows of cells or the plain part is a stub.
  */
 async function extractEmailText(file: UploadSource): Promise<string | undefined> {
   const record = parseEmailRecord(await file.text());
@@ -93,36 +96,9 @@ async function extractEmailText(file: UploadSource): Promise<string | undefined>
     ...(record.to.length > 0 ? [`To: ${record.to.join(", ")}`] : []),
     ...(record.cc.length > 0 ? [`Cc: ${record.cc.join(", ")}`] : []),
     "",
-    record.text ?? (record.html ? htmlToText(record.html) : ""),
+    mailBodyText(record),
   ];
   return lines.join("\n").slice(0, TEXT_STORE_LIMIT).trim() || undefined;
-}
-
-/** HTML read as text: head, style and script dropped, blocks on their own lines. */
-export function htmlToText(html: string): string {
-  return xmlToText(
-    html
-      .replace(/<(head|style|script|noscript|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/&nbsp;/gi, " "),
-    /<\/(?:p|div|tr|li|h[1-6]|table|blockquote)\s*>/gi,
-  );
-}
-
-/** Tags stripped, paragraph boundaries kept, entities restored. */
-function xmlToText(xml: string, paragraphEnd: RegExp): string {
-  return xml
-    .replace(paragraphEnd, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
 
 async function extractOfficeText(file: UploadSource): Promise<string | undefined> {
@@ -167,18 +143,16 @@ async function extractPdfText(file: UploadSource): Promise<string | undefined> {
   for (let i = 1; i <= pages && total < TEXT_STORE_LIMIT; i++) {
     const page = await doc.getPage(i);
     const content = await page.getTextContent();
-    const pageText = content.items
-      .map((item) => ("str" in item ? item.str : ""))
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
+    // The page as a person sees it: lines, the cells of a row, blocks.
+    const pageText = pdfLines(pdfItemsOf(content));
     if (pageText) {
       parts.push(pageText);
       total += pageText.length;
     }
   }
   await loadingTask.destroy();
-  const text = parts.join("\n").slice(0, TEXT_STORE_LIMIT);
+  // A blank line parts two pages, as it parts two blocks of one page.
+  const text = parts.join("\n\n").slice(0, TEXT_STORE_LIMIT);
   return text || undefined;
 }
 

@@ -71,6 +71,15 @@ describe("emailToPdf", () => {
     expect(text).not.toContain("x()");
   });
 
+  it("prints a mail laid out as rows of cells with its rows, whatever its plain body holds", async () => {
+    const { bytes } = await emailToPdf(
+      record({ text: "Check-in Fri 12 March 2027 Total 429.00", html: "<table><tr><td>Check-in</td><td>Fri 12 March 2027</td></tr><tr><td>Total</td><td>&pound;429.00</td></tr></table>" }),
+    );
+    const { text } = await textOf(bytes);
+    expect(text).toContain("Check-in | Fri 12 March 2027");
+    expect(text).toContain("Total | £429.00");
+  });
+
   it("a long body continues across pages", async () => {
     const body = Array.from({ length: 300 }, (_, i) => `Line ${i + 1} of the itinerary.`).join("\n");
     const { bytes } = await emailToPdf(record({ text: body }));

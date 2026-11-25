@@ -1,0 +1,116 @@
+{
+ "items": [
+  {
+   "str": "Harbour Dental Example",
+   "transform": [
+    14,
+    0,
+    0,
+    14,
+    50,
+    782
+   ],
+   "width": 162.6,
+   "height": 14,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    732
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Dear Alex,",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    732
+   ],
+   "width": 46.68,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "This is a reminder of your check-up on 22 July 2027 at 09:30. Please arrive",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    708
+   ],
+   "width": 332.37,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "ten minutes early. If you cannot attend, tell us by 15 July 2027 so that",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    694
+   ],
+   "width": 306.84,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "another patient can take the time.",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    680
+   ],
+   "width": 148.42,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Kind regards,",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    646
+   ],
+   "width": 59.47,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "The reception team",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    632
+   ],
+   "width": 86.15,
+   "height": 10,
+   "hasEOL": false
+  }
+ ]
+}

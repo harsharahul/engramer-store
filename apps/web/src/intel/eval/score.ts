@@ -19,6 +19,8 @@ export interface EvalCase {
   text: string;
   /** The document as written, when it carries structured data (HTML, an invite). */
   raw?: string;
+  /** A message's HTML body, when the case is written as one: its text is what the app's own step makes of it. */
+  html?: string;
   /** Who sent a message, as its header names them. */
   from?: string;
   /** When a message was written: what a date in it with no year is read against. */

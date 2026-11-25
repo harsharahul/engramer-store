@@ -1,0 +1,382 @@
+{
+ "items": [
+  {
+   "str": "Lakeside Plumbing Example",
+   "transform": [
+    14,
+    0,
+    0,
+    14,
+    50,
+    782
+   ],
+   "width": 189.07,
+   "height": 14,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    742
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "12 High Street",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    742
+   ],
+   "width": 63.92,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    113.92,
+    742
+   ],
+   "width": 226.08,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "Invoice number: INV-1144",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    340,
+    742
+   ],
+   "width": 116.16,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Lakeside LK1 2AB",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    728
+   ],
+   "width": 82.27,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    132.27,
+    728
+   ],
+   "width": 207.73,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "Invoice date: 5 November 2026",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    340,
+    728
+   ],
+   "width": 138.96,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Phone 01632 960001",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    714
+   ],
+   "width": 95.63,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    145.63,
+    714
+   ],
+   "width": 194.37,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "Payment due: 23 November 2026",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    340,
+    714
+   ],
+   "width": 149.52,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Labour, 3 hours",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    672
+   ],
+   "width": 70.04,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    120.04,
+    672
+   ],
+   "width": 339.96,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "195.00",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    460,
+    672
+   ],
+   "width": 30.58,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Parts",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    658
+   ],
+   "width": 23.34,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    73.34,
+    658
+   ],
+   "width": 386.66,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "48.50",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    460,
+    658
+   ],
+   "width": 25.02,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Subtotal",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    644
+   ],
+   "width": 36.69,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    86.69,
+    644
+   ],
+   "width": 373.31,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "243.50",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    460,
+    644
+   ],
+   "width": 30.58,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "VAT 20%",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    630
+   ],
+   "width": 42.24,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    92.24,
+    630
+   ],
+   "width": 367.76,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "48.70",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    460,
+    630
+   ],
+   "width": 25.02,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    610
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Total due",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    610
+   ],
+   "width": 44.45,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    94.45,
+    610
+   ],
+   "width": 365.55,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "GBP 292.20",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    460,
+    610
+   ],
+   "width": 55.03,
+   "height": 10,
+   "hasEOL": false
+  }
+ ]
+}

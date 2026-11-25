@@ -23,7 +23,8 @@ describe("exact readers on the eval set", () => {
   });
 
   it("the first set holds the distractor, the form, the time-language and the amount cases, each id once, none shared with the held-out set", () => {
-    expect(EVAL_CASES).toHaveLength(192);
+    expect(EVAL_CASES).toHaveLength(222);
+    expect(EVAL_CASES.filter((c) => c.id.startsWith("s-"))).toHaveLength(30);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("x-"))).toHaveLength(30);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("f-"))).toHaveLength(40);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("t-"))).toHaveLength(30);
@@ -75,8 +76,9 @@ const labelReadings = async (evalCase: EvalCase) => (await labelFacts(evalCase))
 describe("label rules on the eval set", () => {
   it("are right at least nine times in ten, on dates and on amounts", async () => {
     // Every case of the first set: running words, distractors, forms and
-    // time language alike.
-    const written = EVAL_CASES;
+    // time language alike. The structure cases are counted apart below
+    // until the readers use rows and cells.
+    const written = EVAL_CASES.filter((c) => !c.id.startsWith("s-"));
     const plain = written.filter((c) => !c.exact);
     const lines: string[] = [];
     const precise: Record<string, boolean> = {};
@@ -101,6 +103,21 @@ describe("label rules on the eval set", () => {
     lines.push(`form lines that only name a date, kept with their own words: ${named}`);
     console.info(lines.join("\n"));
     expect(precise).toEqual({ dates: true, amounts: true });
+  });
+
+  it("on the structure cases the label rules give fourteen wrong readings, until they read rows and cells", async () => {
+    // The text keeps rows and cells, and the rules still read them as loose
+    // words: a header row claims the dates under it, the second clock of a
+    // row takes the first one's meaning, a quoted reply's rows are read, a
+    // footer's offer is a date. The count is pinned, so that any change to
+    // it is seen; it goes when the nine-in-ten bar covers these cases too.
+    const WRONG_ON_STRUCTURE = 14;
+    const all = await scoreReader(
+      EVAL_CASES.filter((c) => c.id.startsWith("s-")),
+      labelReadings,
+      "dates",
+    );
+    expect(all.perCase.reduce((sum, c) => sum + c.extra, 0)).toBe(WRONG_ON_STRUCTURE);
   });
 
   it("the whole amount is read by its label on at least fifty documents, and right at least 95 times in 100", async () => {

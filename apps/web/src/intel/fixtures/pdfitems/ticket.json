@@ -1,0 +1,158 @@
+{
+ "items": [
+  {
+   "str": "Riverside Hall Example",
+   "transform": [
+    16,
+    0,
+    0,
+    16,
+    50,
+    782
+   ],
+   "width": 176.08,
+   "height": 16,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    12,
+    0,
+    0,
+    12,
+    50,
+    758
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "An Evening of Strings",
+   "transform": [
+    12,
+    0,
+    0,
+    12,
+    50,
+    758
+   ],
+   "width": 115.39,
+   "height": 12,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    722
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Date: Saturday 6 November 2027",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    722
+   ],
+   "width": 148.96,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Doors: 7:00 PM",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    708
+   ],
+   "width": 69.47,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Show starts: 8:00 PM",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    694
+   ],
+   "width": 95.04,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Seat: Stalls K 14",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    680
+   ],
+   "width": 73.93,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    8,
+    0,
+    0,
+    8,
+    50,
+    632
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Booked on: 3 September 2027",
+   "transform": [
+    8,
+    0,
+    0,
+    8,
+    50,
+    632
+   ],
+   "width": 108.51,
+   "height": 8,
+   "hasEOL": true
+  },
+  {
+   "str": "No refunds after 30 October 2027.",
+   "transform": [
+    8,
+    0,
+    0,
+    8,
+    50,
+    620
+   ],
+   "width": 121.4,
+   "height": 8,
+   "hasEOL": false
+  }
+ ]
+}

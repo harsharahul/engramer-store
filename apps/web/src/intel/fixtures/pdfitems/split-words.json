@@ -1,0 +1,116 @@
+{
+ "items": [
+  {
+   "str": "Payment due: 23 Novem",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    782
+   ],
+   "width": 108.94,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": "ber 2026",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    153.94,
+    782
+   ],
+   "width": 39.47,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    752
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Amount",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    752
+   ],
+   "width": 36,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    86,
+    752
+   ],
+   "width": 18,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "due",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    104,
+    752
+   ],
+   "width": 18,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    122,
+    752
+   ],
+   "width": 36,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "86.35 GBP",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    158,
+    752
+   ],
+   "width": 54,
+   "height": 10,
+   "hasEOL": false
+  }
+ ]
+}
