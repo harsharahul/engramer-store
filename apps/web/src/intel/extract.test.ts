@@ -119,4 +119,15 @@ describe("email record text", () => {
     expect(text).not.toContain("track()");
     expect(text).not.toContain("<p>");
   });
+
+  it("extractText reads a mail laid out as rows of cells from its HTML, which keeps them", async () => {
+    const text = await extractText(
+      emailFile({
+        ...base,
+        text: "Check-in Fri 12 March 2027 Total 429.00",
+        html: "<table><tr><td>Check-in</td><td>Fri 12 March 2027</td></tr><tr><td>Total</td><td>&pound;429.00</td></tr></table>",
+      }),
+    );
+    expect(text!.split("\n").slice(-2)).toEqual(["Check-in | Fri 12 March 2027", "Total | £429.00"]);
+  });
 });
