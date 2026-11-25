@@ -319,6 +319,8 @@ function layOut(html: string): { text: string; rows: number } {
   let quote = 0;
   let tables = 0;
   let rowLines = 0;
+  /** How wide the last row of cells of each open table was, by the table's depth. */
+  const rowWidths = new Map<number, number>();
   const top = () => frames[frames.length - 1]!;
   const muted = () => sized.length > 0 && sized[sized.length - 1]!.nothing;
 
@@ -404,7 +406,12 @@ function layOut(html: string): { text: string; rows: number } {
     // A cell of a row is one block of a line or two; the first cell with words is one line (a label, or a value like the others).
     // A cell that holds a table of its own is layout, however small that table is.
     const oneBlock = (cell: Frame) => cell.lines.length <= MAX_CELL_LINES && cell.lines.every((line, index) => !line.blank && !line.row && (index === 0 || line.soft));
-    if (filled.length >= 2 && filled[0]!.lines.length === 1 && filled.every(oneBlock)) {
+    // A row as wide as the row of cells above it in its table goes on that
+    // table: a day and its clock on two lines in each cell, under a header.
+    const width = row.cells.reduce((sum, cell) => sum + cell.span, 0);
+    const under = rowWidths.get(row.depth) === width;
+    if (filled.length >= 2 && (filled[0]!.lines.length === 1 || under) && filled.every(oneBlock)) {
+      rowWidths.set(row.depth, width);
       // A row of cells: one line. An empty cell keeps its place, and a cell that spans columns takes theirs.
       const cells: string[] = [];
       let depth = 0;
@@ -421,6 +428,7 @@ function layOut(html: string): { text: string; rows: number } {
       return;
     }
     // Layout: a cell with more than a line, or one of several, is a block of its own.
+    rowWidths.delete(row.depth);
     for (const cell of filled) {
       const block = filled.length > 1 || cell.lines.length > 1 || cell.lead;
       if (block) {
@@ -598,12 +606,14 @@ function layOut(html: string): { text: string; rows: number } {
           while (rows.length > 0 && rows[rows.length - 1]!.depth >= tables) {
             closeRow();
           }
+          rowWidths.delete(tables);
           tables -= 1;
         }
         blank();
       } else {
         blank();
         tables += 1;
+        rowWidths.delete(tables);
       }
     } else if (name === "tr" && structured) {
       const row = rows[rows.length - 1];

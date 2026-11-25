@@ -39,6 +39,12 @@ const FORWARD_HEADER =
   /^\*?From:\*?[^\n]*\n(?:[^\n]*\n){0,3}?\*?(?:Sent|Date):|^\*?(?:Sent|Date):\*?[^\n]*\n(?:[^\n]*\n){0,3}?\*?From:/im;
 /** Lines that start with ">", one under the other. */
 const QUOTED_LINES = /^>[^\n]*(?:\n>[^\n]*)*/gm;
+/** A reply says so in its subject, which is the first line of a stored mail's text. */
+const REPLY_SUBJECT = /^\s*re\s*:/i;
+/** A line of marketing, as a sender prints it straight above the footer. */
+const PROMO = /\b(?:offers?|sale|discount|deals?|promo(?:tion)?|coupon|voucher|free (?:delivery|shipping)|book again|rate us|review us|refer a friend|save \d|\d+\s?% off)\b/i;
+
+const earliest = (...places: (number | undefined)[]) => places.filter((at): at is number => at !== undefined).sort((a, b) => a - b)[0];
 
 /** Words only a footer uses: the footer starts at the line they stand on. */
 const FOOTER_ONLY = /\bunsubscribe\b|\byou(?:'re| are| have)? ?receiv(?:ed|ing) this (?:e-?mail|message)\b|\bmanage (?:your )?(?:e-?mail |mail |notification )?preferences\b|\ball rights reserved\b|©|\bregistered office\b/i;
@@ -54,11 +60,16 @@ const MARKS_SEEN = 40;
 
 /** Where a message quotes, forwards, and ends in a footer. */
 export function zonesOf(text: string): Zones {
-  const quoteAt = QUOTE_HEADER.exec(text)?.index;
-  const forwardAt = [FORWARD_LINE, FORWARD_HEADER]
-    .map((form) => form.exec(text)?.index)
-    .filter((at): at is number => at !== undefined)
-    .sort((a, b) => a - b)[0];
+  const firstLine = text.indexOf("\n");
+  const reply = REPLY_SUBJECT.test(firstLine === -1 ? text : text.slice(0, firstLine));
+  const separator = FORWARD_LINE.exec(text)?.index;
+  const headers = FORWARD_HEADER.exec(text)?.index;
+  // A block of From and Sent lines, or an "original message" line, carries
+  // another message. In a reply that message is the one it answers, as some
+  // mail programs print it: quoted, like what follows "On ... wrote:".
+  // Anywhere else it is a message sent on: forwarded, and read.
+  const quoteAt = reply ? earliest(QUOTE_HEADER.exec(text)?.index, separator, headers) : QUOTE_HEADER.exec(text)?.index;
+  const forwardAt = reply ? undefined : earliest(separator, headers);
   // The message's own words end where it starts to quote.
   const own = quoteAt ?? text.length;
 
@@ -87,17 +98,30 @@ export function zonesOf(text: string): Zones {
   for (let mark = FOOTER_MARK.exec(text); mark && mark.index < own && marks.length < MARKS_SEEN; mark = FOOTER_MARK.exec(text)) {
     marks.push({ at: mark.index, line: text.lastIndexOf("\n", mark.index - 1) + 1, words: mark[0].toLowerCase(), only: FOOTER_ONLY.test(mark[0]) });
   }
-  const starts: number[] = [];
   const block = marks.find((mark, index) => mark.only && mark.line >= early && marks.slice(index + 1).some((other) => other.words !== mark.words));
-  if (block) {
-    starts.push(block.line);
+  const alone = marks.find((mark) => mark.only && mark.at >= late);
+  const start = earliest(block?.line, alone ? (alone.line >= late ? alone.line : alone.at) : undefined);
+  if (start !== undefined) {
+    let at: number = start;
+    // An offer printed straight above the footer's first line is the
+    // sender's too ("Rate us before 28 February"). Any other sentence
+    // there is the message's.
+    while (at > early && text[at - 1] === "\n") {
+      const above: number = text.lastIndexOf("\n", at - 2) + 1;
+      if (above < early || !PROMO.test(text.slice(above, at - 1))) {
+        break;
+      }
+      at = above;
+    }
+    zones.footer = { at, end: own };
+    return zones;
   }
-  const alone = marks.find((mark) => mark.at >= late);
-  if (alone) {
-    starts.push(alone.only && alone.line >= late ? alone.line : alone.at);
-  }
-  if (starts.length > 0) {
-    zones.footer = { at: Math.min(...starts), end: own };
+  // Words a body uses too ("terms and conditions") hide only the rest of
+  // their own line: what stands under them is still the message.
+  const words = marks.find((mark) => mark.at >= late);
+  if (words) {
+    const stop = text.indexOf("\n", words.at);
+    zones.footer = { at: words.at, end: stop === -1 || stop > own ? own : stop };
   }
   return zones;
 }

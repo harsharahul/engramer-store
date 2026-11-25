@@ -64,6 +64,28 @@ describe("zonesOf: the parts of a message that are not its own words", () => {
     expect(words(text, zonesOf(text).footer)).toBe("Terms and conditions apply.");
   });
 
+  it("words a body uses too hide only the rest of their own line: what stands under them is read", () => {
+    const text = lines("Your booking is confirmed.", "Check-in: 11 Nov 2027", "Check-out: 14 Nov 2027", "By booking you agree to our terms and conditions.", "Total paid: £429.00");
+    expect(words(text, zonesOf(text).footer)).toBe("terms and conditions.");
+  });
+
+  it("an offer printed straight above the footer's line belongs to the footer; another sentence there does not", () => {
+    const body = lines("Your parcel is on its way.", "", "Delivery day: Tuesday 23 February 2027", "Time window: between 10:00 and 12:00", "", "Track it with code PW-99120045.", "");
+    const footer = lines("Spring offer: book again before 30 April 2027 and save 10%.", "Rate us before 28 February 2027.", "You are receiving this email because you have an account with us. Unsubscribe | Privacy");
+    expect(words(`${body}\n${footer}`, zonesOf(`${body}\n${footer}`).footer)).toBe(footer);
+    const plain = lines(body, "Your next order ships on 3 March 2027.", "© 2027 Parcel Example. All rights reserved.");
+    expect(words(plain, zonesOf(plain).footer)).toBe("© 2027 Parcel Example. All rights reserved.");
+  });
+
+  it("in a reply, the message it answers is quoted, in whichever form the mail program prints it", () => {
+    const original = lines("From: Alex Example", "Sent: Mon, 9 Nov 2026 10:00", "Subject: Dinner", "", "Dinner is on 3 March 2027 at 19:30. Deposit £20.00 due by 1 March 2027.");
+    const reply = lines("RE: Dinner", "From: Sam Example <sam@example.com>", "To: alex@example.com", "", "Thanks, see you then.", "", original);
+    expect(zonesOf(reply)).toEqual({ quoted: [{ at: reply.indexOf("From: Alex"), end: reply.length }] });
+    // The same block under a forward's subject is a forwarded message, and is read.
+    const forward = reply.replace("RE: Dinner", "FW: Dinner");
+    expect(zonesOf(forward)).toEqual({ quoted: [], forwarded: { at: forward.indexOf("From: Alex"), end: forward.length } });
+  });
+
   it("the footer is looked for in the message's own words, before what it quotes", () => {
     const own = lines("Thanks for the details, that all works for us and we will see you on 12 March 2027 at the house.", "", "Unsubscribe from this list");
     const text = lines(own, "", "On 1 March 2027 Sam wrote:", "", `> ${"We have a room for you. ".repeat(40)}`);

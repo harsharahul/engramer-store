@@ -1480,9 +1480,11 @@ export const useStore = create<StoreState>((set, get) => {
     }
     const fresh = await extractText(source, { strict: true });
     const payload = decodeIndexPayload(decryptBytes(await api.downloadBlob(id, "index", { timeoutMs: SWEEP_DOWNLOAD_MS }), file.key));
-    // Another device may have finished while this one was reading.
+    // Another device may have finished while this one was reading. And the
+    // contents may have been replaced (a save): what was read is then another
+    // version's text, and nothing of it is written or stamped.
     const current = get().files.get(id);
-    if (!current || !staleText(current)) {
+    if (!current || !staleText(current) || current.digest !== file.digest || current.size !== file.size) {
       return false;
     }
     if (fresh === undefined || fresh.length * 2 < (payload.text ?? "").length) {
@@ -1521,6 +1523,10 @@ export const useStore = create<StoreState>((set, get) => {
       const kept = new Set(merged.map((fact) => fact.id));
       const again = new Set(scanned.evidence.map((item) => item.id));
       evidence = [...evidence.filter((item) => kept.has(item.id) && !again.has(item.id)), ...scanned.evidence];
+    }
+    if (get().files.get(id)?.digest !== file.digest) {
+      // Replaced while the rules were reading it.
+      return false;
     }
     await uploadBlob(
       id,

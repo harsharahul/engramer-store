@@ -23,7 +23,8 @@ export interface Cell {
 
 /**
  * Rows of cells that stand together, line under line. `rows[r][c]` stands
- * under `header[c]`; a cell a row does not have is empty.
+ * under `header[c]` in every row that is as long as the header; a row
+ * shorter than the header could not be placed under it.
  */
 export interface TableBlock {
   at: number;
@@ -134,7 +135,10 @@ function aligned(cells: Cell[], width: number, headed: boolean): Cell[] {
   if (headed && cells.length === 2 && (AMOUNT.test(last.text) || NUMBER_ALONE.test(last.text))) {
     return [cells[0]!, ...Array.from({ length: width - 2 }, () => empty(last.at)), last];
   }
-  return [...cells, ...Array.from({ length: width - cells.length }, () => empty(last.end))];
+  // Any other short row cannot be placed: a page's text has no mark for an
+  // empty cell, so which column is missing is not known. It keeps its own
+  // length, and a reader takes nothing in it as standing under a header.
+  return cells;
 }
 
 function blockOf(run: Row[]): TableBlock {

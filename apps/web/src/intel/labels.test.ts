@@ -1172,6 +1172,30 @@ describe("a table read by its rows, each cell under the header of its column", (
     ]);
   });
 
+  it("a list of payments with a time of day is no timetable: its rows hold amounts, and give nothing", () => {
+    const statement = lines(
+      "Payment due: 23 November 2026",
+      "",
+      "Date | Time | Merchant | Amount (GBP)",
+      ...Array.from({ length: 30 }, (_, i) => `${(i % 28) + 1} Oct 2026 | 08:${String(i).padStart(2, "0")} | Shop ${i} | ${i + 1}.50`),
+    );
+    expect(dated(statement)).toEqual([["due", "2026-11-23", undefined, undefined]]);
+  });
+
+  it("a day and a clock are a moment only under columns that say so: a first row of words is no such header", () => {
+    expect(dated(lines("Outbound | BA 123 | London Heathrow", "Departs | 2 July 2027 | 07:30", "Arrives | 2 July 2027 | 10:45"))).toEqual([
+      ["event", "2027-07-02", "07:30", "depart"],
+      ["event", "2027-07-02", "10:45", "arrive"],
+    ]);
+  });
+
+  it("a row with a cell missing is not read under the header: its clock could be either column's", () => {
+    expect(dated(lines("Date | Departs | Arrives", "2 July 2027 | 07:30 | 10:45", "9 July 2027 | 19:15"))).toEqual([
+      ["event", "2027-07-02", "07:30", "depart"],
+      ["event", "2027-07-02", "10:45", "arrive"],
+    ]);
+  });
+
   it("labels and values in two cells are form lines: the table types them or says they are nobody's business", () => {
     expect(dated(lines("Statement date | 2 November 2026", "Account | REF-48213", "Payment due | 23 November 2026"))).toEqual([["due", "2026-11-23", undefined, undefined]]);
     expect(dated(lines("Issued | 3 May 2027", "Number | 07700 900123", "Pay by | Mon 24 May 2027")).filter(([kind]) => kind === "due")).toEqual([

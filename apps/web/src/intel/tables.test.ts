@@ -92,8 +92,9 @@ describe("tableBlocks: rows of cells that stand together", () => {
         rows: [["Adult", "2", "108.00"], ["Subtotal", "", "170.00"], ["Total paid", "", "160.00"], ["Car", "1", "62.00", "paid"]],
       },
     ]);
-    // A short row that is not a name and its sum keeps its cells from the left.
-    expect(shape(lines("Sailing | Date | Departs", "Outbound | 2 July 2027 | 07:30", "Return | 9 July 2027"))[0]!.rows[1]).toEqual(["Return", "9 July 2027", ""]);
+    // A short row that is not a name and its sum cannot be placed: which cell is missing is not known (a page's
+    // text has no mark for an empty cell). It keeps its own length, and nothing in it is read under a header.
+    expect(shape(lines("Date | Departs | Arrives", "2 July 2027 | 07:30 | 10:45", "9 July 2027 | 19:15"))[0]!.rows[1]).toEqual(["9 July 2027", "19:15"]);
   });
 
   it("rows of a different width are a table of their own", () => {

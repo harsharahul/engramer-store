@@ -11,7 +11,7 @@ import type { FileDto } from "./api";
 
 const blobs = vi.hoisted(() => ({ index: new Map<string, Uint8Array>(), reads: 0, writes: 0 }));
 const originals = vi.hoisted(() => ({ bytes: new Map<string, Uint8Array>(), reads: 0 }));
-const reader = vi.hoisted(() => ({ fail: false, text: undefined as string | undefined }));
+const reader = vi.hoisted(() => ({ fail: false, text: undefined as string | undefined, during: undefined as (() => void) | undefined }));
 const metadata = vi.hoisted(() => ({ writes: 0 }));
 
 vi.mock("./api", async (importOriginal) => {
@@ -44,6 +44,7 @@ vi.mock("./intel/extract", async (importOriginal) => {
       if (reader.fail) {
         throw new Error("the reader could not run");
       }
+      reader.during?.();
       return reader.text !== undefined ? reader.text : original.extractText(file, opts);
     },
   };
@@ -145,6 +146,7 @@ beforeEach(() => {
   originals.reads = 0;
   reader.fail = false;
   reader.text = undefined;
+  reader.during = undefined;
   metadata.writes = 0;
   const stub = api as unknown as Record<string, unknown>;
   stub["downloadBlob"] = async (id: string) => {
@@ -240,6 +242,20 @@ describe("a stored mail read again when it is opened", () => {
     const reads = blobs.reads;
     expect(await useStore.getState().rereadText("f1", RECORD_BYTES)).toBe(false);
     expect(blobs.reads).toBe(reads);
+  });
+
+  it("a file whose contents were replaced while it was being read is left for its new contents", async () => {
+    library([stored({ id: "c1" })], { c1: { text: FLAT } });
+    // A save lands while the reader is at work: the bytes read are no longer the file's.
+    reader.during = () => {
+      const files = new Map(useStore.getState().files);
+      files.set("c1", { ...files.get("c1")!, digest: "d2" });
+      useStore.setState({ files });
+    };
+    expect(await useStore.getState().rereadText("c1", RECORD_BYTES)).toBe(false);
+    expect([blobs.writes, metadata.writes]).toEqual([0, 0]);
+    expect(entry("c1").textEdition).toBeUndefined();
+    expect(blob("c1").text).toBe(FLAT);
   });
 
   it("a file that is not stale, or is gone, is left alone", async () => {

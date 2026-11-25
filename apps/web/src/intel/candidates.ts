@@ -77,6 +77,10 @@ function rowsUnderHeaders(text: string): (at: number) => string | undefined {
   const rows: { at: number; end: number; words: string }[] = [];
   for (const block of /\||\t| {3}/.test(text) ? tableBlocks(text) : []) {
     for (const row of block.header ? block.rows : []) {
+      if (row.length < block.header!.length) {
+        // A cell is missing: the row is shown as it is written.
+        continue;
+      }
       const words = row.flatMap((cell, column) => {
         const name = block.header![column]?.text;
         return cell.text === "" ? [] : [name ? `${name}: ${cell.text}` : cell.text];

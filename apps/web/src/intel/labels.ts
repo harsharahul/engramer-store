@@ -632,6 +632,9 @@ export function structuralDatedFacts(
     const context = opts.writtenAt === undefined ? undefined : { writtenAt: opts.writtenAt };
     for (const block of tableBlocks(text)) {
       for (const row of block.header ? block.rows : []) {
+        if (row.length < block.header!.length) {
+          continue;
+        }
         const days: { parsed: ParsedDate; label: string; meaning: LabelMeaning | undefined }[] = [];
         const clocks: { time: string; label: string; meaning: LabelMeaning | undefined }[] = [];
         for (const [column, cell] of row.entries()) {
@@ -685,7 +688,14 @@ export function structuralDatedFacts(
             if (!held.time) {
               byId.set(held.id, { ...held, time: clock.time });
             }
-          } else if (day.meaning === undefined) {
+          } else if (
+            day.meaning === undefined &&
+            DAY_COLUMN.test(day.label) &&
+            CLOCK_COLUMN.test(clock.label) &&
+            !row.some((cell) => HOLDS_MONEY.test(cell.text))
+          ) {
+            // A timetable: its columns say "Date" and "Time". A row that
+            // holds an amount is a payment with its time of day, no moment.
             moment(clock.time, clock.label || day.label);
           }
         }
@@ -741,6 +751,11 @@ export interface FieldLine {
 const ROW_MARK = /\||\t| {3}/;
 /** The meanings that are a moment: something happens on that day, at that clock. */
 const MOMENTS: ReadonlySet<LabelMeaning> = new Set<LabelMeaning>(["event", "check-in", "check-out", "depart", "arrive"]);
+/** The columns of a timetable that names no kind of moment: a day and a clock, called so. */
+const DAY_COLUMN = /^(?:date|day|when)$/i;
+const CLOCK_COLUMN = /^(?:time|start|starts|start time|begins|from|at)$/i;
+/** A cell that holds a sum of money: a currency sign, or two decimals. */
+const HOLDS_MONEY = /[$£€₹¥]\s?\d|\d[.,]\d{2}(?!\d)/;
 /** A clock as a cell of a table states it: with a colon, or with AM or PM. "10.45" under an amount is no clock. */
 const CLOCK_CELL = /\d:\d\d|\d\s?[ap]\.?m\b|\bnoon\b|\bmidnight\b/i;
 
@@ -811,6 +826,10 @@ export function fieldLines(text: string): FieldLine[] {
   }
   for (const block of headed) {
     for (const row of block.rows) {
+      if (row.length < block.header!.length) {
+        // A cell is missing and the rest cannot be placed under the header.
+        continue;
+      }
       for (const [column, cell] of row.entries()) {
         const label = block.header![column]?.text.replace(/\s+/g, " ") ?? "";
         if (cell.text !== "" && namesACell(label)) {
@@ -1097,11 +1116,13 @@ function rowCells(text: string): { cells: RowCell[]; currencies: string[] } {
         if (cell.text === "") {
           continue;
         }
-        const header = block.header?.[column]?.text;
+        // A row shorter than the header could not be placed under it.
+        const placed = !block.header || row.length >= block.header.length;
+        const header = placed ? block.header?.[column]?.text : undefined;
         // A sum that stands alone after its row's name, in a table of two
         // currencies: which column it belongs to is not known.
         const adrift = named.length > 1 && column > 1 && row.slice(1, column).every((between) => between.text === "");
-        const unit = adrift ? undefined : (units[column] ?? shared);
+        const unit = adrift || !placed ? undefined : (units[column] ?? shared);
         cells.push({ at: cell.at, end: cell.end, text: cell.text, ...(column > 0 && first ? { first } : {}), ...(header ? { header } : {}), ...(unit ? { unit } : {}) });
       }
     }
