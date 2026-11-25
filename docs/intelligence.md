@@ -38,6 +38,8 @@ Categories and tags are ordinary metadata fields (`category`, `tags`, `favorite`
 
 - Plain text and code: read directly (512 KB read cap, 100 KB stored).
 - PDF: text extracted in the browser with pdf.js, capped at 40 pages and 100 KB.
+  The text keeps the page as a person sees it (see "Text keeps its structure"
+  below).
 - Images: EXIF capture date and camera make.
 - Images, with OCR enabled: the text in screenshots, scans, and photos, read on
   this device by tesseract.js. The worker, WebAssembly engine, and English
@@ -49,6 +51,52 @@ Categories and tags are ordinary metadata fields (`category`, `tags`, `favorite`
   invoice files as a receipt.
 
 Extracted text is stored as a per-file encrypted index blob (metadata carries only a marker), fetched and decrypted lazily when search is used, so metadata sync stays small no matter how much text a library holds. Legacy libraries migrate to this layout automatically.
+
+### Text keeps its structure
+
+Every reader that works on lines (a form field, a label above its value, a
+clock under its date, a table) depends on the text holding the lines and
+columns of the page.
+
+```
+ a PDF page                           its text
+ ----------------------------------   -------------------------------------
+ Statement date: 2 November 2026      Statement date: 2 November 2026
+
+ Description   Period      Amount     Description | Period | Amount (GBP)
+ Electricity   1-31 Oct     52.10     Electricity | 1-31 Oct | 52.10
+ Gas           1-31 Oct     34.25     Gas | 1-31 Oct | 34.25
+```
+
+- **A PDF** places pieces of text at points on a page. Pieces on one
+  baseline are one line; a gap wider than two characters parts two cells,
+  written ` | `; a tall gap is a blank line; a sentence the page wrapped is
+  one line again; text set at an angle comes last. A tall heading or a
+  stamp keeps to its own line, and slanted text is upright text.
+- **An HTML email** is laid out with tables. A row of cells is one line
+  with ` | ` between its cells: an empty cell keeps its place and a cell
+  that spans columns takes theirs. A cell that holds blocks is layout and
+  only parts lines. A list item starts with a dash, a quoted message is
+  marked line by line with `> `, and `pre` text keeps its lines. What a
+  browser hides is left out (a hidden preview line, a block shown on
+  phones only), and entities are decoded as a browser decodes them. The
+  walk is one pass over the tags, so its time is in proportion to the
+  mail's size whatever the mail holds.
+- **Which body of a mail is read.** The plain part of a mail in running
+  words; the HTML part when it holds a row of cells, or when the plain
+  part is a stub ("View this email in your browser"). Save as PDF prints
+  the same text.
+
+**Stored files take the new text once.** A PDF with text and a stored mail
+carry a stamp that says which text step read them. A file whose stamp is
+older is read again: by the background pass when it was stored in the last
+ninety days, and when it is opened whatever its age. The new text replaces
+the old; the file's contents, its vectors and the evidence of its facts are
+not touched. The label rules' readings are made fresh from the new text,
+while your answers and every other reader's facts stand, and the on-device
+model is not asked again. A file that reads as less than it holds (a scan
+whose text came from recognition) keeps its text. A second pass reads
+nothing and writes nothing.
 
 ## Search
 
@@ -165,15 +213,16 @@ for the version and the exact prompt of the reader that ships, over at
 least 30 readings, on each of two synthetic sets; never for a travel time,
 an identity document's expiry or a legal deadline, which need exact data;
 and only when the value passes sanity checks (the day exists, a stay ends
-after it begins, an amount names its currency). The first set is 192
+after it begins, an amount names its currency). The first set is 222
 invented emails and documents: a third of them written so that the date or
 amount that matters stands among others that do not, forty written as
 forms (labels and values, flattened tables, a time on the line under its
 date), thirty about time (doors and a show's start, ranges of hours,
-clocks in words, days said in words), and thirty about amounts (a total
+clocks in words, days said in words), thirty about amounts (a total
 among its parts, the currency behind the number, a label on the line
-above its amount); the rules, the label tables and the model's
-instructions are written against it. The second is 60 more,
+above its amount), and thirty about structure (HTML mails laid out as
+tables, pages with rows of cells, a quoted reply, a footer); the rules,
+the label tables and the model's instructions are written against it. The second is 60 more,
 written without sight of the readers: nothing is ever tuned on it, and it
 is the one that says how unseen documents are read. The exact readers are
 scored in the test suite, and Apple's on-device model is scored on a Mac
@@ -189,6 +238,16 @@ readings measure 71% right for dates and 87% for amounts, well below the
 bar, so they are offered for a yes, and naming an email's kind (82%) is
 below its bar too. The bar never moves: a task earns trust only by
 measuring above it.
+
+Until the text of a PDF kept its lines, a page reached the readers as one
+line, while the stored-file cases of both sets held their line breaks. The
+figures published for earlier versions were therefore better than what the
+app read from a PDF. Measured the way the app read then (one line per
+page, `EVAL_SHAPE=flat`), the first set gave 81% of its dates and 84% of
+its amounts, with 34 wrong offers for every 100 documents. With the text
+keeping its lines, rows and cells, and the readers using them, it gives
+94% and 98%, with 23. The second set holds few tables and reads the same
+either way.
 
 The same harness counts what a person is asked, the way the app asks it:
 every unanswered date still ahead, or a deadline lately behind, on the day
@@ -380,6 +439,48 @@ metadata and index blob like every other derived signal.
   "the day after tomorrow", and anything a reply quotes or a message
   forwards, which was said on another day.
 
+  A table is read by its rows and its headers (`intel/tables.ts`). Two or
+  more lines of cells, one under the other, are a table; its first row is
+  a header when it holds names only.
+  - Under a header, each cell is a form line named by its column: a day
+    under "Check-in" is a check-in, a day under "Statement date" needs no
+    reminder. A header row is never a label for the line under it.
+  - A row is one moment: with one day in a row, each clock under
+    "Departs", "Arrives", "Check-in", "Check-out" or an event's name is
+    that moment on the row's day. Under columns called "Date" and "Time"
+    a day and its clock are a moment too (a course timetable), unless the
+    row holds an amount: a payment with its time of day is no moment.
+  - A cell under a name the label table does not hold gives nothing: a
+    list of payments under "Date" asks no questions.
+  - A row with a cell missing is not read under the header: a page's text
+    has no mark for an empty cell, so its cells cannot be placed. A name
+    and its sum ("Total paid | 160.00") is the exception: the sum stands
+    in the last column.
+  - With no header, a row of two cells is a label and its value, and a
+    cell that is itself "Label: value" is a field of its own, so a page
+    set in two columns is read column by column.
+  - Tables that stand under each other are told apart: a row of names
+    after a row of values is the header of the next one.
+
+  In a message, some parts are not its own words (`intel/zones.ts`). What
+  it quotes (lines that start with `>`, all that follows "On ... wrote:",
+  and in a reply the block of From and Sent lines some mail programs print
+  above the message they answer) is read by no rule and never put to the
+  model. Neither is the sender's footer: one footer mark (unsubscribe,
+  "you received this email because", all rights reserved, a copyright
+  sign) starts a footer only in the last two fifths of a message, and a
+  long footer under a short message starts at its first line when it holds
+  two marks, so a mark in the first lines hides nothing. An offer printed
+  straight above the footer's first line ("Rate us before 28 February")
+  belongs to it. Words a body uses too ("terms and conditions", "privacy
+  policy") hide only the rest of their own line. A message it forwards is
+  read for the dates and amounts it writes out (a booking forwarded to
+  oneself). A stored file is no message: every line of it is its own.
+
+  A day a document was issued is read where the document runs out or only
+  states it (a licence, a certificate). On a bill, a ticket or a timetable
+  it is the day the paper was made, and is not read.
+
   Amounts are read with their currency before or behind the number, as a
   symbol or a three-letter code ("$1,250.50", "EUR 1.250,00", "86.40 GBP",
   "29,99 €"), with two decimals; a code behind a dollar amount says which
@@ -410,7 +511,13 @@ metadata and index blob like every other derived signal.
   A label the table does not hold, or one whose meaning depends on the
   document ("Balance", "Fare", "Premium", "Amount paid", "New balance"),
   decides nothing. Not read: an amount with no decimals ("$50") or with no
-  currency.
+  currency. In a table, a number alone in its cell takes the currency its
+  column names ("Amount (GBP)"), and beside a name the table knows
+  ("Amount due") the one currency the document names. It is named by the
+  words in its cell, the name its row starts with, or its column's header:
+  the first of them the table knows says what it is, so "Subtotal" under a
+  column "Total" is a part. A rate or a count beside the amounts is no
+  amount.
 - **Amounts and reference numbers**, at low confidence, from any document,
   including kinds no rule anticipated.
 - **The assistant's judgement**, at the lowest confidence of all, on the Mac
