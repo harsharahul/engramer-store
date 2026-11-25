@@ -322,6 +322,8 @@ describe("reading mail", () => {
       mime: "application/vnd.engram.email+json",
       category: "Mail",
       text: "Your water bill\nFrom: billing@example.com\n\nUSD 64.10, due 15 May 2027.",
+      // Stored with the current text step: these tests are about the model's reading.
+      textEdition: 2,
       ...over,
     });
 

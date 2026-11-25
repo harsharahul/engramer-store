@@ -6,6 +6,24 @@ All notable changes to Engram Store are documented here, following
 ## [Unreleased]
 
 ### Added
+- **A PDF's text keeps its lines and columns.** A page was stored as one
+  long line; now pieces on one baseline are a line, a wide gap parts two
+  cells and a tall gap is a blank line, so a form, a table and a clock
+  under its date are read from a PDF as they are from a mail.
+- **An HTML email's text keeps its rows and cells.** A mail laid out as a
+  table is read from its HTML part, row by row, with the hidden preview
+  line and the phone-only blocks left out and currency signs decoded.
+  Search and Save as PDF show the same text.
+- **Tables are read by their headers.** A day under "Check-in" is a
+  check-in and a day under "Payment due" a due date; a timetable row gives
+  each clock under "Departs" and "Arrives" on the row's own day; a list of
+  payments under "Date" asks nothing.
+- **Amounts under a currency column.** A number under "Amount (GBP)" is
+  an amount in pounds, and a total printed under such a table takes the
+  one currency the document names.
+- **Stored PDFs and mail take the new text once.** Files of the last
+  ninety days are read again in the background, older ones when you open
+  them. Your answers stay; only the rules' own readings are made fresh.
 - **Clocks in more forms.** "Noon", "midday", "9 o'clock in the evening"
   and "15h30" are read as times, and a range of hours ("7-9pm", "between
   10:00 and 14:00") as its start.
@@ -29,6 +47,15 @@ All notable changes to Engram Store are documented here, following
   as a table read out cell by cell prints it, names that amount.
 
 ### Fixed
+- **A quoted reply and a footer are not read.** A date or an amount in
+  the message a reply quotes, or in a sender's footer ("book again before
+  30 April"), is no longer offered. A booking you forward to yourself is
+  still read.
+- **A header row no longer claims the dates under it.** "Check-in |
+  Check-out" gave the check-out the check-in's day, and "Departs |
+  Arrives" gave the arrival the departure's clock.
+- **The day a bill, a ticket or a timetable was issued is not asked
+  about.** An issue date is still read on a document that runs out.
 - **A subtotal, a tax or a fee is not offered as the total.** About 400
   labels ("Subtotal", "VAT", "Shipping", "Discount", "Deposit paid",
   "Previous balance") mark a part of a bill, as do a minus sign and the

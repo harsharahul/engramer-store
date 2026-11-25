@@ -167,10 +167,13 @@ import {
   clipComparable,
   metadataOf,
   needsClip,
+  needsProcessing,
   needsText,
   needsThumb,
   pendingDerivatives,
+  staleText,
   useStore,
+  wantsOriginal,
   type FileEntry,
 } from "./store";
 
@@ -708,6 +711,37 @@ describe("embedding model version", () => {
     expect(needsThumb(entry({ mime: "image/jpeg", hasThumb: true }))).toBe(false);
     expect(needsThumb(entry({ mime: "image/jpeg", trashed: true }))).toBe(false);
     expect(needsThumb(entry({ mime: "application/pdf" }))).toBe(false);
+  });
+
+  it("staleText names the files whose text an older text step wrote: a PDF with text, a stored mail", () => {
+    const pdf = entry({ name: "bill.pdf", mime: "application/pdf", hasText: true, category: "Documents" });
+    expect(staleText(pdf)).toBe(true);
+    expect(staleText({ ...pdf, textEdition: 2 })).toBe(false);
+    // A scan with no text is the text pass's, not this one's.
+    expect(staleText({ ...pdf, hasText: false })).toBe(false);
+    expect(staleText({ ...pdf, trashed: true })).toBe(false);
+    expect(staleText({ ...pdf, inlineText: true, text: "words" })).toBe(false);
+    // A file shared for viewing is its owner's to write.
+    expect(staleText({ ...pdf, shared: true, role: "viewer" })).toBe(false);
+    expect(staleText(entry({ name: "Booking.email", mime: "application/vnd.engram.email+json", hasText: true }))).toBe(true);
+    expect(staleText(entry({ name: "photo.jpg", mime: "image/jpeg", hasText: true }))).toBe(false);
+    expect(staleText(entry({ name: "notes.txt", mime: "text/plain", hasText: true }))).toBe(false);
+  });
+
+  it("the pass owes a stale file its new text only when it was stored in the last ninety days", () => {
+    const day = 86_400_000;
+    const pdf = entry({ name: "bill.pdf", mime: "application/pdf", hasText: true, category: "Documents" });
+    const recent = { ...pdf, createdAt: Date.now() - 10 * day };
+    expect(needsProcessing(recent)).toBe(true);
+    // Its original is fetched, so a phone's size limit applies to it.
+    expect(wantsOriginal(recent)).toBe(true);
+    expect(needsProcessing({ ...pdf, createdAt: Date.now() - 200 * day })).toBe(false);
+    expect(needsProcessing({ ...recent, textEdition: 2 })).toBe(false);
+  });
+
+  it("metadataOf keeps the stamp of the text step", () => {
+    expect(metadataOf(entry({ hasText: true, textEdition: 2 })).textEdition).toBe(2);
+    expect("textEdition" in metadataOf(entry({ hasText: true }))).toBe(false);
   });
 
   it("needsText wants exactly the unread images and scannable PDFs", () => {

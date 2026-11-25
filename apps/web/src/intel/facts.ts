@@ -661,6 +661,23 @@ export function withoutUnreadLines(existing: readonly Fact[], rescanned: readonl
 }
 
 /**
+ * What a file carries, less the rules' readings its new text no longer gives.
+ *
+ * When a file's text is read again with a better text step, the label
+ * rules' readings of the old text are only as good as that text was: a
+ * page read as one line gave readings no line of the page states. A fresh
+ * scan of the new text is the whole truth about them, so a rule's reading
+ * that the scan does not find again goes. What the owner answered stays,
+ * and so does a reading a second reader agreed on, and every other
+ * reader's fact (the model's, a booking's own data, a barcode's): those do
+ * not come from the lines of the text.
+ */
+export function rereadFacts(existing: readonly Fact[], rescanned: readonly Fact[]): Fact[] {
+  const again = new Set(rescanned.map((fact) => fact.id));
+  return existing.filter((fact) => !(fact.source === "label" && !ownerDecided(fact) && fact.accepted === undefined && !again.has(fact.id)));
+}
+
+/**
  * Folds a rescan into what a file already carries, in one fixed order.
  *
  * A decision the owner made outranks anything a later scan finds: a confirmed

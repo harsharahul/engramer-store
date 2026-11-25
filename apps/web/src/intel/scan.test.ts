@@ -92,6 +92,74 @@ describe("scanForFacts", () => {
     expect(await dated("Ledger folio: 12 March 2027")).toEqual([["dated", "2027-03-12"]]);
   });
 
+  it("a day of issue is read on a document that runs out, and not on a bill, a ticket or a timetable", async () => {
+    const kinds = async (text: string) => (await scanForFacts({ ...base, text })).facts.filter((fact) => fact.source === "label" && fact.kind !== "amount").map((fact) => `${fact.kind} ${fact.value}`).sort();
+    // A licence: the day it was issued says how old it is.
+    expect(await kinds("Driving licence\nIssued: 3 May 2027\nExpires: 2 May 2037")).toEqual(["expiry 2037-05-02", "issued 2027-05-03"]);
+    expect(await kinds("Certificate of completion\nIssued: 3 May 2027")).toEqual(["issued 2027-05-03"]);
+    // A bill and a timetable: the day the paper was made is nobody's business.
+    expect(await kinds("Your May bill\nIssued | 3 May 2027\nPay by | Mon 24 May 2027")).toEqual(["due 2027-05-24"]);
+    expect(await kinds("Spring course timetable\nIssued 12 January 2027\nDate | Time | Room\nMon 1 Feb 2027 | 10:00 | Room 4\nMon 8 Feb 2027 | 14:00 | Room 7")).toEqual([
+      "event 2027-02-01",
+      "event 2027-02-08",
+    ]);
+  });
+
+  describe("a message's own words", () => {
+    const EMAIL = "application/vnd.engram.email+json";
+    const writtenAt = Date.parse("2027-02-20T12:00:00Z");
+    const read = async (text: string) =>
+      (await scanForFacts({ name: "Booking.email", mime: EMAIL, text, writtenAt })).facts
+        .filter((fact) => fact.source === "label" && fact.kind !== "identifier")
+        .map((fact) => [fact.kind, fact.value, fact.time ?? fact.unit ?? ""].join(" ").trim())
+        .sort();
+    const booking = [
+      "Booking confirmed",
+      "",
+      "Thank you for booking with Harbour Guest House Example.",
+      "",
+      "Check-in | Check-out | Nights",
+      "Fri 12 March 2027, from 15:00 | Mon 15 March 2027, by 11:00 | 3",
+      "",
+      "Room (3 nights) | £390.00",
+      "VAT | £39.00",
+      "Total | £429.00",
+    ];
+
+    it("a booking with a quoted reply and a footer: the stay and the total are read, nothing from the reply, nothing from the footer", async () => {
+      const text = [
+        ...booking,
+        "",
+        "You received this email because you booked online. Book again before 30 April 2027 and save 15%. Unsubscribe | Terms and conditions",
+        "",
+        "On 18 February 2027 Alex wrote:",
+        "> Could we check in on 11 March 2027 instead? Payment due by 1 March 2027?",
+        "> Total | £240.00",
+      ].join("\n");
+      expect(await read(text)).toEqual(["amount 429.00 GBP", "event 2027-03-12 15:00", "event 2027-03-15 11:00"]);
+    });
+
+    it("a booking forwarded to oneself is read; a day said in words inside it is not", async () => {
+      const text = [
+        "For our diary. Call me tomorrow about it.",
+        "",
+        "---------- Forwarded message ---------",
+        "From: Harbour Guest House Example <stay@example.com>",
+        "Date: Mon, 15 Feb 2027 at 09:00",
+        "Subject: Booking confirmed",
+        "",
+        ...booking,
+        "We will send the door code tomorrow.",
+      ].join("\n");
+      expect(await read(text)).toEqual(["amount 429.00 GBP", "event 2027-03-12 15:00", "event 2027-03-15 11:00"]);
+    });
+
+    it("the same words in a stored file are all the file's own", async () => {
+      const facts = (await scanForFacts({ ...base, text: "Notes\n> Payment due 1 March 2027" })).facts.filter((fact) => fact.kind === "due");
+      expect(facts.map((fact) => fact.value)).toEqual(["2027-03-01"]);
+    });
+  });
+
   it("returns nothing at all for a file with no text and no bytes", async () => {
     const out = await scanForFacts({ name: "a.zip", mime: "application/zip" });
     expect(out.facts).toEqual([]);

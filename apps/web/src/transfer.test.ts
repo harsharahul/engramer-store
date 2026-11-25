@@ -330,6 +330,15 @@ describe("deferred analysis", () => {
     expect(prepared.meta.facts).toBeUndefined();
   });
 
+  it("stamps a PDF and a stored mail with the text step that read them, and no other file", async () => {
+    const { analyzeFile } = await import("./transfer");
+    const record = { v: 1, messageId: "<b1@example.com>", date: Date.UTC(2026, 0, 5), from: { name: "Example Air", address: "bookings@example.com" }, to: ["traveller@example.com"], cc: [], subject: "Your booking", text: "Flight TP 236 leaves at 18:10.", headers: "", inline: [], attachments: [], source: { kind: "import", label: "export.mbox" } };
+    const mail = new File([JSON.stringify(record)], "Your booking.email", { type: "application/vnd.engram.email+json" });
+    expect((await analyzeFile(mail)).meta.textEdition).toBe(2);
+    expect((await analyzeFile(new File([new Uint8Array([1, 2, 3])], "scan.pdf", { type: "application/pdf" }))).meta.textEdition).toBe(2);
+    expect((await analyzeFile(new File(["plain words"], "notes.txt", { type: "text/plain" }))).meta.textEdition).toBeUndefined();
+  });
+
   it("still runs every scanner when not deferred", async () => {
     const { recognizeImage } = await import("./intel/ocr");
     const { embedImage } = await import("./intel/semantic");

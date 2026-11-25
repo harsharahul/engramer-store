@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { strToU8, zipSync } from "fflate";
-import { extractText } from "./extract";
+import { extractText, TEXT_EDITION } from "./extract";
 
 // Real zip containers built in-test, so the reader is exercised end to end.
 const packed = (entries: Record<string, string>, name: string, mime: string): File => {
@@ -69,6 +69,21 @@ describe("office text extraction", () => {
   it("still ignores formats it does not know", async () => {
     const file = new File([new Uint8Array([1, 2, 3])], "a.zip", { type: "application/zip" });
     expect(await extractText(file)).toBeUndefined();
+  });
+});
+
+describe("a reader that cannot run", () => {
+  const unreadable = { name: "Your booking.email", type: "application/vnd.engram.email+json", size: 10, lastModified: 1, text: () => Promise.reject(new Error("the bytes could not be read")) };
+
+  it("gives no text at an upload, which never fails for it", async () => {
+    expect(await extractText(unreadable as never)).toBeUndefined();
+  });
+
+  it("says so when asked to: reading a stored file again must tell a failed run from a file with no text", async () => {
+    await expect(extractText(unreadable as never, { strict: true })).rejects.toThrow("could not be read");
+    // A file that holds no text is read, and has none.
+    expect(await extractText(new File([new Uint8Array([1, 2, 3])], "a.zip", { type: "application/zip" }), { strict: true })).toBeUndefined();
+    expect(TEXT_EDITION).toBe(2);
   });
 });
 

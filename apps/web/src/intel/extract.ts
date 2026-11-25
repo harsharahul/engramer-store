@@ -4,6 +4,14 @@ import { isEmailRecord, parseEmailRecord } from "../mail/kind";
 import { mailBodyText, xmlToText } from "./htmltext";
 import { pdfItemsOf, pdfLines } from "./pdftext";
 
+/**
+ * Which text step this is. The first gave a PDF page as one line and an
+ * HTML mail with the words of its cells run together; this one keeps
+ * lines, rows and cells. A stored PDF or mail whose stamp is older is read
+ * again once.
+ */
+export const TEXT_EDITION = 2;
+
 const TEXT_READ_LIMIT = 512 * 1024;
 const TEXT_STORE_LIMIT = 100_000;
 const PDF_PAGE_LIMIT = 40;
@@ -54,8 +62,12 @@ function isOffice(file: { name: string; type: string }): boolean {
  * .xlsx or .pptx is a zip of XML, so the words come out of document.xml,
  * the shared-strings table and the slides without any renderer involved.
  * Everything lazy-loaded so the viewer never pays for it upfront.
+ *
+ * At an upload a reader that cannot run gives no text and the file still
+ * stores. With `strict`, such a failure is thrown: reading a stored file
+ * again must tell a run that failed from a file that holds no text.
  */
-export async function extractText(file: UploadSource): Promise<string | undefined> {
+export async function extractText(file: UploadSource, opts: { strict?: boolean } = {}): Promise<string | undefined> {
   try {
     if (isEmailRecord(file.name, file.type)) {
       return await extractEmailText(file);
@@ -70,8 +82,11 @@ export async function extractText(file: UploadSource): Promise<string | undefine
     if (isOffice(file) && file.size <= OFFICE_READ_LIMIT) {
       return await extractOfficeText(file);
     }
-  } catch {
+  } catch (error) {
     // Extraction is best-effort; the file still uploads without search text.
+    if (opts.strict) {
+      throw error;
+    }
   }
   return undefined;
 }

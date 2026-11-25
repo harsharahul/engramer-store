@@ -222,6 +222,28 @@ const LINES: Line[] = [
     text: "Hello Sam, this is a reminder of your dental check-up on 22 July 2027 at 09:30. Please arrive ten minutes early.",
     rows: [],
   },
+  // Tables: each cell is read under the header of its column.
+  {
+    what: "a ferry timetable: the clocks of each row, on the row's day",
+    text: "Tidewater Ferries Example\n\nSailing | Date | Departs | Arrives\nOutbound | 2 July 2027 | 07:30 | 10:45\nReturn | 9 July 2027 | 16:00 | 19:15",
+    rows: [
+      row("event", "BOOKED", "2027-07-02", "07:30", "Departs", "", "asks"),
+      row("event", "BOOKED", "2027-07-02", "10:45", "Arrives", "", "asks"),
+      row("event", "BOOKED", "2027-07-09", "16:00", "Departs", "", "asks"),
+      row("event", "BOOKED", "2027-07-09", "19:15", "Arrives", "", "asks"),
+    ],
+  },
+  {
+    what: "a stay: the day under Check-in and the day under Check-out",
+    subject: "Booking confirmed",
+    text: "Booking confirmed\n\nCheck-in | Check-out | Nights\nFri 12 March 2027, from 15:00 | Mon 15 March 2027, by 11:00 | 3\n\nRoom (3 nights) | £390.00\nTotal | £429.00",
+    rows: [row("stay", "STAY", "2027-03-12", "15:00", "Check in", "", "asks"), row("stay", "STAY", "2027-03-15", "11:00", "Check out", "", "asks")],
+  },
+  {
+    what: "a bill: the day under its label, and the total with the currency its column names",
+    text: "Northline Energy Example\n\nStatement date | 2 November 2026\nPayment due | 23 November 2026\n\nDescription | Period | Amount (GBP)\nElectricity | 1 Oct to 31 Oct | 52.10\nGas | 1 Oct to 31 Oct | 34.25\nTotal | | 86.35",
+    rows: [row("due", "DUE", "2026-11-23", "", "Document due", "GBP 86.35", "asks")],
+  },
   // What states nothing shows nothing.
   { what: "the same words in a stored file, where no year is known", text: "Your order has shipped.\nArriving Thursday, November 12", rows: [] },
   {

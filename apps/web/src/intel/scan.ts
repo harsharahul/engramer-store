@@ -32,6 +32,7 @@ import { harvestFacts, labelledFacts, structuralDatedFacts } from "./labels";
 import { loadLexicon } from "./lexicon";
 import { mrzFacts } from "./mrz";
 import { structuredDataFacts } from "./reservation";
+import { withoutZones, zonesOf } from "./zones";
 import { icsFacts } from "./icsread";
 
 const PREF_KEY = "engram-facts";
@@ -111,24 +112,35 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
     }
   }
 
-  const text = input.text ?? "";
+  // In a message, what it quotes and its footer are not its own words, and
+  // no rule reads them. A message it forwards is read (a booking forwarded
+  // to oneself). The places of the text stay true: the parts are blanked.
+  const whole = input.text ?? "";
+  const zones = input.writtenAt !== undefined && whole ? zonesOf(whole) : undefined;
+  const text = zones ? withoutZones(whole, [...zones.quoted, ...(zones.footer ? [zones.footer] : [])]) : whole;
   if (text) {
     found.push(...mrzFacts(text));
     // What a form line's label means, from the shipped table. With no table
     // every line is read with its own words.
     const lexicon = await loadLexicon();
     const typed = labelledFacts(text, input.writtenAt, lexicon);
-    found.push(...typed);
     // A form line is read by its label: the table types it, or says it is
     // nobody's business, and a label it does not hold still surfaces with
     // the document's own words attached. Values already claimed by a typed
     // fact are skipped so nothing appears twice.
-    found.push(
+    const labelled = [
+      ...typed,
       ...structuralDatedFacts(text, new Set(typed.map((fact) => fact.value)), {
         ...(lexicon ? { lexicon } : {}),
         ...(input.writtenAt !== undefined ? { writtenAt: input.writtenAt } : {}),
       }),
-    );
+    ];
+    // A day of issue says how old a document is that runs out, or that only
+    // states it (a certificate). On a bill, a ticket or a timetable it is
+    // the day the paper was made, and nobody's business.
+    const runsOut = labelled.some((fact) => fact.kind === "expiry");
+    const happens = labelled.some((fact) => fact.kind === "due" || fact.kind === "event");
+    found.push(...labelled.filter((fact) => fact.kind !== "issued" || runsOut || !happens));
     found.push(...harvestFacts(text));
   }
   if (found.length === 0) {

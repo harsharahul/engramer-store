@@ -375,3 +375,21 @@ describe("nothing to judge", () => {
     expect(spotCandidates("Table for 4 at 19:30, about 45.00 each, since 2019.")).toEqual([]);
   });
 });
+
+describe("a date or an amount in a row of a table", () => {
+  const text = ["Recent payments", "", "Date | Description | Amount", "3 March 2027 | Card payment 7 | £8.50", "4 March 2027 | Refund | £2.00", "", "Next statement on 1 April 2027."].join("\n");
+
+  it("brings the names of its row's columns: the header says what each cell is", () => {
+    const found = spotCandidates(text);
+    expect(found.filter((c) => c.what === "date").map((c) => c.sentence)).toEqual([
+      "Date: 3 March 2027 | Description: Card payment 7 | Amount: £8.50",
+      "Date: 4 March 2027 | Description: Refund | Amount: £2.00",
+      "Next statement on 1 April 2027.",
+    ]);
+    expect(found.find((c) => c.what === "amount" && c.value === "8.50")?.sentence).toBe("Date: 3 March 2027 | Description: Card payment 7 | Amount: £8.50");
+  });
+
+  it("keeps a row with no header as it is written", () => {
+    expect(spotCandidates("Check-in | Fri 12 March 2027\nCheck-out | Mon 15 March 2027").map((c) => c.sentence)).toEqual(["Check-in | Fri 12 March 2027", "Check-out | Mon 15 March 2027"]);
+  });
+});

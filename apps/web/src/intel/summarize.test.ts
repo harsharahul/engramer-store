@@ -292,6 +292,29 @@ describe("summarize with facts", () => {
     });
   });
 
+  it("in a message, a date in the footer or in what it quotes is not put to the model", async () => {
+    const mail = [
+      "Thanks for booking with us.",
+      "",
+      "Your table is held on 12 March 2027 at 19:30 for four people, in the garden room.",
+      "",
+      "On 1 March 2027 Sam wrote:",
+      "> Could we come on 5 March 2027 instead?",
+    ].join("\n");
+    const footed = `${mail.split("\n").slice(0, 3).join("\n")}\n\nYou received this email because you booked online. Book again before 30 April 2027 and save 15%. Unsubscribe`;
+    for (const text of [mail, footed]) {
+      const { asked, run } = model({ d1: "event", d1w: "table" });
+      const message = { subject: "Your table", from: "Garden Room Example", writtenAt: Date.parse("2027-03-02T12:00:00Z") };
+      const answer = await summarize({ text, name: "Your table.email", categories: ["Documents"], contextSize: 4096, withFacts: true, message }, run);
+      expect(Object.keys(asked[1]!.schema!.properties).filter((key) => /^d\d+$/.test(key))).toEqual(["d1"]);
+      expect(answer?.facts.map((f) => [f.kind, f.value, f.time])).toEqual([["event", "2027-03-12", "19:30"]]);
+    }
+    // The same words in a stored file are all the file's own.
+    const { asked, run } = model({ d1: "event", d1w: "table" });
+    await summarize({ text: mail, name: "table.pdf", categories: ["Documents"], contextSize: 4096, withFacts: true }, run);
+    expect(Object.keys(asked[1]!.schema!.properties).filter((key) => /^d\d+$/.test(key))).toEqual(["d1", "d2", "d3"]);
+  });
+
   it("with date reading off, nothing is judged", async () => {
     const { asked, run } = model({ d1: "expiry" });
     const answer = await summarize({ text: POLICY, name: "policy.pdf", categories: ["Documents"], contextSize: 4096 }, run);
