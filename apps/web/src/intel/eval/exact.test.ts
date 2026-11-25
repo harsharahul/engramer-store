@@ -22,11 +22,12 @@ describe("exact readers on the eval set", () => {
     expect(new Set(EVAL_CASES.map((c) => c.id)).size).toBe(EVAL_CASES.length);
   });
 
-  it("the first set holds the distractor, the form and the time-language cases, each id once, none shared with the held-out set", () => {
-    expect(EVAL_CASES).toHaveLength(162);
+  it("the first set holds the distractor, the form, the time-language and the amount cases, each id once, none shared with the held-out set", () => {
+    expect(EVAL_CASES).toHaveLength(192);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("x-"))).toHaveLength(30);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("f-"))).toHaveLength(40);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("t-"))).toHaveLength(30);
+    expect(EVAL_CASES.filter((c) => c.id.startsWith("a-"))).toHaveLength(30);
     const heldout = new Set(HELDOUT_CASES.map((c) => c.id));
     expect(EVAL_CASES.filter((c) => heldout.has(c.id))).toEqual([]);
   });
@@ -100,5 +101,14 @@ describe("label rules on the eval set", () => {
     lines.push(`form lines that only name a date, kept with their own words: ${named}`);
     console.info(lines.join("\n"));
     expect(precise).toEqual({ dates: true, amounts: true });
+  });
+
+  it("the whole amount is read by its label on at least fifty documents, and right at least 95 times in 100", async () => {
+    // What the amount label table adds: without it a rule names an amount
+    // only on a line that says it is due.
+    const all = await scoreReader(EVAL_CASES, labelReadings, "amounts");
+    const offered = all.perCase.reduce((sum, c) => sum + c.found + c.extra, 0);
+    expect(offered).toBeGreaterThanOrEqual(50);
+    expect(all.precision).toBeGreaterThanOrEqual(0.95);
   });
 });

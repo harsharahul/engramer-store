@@ -19,7 +19,7 @@ import { CATEGORIES } from "../../../apps/web/src/intel/categorize";
 import { EVAL_CASES } from "../../../apps/web/src/intel/eval/cases";
 import { HELDOUT_CASES } from "../../../apps/web/src/intel/eval/heldout";
 import { hashRequest, keptAnswers, replayRunner, StaleAnswer, type SavedAnswer } from "../../../apps/web/src/intel/eval/replay";
-import { errorsByClass, factCases, kindCases, measure, scoreKinds, type EvalCase, type SetFigures } from "../../../apps/web/src/intel/eval/score";
+import { errorsByClass, factCases, kindCases, measure, scoreKinds, scoreReader, type EvalCase, type SetFigures } from "../../../apps/web/src/intel/eval/score";
 import { mergeFacts, type Fact } from "../../../apps/web/src/intel/facts";
 import { EMAIL_MIME } from "../../../apps/web/src/mail/kind";
 import { MODEL_READER, READER_VERSION } from "../../../apps/web/src/intel/reading";
@@ -299,7 +299,12 @@ for (const set of sets) {
     tasks: { ...stored(model), mailKind: kinds },
     together: { ...stored(whole), documents, readWhole: documents - whole.wrong.length },
   };
+  // What the rules read before any model is asked: every amount a label or
+  // booking data names, the weakest harvest left out as above.
+  const rules = await scoreReader(set.cases, async (evalCase) => (await scanned(evalCase)).filter((fact) => fact.source !== "pattern"), "amounts");
+  const ruled = rules.perCase.reduce((sum, c) => sum + c.found + c.extra, 0);
   process.stdout.write(`\n${report(`${set.title}, the model alone`, model, documents)}\n`);
+  process.stdout.write(`${set.title}, the rules alone: amounts found ${percent(rules.recall)}, right ${percent(rules.precision)} of ${ruled} offered\n`);
   process.stdout.write(`${report(`${set.title}, rules and model together`, whole, documents)}\n`);
   process.stdout.write(`${questions(set.title, whole)}\n`);
   // Where the errors are, so the work goes there. The held-out set gives the counts only.

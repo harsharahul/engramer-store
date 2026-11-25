@@ -17,8 +17,23 @@ All notable changes to Engram Store are documented here, following
   "next Friday" and "Saturday the 5th" are read against the day a message
   was sent, and always wait for your yes. What a reply quotes or a message
   forwards is not read against the new message.
+- **A bill's or a receipt's whole amount, by its label.** "Total to pay",
+  "Balance due", "Total paid", "Order total" and some 160 more labels name
+  the amount a document is about; what is still due stands before a total
+  beside it. The amount keeps the document's own words and waits for your
+  yes.
+- **Amounts with the currency after the number.** "86.40 GBP", "1.234,50
+  EUR" and "29,99 €" are read, and a code behind a dollar amount says
+  which dollar ("$35.00 CAD").
+- **A label on the line above its amount** ("Amount due", then "$57.45"),
+  as a table read out cell by cell prints it, names that amount.
 
 ### Fixed
+- **A subtotal, a tax or a fee is not offered as the total.** About 400
+  labels ("Subtotal", "VAT", "Shipping", "Discount", "Deposit paid",
+  "Previous balance") mark a part of a bill, as do a minus sign and the
+  price of one of several ("2 x $55.00"). A document that prints only
+  parts is not asked about an amount.
 - **"Dinner at 7 o'clock" is not read as 07:00.** An hour o'clock with no
   word for the half of the day gives no time rather than a wrong one, and a
   length of time ("Running time: 2h30") is not a time of day.

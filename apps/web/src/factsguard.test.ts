@@ -54,3 +54,25 @@ describe("one predicate decides which facts count", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/**
+ * What an amount is (the amount due, an order's total, a total) is stated in
+ * one field and read by one function, `sumOf` in intel/facts.ts. Code that
+ * compares an amount's label with a name of its own is a second definition
+ * that drifts from the first.
+ */
+describe("one function says what an amount is", () => {
+  it("compares a label with a sum's name nowhere outside intel/facts.ts", () => {
+    const root = join(__dirname);
+    const offenders = sources(root)
+      .filter((file) => relative(root, file) !== join("intel", "facts.ts"))
+      .flatMap((file) =>
+        readFileSync(file, "utf8")
+          .split("\n")
+          .map((line, i) => ({ line, i }))
+          .filter(({ line }) => /["'`](?:amount due|order total)["'`]/.test(line) || /label\?*\.toLowerCase\(\)\s*===/.test(line) || /\bTOTAL_LABEL\b/.test(line))
+          .map(({ i }) => `${relative(root, file)}:${i + 1}`),
+      );
+    expect(offenders).toEqual([]);
+  });
+});

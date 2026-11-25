@@ -256,6 +256,21 @@ describe("the amounts a document holds", () => {
     expect(spotCandidates("The plan renews for USD 99.00 per year.").map((c) => c.value)).toEqual(["99.00"]);
   });
 
+  it("an amount with a minus sign and the price of one of several are never a total, so they are not candidates", () => {
+    const text = ["Tickets: 2 x $55.00", "Railcard discount: -$5.50", "Insurance adjustment: -CAD 190.00", "Total paid: $104.50"].join("\n");
+    expect(spotCandidates(text).filter((c) => c.what === "amount").map((c) => c.value)).toEqual(["104.50"]);
+    // A dash between a label and its amount is not a minus sign.
+    expect(spotCandidates("Shipping - $4.90").map((c) => c.value)).toEqual(["4.90"]);
+  });
+
+  it("an amount with its currency behind it is a candidate", () => {
+    expect(spotCandidates("Amount due: 86.40 GBP\nTotal to pay 1.234,50 EUR\nTotal charged: 29,99 €").map((c) => [c.value, c.unit, c.printed])).toEqual([
+      ["86.40", "GBP", "GBP 86.40"],
+      ["1234.50", "EUR", "EUR 1234.50"],
+      ["29.99", "EUR", "EUR 29.99"],
+    ]);
+  });
+
   it("a total printed again on the card line keeps its place as the total", () => {
     const receipt = [
       "Coffee $4.50",
@@ -280,6 +295,49 @@ describe("the amounts a document holds", () => {
   it("a deposit that was paid is still a deposit, and the balance after it is the total", () => {
     const booking = "Deposit paid: $100.00\nBalance due on arrival: $353.60";
     expect(spotCandidates(booking).map((c) => c.value)).toEqual(["353.60"]);
+  });
+
+  it("an amount whose label the table calls a part is no candidate; one it does not know is offered as before", () => {
+    const table = lexiconFrom(
+      [],
+      [
+        ["subtotal", "part"],
+        ["vat", "part"],
+        ["reschedule fee", "part"],
+        ["items", "part"],
+        ["shipping", "part"],
+      ],
+    );
+    const known = { lexicon: table };
+    expect(amounts(spotCandidates("Reschedule fee: $25.00 within 24 hours", undefined, known))).toEqual([]);
+    expect(amounts(spotCandidates("Items: $62.40, shipping: $6.00", undefined, known))).toEqual([]);
+    const bill = "Subtotal £118.40\nVAT £5.92\nPlease send: £124.32";
+    expect(amounts(spotCandidates(bill, undefined, known))).toEqual([["a1", "124.32", "GBP"]]);
+    // With no table every amount is offered, as before.
+    expect(amounts(spotCandidates(bill)).map(([, value]) => value)).toEqual(["118.40", "5.92", "124.32"]);
+  });
+
+  it("when the totals a label names differ, only they are offered", () => {
+    const table = lexiconFrom(
+      [],
+      [
+        ["total fare", "total"],
+        ["total paid", "total"],
+        ["amount due", "due"],
+        ["balance due", "due"],
+      ],
+    );
+    const known = { lexicon: table };
+    const ticket = "Coffee on board: €4,00\nTotal fare: €213,40\nTotal paid: €225,40";
+    expect(amounts(spotCandidates(ticket, undefined, known))).toEqual([
+      ["a1", "213.40", "EUR"],
+      ["a2", "225.40", "EUR"],
+    ]);
+    // Two amounts due that differ stand before any total.
+    const bill = "Total paid: $10.00\nTotal fare: $12.00\nAmount due: $50.00\nBalance due: $75.00";
+    expect(amounts(spotCandidates(bill, undefined, known)).map(([, value]) => value)).toEqual(["50.00", "75.00"]);
+    // One named total beside an amount nobody named: both are offered, the named one first.
+    expect(amounts(spotCandidates("Coffee on board: €4,00\nTotal fare: €213,40", undefined, known)).map(([, value]) => value)).toEqual(["213.40", "4.00"]);
   });
 
   it("an amount stands in its own sentence", () => {

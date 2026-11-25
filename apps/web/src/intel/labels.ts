@@ -10,9 +10,10 @@
  * wrong expiry is the failure this whole design exists to avoid.
  */
 
+import { CURRENCY_CODES, SYMBOL_CURRENCY, SYMBOL_FAMILY } from "./currency";
 import { type DocumentKind, type Fact, factId, maskTail } from "./facts";
 import { findDates, findTimes, parseDate, parseTime, type DateContext, type ParsedDate } from "./dates";
-import { meaningOf, type LabelMeaning, type Lexicon } from "./lexicon";
+import { amountMeaningOf, meaningOf, type AmountMeaning, type LabelMeaning, type Lexicon } from "./lexicon";
 import { serviceOf, type Role, type Subject } from "./subject";
 
 /** How far past a label to look for its date. */
@@ -516,7 +517,7 @@ export function labelledFacts(text: string, writtenAt?: number, lexicon?: Lexico
       byId.delete(id);
     }
   }
-  const asked = amountDue(text, document);
+  const asked = statedTotal(text, document, lexicon);
   if (asked) {
     byId.set(asked.id, asked);
   }
@@ -707,100 +708,255 @@ export function settledNowhere(text: string, lexicon: Lexicon, context?: DateCon
   return spans;
 }
 
-const SYMBOL_CURRENCY: Record<string, string> = {
-  $: "USD",
-  "£": "GBP",
-  "€": "EUR",
-  "₹": "INR",
-  "¥": "JPY",
-};
-
-const CURRENCY_CODES = new Set([
-  "USD", "EUR", "GBP", "INR", "JPY", "CAD", "AUD", "CHF",
-  "CNY", "SEK", "NZD", "SGD", "AED", "ZAR", "NOK", "DKK",
-]);
-
-// Two decimals and no digit after them: the "1.25" inside "€1.250,00" is not an amount.
+// The two forms the harvest reads. Two decimals and no digit after them.
 const SYMBOL_AMOUNT = /([$£€₹¥])\s?([\d,]+\.\d{2})(?!\d)/g;
 const CODE_AMOUNT = /\b([A-Z]{3})\s?([\d,]+\.\d{2})\b/g;
 
-// The same amounts as much of Europe writes them: a decimal comma, and full
-// stops between the thousands ("€213,40", "EUR 1.250,00"). Two decimals are
-// required, so "€1,250" (thousands, or a decimal comma cut short) is not read.
-const SYMBOL_AMOUNT_COMMA = /([$£€₹¥])\s?(\d{1,3}(?:\.\d{3})*,\d{2})(?![\d,.]*\d)/g;
-const CODE_AMOUNT_COMMA = /\b([A-Z]{3})\s?(\d{1,3}(?:\.\d{3})*,\d{2})(?![\d,.]*\d)/g;
+/**
+ * A number shaped like money: two decimals behind a full stop ("1,250.50"),
+ * or behind a decimal comma with full stops between the thousands
+ * ("1.250,00"), as much of Europe writes it. Two decimals are required, so
+ * "1,250" (thousands, or a decimal comma cut short) is no amount, and
+ * neither is the "1.25" inside "1.250,00".
+ */
+const MONEY_NUMBER = /(?<![\d.,])(?:(\d{1,3}(?:\.\d{3})*,\d{2})(?![\d,.]*\d)|(\d[\d,]*\.\d{2})(?!\d))/g;
+/** A hyphen, or the minus sign some statements print. */
+const MINUS = `[-${String.fromCharCode(0x2212)}]`;
+/** A minus sign on an amount: nothing but a space or a mark before it ("10.00-20.00" is a range). */
+const SIGN = `(?:(?<![\\dA-Za-z])(${MINUS}))?`;
+/** A currency straight before a number, with its minus sign before or behind it ("-£5.50", "CAD -20.00"). */
+const SYMBOL_BEFORE = new RegExp(`${SIGN}([$£€₹¥])\\s?(${MINUS})?$`);
+const CODE_BEFORE = new RegExp(`${SIGN}(?<![A-Za-z0-9_])([A-Z]{3})\\s?(${MINUS})?$`);
+/** A minus sign straight before a number whose currency stands behind it ("-20,00 €"). */
+const SIGN_BEFORE = new RegExp(`(?<![\\dA-Za-z])${MINUS}$`);
+/**
+ * A currency straight behind a number, on the same line. A symbol glued to
+ * the number after it is that number's ("2.50 £40.00"), not this one's.
+ */
+const UNIT_AFTER = new RegExp(`^[ \\t]?(?:([$£€₹¥])(?!${MINUS}?\\d)|([A-Z]{3})(?![A-Za-z0-9_]))`);
+/** How far before a number its currency and sign can reach. */
+const UNIT_REACH = 12;
 const plain = (written: string) => written.replace(/,/g, "");
 const fromComma = (written: string) => written.replace(/\./g, "").replace(",", ".");
 
-/** Every place a piece of text states an amount above zero with its currency, in the order they stand. */
-export function moneyEvery(text: string): { value: string; unit: string; at: number }[] {
-  const found: { value: string; unit: string; at: number }[] = [];
-  const forms: [RegExp, (written: string) => string, boolean][] = [
-    [SYMBOL_AMOUNT, plain, false],
-    [SYMBOL_AMOUNT_COMMA, fromComma, false],
-    [CODE_AMOUNT, plain, true],
-    [CODE_AMOUNT_COMMA, fromComma, true],
-  ];
-  for (const [form, read, coded] of forms) {
-    for (const match of text.matchAll(form)) {
-      if (!coded) {
-        found.push({ value: read(match[2]!), unit: SYMBOL_CURRENCY[match[1]!] ?? match[1]!, at: match.index });
-      } else if (CURRENCY_CODES.has(match[1]!)) {
-        found.push({ value: read(match[2]!), unit: match[1]!, at: match.index });
-      }
-    }
-  }
-  return found.filter((amount) => Number(amount.value) > 0).sort((a, b) => a.at - b.at);
+/** An amount where a text states it: from its currency (or its sign) to its last character. */
+export interface Money {
+  value: string;
+  unit: string;
+  at: number;
+  end: number;
+  /** A minus sign stands on it: an adjustment, never a sum. */
+  minus?: true;
 }
 
-/** Every amount a piece of text states, once per value, at the last place it stands. */
-export function moneyIn(text: string): { value: string; unit: string; at: number }[] {
-  const last = new Map<string, { value: string; unit: string; at: number }>();
-  for (const amount of moneyEvery(text)) {
-    last.set(amount.value, amount);
+/**
+ * Every place a piece of text states an amount above zero with its
+ * currency, in the order they stand. The currency is a symbol or a code,
+ * straight before the number or straight behind it. Each number has one
+ * currency and each currency belongs to one number: a code between two
+ * numbers is the first one's when that number has no other.
+ */
+export function moneyEvery(text: string): Money[] {
+  const found: Money[] = [];
+  // Where the last currency taken from behind a number ends.
+  let taken = 0;
+  for (const match of text.matchAll(MONEY_NUMBER)) {
+    const start = match.index;
+    const stop = start + match[0].length;
+    const value = match[1] !== undefined ? fromComma(match[1]) : plain(match[2]!);
+    const before = text.slice(Math.max(0, start - UNIT_REACH), start);
+    const offset = start - before.length;
+    const symbol = SYMBOL_BEFORE.exec(before);
+    const lead = symbol ?? CODE_BEFORE.exec(before);
+    const leadUnit = symbol ? SYMBOL_CURRENCY[symbol[2]!] : lead && CURRENCY_CODES.has(lead[2]!) ? lead[2]! : undefined;
+    const after = UNIT_AFTER.exec(text.slice(stop, stop + 5));
+    const behind = after?.[1] ? SYMBOL_CURRENCY[after[1]] : after?.[2] && CURRENCY_CODES.has(after[2]) ? after[2] : undefined;
+    let amount: Money | undefined;
+    if (lead && leadUnit && offset + lead.index + (lead[1] ? 1 : 0) >= taken) {
+      amount = { value, unit: leadUnit, at: offset + lead.index, end: stop, ...(lead[1] || lead[3] ? { minus: true as const } : {}) };
+      // "$35.00 CAD": the code says which dollar, and is not the next number's.
+      if (symbol && after?.[2] && SYMBOL_FAMILY[symbol[2]!]?.includes(after[2])) {
+        amount = { ...amount, unit: after[2], end: stop + after[0].length };
+        taken = amount.end;
+      }
+    } else if (after && behind && !/[A-Za-z]/.test(text[start - 1] ?? "")) {
+      const signed = SIGN_BEFORE.test(before);
+      amount = { value, unit: behind, at: signed ? start - 1 : start, end: stop + after[0].length, ...(signed ? { minus: true as const } : {}) };
+      taken = amount.end;
+    }
+    if (amount && Number(value) > 0) {
+      found.push(amount);
+    }
   }
-  return [...last.values()].sort((a, b) => a.at - b.at);
+  return found;
+}
+
+/** Words that mark the amount a document is about, before its line items. */
+export const SUM_LINE = /\b(?:total|due|balance|paid|charged|refund(?:ed)?|fare|price|premium)\b/i;
+/** What one of something costs, as the words after or before an amount say it ("per night", "a month", "/mo"). */
+const RATE_UNIT = "(?:night|month|week|day|hour|session|visit|class|lesson|seat|piece|person|guest|item|unit|mo)";
+/** The price of one of something, said straight after the amount ("$140.00 per night"). A year's price is the year's whole price. */
+const RATE_AFTER = new RegExp(`^\\s*(?:(?:per|a|an|each|every)\\s+|/\\s?)${RATE_UNIT}\\b`, "i");
+/** The same, said by the label before it ("Room rate per night USD 150.00"). */
+const RATE_BEFORE = new RegExp(`\\b(?:per|each|every)\\s+${RATE_UNIT}$`, "i");
+/** Money set aside against a later bill, named straight before the amount ("a deposit of $100.00"). */
+const DEPOSIT_BEFORE = /\bdeposit(?:\s+(?:of|paid))?\s*:?\s*$/i;
+/** A count straight before the amount: the price of one of several ("2 x $55.00"). */
+const COUNT_BEFORE = /\b\d+\s?[x×]\s*$/i;
+/** What closes a label before its amount: a colon, leader dots, a dash, a bar. */
+const LABEL_CLOSE = /[\s:.=|;,-]+$/;
+/** What parts one label from the one before it on a line. */
+const LABEL_BREAK = /[,;|\t]|\s{2,}/g;
+
+/** An amount with the words that name it, and what the label table says those words mean. */
+export interface AmountLine extends Money {
+  /** The document's own words for the amount: before it on its line, or on the line above an amount that stands alone. */
+  label?: string;
+  /** What the amount is, where its own marks or the table say so; a part is never the whole. */
+  meaning?: AmountMeaning;
+}
+
+/** Words as a label: without the break that opens them, short, and with a letter. */
+function asLabel(words: string): string | undefined {
+  const label = words.replace(/^[\s,;|]+/, "").trim();
+  return label.length <= MAX_LABEL_CHARS && /[A-Za-z]/.test(label) ? label : undefined;
+}
+
+/**
+ * The words that close a stretch of text, as a label: without what closes
+ * them, and from the last break on. A comma is always a break: the words
+ * before it are another thing ("3 items, total"), and joined to the label
+ * they would name something else.
+ */
+function closingLabel(words: string): string | undefined {
+  const closed = words.replace(LABEL_CLOSE, "");
+  let from = 0;
+  for (const cut of closed.matchAll(LABEL_BREAK)) {
+    from = cut.index + cut[0].length;
+  }
+  return asLabel(closed.slice(from));
+}
+
+/**
+ * Every amount a text states, each with its label and what the label means.
+ *
+ * The label is the words before the amount on its line, back to the amount
+ * or the break before them; an amount alone on its line takes the line
+ * above, as a table read out cell by cell prints it. A minus sign, a rate
+ * ("per night"), a deposit and the price of one of several ("2 x") make a
+ * part, whatever the words say. Otherwise the table decides, and words it
+ * does not hold decide nothing.
+ */
+export function amountLines(text: string, lexicon?: Lexicon): AmountLine[] {
+  const found = moneyEvery(text);
+  return found.map((amount, index) => {
+    const lineStart = text.lastIndexOf("\n", amount.at - 1) + 1;
+    const stop = text.indexOf("\n", amount.end);
+    const lineEnd = stop === -1 ? text.length : stop;
+    const lineBefore = text.slice(lineStart, amount.at);
+    const earlier = found[index - 1];
+    const own = closingLabel(text.slice(Math.max(lineStart, earlier ? earlier.end : 0), amount.at));
+    let label = own;
+    if (!label && lineStart > 0 && !lineBefore.trim() && !text.slice(amount.end, lineEnd).trim()) {
+      const aboveStart = text.lastIndexOf("\n", lineStart - 2) + 1;
+      if (!found.some((other) => other.at >= aboveStart && other.at < lineStart)) {
+        label = closingLabel(text.slice(aboveStart, lineStart - 1));
+      }
+    }
+    const deposit = DEPOSIT_BEFORE.exec(lineBefore);
+    const part =
+      amount.minus ||
+      RATE_AFTER.test(text.slice(amount.end, amount.end + 16)) ||
+      (own !== undefined && RATE_BEFORE.test(own)) ||
+      COUNT_BEFORE.test(lineBefore) ||
+      // "Total due after your deposit: $353.60" names the total, not the
+      // deposit: only what stands before the word says so.
+      (deposit !== null && !SUM_LINE.test(lineBefore.slice(0, deposit.index)));
+    const meaning = part ? "part" : label && lexicon ? amountMeaningOf(lexicon, label) : undefined;
+    return { ...amount, ...(label ? { label } : {}), ...(meaning ? { meaning } : {}) };
+  });
 }
 
 const AMOUNT_DUE_LINE = /\b(?:(?:amount|total|balance)\s+due|amount\s+payable|(?:is|are)\s+due)\b/i;
+/** Words of a payslip or of a bank account's statement, whose totals are no bill's. */
+const NOT_A_BILL = /\b(?:pay\s?slip|pay\s?stub|net pay|gross pay|take[- ]home pay|opening balance|closing balance|paid in|paid out|money in|money out|withdrawals?)\b/i;
 /** A statement's minimum is due as well as its balance: two answers to one question. */
-const MINIMUM = /\bmin(?:imum|\.)?\s/i;
+const MINIMUM = /\bmin(?:imum\b|\.|\b)/i;
 
 /**
- * The one amount a bill asks for: alone with its currency on a line that
- * says it is due. A line with two amounts, two lines that disagree, or a
- * minimum anywhere beside a balance name no single amount, and then none is
- * stated. Nothing due (0.00) is not an amount due.
+ * The whole amount a document states: what is still due, or else what it
+ * came to.
+ *
+ * An amount is due where its line says so ("Amount due $84.20", "Rent of
+ * USD 2,400.00 is due") or where the label table says its label means that
+ * ("Total to pay", "Patient balance"). With nothing due, the amount whose
+ * label means the total is it ("Total paid", "Order total"). A part is
+ * never either. Two different amounts due, or two different totals, are not
+ * guessed between; a line that says an amount is due and holds two that
+ * could be it, or a minimum anywhere beside a balance, names no single
+ * amount, and then none is stated. Nothing due (0.00) is not an amount due.
  */
-function amountDue(text: string, document: DocumentKind): Fact | undefined {
-  const lines = text.split(/\r?\n/);
-  if (lines.some((line) => MINIMUM.test(line) && moneyIn(line).length > 0)) {
-    return undefined;
-  }
-  const stated = new Map<string, string>();
-  for (const line of lines) {
-    const says = AMOUNT_DUE_LINE.exec(line);
-    const onLine = says ? moneyIn(line) : [];
-    // A line that only says something is due names no amount, and is not a
-    // second answer.
-    if (!says || onLine.length === 0) {
-      continue;
+function statedTotal(text: string, document: DocumentKind, lexicon?: Lexicon): Fact | undefined {
+  const amounts = amountLines(text, lexicon);
+  // Each value once, under the first name the document gives it.
+  const due = new Map<string, { unit: string; label: string }>();
+  const total = new Map<string, { unit: string; label: string }>();
+  const keep = (into: Map<string, { unit: string; label: string }>, amount: AmountLine, label: string) => {
+    if (!into.has(amount.value)) {
+      into.set(amount.value, { unit: amount.unit, label });
     }
-    if (onLine.length > 1) {
+  };
+  let lineStart = 0;
+  for (const line of text.split("\n")) {
+    const lineEnd = lineStart + line.length;
+    const here = amounts.filter((amount) => amount.at >= lineStart && amount.at < lineEnd);
+    // A minimum on the amount's own line, or in the label a line above it.
+    if (here.length > 0 && (MINIMUM.test(line) || here.some((amount) => MINIMUM.test(amount.label ?? "")))) {
       return undefined;
     }
-    // "Rent of USD 2,400.00 is due": the amount stands before the words. A
-    // prize named after them ("Your feedback is due! Win $50.00") is not it.
-    if (/^(?:is|are)\s/i.test(says[0]) && onLine[0]!.at > says.index) {
-      continue;
+    // What the line could be saying is due: each value once, and never a part.
+    const open = [...new Map(here.filter((amount) => amount.meaning !== "part").map((amount) => [amount.value, amount])).values()];
+    const says = AMOUNT_DUE_LINE.exec(line);
+    // A line that only says something is due names no amount, and is not a
+    // second answer.
+    if (says && open.length > 0) {
+      if (open.length > 1) {
+        return undefined;
+      }
+      const [one] = open as [AmountLine];
+      // "Rent of USD 2,400.00 is due": the amount stands before the words. A
+      // prize named after them ("Your feedback is due! Win $50.00") is not it.
+      if (!(/^(?:is|are)\s/i.test(says[0]) && one.at - lineStart > says.index)) {
+        keep(due, one, one.meaning === "due" && one.label ? one.label : "Amount due");
+      }
     }
-    stated.set(onLine[0]!.value, onLine[0]!.unit);
+    for (const amount of here) {
+      if (amount.label && amount.meaning === "due") {
+        keep(due, amount, amount.label);
+      } else if (amount.label && amount.meaning === "total") {
+        keep(total, amount, amount.label);
+      }
+    }
+    lineStart = lineEnd + 1;
   }
+  // A payslip's total, or a bank account's, is what was earned or moved:
+  // only an amount that is due is such a document's to state.
+  const stated = due.size > 0 ? due : NOT_A_BILL.test(text) ? new Map<string, { unit: string; label: string }>() : total;
   if (stated.size !== 1) {
     return undefined;
   }
-  const [[value, unit]] = [...stated] as [[string, string]];
-  return { id: factId("amount", value), kind: "amount", document, value, unit, label: "Amount due", source: "label", confidence: 0.7 };
+  const [[value, named]] = [...stated] as [[string, { unit: string; label: string }]];
+  return {
+    id: factId("amount", value),
+    kind: "amount",
+    document,
+    value,
+    unit: named.unit,
+    label: named.label,
+    sum: due.size > 0 ? "due" : "total",
+    source: "label",
+    confidence: 0.7,
+  };
 }
 const TOKEN = /\b[A-Za-z0-9][A-Za-z0-9-]{5,}\b/g;
 // A date and a clock joined by T, as invites and mail headers write them

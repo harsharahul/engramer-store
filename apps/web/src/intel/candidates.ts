@@ -9,7 +9,8 @@
  * must not become a hundred questions.
  */
 import { findDates, findRelativeDays, findTimes, type DateContext, type FoundDate } from "./dates";
-import { clockLineTime, moneyEvery } from "./labels";
+import { amountLines, clockLineTime, SUM_LINE } from "./labels";
+import type { Lexicon } from "./lexicon";
 
 export interface Candidate {
   /** "d1".."d10" for dates, "a1".."a6" for amounts: the name a reader answers by. */
@@ -38,8 +39,6 @@ const MAX_AMOUNTS = 6;
 /** A date in a table of times is the day of each; two are enough to say what the day is. */
 const CLOCKS_PER_DATE = 2;
 const SENTENCE_MAX = 200;
-/** Words that mark the amount a document is about, before its line items. */
-const SUM_LINE = /\b(?:total|due|balance|paid|charged|refund(?:ed)?|fare|price|premium)\b/i;
 /** A sentence ends at a line's end, or at a full stop before a new start. */
 const SENTENCE_END = /\n+|[.!?]\s+(?=[A-Z0-9"'(])/g;
 
@@ -79,49 +78,50 @@ function shortened(text: string, sentence: Span, at: number, end: number): strin
   return text.slice(from, from + SENTENCE_MAX).trim();
 }
 
-/** The price of one of something, said straight after the amount ("$140.00 per night"). A year's price is the year's whole price. */
-const RATE_AFTER = /^\s*(?:(?:per|a|an|each|every)\s+|\/\s?)(?:night|month|week|day|hour|session|visit|class|lesson|seat|piece|person|guest|item|unit|mo)\b/i;
-/** Money set aside against a later bill, named straight before the amount ("a deposit of $100.00"). */
-const DEPOSIT_BEFORE = /\bdeposit(?:\s+(?:of|paid))?\s*:?\s*$/i;
-/** An amount as it stands in the text, from its currency to its last digit. */
-const AMOUNT_HERE = /^[^\d\n]{0,4}[\d.,]*\d/;
-
-/**
- * Whether an amount is a rate or a deposit: a part of what a document
- * costs, never the whole, so never the total it is about.
- */
-function partOnly(text: string, at: number): boolean {
-  const end = at + (AMOUNT_HERE.exec(text.slice(at, at + 24))?.[0].length ?? 0);
-  const before = text.slice(text.lastIndexOf("\n", at - 1) + 1, at);
-  const deposit = DEPOSIT_BEFORE.exec(before);
-  // "Total due after your deposit: $353.60" names the total, not the deposit:
-  // only what stands before the word says so ("Deposit paid" is a deposit).
-  return RATE_AFTER.test(text.slice(end, end + 16)) || (deposit !== null && !SUM_LINE.test(before.slice(0, deposit.index)));
-}
-
 const lineAt = (text: string, at: number) => {
   const end = text.indexOf("\n", at);
   return text.slice(text.lastIndexOf("\n", at - 1) + 1, end === -1 ? text.length : end);
 };
 
+/** An amount still open to be a document's total. */
+interface OpenAmount {
+  value: string;
+  unit: string;
+  at: number;
+  /** It stands where a line calls it a sum, or its label names one. */
+  sum: boolean;
+  /** What the label table says its label names. */
+  named?: "due" | "total";
+}
+
 /**
  * The amounts open to be a document's total, once per value. A value printed
- * more than once (the total, and again on the card line) stands where a line
- * calls it a sum, if any does; a rate or a deposit is no place for it.
+ * more than once (the total, and again on the card line) stands where its
+ * label names a sum, or else where a line calls it one. A part of what a
+ * document costs is never the whole, so it is no candidate and no place for
+ * a value: a rate, a deposit, an amount with a minus sign, the price of one
+ * of several, and any amount whose label the table calls a part ("Subtotal",
+ * "Tax", a fee). Where the table names more than one sum and they differ,
+ * the total is one of those and nothing else is offered: the amounts due
+ * when more than one is due, else every named sum.
  */
-function amountsOf(text: string): { value: string; unit: string; at: number; sum: boolean }[] {
-  const placed = new Map<string, { value: string; unit: string; at: number; sum: boolean }>();
-  for (const amount of moneyEvery(text)) {
-    if (partOnly(text, amount.at)) {
+function amountsOf(text: string, lexicon?: Lexicon): OpenAmount[] {
+  const placed = new Map<string, OpenAmount>();
+  for (const amount of amountLines(text, lexicon)) {
+    if (amount.meaning === "part") {
       continue;
     }
-    const sum = SUM_LINE.test(lineAt(text, amount.at));
+    const named = amount.meaning;
+    const sum = named !== undefined || SUM_LINE.test(lineAt(text, amount.at));
     const held = placed.get(amount.value);
-    if (!held || (sum && !held.sum)) {
-      placed.set(amount.value, { ...amount, sum });
+    if (!held || (named !== undefined && !held.named) || (sum && !held.sum)) {
+      placed.set(amount.value, { value: amount.value, unit: amount.unit, at: amount.at, sum, ...(named ? { named } : {}) });
     }
   }
-  return [...placed.values()].sort((a, b) => a.at - b.at);
+  const open = [...placed.values()].sort((a, b) => a.at - b.at);
+  const due = open.filter((amount) => amount.named === "due");
+  const named = due.length > 1 ? due : open.filter((amount) => amount.named !== undefined);
+  return named.length > 1 ? named : open;
 }
 
 /** How many lines up a clock line looks for its date, as the form reader does. */
@@ -176,6 +176,8 @@ export interface Known {
   total?: boolean;
   /** Places whose dates are nobody's business (a form line such as "Statement date: ..."): nothing is asked about a date found there. */
   skip?: readonly { at: number; end: number }[];
+  /** The label table: an amount whose label it calls a part is not offered as the total. */
+  lexicon?: Lexicon;
 }
 
 /**
@@ -217,7 +219,7 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
           })
           .map((day) => ({ at: day.at, end: day.end, date: { iso: day.iso, ambiguous: false }, relative: true as const }));
   const found: (FoundDate & { relative?: true })[] = [...written, ...said].sort((a, b) => a.at - b.at);
-  const money = known.total ? [] : amountsOf(text);
+  const money = known.total ? [] : amountsOf(text, known.lexicon);
   if (found.length === 0 && money.length === 0) {
     return [];
   }

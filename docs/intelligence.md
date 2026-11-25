@@ -165,30 +165,34 @@ for the version and the exact prompt of the reader that ships, over at
 least 30 readings, on each of two synthetic sets; never for a travel time,
 an identity document's expiry or a legal deadline, which need exact data;
 and only when the value passes sanity checks (the day exists, a stay ends
-after it begins, an amount names its currency). The first set is 162
+after it begins, an amount names its currency). The first set is 192
 invented emails and documents: a third of them written so that the date or
 amount that matters stands among others that do not, forty written as
 forms (labels and values, flattened tables, a time on the line under its
-date), and thirty about time (doors and a show's start, ranges of hours,
-clocks in words, days said in words); the rules, the label table and the
-model's instructions are written against it. The second is 60 more,
+date), thirty about time (doors and a show's start, ranges of hours,
+clocks in words, days said in words), and thirty about amounts (a total
+among its parts, the currency behind the number, a label on the line
+above its amount); the rules, the label tables and the model's
+instructions are written against it. The second is 60 more,
 written without sight of the readers: nothing is ever tuned on it, and it
 is the one that says how unseen documents are read. The exact readers are
 scored in the test suite, and Apple's on-device model is scored on a Mac
 by a harness that runs the app's own reading code (`tools/eval/apple`).
 
-On the second set today, the rules and the model together find 85% of the
-dates and 80% of the amounts a careful reader would, and of what they
-offer 73% of the dates and 84% of the amounts are right; two of twelve
-documents that state nothing still get an offer. The model's own readings
-measure 72% right for dates and 82% for amounts, well below the bar, so
-they are offered for a yes, and naming an email's kind (86%) is below its
-bar too. The bar never moves: a task earns trust only by measuring above
-it.
+On the second set today, the rules and the model together find 84% of the
+dates and 95% of the amounts a careful reader would, and of what they
+offer 73% of the dates and 90% of the amounts are right; two of twelve
+documents that state nothing still get an offer. Where a label names the
+whole amount, the rule states it with no model: that covers 30% of the
+second set's amounts, and every one of them is right. The model's own
+readings measure 71% right for dates and 87% for amounts, well below the
+bar, so they are offered for a yes, and naming an email's kind (82%) is
+below its bar too. The bar never moves: a task earns trust only by
+measuring above it.
 
 The same harness counts what a person is asked, the way the app asks it:
 every unanswered date still ahead, or a deadline lately behind, on the day
-the document arrived. On the second set that is 98 suggestions for every
+the document arrived. On the second set that is 97 suggestions for every
 100 documents, 8 of them on a day the document does not state for its
 reader or under the wrong meaning. Both numbers are tracked from change to
 change, and a change that raises either does not ship.
@@ -314,8 +318,8 @@ metadata and index blob like every other derived signal.
     and, in a message about an order, "Arriving" and "should arrive";
   - a flight written in words ("Flight UA 123 departs SFO 10:15 AM on March
     4, 2027, arrives JFK 6:45 PM"), which keeps its number and airports;
-  - the amount a bill asks for, when one amount stands on a line that says
-    it is due.
+  - the whole amount of a bill or a receipt, by the label beside it or by a
+    line that says it is due (more on amounts below).
 
   A label claims the date on its own line before any line below it. The
   labels a form prints ("Expiry date", "Due date", "Check-in") also read
@@ -375,6 +379,38 @@ metadata and index blob like every other derived signal.
   reading instead. Not read: a weekday said of the past or of a schedule,
   "the day after tomorrow", and anything a reply quotes or a message
   forwards, which was said on another day.
+
+  Amounts are read with their currency before or behind the number, as a
+  symbol or a three-letter code ("$1,250.50", "EUR 1.250,00", "86.40 GBP",
+  "29,99 €"), with two decimals; a code behind a dollar amount says which
+  dollar ("$35.00 CAD"). Each amount is read with the words that name it:
+  the words before it on its line, or the line above an amount that stands
+  alone, as a table read out cell by cell prints it. A second table of
+  about 560 labels (`tools/label-lexicon/amounts.tsv`), matched whole like
+  the first, says what those words mean:
+  - what is still to pay ("Amount due", "Total to pay", "Balance due",
+    "Patient balance");
+  - what the document came to, or what was paid ("Total", "Order total",
+    "Total paid", "Total fare");
+  - a part, which is never the whole ("Subtotal", "VAT", "Shipping",
+    "Discount", a named fee, "Deposit paid", "Previous balance", "Minimum
+    payment").
+
+  An amount with a minus sign, a rate ("per night"), a deposit and the
+  price of one of several ("2 x $55.00") are parts whatever their words.
+
+  The whole amount of a document is then read by rule: the one amount that
+  is still to pay or, with nothing to pay, the one total. A line that says
+  an amount is due ("Rent of USD 2,400.00 is due") counts too. Two
+  different amounts due, or two different totals, are not guessed between,
+  and a statement that prints a minimum beside its balance names no single
+  amount. A payslip's total, or a bank account's, is no bill's: on such a
+  document only an amount that is due is read. The reading keeps the
+  document's own words and waits for your yes, like every reading by rule.
+  A label the table does not hold, or one whose meaning depends on the
+  document ("Balance", "Fare", "Premium", "Amount paid", "New balance"),
+  decides nothing. Not read: an amount with no decimals ("$50") or with no
+  currency.
 - **Amounts and reference numbers**, at low confidence, from any document,
   including kinds no rule anticipated.
 - **The assistant's judgement**, at the lowest confidence of all, on the Mac
@@ -383,8 +419,10 @@ metadata and index blob like every other derived signal.
   April") are read in two steps. First the rules find every date in the
   whole text, each with the clock beside it, and every amount, and set
   aside what cannot matter: a day that was already over when the message
-  was sent or the file was kept, a rate ("per night") or a deposit, and
-  anything a rule or the document's own booking data already read. Then
+  was sent or the file was kept, a part of a bill (a rate, a deposit, an
+  amount with a minus sign, an amount whose label the table calls a part),
+  and anything a rule or the document's own booking data already read.
+  Where the totals a document labels differ, only those are kept. Then
   the on-device model is asked once about what is left. For each date it
   answers from a short fixed list: something that happens, a check-in, a
   check-out, a departure, an arrival, a day to pay or act by, an expiry,

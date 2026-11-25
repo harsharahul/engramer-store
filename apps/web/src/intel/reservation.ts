@@ -15,7 +15,7 @@
  */
 
 import { isRealDate } from "./dates";
-import { factId, type DocumentKind, type Fact, type ReadFact } from "./facts";
+import { factId, type AmountSum, type DocumentKind, type Fact, type ReadFact } from "./facts";
 import { cleanSubject, serviceOf, type Subject } from "./subject";
 
 const SCRIPT_BLOCK = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
@@ -283,6 +283,7 @@ function factsOf(res: Node, reservation: number): ReadFact[] {
       value: total.value,
       unit: total.unit,
       label: "Total",
+      sum: "total",
       source: "jsonld",
       confidence: 1,
     });
@@ -347,7 +348,7 @@ function billingFactsOf(node: Node): Fact[] {
   // An order with nothing on its way is a receipt.
   const document: DocumentKind = parcels.length > 0 ? "delivery" : "invoice";
   const facts: Fact[] = [];
-  const amount = (total: { value: string; unit: string } | undefined, label: string) => {
+  const amount = (total: { value: string; unit: string } | undefined, label: string, sum: AmountSum) => {
     if (total) {
       facts.push({
         id: factId("amount", total.value),
@@ -356,6 +357,7 @@ function billingFactsOf(node: Node): Fact[] {
         value: total.value,
         unit: total.unit,
         label,
+        sum,
         source: "jsonld",
         confidence: 1,
       });
@@ -398,7 +400,7 @@ function billingFactsOf(node: Node): Fact[] {
   if (invoice) {
     dated("due", node["paymentDueDate"] ?? node["paymentDue"], "Payment due");
     const due = record(node["totalPaymentDue"]);
-    amount(moneyOf(due?.["price"] ?? due?.["value"], due?.["priceCurrency"] ?? due?.["currency"]), "Amount due");
+    amount(moneyOf(due?.["price"] ?? due?.["value"], due?.["priceCurrency"] ?? due?.["currency"]), "Amount due", "due");
     identifier(str(node["confirmationNumber"]) ?? str(node["identifier"]), "Invoice number", "purchase");
     identifier(str(node["accountId"]), "Account number");
   }
@@ -406,7 +408,7 @@ function billingFactsOf(node: Node): Fact[] {
     // The order's own price is its total; one offer alone states it too.
     // Several offers are line items, and adding them up would be a guess.
     const offer = record(node["acceptedOffer"]);
-    amount(moneyOf(node["price"], node["priceCurrency"]) ?? (offer ? moneyOf(offer["price"], offer["priceCurrency"]) : undefined), "Order total");
+    amount(moneyOf(node["price"], node["priceCurrency"]) ?? (offer ? moneyOf(offer["price"], offer["priceCurrency"]) : undefined), "Order total", "order");
     identifier(str(node["orderNumber"]), "Order number", "purchase");
   }
   for (const parcel of parcels) {

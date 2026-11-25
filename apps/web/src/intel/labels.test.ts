@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { fieldLines, guessDocumentKind, harvestFacts, labelledFacts, settledNowhere, structuralDatedFacts } from "./labels";
+import { amountLines, fieldLines, guessDocumentKind, harvestFacts, labelledFacts, moneyEvery, settledNowhere, structuralDatedFacts } from "./labels";
 import { lexiconFrom } from "./lexicon";
 import { subjectOf } from "./subject";
+import shipped from "./tables/labels.json";
 
 describe("labelledFacts", () => {
   it("reads an expiry behind its label", () => {
@@ -475,6 +476,10 @@ describe("the amount a bill asks for", () => {
     expect(due("Amount due $84.20\nTotal due: $84.20")).toHaveLength(1);
   });
 
+  it("the bill's amount says it is the amount due", () => {
+    expect(due("Amount due $84.20\nDue date: November 20, 2026")[0]).toMatchObject({ sum: "due" });
+  });
+
   it("a statement with a minimum and a balance names no single amount", () => {
     expect(due("Minimum payment due $35.00. New balance $1,240.18")).toEqual([]);
     expect(due("Minimum amount due $35.00\nTotal amount due $1,240.18")).toEqual([]);
@@ -872,5 +877,245 @@ describe("fieldLines", () => {
     expect(fieldLines("From: a@example.com\nDate: 3 March 2027\nSubject: hello").map((line) => line.label)).toEqual([]);
     // A lone Date line is a ticket's.
     expect(fieldLines("Rail ticket\nDate: 3 March 2027").map((line) => line.label)).toEqual(["Date"]);
+  });
+});
+
+describe("money as documents write it", () => {
+  const read = (text: string) => moneyEvery(text).map((amount) => `${amount.unit} ${amount.value}${amount.minus ? " minus" : ""}`);
+
+  it("reads the currency before the number, as a symbol or a code, with either decimal mark", () => {
+    expect(read("Total $1,250.50")).toEqual(["USD 1250.50"]);
+    expect(read("Total: EUR 1.250,00")).toEqual(["EUR 1250.00"]);
+    expect(read("Total fare: €213,40")).toEqual(["EUR 213.40"]);
+    expect(read("USD12.00 and CHF 9.00")).toEqual(["USD 12.00", "CHF 9.00"]);
+  });
+
+  it("reads the currency after the number, as a code or a symbol", () => {
+    expect(read("Amount due: 86.40 GBP")).toEqual(["GBP 86.40"]);
+    expect(read("Total to pay 1.234,50 EUR")).toEqual(["EUR 1234.50"]);
+    expect(read("Total charged: 29,99 €")).toEqual(["EUR 29.99"]);
+    expect(read("Amount payable 48.50€")).toEqual(["EUR 48.50"]);
+    expect(read("450.00 CAD")).toEqual(["CAD 450.00"]);
+  });
+
+  it("gives each number one currency, and each currency to one number", () => {
+    expect(read("Subtotal 10.00 GBP  VAT 12.00 EUR")).toEqual(["GBP 10.00", "EUR 12.00"]);
+    expect(read("GBP 10.00 EUR 12.00")).toEqual(["GBP 10.00", "EUR 12.00"]);
+    expect(read("120.00 GBP 24.00 GBP 144.00 GBP")).toEqual(["GBP 120.00", "GBP 24.00", "GBP 144.00"]);
+    // The code between the two numbers is the first one's; the second has none.
+    expect(read("Total 12.00 EUR 13.00")).toEqual(["EUR 12.00"]);
+    // A currency on the line above is not the number's.
+    expect(read("Subtotal 72.00\nUSD 14.40")).toEqual(["USD 14.40"]);
+    // A symbol glued to the next number is that number's, never the one before it.
+    expect(read("Hours 2.50 £40.00 £100.00")).toEqual(["GBP 40.00", "GBP 100.00"]);
+    expect(read("Unleaded 45.20 £62.15")).toEqual(["GBP 62.15"]);
+    expect(read("Consulting 10.00 $150.00 $1,500.00")).toEqual(["USD 150.00", "USD 1500.00"]);
+    expect(read("Credit 10.00 $-5.00")).toEqual(["USD 5.00 minus"]);
+    // A symbol that stands free after a number still closes it.
+    expect(read("29,99 € 15,00 €")).toEqual(["EUR 29.99", "EUR 15.00"]);
+  });
+
+  it("takes the code after a dollar amount as its currency", () => {
+    expect(read("Total: $35.00 CAD")).toEqual(["CAD 35.00"]);
+    expect(read("$35.00 CAD $4.90 CAD")).toEqual(["CAD 35.00", "CAD 4.90"]);
+    expect(read("£12.00 GBP")).toEqual(["GBP 12.00"]);
+  });
+
+  it("reads no amount from a clock, a weight, a version or a number with no currency", () => {
+    expect(read("Doors at 12.00 PM")).toEqual([]);
+    expect(read("Weight 3.50 kg")).toEqual([]);
+    expect(read("Total: 14.30")).toEqual([]);
+    expect(read("Firmware v2.10 USB")).toEqual([]);
+    expect(read("Paid USD 0.00")).toEqual([]);
+  });
+
+  it("marks an amount with a minus sign on it, and no other", () => {
+    expect(read("Discount: -£5.50")).toEqual(["GBP 5.50 minus"]);
+    expect(read("Insurance adjustment: -CAD 190.00")).toEqual(["CAD 190.00 minus"]);
+    expect(read("Insurance adjustment: \u2212CAD 190.00")).toEqual(["CAD 190.00 minus"]);
+    expect(read("Credit $-12.50")).toEqual(["USD 12.50 minus"]);
+    expect(read("Refund -20,00 €")).toEqual(["EUR 20.00 minus"]);
+    // A range, a dash between a label and its amount, and brackets are not a minus.
+    expect(read("Tickets £10.00-£20.00")).toEqual(["GBP 10.00", "GBP 20.00"]);
+    expect(read("Shipping - $4.90")).toEqual(["USD 4.90"]);
+    expect(read("your plan (USD 59.99)")).toEqual(["USD 59.99"]);
+  });
+
+  it("says where each amount stands, from its currency to its last character", () => {
+    const text = "Fare: £33.00, total 27.50 GBP.";
+    expect(moneyEvery(text).map((amount) => text.slice(amount.at, amount.end))).toEqual(["£33.00", "27.50 GBP"]);
+  });
+});
+
+describe("an amount with its label and what the label means", () => {
+  // A small table, as the shipped one is shaped: normalized label to meaning.
+  const table = lexiconFrom(
+    [],
+    [
+      ["subtotal", "part"],
+      ["vat", "part"],
+      ["service fees", "part"],
+      ["railcard discount", "part"],
+      ["sales tax", "part"],
+      ["items total", "part"],
+      ["delivery total", "part"],
+      ["total", "total"],
+      ["total to pay", "due"],
+      ["amount due", "due"],
+      ["total stay", "total"],
+      ["total paid", "total"],
+      ["total incl vat", "total"],
+    ],
+  );
+  const read = (text: string) => amountLines(text, table).map((amount) => [amount.value, amount.label, amount.meaning]);
+
+  it("a comma parts a label from the words before it, whatever those words and the label make together", () => {
+    // "Items total" and "Delivery total" are parts; a total named after a comma is not.
+    expect(read("3 items, total: $45.00")).toEqual([["45.00", "total", "total"]]);
+    expect(read("Delivery, total $45.00")).toEqual([["45.00", "total", "total"]]);
+    expect(read("Return trip, total paid: $80.00")).toEqual([["80.00", "total paid", "total"]]);
+  });
+
+  it("the label is the words before the amount on its line, and the table says what they mean", () => {
+    expect(read("Subtotal £118.40\nVAT £5.92\nTotal to pay: £124.32")).toEqual([
+      ["118.40", "Subtotal", "part"],
+      ["5.92", "VAT", "part"],
+      ["124.32", "Total to pay", "due"],
+    ]);
+    expect(read("Total stay USD 450.00")).toEqual([["450.00", "Total stay", "total"]]);
+    expect(read("Subtotal ........ $35.00")).toEqual([["35.00", "Subtotal", "part"]]);
+    expect(read("Total (incl. VAT)   €240.00")).toEqual([["240.00", "Total (incl. VAT)", "total"]]);
+    expect(read("VAT 20%   €40.00")).toEqual([["40.00", "VAT 20%", "part"]]);
+  });
+
+  it("two amounts on one line have a label each", () => {
+    expect(read("Fare: £33.00, railcard discount: -£5.50")).toEqual([
+      ["33.00", "Fare", undefined],
+      ["5.50", "railcard discount", "part"],
+    ]);
+    expect(read("Subtotal 120.00 GBP  VAT 24.00 GBP")).toEqual([
+      ["120.00", "Subtotal", "part"],
+      ["24.00", "VAT", "part"],
+    ]);
+  });
+
+  it("an amount alone on its line takes the label on the line above", () => {
+    expect(read("Subtotal\n$50.00\nSales tax\n$4.00\nAmount due\n$54.00")).toEqual([
+      ["50.00", "Subtotal", "part"],
+      ["4.00", "Sales tax", "part"],
+      ["54.00", "Amount due", "due"],
+    ]);
+    // Words the table does not hold, an amount above, or an empty line above give no meaning.
+    expect(read("Thank you\n$57.45")).toEqual([["57.45", "Thank you", undefined]]);
+    expect(read("Amount due $10.00\n$57.45")).toEqual([
+      ["10.00", "Amount due", "due"],
+      ["57.45", undefined, undefined],
+    ]);
+    expect(read("Amount due\n\n$57.45")).toEqual([["57.45", undefined, undefined]]);
+    // An amount with words behind it on its line is not alone.
+    expect(read("Amount due\n$57.45 was paid")).toEqual([["57.45", undefined, undefined]]);
+  });
+
+  it("a minus, a rate, a deposit and a price for one of several are parts, whatever the table holds", () => {
+    expect(read("Total paid: -$20.00")).toEqual([["20.00", "Total paid", "part"]]);
+    expect(read("Room rate per night USD 150.00")[0]![2]).toBe("part");
+    expect(read("Total paid: $140.00 per night")[0]![2]).toBe("part");
+    expect(read("A deposit of $100.00 holds your booking.")[0]![2]).toBe("part");
+    expect(read("Deposit paid: $100.00")[0]![2]).toBe("part");
+    expect(read("Tickets: 2 x $55.00, service fees: $11.00")).toEqual([
+      ["55.00", "Tickets: 2 x", "part"],
+      ["11.00", "service fees", "part"],
+    ]);
+    // The total that is left after a deposit is not the deposit.
+    expect(read("Total due after your deposit: $353.60")[0]![2]).toBeUndefined();
+  });
+
+  it("a sentence is not a label", () => {
+    expect(read("Any change to your booking carries a change fee of CAD 35.00 and more words.")).toEqual([["35.00", undefined, undefined]]);
+  });
+
+  it("with no table, only what the amount itself shows is known", () => {
+    const bare = amountLines("Subtotal £118.40\nDiscount -£5.00\nTotal to pay: £113.40").map((amount) => [amount.value, amount.label, amount.meaning]);
+    expect(bare).toEqual([
+      ["118.40", "Subtotal", undefined],
+      ["5.00", "Discount", "part"],
+      ["113.40", "Total to pay", undefined],
+    ]);
+  });
+});
+
+describe("the whole amount of a document, by its label", () => {
+  const table = lexiconFrom(shipped.dates, shipped.amounts);
+  const whole = (text: string) =>
+    labelledFacts(text, undefined, table)
+      .filter((fact) => fact.kind === "amount")
+      .map((fact) => [fact.value, fact.unit, fact.sum, fact.label]);
+
+  it("the amount a label calls due is the bill's amount, in the document's own words", () => {
+    expect(whole("Subtotal £118.40\nVAT £5.92\nTotal to pay: £124.32")).toEqual([["124.32", "GBP", "due", "Total to pay"]]);
+    expect(whole("Usage charge 56.00 GBP\nStanding charge 30.40 GBP\nAmount due: 86.40 GBP")).toEqual([["86.40", "GBP", "due", "Amount due"]]);
+    expect(whole("Subtotal\n$50.00\nSales tax\n$4.00\nAmount due\n$54.00")).toEqual([["54.00", "USD", "due", "Amount due"]]);
+  });
+
+  it("with nothing due, the amount a label calls the total is the document's amount", () => {
+    expect(whole("Fare: £33.00, railcard discount: -£5.50\nTotal paid: £27.50")).toEqual([["27.50", "GBP", "total", "Total paid"]]);
+    expect(whole("Vehicle: $140.00\nPassenger: $46.00\nTotal fare: $186.00")).toEqual([["186.00", "USD", "total", "Total fare"]]);
+    expect(whole("Room rate per night USD 150.00\nDeposit paid USD 100.00\nTotal stay USD 450.00")).toEqual([["450.00", "USD", "total", "Total stay"]]);
+    expect(whole("Subtotal $35.00\nShipping $4.90\nOrder total $39.90")).toEqual([["39.90", "USD", "total", "Order total"]]);
+  });
+
+  it("what is still due stands before what it all came to", () => {
+    expect(whole("Total charges: CAD 320.00\nInsurance adjustment: -CAD 190.00\nPatient balance: CAD 130.00")).toEqual([
+      ["130.00", "CAD", "due", "Patient balance"],
+    ]);
+    expect(whole("Invoice total: £500.00\nAmount paid: £200.00\nBalance due: £300.00")).toEqual([["300.00", "GBP", "due", "Balance due"]]);
+    // Nothing is due any more: the total is what the document came to.
+    expect(whole("Total: $80.00\nAmount paid: $80.00\nBalance due: $0.00")).toEqual([["80.00", "USD", "total", "Total"]]);
+  });
+
+  it("a total printed twice with one value is one amount, under its first name", () => {
+    expect(whole("Total: $65.31\nAmount charged: $65.31")).toEqual([["65.31", "USD", "total", "Total"]]);
+    expect(whole("Amount due $84.20\nTotal due: $84.20")).toEqual([["84.20", "USD", "due", "Amount due"]]);
+  });
+
+  it("two totals that differ, or two amounts due that differ, are not guessed between", () => {
+    expect(whole("Total fare: €213,40\nTotal paid: €225,40")).toEqual([]);
+    expect(whole("Amount due: $50.00\nBalance due: $75.00")).toEqual([]);
+  });
+
+  it("a part is never the whole, alone or beside a sum", () => {
+    expect(whole("Reschedule fee: $25.00")).toEqual([]);
+    expect(whole("Items: $62.40, shipping: $6.00")).toEqual([]);
+    expect(whole("Previous balance due: $64.10")).toEqual([]);
+    expect(whole("Previous balance due: $64.10\nAmount due: $92.35")).toEqual([["92.35", "USD", "due", "Amount due"]]);
+  });
+
+  it("a statement with a minimum beside its balance still names no single amount", () => {
+    expect(whole("Minimum payment due $35.00\nNew balance $1,240.18")).toEqual([]);
+    expect(whole("Statement balance: CAD 615.40\nMinimum payment: CAD 20.00")).toEqual([]);
+    // A minimum whose label stands on the line above, or is closed by a colon, is a minimum still.
+    expect(whole("Amount due\n$1,234.56\nMinimum payment\n$35.00")).toEqual([]);
+    expect(whole("Minimum payment\n$35.00\nAmount due\n$1,234.56")).toEqual([]);
+    expect(whole("Amount due $1,234.56\nMinimum: $35.00")).toEqual([]);
+    // A word that only begins like it is none.
+    expect(whole("Parking: 45 minutes\nTotal paid: $6.00")).toEqual([["6.00", "USD", "total", "Total paid"]]);
+  });
+
+  it("a payslip's total and a bank account's totals are not a bill's whole amount", () => {
+    expect(whole("Payslip for November\nBasic £3,000.00\nTotal £3,000.00\nNet pay £2,400.00")).toEqual([]);
+    expect(whole("Current account\nOpening balance £1,000.00\nWithdrawals\nTotal £5,000.00\nClosing balance £1,200.00")).toEqual([]);
+    expect(whole("Paid in\n£2,400.00\nPaid out\n£500.00")).toEqual([]);
+    // A bill that shows where its balance came from still asks for its amount.
+    expect(whole("Opening balance £30.00\nPayments -£30.00\nNew charges £55.20\nTotal due £55.20")).toEqual([["55.20", "GBP", "due", "Total due"]]);
+  });
+
+  it("an amount a sentence says is due is still read, under the reader's own name for it", () => {
+    expect(whole("Rent of USD 2,400.00 is due on 1 May 2027.")).toEqual([["2400.00", "USD", "due", "Amount due"]]);
+  });
+
+  it("with no table, only a line that says an amount is due is read, as before", () => {
+    const bare = (text: string) => labelledFacts(text).filter((fact) => fact.kind === "amount").map((fact) => [fact.value, fact.sum, fact.label]);
+    expect(bare("Subtotal £118.40\nVAT £5.92\nAmount due: £124.32")).toEqual([["124.32", "due", "Amount due"]]);
+    expect(bare("Fare: £33.00\nTotal paid: £27.50")).toEqual([]);
   });
 });

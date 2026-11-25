@@ -1,0 +1,579 @@
+# Due: what is still to pay
+Amount due	due
+Total due	due
+Balance due	due
+Total amount due	due
+Amount due total	due
+Total balance due	due
+Amount payable	due
+Total payable	due
+Total amount payable	due
+Amount to pay	due
+Total to pay	due
+Total amount to pay	due
+Please pay	due
+Pay this amount	due
+Amount owing	due
+Amount owed	due
+Total owed	due
+Total owing	due
+Total amount owed	due
+Balance owing	due
+Total balance owing	due
+Amount to collect	due
+Amount to be collected	due
+Patient balance	due
+Patient responsibility	due
+You owe	due
+You owe us	due
+Payment due	due
+Total payment due	due
+Balance payable	due
+Invoice balance	due
+Remaining to pay	due
+Your balance due	due
+Your amount due	due
+Your total due	due
+Total to be paid	due
+Amount to be paid	due
+Balance to pay	due
+Balance to be paid	due
+Amount still due	due
+Still to pay	due
+Amount unpaid	due
+Amount due upon receipt	due
+# Total: what it came to
+Total	total
+Grand total	total
+Order total	total
+Invoice total	total
+Total amount	total
+Total price	total
+Total cost	total
+Total fare	total
+Total incl VAT	total
+Total inc VAT	total
+Total including VAT	total
+Total incl tax	total
+Total inc tax	total
+Total including tax	total
+Total with tax	total
+Total with VAT	total
+Total tax included	total
+Total VAT included	total
+Total incl taxes	total
+Total including taxes	total
+Total including tax and fees	total
+Total incl fees	total
+Total including fees	total
+Total incl GST	total
+Total inc GST	total
+Total including GST	total
+Total incl sales tax	total
+Total with taxes	total
+Total with taxes and fees	total
+Total taxes included	total
+Total tax inclusive	total
+Total VAT inclusive	total
+Gross total	total
+Final total	total
+Booking total	total
+Trip total	total
+Total stay	total
+Total for stay	total
+Total for your stay	total
+Reservation total	total
+Ticket total	total
+Total premium	total
+Total annual premium	total
+Your total	total
+Your order total	total
+Total for your order	total
+Your grand total	total
+Your total price	total
+Total order	total
+Order grand total	total
+Invoice grand total	total
+Total invoice	total
+Total invoice amount	total
+Invoice amount	total
+Total this invoice	total
+Total this bill	total
+Total for this bill	total
+This bill total	total
+Total for this invoice	total
+Total for this order	total
+Total for this booking	total
+Total for your booking	total
+Total for this reservation	total
+Total for your trip	total
+Total for your purchase	total
+Total price incl VAT	total
+Total price including tax	total
+Total cost incl tax	total
+Total cost including tax	total
+Total fare incl tax	total
+Total fare including taxes	total
+Total booking cost	total
+Total booking price	total
+Total booking amount	total
+Total reservation cost	total
+Total trip cost	total
+Total trip price	total
+Total purchase	total
+Total purchase price	total
+Total order amount	total
+Order amount	total
+Order total incl VAT	total
+Order total including tax	total
+Total sale	total
+Total sale price	total
+Total ticket price	total
+Grand total incl VAT	total
+Grand total including tax	total
+Grand total tax included	total
+Purchase total	total
+Receipt total	total
+Sale total	total
+Bill total	total
+Total bill	total
+Check total	total
+Tab total	total
+Transaction total	total
+Estimated total	total
+Estimated order total	total
+# Total: what was paid or charged
+Total paid	total
+Total charged	total
+Amount charged	total
+Total charge	total
+Charged to card	total
+Amount charged to card	total
+Total charged to card	total
+Total amount paid	total
+Total amount charged	total
+Total price paid	total
+Price paid	total
+# Total: what was refunded
+Total refund	total
+Refund total	total
+Amount refunded	total
+Refund amount	total
+Total refunded	total
+Total amount refunded	total
+Refunded amount	total
+Total refunded amount	total
+Total refund amount	total
+# Part: subtotals and net figures
+Subtotal	part
+Sub total	part
+Net	part
+Net amount	part
+Net total	part
+Net price	part
+Net cost	part
+Total before tax	part
+Total before taxes	part
+Total before VAT	part
+Total before discount	part
+Total before fees	part
+Total before taxes and fees	part
+Total excl VAT	part
+Total ex VAT	part
+Total excluding VAT	part
+Total excl tax	part
+Total ex tax	part
+Total excluding tax	part
+Total excluding taxes	part
+Total without tax	part
+Total without VAT	part
+Pre-tax total	part
+Pre-tax	part
+Pre-tax amount	part
+Price before tax	part
+Price excluding VAT	part
+Price excl VAT	part
+Amount before tax	part
+Amount excluding tax	part
+Amount excl VAT	part
+Items	part
+Item total	part
+Items subtotal	part
+Items total	part
+Item subtotal	part
+Merchandise	part
+Merchandise total	part
+Merchandise subtotal	part
+Room charges	part
+Room subtotal	part
+Taxable amount	part
+Taxable total	part
+Taxable subtotal	part
+Non-taxable	part
+Order subtotal	part
+Cart subtotal	part
+Invoice subtotal	part
+Booking subtotal	part
+Base fare	part
+Base price	part
+Base rate	part
+Base cost	part
+Base amount	part
+Ticket subtotal	part
+Fare subtotal	part
+Fare before tax	part
+# Part: taxes
+Tax	part
+Taxes	part
+Sales tax	part
+VAT	part
+GST	part
+HST	part
+PST	part
+QST	part
+Total tax	part
+Tax total	part
+Total taxes	part
+Taxes and fees	part
+Tax and fees	part
+Taxes and charges	part
+Taxes and surcharges	part
+Fees and charges	part
+Estimated tax	part
+Estimated taxes	part
+Tax amount	part
+VAT amount	part
+VAT total	part
+Total VAT	part
+GST amount	part
+Total GST	part
+Total sales tax	part
+Sales tax total	part
+State tax	part
+Local tax	part
+County tax	part
+City tax	part
+Tourist tax	part
+Tourism tax	part
+Occupancy tax	part
+Hotel tax	part
+Room tax	part
+Lodging tax	part
+Excise tax	part
+Service tax	part
+Consumption tax	part
+Value added tax	part
+Goods and services tax	part
+Import duty	part
+Import tax	part
+Customs duty	part
+Duties	part
+Duties and taxes	part
+Tax rate	part
+# Part: delivery
+Shipping	part
+Shipping and handling	part
+Shipping and delivery	part
+Shipping cost	part
+Shipping costs	part
+Shipping charge	part
+Shipping fee	part
+Shipping total	part
+Standard shipping	part
+Express shipping	part
+Free shipping	part
+Delivery	part
+Delivery charge	part
+Delivery charges	part
+Delivery fee	part
+Delivery cost	part
+Delivery total	part
+Standard delivery	part
+Express delivery	part
+Free delivery	part
+Postage	part
+Postage and packing	part
+Postage and handling	part
+P&P	part
+Standard postage	part
+Handling	part
+Freight	part
+Freight charge	part
+Freight cost	part
+Courier	part
+Courier fee	part
+Packaging	part
+Packing	part
+# Part: discounts and credits
+Discount	part
+Total discount	part
+Discounts	part
+Discount applied	part
+Discount code	part
+Promo	part
+Promo code	part
+Promo discount	part
+Promotion	part
+Promotions	part
+Promotional discount	part
+Coupon	part
+Coupons	part
+Coupon code	part
+Coupon discount	part
+Voucher	part
+Voucher discount	part
+Gift card	part
+Gift card applied	part
+Gift certificate	part
+Store credit	part
+Credit applied	part
+Loyalty discount	part
+Railcard discount	part
+Member discount	part
+Members discount	part
+Student discount	part
+Senior discount	part
+Employee discount	part
+Early bird discount	part
+Multi-buy discount	part
+Offer discount	part
+Points redeemed	part
+Reward points redeemed	part
+Rewards applied	part
+You saved	part
+You save	part
+Savings	part
+Total savings	part
+Amount saved	part
+# Part: named fees
+Service charge	part
+Service fee	part
+Service fees	part
+Booking fee	part
+Booking charge	part
+Processing fee	part
+Handling fee	part
+Convenience fee	part
+Late fee	part
+Late payment fee	part
+Reschedule fee	part
+Cancellation fee	part
+Change fee	part
+Amendment fee	part
+Admin fee	part
+Administration fee	part
+Administration charge	part
+Cleaning fee	part
+Resort fee	part
+Destination fee	part
+Facility fee	part
+Facility charge	part
+Environmental fee	part
+Seat selection fee	part
+Seat fee	part
+Transaction fee	part
+Payment fee	part
+Card fee	part
+Credit card fee	part
+Card surcharge	part
+Surcharge	part
+Fuel surcharge	part
+Fuel charge	part
+Pet fee	part
+Extra guest fee	part
+Extra person fee	part
+Early check-in fee	part
+Late check-out fee	part
+Airport fee	part
+Airport tax	part
+Security fee	part
+Activation fee	part
+Connection fee	part
+Setup fee	part
+Installation fee	part
+Restocking fee	part
+Return fee	part
+Overdraft fee	part
+Platform fee	part
+Marketplace fee	part
+Reservation fee	part
+Sewer charge	part
+Router rental	part
+Device installment	part
+Policy fee	part
+Standing charge	part
+Usage charge	part
+# Part: tips and service
+Tip	part
+Gratuity	part
+Suggested tip	part
+Tip amount	part
+Tip added	part
+Optional tip	part
+Driver tip	part
+Included gratuity	part
+Auto gratuity	part
+Automatic gratuity	part
+Added gratuity	part
+# Part: deposits
+Deposit	part
+Deposit paid	part
+Deposit due	part
+Deposit required	part
+Deposit amount	part
+Deposit received	part
+Security deposit	part
+Refundable deposit	part
+Damage deposit	part
+Booking deposit	part
+Reservation deposit	part
+Initial deposit	part
+Deposit already paid	part
+Deposit at desk	part
+Deposit on arrival	part
+Deposit at pick up	part
+Deposit at check in	part
+Down payment	part
+Amount deposited	part
+# Part: earlier states of an account
+Previous balance	part
+Prior balance	part
+Last statement balance	part
+Previous statement balance	part
+Prior statement balance	part
+Previous amount due	part
+Prior amount due	part
+Previous balance due	part
+Prior balance due	part
+Previous charges	part
+Previously paid	part
+Already paid	part
+Last payment	part
+Last payment amount	part
+Last payment received	part
+Payments	part
+Payments and credits	part
+Payments received	part
+Credits	part
+Adjustments	part
+Total payments	part
+Total credits	part
+Insurance paid	part
+Insurance adjustment	part
+Insurance payment	part
+Loan balance	part
+Principal balance	part
+Outstanding principal	part
+Principal outstanding	part
+Remaining principal	part
+Mortgage balance	part
+Paid by insurance	part
+Plan paid	part
+Amount brought forward	part
+# Part: minimums and limits
+Minimum payment	part
+Minimum payment due	part
+Minimum due	part
+Minimum amount due	part
+Minimum amount	part
+Minimum amount payable	part
+Minimum monthly payment	part
+Min payment	part
+Min payment due	part
+Credit limit	part
+Available credit	part
+Cash advance limit	part
+Cash limit	part
+Spending limit	part
+Purchase limit	part
+Overdraft limit	part
+Available overdraft	part
+# Part: rates and unit prices
+Unit price	part
+Price each	part
+Each	part
+Rate	part
+Nightly rate	part
+Daily rate	part
+Hourly rate	part
+Weekly rate	part
+Monthly rate	part
+Rate per night	part
+Rate per day	part
+Rate per hour	part
+Room rate	part
+Average rate	part
+Average nightly rate	part
+Price per person	part
+Per person	part
+Per night	part
+Per day	part
+Price per night	part
+Price per unit	part
+Price per item	part
+Item price	part
+List price	part
+RRP	part
+MSRP	part
+Was	part
+Original price	part
+Regular price	part
+Sale price	part
+Cost per unit	part
+Price per kWh	part
+Price per gallon	part
+Price per litre	part
+Price per liter	part
+Excess	part
+Deductible	part
+Interest charged	part
+Interest earned	part
+Interest paid	part
+Insurance excess	part
+Interest	part
+Finance charge	part
+Interest rate	part
+APR	part
+Annual percentage rate	part
+# Part: bank account figures
+Available balance	part
+Account balance	part
+Ledger balance	part
+Current ledger balance	part
+Available funds	part
+Cleared balance	part
+Book balance	part
+Savings balance	part
+Checking balance	part
+Opening balance	part
+Closing balance	part
+Average balance	part
+Average daily balance	part
+Balance forward	part
+Balance brought forward	part
+Balance carried forward	part
+Beginning balance	part
+Starting balance	part
+Ending balance	part
+Withdrawals	part
+Deposits	part
+Total deposits	part
+Total withdrawals	part
+Debits	part
+Total debits	part
+# Part: cash handling
+Change	part
+Change due	part
+Change given	part
+Cash tendered	part
+Tendered	part
+Amount tendered	part
+Cash	part
+Cash given	part
+Cash received	part
+Cash back	part
+Cashback	part
+Rounding	part
+Rounding adjustment	part
+Cash rounding	part
+Round up	part

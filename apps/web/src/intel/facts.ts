@@ -98,6 +98,12 @@ export type FactSource =
   /** Entered or corrected by hand. */
   | "user";
 
+/**
+ * What an amount is, of all the amounts a document prints: what is still to
+ * pay, the total of an order, or the total it came to or was paid.
+ */
+export type AmountSum = "due" | "order" | "total";
+
 export interface Fact {
   /** Stable across rescans: file, kind and value. See factId. */
   id: string;
@@ -143,6 +149,12 @@ export interface Fact {
    * not settle it, so it always asks.
    */
   relative?: boolean;
+  /**
+   * What an amount is, stated by the reader: the amount still to pay, an
+   * order's total, or a total. Kept as stored; read it only through `sumOf`,
+   * which also knows the facts stored before this field.
+   */
+  sum?: AmountSum;
   /** Pinned by the owner. Never overwritten by a later scan. */
   confirmed?: boolean;
   /**
@@ -701,10 +713,11 @@ export function mergeFacts(existing: Fact[], found: Fact[]): Fact[] {
     }
     if (prior.confirmed) {
       // The owner's answer stands; only the reader's statement of meaning moves.
-      merged.set(fact.id, withSubjectFrom(prior, fact));
+      merged.set(fact.id, withSumFrom(withSubjectFrom(prior, fact), fact));
       continue;
     }
-    merged.set(fact.id, withSubjectFrom(pick(prior, fact), fact));
+    // Whichever reading is kept, what either said the amount is stays said.
+    merged.set(fact.id, withSumFrom(withSumFrom(withSubjectFrom(pick(prior, fact), fact), fact), prior));
   }
   // The cap has to drop the weakest rather than whichever arrived last.
   return capped(
@@ -726,17 +739,44 @@ function capRank(fact: Fact): number {
 
 /** Kinds a document states once: two different readings of one disagree. */
 const SLOT_KINDS: ReadonlySet<FactKind> = new Set(["expiry", "due", "issued", "amount"]);
-/** Of all the amounts a document prints, the one it asks to be paid. */
-const TOTAL_LABEL = /due|total|balance|pay/i;
 /** Readers whose answers are grounded but not exact; two of them can agree or disagree. */
 const GROUNDED_READERS: ReadonlySet<FactSource> = new Set(["model", "label"]);
+
+const AMOUNT_SUMS: readonly AmountSum[] = ["due", "order", "total"];
+/** The names readers gave a sum before a fact could state it in a field. */
+const SUM_NAMES: Readonly<Record<string, AmountSum>> = { "amount due": "due", "order total": "order", total: "total" };
+/** Any other label of that time that named a sum counted as the total. */
+const TOTAL_LABEL = /due|total|balance|pay/i;
+
+/**
+ * What an amount is: the amount still to pay, an order's total, a total, or
+ * nothing a reader named. The one place that says so. A fact stored before
+ * readers stated it in `sum` is read by the name its reader gave it.
+ */
+export function sumOf(fact: Fact): AmountSum | undefined {
+  if (fact.kind !== "amount") {
+    return undefined;
+  }
+  if (fact.sum !== undefined) {
+    // A value a newer version wrote is not one this version acts on.
+    return AMOUNT_SUMS.includes(fact.sum) ? fact.sum : undefined;
+  }
+  const label = fact.label?.trim().toLowerCase() ?? "";
+  return SUM_NAMES[label] ?? (TOTAL_LABEL.test(label) ? "total" : undefined);
+}
+
+/** A fact with what another reading of the same amount says it is, where it says nothing itself. */
+function withSumFrom(kept: Fact, other: Fact): Fact {
+  const sum = kept.kind === "amount" && kept.sum === undefined && sumOf(kept) === undefined ? sumOf(other) : undefined;
+  return sum ? { ...kept, sum } : kept;
+}
 
 function slotOf(fact: Fact): string | undefined {
   if (!SLOT_KINDS.has(fact.kind)) {
     return undefined;
   }
   if (fact.kind === "amount") {
-    return TOTAL_LABEL.test(fact.label ?? "") ? "amount" : undefined;
+    return sumOf(fact) ? "amount" : undefined;
   }
   return fact.kind;
 }

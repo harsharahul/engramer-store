@@ -27,7 +27,9 @@ For each set the run reports two things: what the model alone offered (the
 figures the app's trust rests on), and what the rules and the model give
 together (what the owner is shown). Each reports dates and amounts found,
 how many of those offered were right, and the noise: documents that state
-nothing and still got an offer.
+nothing and still got an offer. One more line gives the amounts the rules
+alone read, before any model is asked: the model is only asked about an
+amount where no rule named the document's total.
 
 While working on the instructions, read the first set alone or a few of its
 cases without writing scores, or check that a document is read the same way

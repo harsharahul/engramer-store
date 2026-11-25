@@ -13,6 +13,7 @@ import {
   mergeFacts,
   offeredFacts,
   reconcileFacts,
+  sumOf,
   type Fact,
 } from "./facts";
 
@@ -679,6 +680,46 @@ describe("what the model is not asked about again", () => {
     expect(alreadyRead([amount({ value: "45.00", source: "pattern", confidence: 0.3 })]).total).toBe(false);
     expect(alreadyRead([amount({ value: "64.10", label: "Total", source: "model", confidence: 0.45 })]).total).toBe(false);
     expect(alreadyRead([amount({ value: "64.10", label: "Total", source: "model", confidence: 0.45, confirmed: true })]).total).toBe(true);
+  });
+
+  it("what an amount is comes from its own field, and from the label of a fact stored before the field", () => {
+    const amount = (over: Partial<Fact>): Fact => fact({ id: "amount:10.00", kind: "amount", value: "10.00", unit: "USD", ...over });
+    expect(sumOf(amount({ sum: "due", label: "Patient balance" }))).toBe("due");
+    expect(sumOf(amount({ sum: "order" }))).toBe("order");
+    expect(sumOf(amount({ sum: "total", label: "Paid in full" }))).toBe("total");
+    // Stored before the field: the three names the readers wrote.
+    expect(sumOf(amount({ label: "Amount due" }))).toBe("due");
+    expect(sumOf(amount({ label: "Order total" }))).toBe("order");
+    expect(sumOf(amount({ label: "Total" }))).toBe("total");
+    // Any other label that named a sum counted as the total, and still does.
+    expect(sumOf(amount({ label: "Balance to pay" }))).toBe("total");
+    expect(sumOf(amount({ label: "Voucher" }))).toBeUndefined();
+    expect(sumOf(amount({}))).toBeUndefined();
+    // A value a newer version wrote is not one this version knows.
+    expect(sumOf(amount({ sum: "teleport" as never }))).toBeUndefined();
+    // Only an amount has a sum.
+    expect(sumOf(fact({ kind: "due", label: "Total" }))).toBeUndefined();
+  });
+
+  it("an amount whose field names it is the total a reader named, whatever the document's words", () => {
+    const amount = (over: Partial<Fact>): Fact => fact({ id: "amount:130.00", kind: "amount", value: "130.00", unit: "CAD", source: "label", confidence: 0.7, ...over });
+    expect(alreadyRead([amount({ label: "Still to settle", sum: "due" })]).total).toBe(true);
+    expect(alreadyRead([amount({ label: "Still to settle" })]).total).toBe(false);
+  });
+
+  it("the owner's amount takes what a reader says it is, and stays the owner's", () => {
+    const owned = fact({ id: "amount:64.10", kind: "amount", value: "64.10", unit: "USD", source: "pattern", confidence: 0.3, confirmed: true });
+    const read = fact({ id: "amount:64.10", kind: "amount", value: "64.10", unit: "USD", label: "Amount due", sum: "due", source: "label", confidence: 0.7 });
+    const [merged] = mergeFacts([owned], [read]);
+    expect(merged).toMatchObject({ confirmed: true, source: "pattern", sum: "due" });
+  });
+
+  it("two readers that agree on an amount keep what either said it is", () => {
+    const harvested = fact({ id: "amount:64.10", kind: "amount", value: "64.10", unit: "USD", source: "pattern", confidence: 0.3 });
+    const named = fact({ id: "amount:64.10", kind: "amount", value: "64.10", unit: "USD", label: "Total", sum: "total", source: "model", confidence: 0.3 });
+    // Equal confidence: the stored one wins, and takes the name the other gave.
+    const [merged] = mergeFacts([harvested], [named]);
+    expect(sumOf(merged!)).toBe("total");
   });
 });
 
