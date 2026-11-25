@@ -34,8 +34,14 @@ const MAX_QUOTE_MARKS = 8;
 const MAX_CELL_LINES = 2;
 
 /** A style that takes its element, and all it holds, out of sight. */
-const HIDING =
-  /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?:\.0+)?|max-height\s*:\s*0(?:\.0+)?(?:px|pt|em|rem|%)?)\s*(?:!\s*important\s*)?(?=;|$)/i;
+const HIDING = /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0(?:\.0+)?)\s*(?:!\s*important\s*)?(?=;|$)/i;
+/** A height of nothing hides what an element holds only when nothing may overflow it. */
+const NO_HEIGHT = /(?:^|;)\s*max-height\s*:\s*0(?:\.0+)?(?:px|pt|em|rem|%)?\s*(?:!\s*important\s*)?(?=;|$)/i;
+const CLIPPED = /(?:^|;)\s*overflow(?:-y)?\s*:\s*hidden/i;
+/** A style that keeps the line breaks of the source. */
+const AS_WRITTEN = /(?:^|;)\s*white-space\s*:\s*pre/i;
+/** The end of a comment, in both forms a browser accepts. */
+const COMMENT_END = /--!?>/g;
 /** A text size stated on an element; a size of nothing hides the text until an element inside states a size again. */
 const FONT_SIZE = /(?:^|;)\s*font-size\s*:\s*([^;!]+)/i;
 const NOTHING = /^0(?:\.0+)?(?:px|pt|em|rem|%)?$/i;
@@ -92,6 +98,8 @@ interface Tag {
   name: string;
   style: string;
   hidden: boolean;
+  /** It names a class: a style sheet may size or show it. */
+  classed: boolean;
   /** Columns a cell takes. */
   span: number;
 }
@@ -116,7 +124,7 @@ function readTag(html: string, lt: number, quotes: { '"': boolean; "'": boolean 
   while (at < length && isNameCharacter(html.charCodeAt(at))) {
     at += 1;
   }
-  const tag: Tag = { end: length, closing, name: html.slice(nameStart, at).toLowerCase(), style: "", hidden: false, span: 1 };
+  const tag: Tag = { end: length, closing, name: html.slice(nameStart, at).toLowerCase(), style: "", hidden: false, classed: false, span: 1 };
   for (;;) {
     while (at < length && (isSpace(html.charCodeAt(at)) || html.charCodeAt(at) === 47)) {
       at += 1;
@@ -174,6 +182,8 @@ function readTag(html: string, lt: number, quotes: { '"': boolean; "'": boolean 
       tag.style = value;
     } else if (attribute === "hidden") {
       tag.hidden = true;
+    } else if (attribute === "class") {
+      tag.classed = value.trim() !== "";
     } else if (attribute === "colspan") {
       tag.span = Math.min(MAX_SPAN, Math.max(1, Number.parseInt(value, 10) || 1));
     }
@@ -202,6 +212,8 @@ interface Line {
   blank?: true;
   /** The line follows the one above after a line break, with no block between them. */
   soft?: true;
+  /** The line is a row of cells. */
+  row?: true;
 }
 
 /** What is being written: the page itself, or one cell of a row. */
@@ -217,6 +229,8 @@ interface Frame {
   lead: boolean;
   /** The next line is a list item. */
   bullet: boolean;
+  /** The open line is set as written: its gaps are kept. */
+  keep: boolean;
   /** Columns the cell takes. */
   span: number;
 }
@@ -228,11 +242,17 @@ interface Row {
   cellOpen: boolean;
 }
 
-/** A piece of the page that is out of sight, with all it holds. */
-interface Gone {
+/** An element that is open, with a count of what was opened inside it. No tree is kept. */
+interface Scope {
   name: string;
   /** Elements of that name open inside it, itself counted. */
   depth: number;
+  /** Other elements open inside it, by name. */
+  inner: Map<string, number>;
+}
+
+/** A piece of the page that is out of sight, with all it holds. */
+interface Gone extends Scope {
   /** A row and a cell open inside it, at the table depth it has reached. */
   row: boolean;
   cell: boolean;
@@ -241,16 +261,49 @@ interface Gone {
 }
 
 /** An element that states a text size: nothing, or a size again inside one of nothing. */
-interface Sized {
-  name: string;
-  depth: number;
+interface Sized extends Scope {
   nothing: boolean;
   /** How many frames were open when it began: it ends with its cell at the latest. */
   frame: number;
 }
 
-const newFrame = (span = 1): Frame => ({ lines: [], open: "", gap: false, soft: false, lead: false, bullet: false, span });
+const newFrame = (span = 1): Frame => ({ lines: [], open: "", gap: false, soft: false, lead: false, bullet: false, keep: false, span });
 const isCell = (name: string) => name === "td" || name === "th";
+const startsBlock = (name: string) => PARAGRAPH.has(name) || BLOCK.has(name) || name === "table" || name === "blockquote" || name === "li";
+
+/** Whether a start tag ends an open element, as a browser ends it: a paragraph at the next block, a list item at the next item of its list. */
+function endsAtStart(scope: Scope, name: string): boolean {
+  if (scope.name === "p") {
+    return startsBlock(name);
+  }
+  return scope.name === "li" && name === "li" && !scope.inner.get("ul") && !scope.inner.get("ol");
+}
+
+function opened(scope: Scope, name: string): void {
+  if (name === scope.name) {
+    scope.depth += 1;
+  } else {
+    scope.inner.set(name, (scope.inner.get(name) ?? 0) + 1);
+  }
+}
+
+/**
+ * What a closing tag met inside an open element closes: the element itself
+ * ("own"), something opened inside it ("inner"), or something that was open
+ * around it ("outer"), which ends the element too.
+ */
+function closed(scope: Scope, name: string): "own" | "inner" | "outer" {
+  if (name === scope.name) {
+    scope.depth -= 1;
+    return scope.depth > 0 ? "inner" : "own";
+  }
+  const open = scope.inner.get(name) ?? 0;
+  if (open > 0) {
+    scope.inner.set(name, open - 1);
+    return "inner";
+  }
+  return "outer";
+}
 
 /** HTML as its lines, and how many of them are rows of cells. */
 function layOut(html: string): { text: string; rows: number } {
@@ -259,6 +312,10 @@ function layOut(html: string): { text: string; rows: number } {
   const sized: Sized[] = [];
   const quotes = { '"': true, "'": true };
   let gone: Gone | null = null;
+  /** The element whose text is set as written, line breaks kept. */
+  let asWritten: Scope | null = null;
+  /** A paragraph is open: its closing tag closes something. */
+  let paragraph = false;
   let quote = 0;
   let tables = 0;
   let rowLines = 0;
@@ -281,10 +338,14 @@ function layOut(html: string): { text: string; rows: number } {
   /** Ends the open line; true when it held words. */
   const flush = (): boolean => {
     const frame = top();
+    const keep = frame.keep;
+    frame.keep = false;
     if (!frame.open) {
       return false;
     }
-    const text = frame.open.replace(NO_WIDTH, "").replace(/\s+/g, " ").trim();
+    const bare = frame.open.replace(NO_WIDTH, "");
+    // Text set as written keeps its gaps: columns made with spaces stay columns.
+    const text = (keep ? bare.replace(/\t/g, "    ").replace(/[^\S ]/g, " ") : bare.replace(/\s+/g, " ")).trim();
     frame.open = "";
     if (!text) {
       return false;
@@ -302,6 +363,16 @@ function layOut(html: string): { text: string; rows: number } {
   const blank = () => {
     endLine();
     top().gap = true;
+  };
+  /** A line break inside a block: the next line follows this one. A second break, or one after a block, is a blank line. */
+  const lineBreak = () => {
+    const frame = top();
+    if (flush()) {
+      frame.soft = true;
+    } else {
+      frame.soft = false;
+      frame.gap = true;
+    }
   };
 
   const closeCell = () => {
@@ -331,7 +402,8 @@ function layOut(html: string): { text: string; rows: number } {
     const parent = top();
     endLine();
     // A cell of a row is one block of a line or two; the first cell with words is one line (a label, or a value like the others).
-    const oneBlock = (cell: Frame) => cell.lines.length <= MAX_CELL_LINES && cell.lines.every((line, index) => !line.blank && (index === 0 || line.soft));
+    // A cell that holds a table of its own is layout, however small that table is.
+    const oneBlock = (cell: Frame) => cell.lines.length <= MAX_CELL_LINES && cell.lines.every((line, index) => !line.blank && !line.row && (index === 0 || line.soft));
     if (filled.length >= 2 && filled[0]!.lines.length === 1 && filled.every(oneBlock)) {
       // A row of cells: one line. An empty cell keeps its place, and a cell that spans columns takes theirs.
       const cells: string[] = [];
@@ -344,6 +416,7 @@ function layOut(html: string): { text: string; rows: number } {
         depth = Math.max(depth, cell.lines[0]?.quote ?? 0);
       }
       push(parent, cells.join(" | ").replace(/\s+/g, " ").trim(), depth);
+      parent.lines[parent.lines.length - 1]!.row = true;
       rowLines += 1;
       return;
     }
@@ -358,6 +431,9 @@ function layOut(html: string): { text: string; rows: number } {
           parent.gap = true;
         } else {
           push(parent, line.text, line.quote);
+          if (line.row) {
+            parent.lines[parent.lines.length - 1]!.row = true;
+          }
         }
       }
       if (block || cell.gap) {
@@ -372,7 +448,22 @@ function layOut(html: string): { text: string; rows: number } {
     const lt = html.indexOf("<", at);
     const textEnd = lt === -1 ? length : lt;
     if (textEnd > at && !gone && !muted()) {
-      top().open += decodeEntities(html.slice(at, textEnd));
+      const words = decodeEntities(html.slice(at, textEnd));
+      if (asWritten && words.includes("\n")) {
+        // Text set as written: each line of the source is a line.
+        for (const [index, line] of words.split(/\r?\n/).entries()) {
+          if (index > 0) {
+            lineBreak();
+          }
+          top().open += line;
+          top().keep = true;
+        }
+      } else {
+        top().open += words;
+        if (asWritten) {
+          top().keep = true;
+        }
+      }
     }
     if (lt === -1) {
       break;
@@ -382,8 +473,9 @@ function layOut(html: string): { text: string; rows: number } {
       // A comment, a doctype or a processing instruction.
       if (html.startsWith("<!--", lt)) {
         const empty = html.startsWith("<!-->", lt) ? 5 : html.startsWith("<!--->", lt) ? 6 : 0;
-        const close = empty ? -1 : html.indexOf("-->", lt + 4);
-        at = empty ? lt + empty : close === -1 ? length : close + 3;
+        COMMENT_END.lastIndex = lt + 4;
+        const close = empty ? null : COMMENT_END.exec(html);
+        at = empty ? lt + empty : close ? close.index + close[0].length : length;
       } else {
         const close = html.indexOf(">", lt);
         at = close === -1 ? length : close + 1;
@@ -410,20 +502,22 @@ function layOut(html: string): { text: string; rows: number } {
       continue;
     }
     const empty = VOID.has(name);
-    const hides = tag.hidden || (tag.style !== "" && HIDING.test(tag.style));
+    const hides = tag.hidden || (tag.style !== "" && (HIDING.test(tag.style) || (NO_HEIGHT.test(tag.style) && CLIPPED.test(tag.style))));
 
     if (gone) {
       if (empty) {
         continue;
       }
-      // A piece out of sight ends with its own closing tag, or with the cell, row or table it stands in.
+      // A piece out of sight ends as a browser ends it: with its own closing
+      // tag; with the closing tag of something that was open around it; where
+      // a paragraph, a list item, a cell or a row left open ends; or with the
+      // cell, row or table it stands in. The tag that ends it is then handled
+      // as any other.
       const level = gone.outer.length === 0;
       if (!closing) {
-        const implied = level && ((isCell(gone.name) && (isCell(name) || name === "tr")) || (gone.name === "tr" && name === "tr"));
+        const implied = (level && ((isCell(gone.name) && (isCell(name) || name === "tr")) || (gone.name === "tr" && name === "tr"))) || endsAtStart(gone, name);
         if (!implied) {
-          if (name === gone.name) {
-            gone.depth += 1;
-          }
+          opened(gone, name);
           if (name === "table") {
             gone.outer.push([gone.row, gone.cell]);
             gone.row = false;
@@ -437,11 +531,16 @@ function layOut(html: string): { text: string; rows: number } {
           }
           continue;
         }
-      } else if (name === gone.name && (gone.depth -= 1) > 0) {
-        continue;
-      } else if (name === gone.name) {
-        gone = null;
-        continue;
+      } else if (name === gone.name || !(name === "table" || name === "tr" || isCell(name))) {
+        const what = closed(gone, name);
+        if (what === "own") {
+          gone = null;
+          continue;
+        }
+        // A closing tag with nothing to close ends nothing: "</p>" where no paragraph is open.
+        if (what === "inner" || (name === "p" && !paragraph)) {
+          continue;
+        }
       } else if (name === "table" && !level) {
         [gone.row, gone.cell] = gone.outer.pop()!;
         continue;
@@ -452,35 +551,47 @@ function layOut(html: string): { text: string; rows: number } {
       } else if (isCell(name) && gone.cell) {
         gone.cell = false;
         continue;
-      } else if (name !== "table" && name !== "tr" && !isCell(name)) {
-        continue;
       }
       gone = null;
     }
     if (hides && !closing) {
       if (!empty) {
-        gone = { name, depth: 1, row: false, cell: false, outer: [] };
+        gone = { name, depth: 1, inner: new Map(), row: false, cell: false, outer: [] };
       }
       continue;
     }
 
     if (closing) {
-      const last = sized[sized.length - 1];
-      if (last && last.name === name && (last.depth -= 1) === 0) {
+      // A closing tag ends the text sizes stated inside what it closes.
+      for (let last = sized[sized.length - 1]; last; last = sized[sized.length - 1]) {
+        const what = closed(last, name);
+        if (what === "inner" || (what === "outer" && name === "p" && !paragraph)) {
+          break;
+        }
         sized.pop();
+        if (what === "own") {
+          break;
+        }
       }
+    }
+    if (asWritten) {
+      if (closing && closed(asWritten, name) !== "inner") {
+        asWritten = null;
+      } else if (!closing && !empty) {
+        opened(asWritten, name);
+      }
+    } else if (!closing && !empty && (name === "pre" || (tag.style !== "" && AS_WRITTEN.test(tag.style)))) {
+      asWritten = { name, depth: 1, inner: new Map() };
+    }
+    if (name === "p") {
+      paragraph = !closing;
+    } else if (!closing && startsBlock(name)) {
+      paragraph = false;
     }
 
     const structured = tables > 0 && tables <= MAX_TABLE_DEPTH;
     if (name === "br") {
-      const frame = top();
-      if (flush()) {
-        frame.soft = true;
-      } else {
-        // A second break, or a break after a block: a blank line.
-        frame.soft = false;
-        frame.gap = true;
-      }
+      lineBreak();
     } else if (name === "table") {
       if (closing) {
         if (tables > 0) {
@@ -540,13 +651,19 @@ function layOut(html: string): { text: string; rows: number } {
     }
 
     if (!closing && !empty) {
+      // A paragraph that states a size ends at the next block, as any paragraph does.
+      while (sized.length > 0 && endsAtStart(sized[sized.length - 1]!, name)) {
+        sized.pop();
+      }
       const size = tag.style === "" ? null : FONT_SIZE.exec(tag.style);
-      const nothing = size ? NOTHING.test(size[1]!.trim()) : muted();
+      // Inside a wrapper of size nothing, an element that states a size is seen
+      // again; so is one that a class, or a font element, may size.
+      const nothing = size ? NOTHING.test(size[1]!.trim()) : muted() && !tag.classed && name !== "font";
       const last = sized[sized.length - 1];
       if (nothing !== muted()) {
-        sized.push({ name, depth: 1, nothing, frame: frames.length });
-      } else if (last && last.name === name) {
-        last.depth += 1;
+        sized.push({ name, depth: 1, inner: new Map(), nothing, frame: frames.length });
+      } else if (last) {
+        opened(last, name);
       }
     }
   }

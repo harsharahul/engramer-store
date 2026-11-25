@@ -105,12 +105,12 @@ describe("label rules on the eval set", () => {
     expect(precise).toEqual({ dates: true, amounts: true });
   });
 
-  it("on the structure cases the label rules are wrong no more often than they were: a ceiling that only comes down", async () => {
+  it("on the structure cases the label rules give fourteen wrong readings, until they read rows and cells", async () => {
     // The text keeps rows and cells, and the rules still read them as loose
     // words: a header row claims the dates under it, the second clock of a
     // row takes the first one's meaning, a quoted reply's rows are read, a
-    // footer's offer is a date. The count is pinned so that it can fall and
-    // never rise; it goes when the nine-in-ten bar covers these cases too.
+    // footer's offer is a date. The count is pinned, so that any change to
+    // it is seen; it goes when the nine-in-ten bar covers these cases too.
     const WRONG_ON_STRUCTURE = 14;
     const all = await scoreReader(
       EVAL_CASES.filter((c) => c.id.startsWith("s-")),

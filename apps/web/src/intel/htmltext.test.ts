@@ -120,6 +120,54 @@ describe("htmlToText: an HTML mail as its lines, rows and cells", () => {
     expect(htmlToText(`<table><tr><td><div style="font-size:0">gone</td><td>Seen</td><td>too</td></tr></table>`)).toBe("| Seen | too");
   });
 
+  it("a hidden piece left open ends where a browser ends it, and the words after it are read", () => {
+    // The closing tag of what stands around it ends it.
+    expect(htmlToText(`<div><span style="display:none">Preview words</div><p>Your total is £20.00, due 3 March 2027.</p><p>Thanks</p>`)).toBe(
+      lines("Your total is £20.00, due 3 March 2027.", "", "Thanks"),
+    );
+    expect(htmlToText(`<p><span style="display:none">Preview words</p><p>Your total is £20.00.</p>`)).toBe("Your total is £20.00.");
+    // A hidden paragraph ends where the next block starts, a hidden list item where the next item starts.
+    expect(htmlToText(`<p style="display:none">Preview words<p>Dear Alex, your total is £20.00.</p><p>Thanks</p>`)).toBe(lines("Dear Alex, your total is £20.00.", "", "Thanks"));
+    expect(htmlToText(`<ul><li style="display:none">x<li>Visible one<li>Visible two</ul><p>After</p>`)).toBe(lines("- Visible one", "- Visible two", "", "After"));
+    // The same for a paragraph of size nothing.
+    expect(htmlToText(`<p style="font-size:0;line-height:0">&nbsp;<div>Your total is £20.00.</div>`)).toBe("Your total is £20.00.");
+    expect(htmlToText(`<div><span style="font-size:0">Preview <b>words</div><p>Seen.</p>`)).toBe("Seen.");
+    // What is hidden and closed stays hidden with all it holds.
+    expect(htmlToText(`<div style="display:none"><p>one</p><ul><li>two<li>three</ul><p>four</div><p>Seen.</p>`)).toBe("Seen.");
+    expect(
+      mailBodyText({
+        text: "Order 1234\nIt will arrive on 3 March 2027.",
+        html: `<table><tr><td>Order</td><td>1234</td></tr></table><div><span style="display:none">Preview</div><p>It will arrive on 3 March 2027.</p>`,
+      }),
+    ).toBe(lines("Order | 1234", "", "It will arrive on 3 March 2027."));
+  });
+
+  it("shows what only a careless rule would hide", () => {
+    // A comment closed the other way a browser accepts.
+    expect(htmlToText("<p>Before</p><!-- note --!><p>After</p>")).toBe(lines("Before", "", "After"));
+    // Inside a wrapper of size nothing, text that a class or a font element may size.
+    expect(htmlToText(`<table><tr><td style="font-size:0"><div class="column"><p class="words">Hello</p></div></td></tr></table>`)).toBe("Hello");
+    expect(htmlToText(`<div style="font-size:0"><font size="2">Hello</font></div>`)).toBe("Hello");
+    // A height of nothing hides only what cannot overflow it.
+    expect(htmlToText(`<div style="max-height:0">Overflowing words</div>`)).toBe("Overflowing words");
+  });
+
+  it("text set as it is written keeps its lines and its gaps", () => {
+    expect(htmlToText("<pre>Booking reference: ABC123\nCheck-in: 12 March 2027\nCheck-out: 15 March 2027</pre>")).toBe(
+      lines("Booking reference: ABC123", "Check-in: 12 March 2027", "Check-out: 15 March 2027"),
+    );
+    expect(htmlToText(`<div style="white-space: pre-wrap">Dear Alex,\n\nYour total is £20.00.\nThanks</div><p>After   words.</p>`)).toBe(
+      lines("Dear Alex,", "", "Your total is £20.00.", "Thanks", "", "After words."),
+    );
+    expect(htmlToText("<pre>Date         Amount\n3 May 2027   £40.00\n</pre>")).toBe(lines("Date         Amount", "3 May 2027   £40.00"));
+  });
+
+  it("a table inside a cell is no part of the row around it", () => {
+    expect(htmlToText("<table><tr><td>Your order</td><td><table><tr><td>Total</td><td>&pound;429.00</td></tr></table></td></tr></table>")).toBe(
+      lines("Your order", "", "Total | £429.00"),
+    );
+  });
+
   it("head, style, script and comments give nothing, and a head left open does not take the body with it", () => {
     expect(htmlToText("<html><head><title>T</title><style>p{color:red}</style></head><body><script>var a = '<p>no</p>';</script><!-- <p>no</p> --><p>Yes.</p></body></html>")).toBe("Yes.");
     expect(htmlToText("<html><head><title>T</title><style>a{}</style><body><p>Yes.</p></body></html>")).toBe("Yes.");

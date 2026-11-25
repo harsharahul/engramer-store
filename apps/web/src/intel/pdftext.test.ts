@@ -146,6 +146,39 @@ describe("pdfLines on its own", () => {
     expect(pdfItemsOf({ items: [{ type: "beginMarkedContent" }, { str: "x", transform: [10, 0, 0, 10, 5, 7], width: 5, height: 10 }] })).toEqual([{ str: "x", x: 5, y: 7, width: 5, height: 10 }]);
   });
 
+  it("a tall piece does not pull the lines under it into its row, and a small raised sign stays in its own", () => {
+    const tall = (str: string, x: number, y: number, height: number): PdfItem => ({ str, x, y, width: str.length * height * 0.5, height });
+    expect(pdfLines([tall("INVOICE", 0, 750, 48), at("Invoice date: 3 Feb 2027", 0, 728)])).toBe("INVOICE\nInvoice date: 3 Feb 2027");
+    // A stamp set across the page.
+    expect(pdfLines([tall("PAID", 200, 500, 200), at("Line one 1 March 2027", 0, 470), at("Line two", 0, 458)])).toBe("PAID\nLine one 1 March 2027\nLine two");
+    expect(pdfLines([at("Total", 0, 100), { str: "£", x: 60, y: 103, width: 3, height: 6 }, at("429.00", 64, 100)])).toBe("Total | £429.00");
+  });
+
+  it("pieces that lie over each other are parted by a space, never glued", () => {
+    expect(pdfLines([at("Line one", 0, 100), at("COPY", 10, 100)])).toBe("Line one COPY");
+  });
+
+  it("slanted text is upright text; only text set at an angle is put last", () => {
+    const piece = (str: string, transform: number[]) => ({ str, transform, width: str.length * 5, height: 10 });
+    const items = pdfItemsOf({ items: [piece("Due date:", [10, 0, 0, 10, 0, 100]), piece("12 March 2027", [10, 0, 2.5, 10, 50, 100]), piece("Printed sideways", [0, 10, -10, 0, 300, 50])] });
+    expect(pdfLines(items)).toBe("Due date: 12 March 2027\n\nPrinted sideways");
+  });
+
+  it("a capital at a line's end is a value, not a joining word", () => {
+    expect(pdfLines([at("Grade: A", 0, 100), at("Next review: 12 March 2027", 0, 86)])).toBe("Grade: A\nNext review: 12 March 2027");
+    expect(pdfLines([at("State: OR", 0, 100), at("Boarding 10:30", 0, 86)])).toBe("State: OR\nBoarding 10:30");
+  });
+
+  it("a piece that states no width is as wide as its words, so the next word is a word and not a cell", () => {
+    const items = pdfItemsOf({ items: [{ str: "Total", transform: [10, 0, 0, 10, 0, 100], width: 0, height: 10 }, { str: "£429.00", transform: [10, 0, 0, 10, 30, 100], width: 35, height: 10 }] });
+    expect(pdfLines(items)).toBe("Total £429.00");
+  });
+
+  it("reads a row of a hundred and sixty thousand pieces", () => {
+    const row = Array.from({ length: 160_000 }, (_, i) => at("w", i * 8, 100));
+    expect(pdfLines(row).length).toBe(160_000 * 2 - 1);
+  });
+
   it("reads five thousand pieces in well under a tenth of a second", () => {
     const many = Array.from({ length: 5000 }, (_, i) => at(`W${i}`, (i % 20) * 30, 10_000 - Math.floor(i / 20) * 14));
     const started = performance.now();

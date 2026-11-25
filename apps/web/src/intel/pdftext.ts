@@ -37,10 +37,13 @@ export function pdfItemsOf(content: { items: readonly unknown[] }): PdfItem[] {
     if (typeof item.str !== "string" || !Array.isArray(item.transform) || item.transform.length < 6) {
       continue;
     }
-    const [a, b, c, d, x, y] = item.transform as number[];
-    const height = Number(item.height) || Math.hypot(c ?? 0, d ?? 0) || Math.hypot(a ?? 0, b ?? 0);
-    const rotated = Math.abs(b ?? 0) > 0.01 || Math.abs(c ?? 0) > 0.01;
-    items.push({ str: item.str, x: x ?? Number.NaN, y: y ?? Number.NaN, width: Number(item.width) || 0, height, ...(rotated ? { rotated: true as const } : {}) });
+    const [a = 0, b = 0, c = 0, d = 0, x = Number.NaN, y = Number.NaN] = item.transform as number[];
+    const height = Number(item.height) || Math.hypot(c, d) || Math.hypot(a, b);
+    // Only the direction of the baseline says that text is set at an angle: slanted text is upright.
+    const rotated = a <= 0 || Math.abs(b) > 0.1 * Math.abs(a);
+    // A piece that states no width is taken to be as wide as its characters.
+    const width = Number(item.width) || item.str.length * height * 0.5;
+    items.push({ str: item.str, x, y, width, height, ...(rotated ? { rotated: true as const } : {}) });
   }
   return items;
 }
@@ -51,8 +54,8 @@ const CELL_GAP = 2;
 const SPACE_GAP = 0.25;
 /** Two baselines further apart than this many line heights are two blocks. */
 const BLOCK_GAP = 1.8;
-/** A word at a line's end that the next line must go on from. */
-const GOES_ON = /\b(?:a|an|the|of|on|at|by|to|in|for|and|or|with|from|your|our|until|before|after)$/i;
+/** A word at a line's end that the next line must go on from. In small letters only: "Grade: A" and "State: OR" end with a value. */
+const GOES_ON = /\b(?:a|an|the|of|on|at|by|to|in|for|and|or|with|from|your|our|until|before|after)$/;
 
 interface Line {
   y: number;
@@ -72,30 +75,42 @@ function characterWidth(a: PdfItem, b: PdfItem): number {
 /** One line from the pieces on its baseline. */
 function lineOf(parts: PdfItem[]): Line {
   parts.sort((a, b) => a.x - b.x);
-  let text = "";
+  const pieces: string[] = [];
   let cells = 1;
+  let height = 0;
   let last: PdfItem | undefined;
+  /** How far right the line has come. */
+  let reach = 0;
   for (const part of parts) {
     if (last) {
-      const gap = part.x - (last.x + last.width);
+      const gap = part.x - reach;
       const unit = characterWidth(last, part);
       if (gap > CELL_GAP * unit) {
-        text = `${text.trimEnd()} | `;
+        pieces.push(" | ");
         cells += 1;
-      } else if (gap > SPACE_GAP * unit || /\s$/.test(last.str) || /^\s/.test(part.str)) {
-        text = `${text.trimEnd()} `;
+      } else if (gap > SPACE_GAP * unit || gap < -unit) {
+        // A small gap is a space. So is a piece that lies over the one before it: two runs, never one word.
+        pieces.push(" ");
       }
     }
-    text += last ? part.str.trimStart() : part.str.trim();
+    pieces.push(part.str);
+    height = Math.max(height, part.height);
+    reach = last ? Math.max(reach, part.x + part.width) : part.x + part.width;
     last = part;
   }
-  return {
-    y: parts[0]!.y,
-    height: Math.max(...parts.map((part) => part.height)),
-    left: parts[0]!.x,
-    cells,
-    text: text.replace(/\s+/g, " ").trim(),
-  };
+  return { y: parts[0]!.y, height, left: parts[0]!.x, cells, text: pieces.join("").replace(/\s+/g, " ").trim() };
+}
+
+/**
+ * Whether a piece stands on a row's baseline: within half a line of it. Of
+ * two very different sizes the smaller one says how far that is, so a stamp
+ * or a tall heading has no say over the lines beside it; a small raised
+ * sign still belongs to the amount it stands before.
+ */
+function onBaseline(row: { y: number; height: number }, y: number, height: number): boolean {
+  const small = Math.min(row.height, height);
+  const large = Math.max(row.height, height);
+  return Math.abs(row.y - y) <= 0.5 * (large <= 2 * small ? large : small);
 }
 
 /** Whether the page wrapped a sentence between these two lines. */
@@ -120,9 +135,8 @@ export function pdfLines(items: readonly PdfItem[]): string {
   let top: { y: number; height: number } | undefined;
   for (const item of upright) {
     const height = item.height || 10;
-    if (top && Math.abs(top.y - item.y) <= 0.5 * Math.max(top.height, height)) {
+    if (top && onBaseline(top, item.y, height)) {
       rows[rows.length - 1]!.push(item);
-      top.height = Math.max(top.height, height);
     } else {
       rows.push([item]);
       top = { y: item.y, height };

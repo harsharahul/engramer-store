@@ -78,8 +78,9 @@ export async function extractText(file: UploadSource): Promise<string | undefine
 
 /**
  * An email's searchable text: subject, sender and recipients first, so a
- * search by person or subject meets them before the body, then the plain
- * body, or the HTML body read as text when the message has no plain one.
+ * search by person or subject meets them before the body, then the body as
+ * `mailBodyText` chooses it: the plain part, or the HTML part read as text
+ * when that holds rows of cells or the plain part is a stub.
  */
 async function extractEmailText(file: UploadSource): Promise<string | undefined> {
   const record = parseEmailRecord(await file.text());
