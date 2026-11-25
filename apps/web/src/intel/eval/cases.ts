@@ -9,6 +9,7 @@
 import { AMOUNT_CASES } from "./amountcases";
 import { DISTRACTOR_CASES } from "./distractors";
 import { FORM_CASES } from "./forms";
+import { STRUCTURE_CASES } from "./structurecases";
 import { TIME_CASES } from "./timecases";
 import type { EvalCase } from "./score";
 
@@ -722,4 +723,6 @@ export const EVAL_CASES: readonly EvalCase[] = [
   ...TIME_CASES,
   // Amounts: the whole amount against its parts, the currency after the number, a label on the line above.
   ...AMOUNT_CASES,
+  // Structure: HTML mail with tables, a quoted reply and a footer; stored files with rows of cells.
+  ...STRUCTURE_CASES,
 ];

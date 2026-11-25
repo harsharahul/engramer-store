@@ -1,6 +1,7 @@
 import type { ExifSignals } from "./categorize";
 import type { UploadSource } from "../transfer";
 import { isEmailRecord, parseEmailRecord } from "../mail/kind";
+import { mailBodyText, xmlToText } from "./htmltext";
 
 const TEXT_READ_LIMIT = 512 * 1024;
 const TEXT_STORE_LIMIT = 100_000;
@@ -93,36 +94,9 @@ async function extractEmailText(file: UploadSource): Promise<string | undefined>
     ...(record.to.length > 0 ? [`To: ${record.to.join(", ")}`] : []),
     ...(record.cc.length > 0 ? [`Cc: ${record.cc.join(", ")}`] : []),
     "",
-    record.text ?? (record.html ? htmlToText(record.html) : ""),
+    mailBodyText(record),
   ];
   return lines.join("\n").slice(0, TEXT_STORE_LIMIT).trim() || undefined;
-}
-
-/** HTML read as text: head, style and script dropped, blocks on their own lines. */
-export function htmlToText(html: string): string {
-  return xmlToText(
-    html
-      .replace(/<(head|style|script|noscript|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/&nbsp;/gi, " "),
-    /<\/(?:p|div|tr|li|h[1-6]|table|blockquote)\s*>/gi,
-  );
-}
-
-/** Tags stripped, paragraph boundaries kept, entities restored. */
-function xmlToText(xml: string, paragraphEnd: RegExp): string {
-  return xml
-    .replace(paragraphEnd, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
 
 async function extractOfficeText(file: UploadSource): Promise<string | undefined> {

@@ -20,6 +20,7 @@ import { EVAL_CASES } from "../../../apps/web/src/intel/eval/cases";
 import { HELDOUT_CASES } from "../../../apps/web/src/intel/eval/heldout";
 import { hashRequest, keptAnswers, replayRunner, StaleAnswer, type SavedAnswer } from "../../../apps/web/src/intel/eval/replay";
 import { errorsByClass, factCases, kindCases, measure, scoreKinds, scoreReader, type EvalCase, type SetFigures } from "../../../apps/web/src/intel/eval/score";
+import { flatPages } from "../../../apps/web/src/intel/eval/shape";
 import { mergeFacts, type Fact } from "../../../apps/web/src/intel/facts";
 import { EMAIL_MIME } from "../../../apps/web/src/mail/kind";
 import { MODEL_READER, READER_VERSION } from "../../../apps/web/src/intel/reading";
@@ -134,10 +135,23 @@ function canonical(value: unknown): string {
   );
 }
 
+// EVAL_SHAPE=flat reads every stored file as a PDF step that keeps no lines
+// hands it over: each page one line, the cells of a row run together. It is
+// the way to measure what such a step costs; it writes no scores.
+const flat = process.env["EVAL_SHAPE"] === "flat";
+if (process.env["EVAL_SHAPE"] && !flat) {
+  throw new Error(`EVAL_SHAPE names no shape: ${process.env["EVAL_SHAPE"]}`);
+}
+const shaped = (evalCase: EvalCase): EvalCase =>
+  flat && evalCase.mime === "application/pdf" && !evalCase.raw ? { ...evalCase, text: flatPages(evalCase.text) } : evalCase;
+if (flat) {
+  process.stdout.write("shape: every stored file is read as one line per page (EVAL_SHAPE=flat)\n");
+}
+
 const SETS = [
-  { key: "first", title: "the first set", cases: EVAL_CASES, quiet: false },
+  { key: "first", title: "the first set", cases: EVAL_CASES.map(shaped), quiet: false },
   // Never printed case by case: a case that is looked at is a case that gets tuned on.
-  { key: "heldout", title: "the held-out set", cases: HELDOUT_CASES, quiet: true },
+  { key: "heldout", title: "the held-out set", cases: HELDOUT_CASES.map(shaped), quiet: true },
 ] as const;
 // EVAL_SET=first reads one set and writes no scores: the way to work on the
 // instructions without touching the held-out set.
@@ -325,8 +339,9 @@ for (const set of sets) {
     }
   }
 }
-if (oneSet) {
-  // One set says nothing about the other: no scores are written.
+if (oneSet || flat) {
+  // One set says nothing about the other, and a flat run measures a shape
+  // the app does not ship: no scores are written.
   process.exit(0);
 }
 
