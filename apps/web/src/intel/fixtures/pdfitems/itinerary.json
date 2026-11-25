@@ -1,0 +1,410 @@
+{
+ "items": [
+  {
+   "str": "Tidewater Ferries Example",
+   "transform": [
+    16,
+    0,
+    0,
+    16,
+    50,
+    782
+   ],
+   "width": 202.75,
+   "height": 16,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    746
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Booking date: 14 June 2027",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    746
+   ],
+   "width": 124.53,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    712
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Sailing",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    712
+   ],
+   "width": 32.79,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    82.79,
+    712
+   ],
+   "width": 67.21,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "Date",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    150,
+    712
+   ],
+   "width": 21.67,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    171.67,
+    712
+   ],
+   "width": 158.33,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "Departs",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    330,
+    712
+   ],
+   "width": 37.23,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    367.23,
+    712
+   ],
+   "width": 62.77,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "Arrives",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    430,
+    712
+   ],
+   "width": 34.46,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    698
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Outbound",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    698
+   ],
+   "width": 43.92,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    93.92,
+    698
+   ],
+   "width": 56.08,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "2 July 2027",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    150,
+    698
+   ],
+   "width": 51.14,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    201.14,
+    698
+   ],
+   "width": 128.86,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "07:30",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    330,
+    698
+   ],
+   "width": 25.02,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    355.02,
+    698
+   ],
+   "width": 74.98,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "10:45",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    430,
+    698
+   ],
+   "width": 25.02,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Return",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    684
+   ],
+   "width": 30.01,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    80.01,
+    684
+   ],
+   "width": 69.99,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "9 July 2027",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    150,
+    684
+   ],
+   "width": 51.14,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    201.14,
+    684
+   ],
+   "width": 128.86,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "16:00",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    330,
+    684
+   ],
+   "width": 25.02,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    355.02,
+    684
+   ],
+   "width": 74.98,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "19:15",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    430,
+    684
+   ],
+   "width": 25.02,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Total paid: GBP 186.00",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    646
+   ],
+   "width": 103.95,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    0,
+    7,
+    -7,
+    0,
+    570,
+    442
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Printed by the passenger",
+   "transform": [
+    0,
+    7,
+    -7,
+    0,
+    570,
+    442
+   ],
+   "width": 77.82,
+   "height": 7,
+   "hasEOL": false
+  }
+ ]
+}

@@ -1,0 +1,382 @@
+{
+ "items": [
+  {
+   "str": "Northline Energy Example",
+   "transform": [
+    16,
+    0,
+    0,
+    16,
+    50,
+    782
+   ],
+   "width": 199.17,
+   "height": 16,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    760
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Gas and electricity statement",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    760
+   ],
+   "width": 128.94,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Statement date: 2 November 2026",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    722
+   ],
+   "width": 152.86,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Account number: REF-48213",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    708
+   ],
+   "width": 129.5,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    672
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Description",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    672
+   ],
+   "width": 55.01,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    105.01,
+    672
+   ],
+   "width": 114.99,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "Period",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    220,
+    672
+   ],
+   "width": 31.12,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    251.12,
+    672
+   ],
+   "width": 168.88,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "Amount (GBP)",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    420,
+    672
+   ],
+   "width": 68.88,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    658
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Electricity",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    658
+   ],
+   "width": 42.78,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    92.78,
+    658
+   ],
+   "width": 127.22,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "1 Oct to 31 Oct",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    220,
+    658
+   ],
+   "width": 67.26,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    287.26,
+    658
+   ],
+   "width": 132.74,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "52.10",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    420,
+    658
+   ],
+   "width": 25.02,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Gas",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    644
+   ],
+   "width": 18.34,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    68.34,
+    644
+   ],
+   "width": 151.66,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "1 Oct to 31 Oct",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    220,
+    644
+   ],
+   "width": 67.26,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": " ",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    287.26,
+    644
+   ],
+   "width": 132.74,
+   "height": 0,
+   "hasEOL": false
+  },
+  {
+   "str": "34.25",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    420,
+    644
+   ],
+   "width": 25.02,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    606
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Total amount due: 86.35 GBP",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    606
+   ],
+   "width": 138.92,
+   "height": 10,
+   "hasEOL": false
+  },
+  {
+   "str": "",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    592
+   ],
+   "width": 0,
+   "height": 0,
+   "hasEOL": true
+  },
+  {
+   "str": "Payment due date: 23 November 2026",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    592
+   ],
+   "width": 171.76,
+   "height": 10,
+   "hasEOL": true
+  },
+  {
+   "str": "Next statement date: 2 December 2026",
+   "transform": [
+    10,
+    0,
+    0,
+    10,
+    50,
+    578
+   ],
+   "width": 174.53,
+   "height": 10,
+   "hasEOL": false
+  }
+ ]
+}

@@ -2,6 +2,7 @@ import type { ExifSignals } from "./categorize";
 import type { UploadSource } from "../transfer";
 import { isEmailRecord, parseEmailRecord } from "../mail/kind";
 import { mailBodyText, xmlToText } from "./htmltext";
+import { pdfItemsOf, pdfLines } from "./pdftext";
 
 const TEXT_READ_LIMIT = 512 * 1024;
 const TEXT_STORE_LIMIT = 100_000;
@@ -141,18 +142,16 @@ async function extractPdfText(file: UploadSource): Promise<string | undefined> {
   for (let i = 1; i <= pages && total < TEXT_STORE_LIMIT; i++) {
     const page = await doc.getPage(i);
     const content = await page.getTextContent();
-    const pageText = content.items
-      .map((item) => ("str" in item ? item.str : ""))
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
+    // The page as a person sees it: lines, the cells of a row, blocks.
+    const pageText = pdfLines(pdfItemsOf(content));
     if (pageText) {
       parts.push(pageText);
       total += pageText.length;
     }
   }
   await loadingTask.destroy();
-  const text = parts.join("\n").slice(0, TEXT_STORE_LIMIT);
+  // A blank line parts two pages, as it parts two blocks of one page.
+  const text = parts.join("\n\n").slice(0, TEXT_STORE_LIMIT);
   return text || undefined;
 }
 
