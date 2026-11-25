@@ -32,6 +32,7 @@ import { harvestFacts, labelledFacts, structuralDatedFacts } from "./labels";
 import { loadLexicon } from "./lexicon";
 import { mrzFacts } from "./mrz";
 import { structuredDataFacts } from "./reservation";
+import { withoutZones, zonesOf } from "./zones";
 import { icsFacts } from "./icsread";
 
 const PREF_KEY = "engram-facts";
@@ -111,7 +112,12 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
     }
   }
 
-  const text = input.text ?? "";
+  // In a message, what it quotes and its footer are not its own words, and
+  // no rule reads them. A message it forwards is read (a booking forwarded
+  // to oneself). The places of the text stay true: the parts are blanked.
+  const whole = input.text ?? "";
+  const zones = input.writtenAt !== undefined && whole ? zonesOf(whole) : undefined;
+  const text = zones ? withoutZones(whole, [...zones.quoted, ...(zones.footer ? [zones.footer] : [])]) : whole;
   if (text) {
     found.push(...mrzFacts(text));
     // What a form line's label means, from the shipped table. With no table

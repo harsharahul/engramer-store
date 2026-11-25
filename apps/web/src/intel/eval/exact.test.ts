@@ -104,12 +104,12 @@ describe("label rules on the eval set", () => {
     expect(precise).toEqual({ dates: true, amounts: true });
   });
 
-  it("on the structure cases the label rules give five wrong readings: a quoted reply, two footers and a price list", async () => {
-    // Tables are read by their rows and headers. What is left: the rows of a
-    // quoted reply (two), an offer in a footer (two), and the day a price
-    // list is valid until. The count is pinned, so that any change to it is
-    // seen.
-    const WRONG_ON_STRUCTURE = 5;
+  it("on the structure cases the label rules give one wrong reading: the day a price list is valid until", async () => {
+    // Tables are read by their rows and headers; a quoted reply and a footer
+    // are not read. What is left is no matter of structure: "Prices valid
+    // until" reads as a document's expiry. The count is pinned, so that any
+    // change to it is seen.
+    const WRONG_ON_STRUCTURE = 1;
     const all = await scoreReader(
       EVAL_CASES.filter((c) => c.id.startsWith("s-")),
       labelReadings,

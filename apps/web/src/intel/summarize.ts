@@ -22,6 +22,7 @@ import { settledNowhere } from "./labels";
 import { loadLexicon } from "./lexicon";
 import { DOCUMENT_KINDS, documentKindProperty } from "./modelfacts";
 import { headChunk } from "./window";
+import { withoutZones, zonesOf } from "./zones";
 
 export const SUMMARY_MAX = 240;
 /** Below this there is nothing to summarize. */
@@ -312,13 +313,17 @@ async function summaryOf(input: SummaryInput, run: Runner): Promise<Summary | nu
 async function judged(input: SummaryInput, document: DocumentKind, run: Runner): Promise<Fact[]> {
   const lexicon = await loadLexicon();
   const context = input.message ? { writtenAt: input.message.writtenAt } : undefined;
-  const candidates = spotCandidates(input.text, context, {
+  // In a message, nothing is asked about what it quotes or about its
+  // footer: those parts are blanked before the dates and amounts are found.
+  const zones = input.message ? zonesOf(input.text) : undefined;
+  const own = zones ? withoutZones(input.text, [...zones.quoted, ...(zones.footer ? [zones.footer] : [])]) : input.text;
+  const candidates = spotCandidates(own, context, {
     ...(input.keptAt !== undefined ? { keptAt: input.keptAt } : {}),
     ...alreadyRead(input.known ?? []),
     // The date a form line's label says needs no reminder ("Statement
     // date: ...") is not put to the model either, and neither is an amount
     // whose label says it is a part of the bill.
-    ...(lexicon ? { skip: settledNowhere(input.text, lexicon, context), lexicon } : {}),
+    ...(lexicon ? { skip: settledNowhere(own, lexicon, context), lexicon } : {}),
   });
   if (candidates.length === 0) {
     return [];

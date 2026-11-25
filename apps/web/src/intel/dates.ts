@@ -16,6 +16,8 @@
  * result back a day for anyone west of Greenwich.
  */
 
+import { withoutZones, zonesOf } from "./zones";
+
 export type DateOrder = "mdy" | "dmy" | "ymd";
 
 export interface ParsedDate {
@@ -278,14 +280,6 @@ const DONE_AFTER = /^[^.!?\n]*\balready\b/i;
 const WEEKDAY_THE_DAY = new RegExp(String.raw`\b${WEEKDAY_NAME}\s+the\s+(\d{1,2})(?:st|nd|rd|th)\b`, "gi");
 /** How far ahead "Saturday the 5th" is looked for. */
 const WEEKDAY_THE_DAY_REACH = 42;
-/** A reply's quoted message starts here: "On Mon, 9 Nov 2026, Alex wrote:". */
-const QUOTE_HEADER = /^On\s.{1,200}\bwrote:\s*$/im;
-/** A forward's separator line, as mail programs write it. */
-const FORWARD_LINE = /^[ \t]*[-_]*[ \t]*(?:forwarded message|original message|begin forwarded message:)/im;
-/** A forwarded message starts at a "From:" line with its "Sent:" or "Date:" line close below. */
-const FORWARD_HEADER =
-  /^\*?From:\*?[^\n]*\n(?:[^\n]*\n){0,3}?\*?(?:Sent|Date):|^\*?(?:Sent|Date):\*?[^\n]*\n(?:[^\n]*\n){0,3}?\*?From:/im;
-
 /** The UTC day a number of days after a moment, as YYYY-MM-DD. */
 function dayAfter(writtenAt: number, days: number): string {
   const written = new Date(writtenAt);
@@ -302,12 +296,8 @@ function dayAfter(writtenAt: number, days: number): string {
  * line that begins with ">" is never read.
  */
 export function findRelativeDays(text: string, writtenAt: number): { at: number; end: number; iso: string; relative: true }[] {
-  const cut = Math.min(
-    ...[QUOTE_HEADER, FORWARD_LINE, FORWARD_HEADER, /$(?![\s\S])/]
-      .map((form) => form.exec(text)?.index)
-      .filter((at): at is number => at !== undefined),
-  );
-  const own = text.slice(0, cut).replace(/^>[^\n]*/gm, (quoted) => " ".repeat(quoted.length));
+  const zones = zonesOf(text);
+  const own = withoutZones(text, [...zones.quoted, ...(zones.forwarded ? [zones.forwarded] : [])]);
   const today = new Date(writtenAt).getUTCDay();
   const ahead = (name: string) => (DAY_NAMES.indexOf(name.toLowerCase()) - today + 7) % 7;
   const days: { at: number; end: number; iso: string; relative: true }[] = [];
