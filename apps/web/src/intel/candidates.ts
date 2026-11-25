@@ -11,6 +11,7 @@
 import { findDates, findRelativeDays, findTimes, type DateContext, type FoundDate } from "./dates";
 import { amountLines, clockLineTime, SUM_LINE } from "./labels";
 import type { Lexicon } from "./lexicon";
+import { tableBlocks } from "./tables";
 
 export interface Candidate {
   /** "d1".."d10" for dates, "a1".."a6" for amounts: the name a reader answers by. */
@@ -65,6 +66,27 @@ function sentencesOf(text: string, whole: readonly Span[]): Span[] {
   }
   spans.push({ at: start, end: text.length });
   return spans.filter((span) => span.end > span.at);
+}
+
+/**
+ * For a place in a row of a table that has a header: the row, each cell
+ * named by its column ("Date: 3 March 2027 | Amount: £8.50"). A row alone
+ * says what its cells hold; only the header says what they are.
+ */
+function rowsUnderHeaders(text: string): (at: number) => string | undefined {
+  const rows: { at: number; end: number; words: string }[] = [];
+  for (const block of /\||\t| {3}/.test(text) ? tableBlocks(text) : []) {
+    for (const row of block.header ? block.rows : []) {
+      const words = row.flatMap((cell, column) => {
+        const name = block.header![column]?.text;
+        return cell.text === "" ? [] : [name ? `${name}: ${cell.text}` : cell.text];
+      });
+      if (words.length > 0) {
+        rows.push({ at: row[0]!.at, end: row[row.length - 1]!.end, words: words.join(" | ").slice(0, SENTENCE_MAX) });
+      }
+    }
+  }
+  return (at) => rows.find((row) => at >= row.at && at < row.end)?.words;
 }
 
 /** The words of a sentence around one place in it, kept short. */
@@ -224,6 +246,7 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
     return [];
   }
   const sentences = sentencesOf(text, found);
+  const rowWords = rowsUnderHeaders(text);
   // Spans are in order, so each place is found by walking forward once.
   let cursor = 0;
   const sentenceAt = (at: number): Span => {
@@ -306,7 +329,7 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
       continue;
     }
     const printed = text.slice(hit.at, hit.end);
-    const sentence = shortened(text, sentenceAt(hit.at), hit.at, hit.end);
+    const sentence = rowWords(hit.at) ?? shortened(text, sentenceAt(hit.at), hit.at, hit.end);
     // The nearest clocks, then back in the order they stand.
     const clocks = (clocksOf.get(index) ?? [])
       .map((clock, order) => ({ ...clock, order }))
@@ -348,7 +371,7 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
       value: amount.value,
       unit: amount.unit,
       printed,
-      sentence: shortened(text, sentenceAt(amount.at), amount.at, amount.at + printed.length),
+      sentence: rowWords(amount.at) ?? shortened(text, sentenceAt(amount.at), amount.at, amount.at + printed.length),
     });
   }
   return candidates;

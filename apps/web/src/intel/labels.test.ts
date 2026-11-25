@@ -1119,3 +1119,95 @@ describe("the whole amount of a document, by its label", () => {
     expect(bare("Fare: £33.00\nTotal paid: £27.50")).toEqual([]);
   });
 });
+
+describe("a table read by its rows, each cell under the header of its column", () => {
+  const table = lexiconFrom(shipped.dates, shipped.amounts);
+  const lines = (...text: string[]) => text.join("\n");
+  // The two label passes, as a scan runs them: the word rules, then the form lines.
+  const read = (text: string, writtenAt?: number) => {
+    const typed = labelledFacts(text, writtenAt, table);
+    return [...typed, ...structuralDatedFacts(text, new Set(typed.map((fact) => fact.value)), { lexicon: table, ...(writtenAt !== undefined ? { writtenAt } : {}) })];
+  };
+  const dated = (text: string) =>
+    read(text)
+      .filter((fact) => fact.kind !== "amount" && fact.kind !== "identifier")
+      .map((fact) => [fact.kind, fact.value, fact.time, subjectOf(fact)?.role])
+      .sort();
+  const whole = (text: string) => read(text).filter((fact) => fact.kind === "amount").map((fact) => [fact.value, fact.unit, fact.sum, fact.label]);
+
+  it("a timetable: each clock is a moment on its row's day, by its column; the header row gives nothing", () => {
+    expect(dated(lines("Tidewater Ferries Example", "", "Sailing | Date | Departs | Arrives", "Outbound | 2 July 2027 | 07:30 | 10:45", "Return | 9 July 2027 | 16:00 | 19:15"))).toEqual([
+      ["event", "2027-07-02", "07:30", "depart"],
+      ["event", "2027-07-02", "10:45", "arrive"],
+      ["event", "2027-07-09", "16:00", "depart"],
+      ["event", "2027-07-09", "19:15", "arrive"],
+    ]);
+  });
+
+  it("a stay: the day under Check-in and the day under Check-out, each once, with the clock its own cell states", () => {
+    expect(dated(lines("Check-in | Check-out | Nights", "11 Nov 2027 | 14 Nov 2027 | 3"))).toEqual([
+      ["event", "2027-11-11", undefined, "check-in"],
+      ["event", "2027-11-14", undefined, "check-out"],
+    ]);
+    expect(dated(lines("Check-in | Check-out | Nights", "Fri 12 March 2027, from 15:00 | Mon 15 March 2027, by 11:00 | 3"))).toEqual([
+      ["event", "2027-03-12", "15:00", "check-in"],
+      ["event", "2027-03-15", "11:00", "check-out"],
+    ]);
+  });
+
+  it("a header row is never a label for the line under it", () => {
+    // Before, Departs and Arrives both took the first date of the next line.
+    expect(dated(lines("Departs | Arrives", "2 July 2027 07:30 | 2 July 2027 10:45", "9 July 2027 16:00 | 9 July 2027 19:15"))).toEqual([
+      ["event", "2027-07-02", "07:30", "depart"],
+      ["event", "2027-07-02", "10:45", "arrive"],
+      ["event", "2027-07-09", "16:00", "depart"],
+      ["event", "2027-07-09", "19:15", "arrive"],
+    ]);
+  });
+
+  it("a day and one clock in a row are one moment, whatever the columns are called", () => {
+    expect(dated(lines("Spring course timetable", "Date | Time | Room", "Mon 1 Feb 2027 | 10:00 | Room 4", "Mon 8 Feb 2027 | 14:00 | Room 7"))).toEqual([
+      ["event", "2027-02-01", "10:00", undefined],
+      ["event", "2027-02-08", "14:00", undefined],
+    ]);
+  });
+
+  it("labels and values in two cells are form lines: the table types them or says they are nobody's business", () => {
+    expect(dated(lines("Statement date | 2 November 2026", "Account | REF-48213", "Payment due | 23 November 2026"))).toEqual([["due", "2026-11-23", undefined, undefined]]);
+    expect(dated(lines("Issued | 3 May 2027", "Number | 07700 900123", "Pay by | Mon 24 May 2027")).filter(([kind]) => kind === "due")).toEqual([
+      ["due", "2027-05-24", undefined, undefined],
+    ]);
+  });
+
+  it("a field in one cell of a page set in two columns is read from its own cell", () => {
+    expect(dated(lines("12 High Street | Invoice date: 3 Feb 2027", "Lakeside LK1 2AB | Payment due: 23 Feb 2027"))).toEqual([["due", "2027-02-23", undefined, undefined]]);
+    expect(fieldLines("12 High Street | Invoice date: 3 Feb 2027").map((line) => [line.label, line.value])).toEqual([["Invoice date", "3 Feb 2027"]]);
+  });
+
+  it("a history of payments gives nothing: a cell under a name the table does not hold is no form line", () => {
+    const history = lines("Date | Description | Amount", ...Array.from({ length: 100 }, (_, i) => `${(i % 28) + 1} March 2027 | Card payment ${i} | £${i + 1}.50`));
+    read(history);
+    const started = performance.now();
+    expect(dated(history)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(whole(history)).toEqual([]);
+  });
+
+  it("an amount alone in its cell takes the currency its column names, and its row's name says what it is", () => {
+    const bill = lines("Description | Period | Amount (GBP)", "Electricity | 1 Oct to 31 Oct | 52.10", "Gas | 1 Oct to 31 Oct | 34.25", "Total | | 86.35");
+    expect(whole(bill)).toEqual([["86.35", "GBP", "total", "Total"]]);
+    expect(amountLines(bill, table).map((amount) => [amount.value, amount.unit, amount.label, amount.meaning])).toEqual([
+      ["52.10", "GBP", "Electricity", undefined],
+      ["34.25", "GBP", "Gas", undefined],
+      ["86.35", "GBP", "Total", "total"],
+    ]);
+    // Two columns: the first row names the currency.
+    expect(whole(lines("Description | Amount (USD)", "Plan | 40.00", "Taxes and fees | 6.20", "Total to pay | 58.20"))).toEqual([["58.20", "USD", "due", "Total to pay"]]);
+    // The column's own name says what its amounts are, when the row has no name for them.
+    expect(whole(lines("Invoice | Due date | Amount due", "INV-1144 | 23 November 2026 | £292.20"))).toEqual([["292.20", "GBP", "due", "Amount due"]]);
+  });
+
+  it("a number with no currency anywhere near is still no amount", () => {
+    expect(whole(lines("Fare | Qty | Amount", "Adult | 2 | 108.00", "Total | | 108.00"))).toEqual([]);
+  });
+});

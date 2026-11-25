@@ -103,6 +103,21 @@ describe("tableBlocks: rows of cells that stand together", () => {
     ]);
   });
 
+  it("a row of names under rows of values is the header of a table of its own", () => {
+    expect(
+      shape(lines("Issued | 20 June 2027", "Date | Departs | Arrives", "5 August 2027 | 07:45 | 09:10", "12 August 2027 | 18:20 | 19:45", "Fare | Qty | Amount", "Foot passenger | 2 | 36.00")),
+    ).toEqual([
+      { header: ["Date", "Departs", "Arrives"], rows: [["5 August 2027", "07:45", "09:10"], ["12 August 2027", "18:20", "19:45"]] },
+      { header: ["Fare", "Qty", "Amount"], rows: [["Foot passenger", "2", "36.00"]] },
+    ]);
+    expect(shape(lines("Check-in | Check-out | Nights", "13 Oct 2027 | 16 Oct 2027 | 3", "Description | Date | Amount (EUR)", "Room | 13 Oct 2027 | 95.00", "Total | | 313.50"))).toEqual([
+      { header: ["Check-in", "Check-out", "Nights"], rows: [["13 Oct 2027", "16 Oct 2027", "3"]] },
+      { header: ["Description", "Date", "Amount (EUR)"], rows: [["Room", "13 Oct 2027", "95.00"], ["Total", "", "313.50"]] },
+    ]);
+    // Rows of names only, with no row of values before them, stay one table.
+    expect(tableBlocks(lines("Day | Class | Room", "Mon | Yoga | Hall", "Tue | Pilates | Studio"))).toHaveLength(1);
+  });
+
   it("a colon inside a cell does not part it", () => {
     expect(shape(lines("12 High Street | Invoice date: 3 Feb 2027", "Lakeside LK1 2AB | Payment due: 23 Feb 2027"))).toEqual([
       { rows: [["12 High Street", "Invoice date: 3 Feb 2027"], ["Lakeside LK1 2AB", "Payment due: 23 Feb 2027"]] },

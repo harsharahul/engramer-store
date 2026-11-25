@@ -116,7 +116,12 @@ interface Row {
   at: number;
   end: number;
   cells: Cell[];
+  /** The row holds a digit: a value, where a row of names holds none. */
+  valued: boolean;
 }
+
+/** The fewest cells a row of names needs to be the header of a new table under another one. */
+const HEADER_CELLS = 3;
 
 /** A row's cells, each under its column of a table `width` cells wide. */
 function aligned(cells: Cell[], width: number, headed: boolean): Cell[] {
@@ -176,10 +181,15 @@ export function tableBlocks(text: string): TableBlock[] {
       }
     }
     if (worded >= 2) {
-      if (run.length > 0 && Math.abs(cells.length - run[0]!.cells.length) > 1) {
+      const valued = /\d/.test(line);
+      const before = run[run.length - 1];
+      // A table ends where the next one starts under it: at rows of another
+      // width, and at a row of names that follows a row of values (the
+      // header of the next table).
+      if (before && (Math.abs(cells.length - run[0]!.cells.length) > 1 || (!valued && before.valued && cells.length >= HEADER_CELLS))) {
         close();
       }
-      run.push({ at, end, cells });
+      run.push({ at, end, cells, valued });
     } else {
       close();
     }

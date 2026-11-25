@@ -118,17 +118,23 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
     // every line is read with its own words.
     const lexicon = await loadLexicon();
     const typed = labelledFacts(text, input.writtenAt, lexicon);
-    found.push(...typed);
     // A form line is read by its label: the table types it, or says it is
     // nobody's business, and a label it does not hold still surfaces with
     // the document's own words attached. Values already claimed by a typed
     // fact are skipped so nothing appears twice.
-    found.push(
+    const labelled = [
+      ...typed,
       ...structuralDatedFacts(text, new Set(typed.map((fact) => fact.value)), {
         ...(lexicon ? { lexicon } : {}),
         ...(input.writtenAt !== undefined ? { writtenAt: input.writtenAt } : {}),
       }),
-    );
+    ];
+    // A day of issue says how old a document is that runs out, or that only
+    // states it (a certificate). On a bill, a ticket or a timetable it is
+    // the day the paper was made, and nobody's business.
+    const runsOut = labelled.some((fact) => fact.kind === "expiry");
+    const happens = labelled.some((fact) => fact.kind === "due" || fact.kind === "event");
+    found.push(...labelled.filter((fact) => fact.kind !== "issued" || runsOut || !happens));
     found.push(...harvestFacts(text));
   }
   if (found.length === 0) {

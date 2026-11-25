@@ -92,6 +92,19 @@ describe("scanForFacts", () => {
     expect(await dated("Ledger folio: 12 March 2027")).toEqual([["dated", "2027-03-12"]]);
   });
 
+  it("a day of issue is read on a document that runs out, and not on a bill, a ticket or a timetable", async () => {
+    const kinds = async (text: string) => (await scanForFacts({ ...base, text })).facts.filter((fact) => fact.source === "label" && fact.kind !== "amount").map((fact) => `${fact.kind} ${fact.value}`).sort();
+    // A licence: the day it was issued says how old it is.
+    expect(await kinds("Driving licence\nIssued: 3 May 2027\nExpires: 2 May 2037")).toEqual(["expiry 2037-05-02", "issued 2027-05-03"]);
+    expect(await kinds("Certificate of completion\nIssued: 3 May 2027")).toEqual(["issued 2027-05-03"]);
+    // A bill and a timetable: the day the paper was made is nobody's business.
+    expect(await kinds("Your May bill\nIssued | 3 May 2027\nPay by | Mon 24 May 2027")).toEqual(["due 2027-05-24"]);
+    expect(await kinds("Spring course timetable\nIssued 12 January 2027\nDate | Time | Room\nMon 1 Feb 2027 | 10:00 | Room 4\nMon 8 Feb 2027 | 14:00 | Room 7")).toEqual([
+      "event 2027-02-01",
+      "event 2027-02-08",
+    ]);
+  });
+
   it("returns nothing at all for a file with no text and no bytes", async () => {
     const out = await scanForFacts({ name: "a.zip", mime: "application/zip" });
     expect(out.facts).toEqual([]);

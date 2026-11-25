@@ -15,6 +15,7 @@ import { type DocumentKind, type Fact, factId, maskTail } from "./facts";
 import { findDates, findTimes, parseDate, parseTime, type DateContext, type ParsedDate } from "./dates";
 import { amountMeaningOf, meaningOf, type AmountMeaning, type LabelMeaning, type Lexicon } from "./lexicon";
 import { serviceOf, type Role, type Subject } from "./subject";
+import { cellsOf, headerLines, tableBlocks } from "./tables";
 
 /** How far past a label to look for its date. */
 const WINDOW = 60;
@@ -366,9 +367,16 @@ export function labelledFacts(text: string, writtenAt?: number, lexicon?: Lexico
   });
   const document = guessDocumentKind(text);
   const byId = new Map<string, Fact>();
+  // The header row of a table names its columns. It is no label for the
+  // line under it: each cell there is read under its own column.
+  const headers = headerLines(text);
+  const inHeader = (at: number) => headers.some((header) => at >= header.at && at < header.end);
   for (const { kind, labels, reach, label } of KINDS) {
     labels.lastIndex = 0;
     for (let match = labels.exec(text); match; match = labels.exec(text)) {
+      if (inHeader(match.index)) {
+        continue;
+      }
       // A document prints the year it expires in; an offer "valid thru
       // December 31" does not, and is nobody's document.
       const window = windowAfter(text, match.index + match[0].length);
@@ -412,7 +420,7 @@ export function labelledFacts(text: string, writtenAt?: number, lexicon?: Lexico
     }
     words.labels.lastIndex = 0;
     for (let match = words.labels.exec(text); match; match = words.labels.exec(text)) {
-      if (words.lookBack && INVITED.test(text.slice(Math.max(0, match.index - 30), match.index))) {
+      if (inHeader(match.index) || (words.lookBack && INVITED.test(text.slice(Math.max(0, match.index - 30), match.index)))) {
         continue;
       }
       const after = windowAfter(text, match.index + match[0].length);
@@ -576,7 +584,10 @@ export function structuralDatedFacts(
     // behind the message, not ahead of it: neither takes a guessed year.
     const context = meaning === "expiry" || meaning === "issued" || opts.writtenAt === undefined ? undefined : { writtenAt: opts.writtenAt };
     const parsed = parseDate(line.value.slice(0, WINDOW), context);
-    if (!parsed || read.has(parsed.iso)) {
+    // In a table, two moments can share a day, each under its own column
+    // ("Departs" and "Arrives"): both stand, unless a word rule read that day.
+    const second = parsed !== null && line.column === true && MOMENTS.has(meaning) && !claimed.has(parsed.iso);
+    if (!parsed || (read.has(parsed.iso) && !second)) {
       continue;
     }
     const label = line.label.slice(0, MAX_LABEL_CHARS);
@@ -594,8 +605,9 @@ export function structuralDatedFacts(
     } else {
       const id = factId("event", `${parsed.iso} ${label.toLowerCase()}`);
       if (!byId.has(id)) {
-        // The clock on the line itself, or on the clock line a form prints under it.
-        const time = parseTime(line.value) ?? clockBelow(text, line, meaning, opts.lexicon!, opts.writtenAt);
+        // The clock on the line itself, or on the clock line a form prints
+        // under it. A cell among others has no line under it of its own.
+        const time = parseTime(line.value) ?? (line.part ? null : clockBelow(text, line, meaning, opts.lexicon!, opts.writtenAt));
         byId.set(id, {
           id,
           kind: "event",
@@ -612,10 +624,81 @@ export function structuralDatedFacts(
     read.add(parsed.iso);
   }
 
+  // A row of a table is one moment: its day stands in one cell and its
+  // clocks in others, each under the header that says what it is
+  // ("Date | Departs | Arrives"). A day and one clock in a row are one
+  // moment whatever their columns are called ("Date | Time | Room").
+  if (opts.lexicon && ROW_MARK.test(text)) {
+    const context = opts.writtenAt === undefined ? undefined : { writtenAt: opts.writtenAt };
+    for (const block of tableBlocks(text)) {
+      for (const row of block.header ? block.rows : []) {
+        const days: { parsed: ParsedDate; label: string; meaning: LabelMeaning | undefined }[] = [];
+        const clocks: { time: string; label: string; meaning: LabelMeaning | undefined }[] = [];
+        for (const [column, cell] of row.entries()) {
+          const label = block.header![column]?.text.replace(/\s+/g, " ") ?? "";
+          const meaning = label ? meaningOf(opts.lexicon, label) : undefined;
+          const parsed = /\d/.test(cell.text) ? parseDate(cell.text.slice(0, WINDOW), context) : null;
+          const time = parsed || !CLOCK_CELL.test(cell.text) ? null : clockLineTime(cell.text, opts.writtenAt);
+          if (parsed) {
+            days.push({ parsed, label, meaning });
+          } else if (time) {
+            clocks.push({ time, label, meaning });
+          }
+        }
+        const [day] = days;
+        const [clock] = clocks;
+        if (days.length !== 1 || !day || !clock || day.meaning === "none") {
+          continue;
+        }
+        const iso = day.parsed.iso;
+        const moment = (time: string, words: string, role?: LabelMeaning) => {
+          const label = words.slice(0, MAX_LABEL_CHARS);
+          const plain = factId("event", `${iso} ${label.toLowerCase()}`);
+          // Two rows of one day under one header are two moments.
+          const id = byId.has(plain) && byId.get(plain)!.time !== time ? factId("event", `${iso} ${time} ${label.toLowerCase()}`) : plain;
+          if (!byId.has(id)) {
+            byId.set(id, {
+              id,
+              kind: "event",
+              document,
+              value: iso,
+              label,
+              time,
+              ...(role && role !== "event" ? { subject: { role: role as Role } } : {}),
+              source: "label",
+              confidence: day.parsed.ambiguous || day.parsed.assumedYear ? 0.5 : 0.7,
+              ...(day.parsed.ambiguous ? { ambiguous: true as const } : {}),
+              ...(day.parsed.assumedYear ? { assumedYear: true as const } : {}),
+            });
+          }
+          read.add(iso);
+        };
+        const named = clocks.filter((one) => one.meaning !== undefined && MOMENTS.has(one.meaning));
+        if (named.length > 0) {
+          for (const one of named) {
+            moment(one.time, one.label, one.meaning);
+          }
+        } else if (clocks.length === 1 && clock.meaning === undefined) {
+          const held = [...byId.values()].find((fact) => fact.value === iso && fact.source === "label" && fact.label === day.label.slice(0, MAX_LABEL_CHARS));
+          if (held) {
+            // The day was read under its own header: the row's clock is that moment's.
+            if (!held.time) {
+              byId.set(held.id, { ...held, time: clock.time });
+            }
+          } else if (day.meaning === undefined) {
+            moment(clock.time, clock.label || day.label);
+          }
+        }
+      }
+    }
+  }
+
   // The lines whose label the table does not hold: kept with their own
-  // words, as before, and only for a date that states its year.
+  // words, as before, and only for a date that states its year. A cell
+  // under a column's header is no such line: a list of payments under
+  // "Date" names nothing.
   for (const line of lines) {
-    if (line.meaning !== undefined) {
+    if (line.meaning !== undefined || line.column) {
       continue;
     }
     const parsed = parseDate(line.value.slice(0, WINDOW));
@@ -648,6 +731,33 @@ export interface FieldLine {
   end: number;
   label: string;
   value: string;
+  /** The label is the header of the value's column: the value is one cell of a table. */
+  column?: true;
+  /** Other cells stand on the same line: the field does not run to the line's end. */
+  part?: true;
+}
+
+/** What a line holds when it may be a row of cells: a bar, a tab or a wide gap. */
+const ROW_MARK = /\||\t| {3}/;
+/** The meanings that are a moment: something happens on that day, at that clock. */
+const MOMENTS: ReadonlySet<LabelMeaning> = new Set<LabelMeaning>(["event", "check-in", "check-out", "depart", "arrive"]);
+/** A clock as a cell of a table states it: with a colon, or with AM or PM. "10.45" under an amount is no clock. */
+const CLOCK_CELL = /\d:\d\d|\d\s?[ap]\.?m\b|\bnoon\b|\bmidnight\b/i;
+
+/** A label, a colon, a value, in a line or in one cell; null for a clock's colon and for a refused label. */
+function asField(words: string): { label: string; value: string } | null {
+  const field = FIELD_LINE.exec(words);
+  const colon = words.indexOf(":");
+  if (!field || (/\d/.test(words[colon - 1] ?? "") && /\d/.test(words[colon + 1] ?? ""))) {
+    return null;
+  }
+  const label = field[1]!.replace(/\s+/g, " ").trim();
+  return /[A-Za-z]/.test(label) && !REFUSED_LABELS.test(label) ? { label, value: field[2]!.trim() } : null;
+}
+
+/** Whether a cell's words can name the cell beside or under them: short, with a letter, and no value themselves. */
+function namesACell(words: string): boolean {
+  return /[A-Za-z]/.test(words) && words.length <= MAX_LABEL_CHARS && !REFUSED_LABELS.test(words) && !(/\d/.test(words) && (findDates(words).length > 0 || findTimes(words).length > 0));
 }
 
 /**
@@ -656,6 +766,12 @@ export interface FieldLine {
  * label), a refused label, and the header lines of a forwarded or quoted
  * message, which date the mail and nothing in it. A Date line counts as a
  * header only beside another header line: a ticket prints "Date:" too.
+ *
+ * A table gives form lines too. Under a header row, each cell is a field
+ * named by the header of its column. With no header, a row of two cells is
+ * a label and its value, and a cell that is itself "Label: value" is a
+ * field of its own (a page set in two columns). A line of cells is never
+ * read whole.
  */
 export function fieldLines(text: string): FieldLine[] {
   const spans: { at: number; end: number; line: string }[] = [];
@@ -667,23 +783,43 @@ export function fieldLines(text: string): FieldLine[] {
     at = end + 1;
   }
   const header = spans.map(({ line }) => MAIL_HEADER.test(line));
+  const headed = ROW_MARK.test(text) ? tableBlocks(text).filter((block) => block.header !== undefined) : [];
   const fields: FieldLine[] = [];
   for (const [index, { at, end, line }] of spans.entries()) {
-    const field = FIELD_LINE.exec(line);
-    const colon = line.indexOf(":");
-    if (!field || (/\d/.test(line[colon - 1] ?? "") && /\d/.test(line[colon + 1] ?? ""))) {
+    const cells = ROW_MARK.test(line) ? cellsOf(line, at).filter((cell) => cell.text !== "") : [];
+    if (cells.length >= 2) {
+      if (headed.some((block) => at >= block.at && at < block.end)) {
+        // A header row, or a row under one: read by its columns, below.
+        continue;
+      }
+      const own = cells.flatMap((cell) => {
+        const field = asField(cell.text);
+        return field ? [{ at: cell.at, end: cell.end, ...field, part: true as const }] : [];
+      });
+      fields.push(...own);
+      const [first, second] = cells as [(typeof cells)[number], (typeof cells)[number]];
+      if (own.length === 0 && cells.length === 2 && namesACell(first.text)) {
+        fields.push({ at: first.at, end: second.end, label: first.text.replace(/\s+/g, " "), value: second.text });
+      }
       continue;
     }
-    const label = field[1]!.replace(/\s+/g, " ").trim();
-    if (!/[A-Za-z]/.test(label) || REFUSED_LABELS.test(label)) {
+    const field = asField(line);
+    if (!field || (header[index] && (header[index - 1] || header[index + 1]))) {
       continue;
     }
-    if (header[index] && (header[index - 1] || header[index + 1])) {
-      continue;
-    }
-    fields.push({ at: at + (line.length - line.trimStart().length), end, label, value: field[2]!.trim() });
+    fields.push({ at: at + (line.length - line.trimStart().length), end, ...field });
   }
-  return fields;
+  for (const block of headed) {
+    for (const row of block.rows) {
+      for (const [column, cell] of row.entries()) {
+        const label = block.header![column]?.text.replace(/\s+/g, " ") ?? "";
+        if (cell.text !== "" && namesACell(label)) {
+          fields.push({ at: cell.at, end: cell.end, label, value: cell.text, column: true, part: true });
+        }
+      }
+    }
+  }
+  return fields.sort((a, b) => a.at - b.at);
 }
 
 /**
@@ -848,7 +984,19 @@ function closingLabel(words: string): string | undefined {
  * does not hold decide nothing.
  */
 export function amountLines(text: string, lexicon?: Lexicon): AmountLine[] {
-  const found = moneyEvery(text);
+  const stated = moneyEvery(text);
+  const cells = rowCells(text);
+  // A number alone in a cell, under a column that names its currency, is an amount too.
+  const alone = cells.flatMap((cell): Money[] => {
+    const number = cell.unit ? AMOUNT_ALONE.exec(cell.text) : null;
+    if (!number || stated.some((amount) => amount.at >= cell.at && amount.at < cell.end)) {
+      return [];
+    }
+    const value = number[2] !== undefined ? fromComma(number[2]) : plain(number[3]!);
+    return Number(value) > 0 ? [{ value, unit: cell.unit!, at: cell.at, end: cell.end, ...(number[1] ? { minus: true as const } : {}) }] : [];
+  });
+  const found = alone.length > 0 ? [...stated, ...alone].sort((a, b) => a.at - b.at) : stated;
+  let next = 0;
   return found.map((amount, index) => {
     const lineStart = text.lastIndexOf("\n", amount.at - 1) + 1;
     const stop = text.indexOf("\n", amount.end);
@@ -863,6 +1011,23 @@ export function amountLines(text: string, lexicon?: Lexicon): AmountLine[] {
         label = closingLabel(text.slice(aboveStart, lineStart - 1));
       }
     }
+    // In a row of a table an amount has more names than the words before
+    // it: the words in its own cell, the name its row starts with, and the
+    // header of its column. The first of them that the table of labels
+    // knows says what the amount is ("Subtotal" under a column "Total" is
+    // a part); with none known, the nearest name is its label.
+    while (next < cells.length && cells[next]!.end <= amount.at) {
+      next += 1;
+    }
+    const cell = cells[next] && cells[next]!.at <= amount.at ? cells[next] : undefined;
+    let known: AmountMeaning | undefined;
+    if (cell) {
+      const inCell = closingLabel(text.slice(Math.max(cell.at, earlier ? earlier.end : 0), amount.at));
+      const names = [inCell, cell.first, inCell ? undefined : own, cell.header].filter((name): name is string => name !== undefined);
+      const typed = lexicon ? names.find((name) => amountMeaningOf(lexicon, name) !== undefined) : undefined;
+      label = typed ?? names[0] ?? label;
+      known = typed && lexicon ? amountMeaningOf(lexicon, typed) : undefined;
+    }
     const deposit = DEPOSIT_BEFORE.exec(lineBefore);
     const part =
       amount.minus ||
@@ -872,9 +1037,66 @@ export function amountLines(text: string, lexicon?: Lexicon): AmountLine[] {
       // "Total due after your deposit: $353.60" names the total, not the
       // deposit: only what stands before the word says so.
       (deposit !== null && !SUM_LINE.test(lineBefore.slice(0, deposit.index)));
-    const meaning = part ? "part" : label && lexicon ? amountMeaningOf(lexicon, label) : undefined;
+    const meaning = part ? "part" : cell ? known : label && lexicon ? amountMeaningOf(lexicon, label) : undefined;
     return { ...amount, ...(label ? { label } : {}), ...(meaning ? { meaning } : {}) };
   });
+}
+
+/** A number shaped like money, alone in a cell, with the minus sign it may carry. */
+const AMOUNT_ALONE = new RegExp(`^(${MINUS})?\\s?(?:(\\d{1,3}(?:\\.\\d{3})*,\\d{2})|(\\d[\\d,]*\\.\\d{2}))$`);
+
+/** The currency a cell of names states: a code or a symbol ("Amount (GBP)", "Price in EUR", "Total £"). */
+function currencyNamed(words: string): string | undefined {
+  if (/\d/.test(words)) {
+    return undefined;
+  }
+  for (const code of words.matchAll(/\b[A-Z]{3}\b/g)) {
+    if (CURRENCY_CODES.has(code[0])) {
+      return code[0];
+    }
+  }
+  const symbol = /[$£€₹¥]/.exec(words);
+  return symbol ? SYMBOL_CURRENCY[symbol[0]] : undefined;
+}
+
+/** A cell of a table's row, with the names that stand for it. */
+interface RowCell {
+  at: number;
+  end: number;
+  text: string;
+  /** The name the row starts with, when this is not that cell. */
+  first?: string;
+  /** The header of the cell's column. */
+  header?: string;
+  /** The currency the column names: in its header, or in the first row of a table with none. */
+  unit?: string;
+}
+
+/** Every cell of every table row of a text, in the order they stand. */
+function rowCells(text: string): RowCell[] {
+  if (!ROW_MARK.test(text)) {
+    return [];
+  }
+  const cells: RowCell[] = [];
+  for (const block of tableBlocks(text)) {
+    const names = block.header ?? block.rows[0]!;
+    const units = names.map((name) => currencyNamed(name.text));
+    // One currency named for the whole table stands for every column that names none.
+    const named = [...new Set(units.filter((unit) => unit !== undefined))];
+    const shared = named.length === 1 ? named[0] : undefined;
+    for (const row of block.rows) {
+      const first = row[0] && namesACell(row[0].text) ? row[0].text : undefined;
+      for (const [column, cell] of row.entries()) {
+        if (cell.text === "") {
+          continue;
+        }
+        const header = block.header?.[column]?.text;
+        const unit = units[column] ?? shared;
+        cells.push({ at: cell.at, end: cell.end, text: cell.text, ...(column > 0 && first ? { first } : {}), ...(header ? { header } : {}), ...(unit ? { unit } : {}) });
+      }
+    }
+  }
+  return cells;
 }
 
 const AMOUNT_DUE_LINE = /\b(?:(?:amount|total|balance)\s+due|amount\s+payable|(?:is|are)\s+due)\b/i;
