@@ -1207,6 +1207,27 @@ describe("a table read by its rows, each cell under the header of its column", (
     expect(whole(lines("Invoice | Due date | Amount due", "INV-1144 | 23 November 2026 | £292.20"))).toEqual([["292.20", "GBP", "due", "Amount due"]]);
   });
 
+  it("an amount named under a table takes the one currency the document names; a rate inside the table takes none", () => {
+    const bill = lines(
+      "Charge | Volume | Rate | Amount (USD)",
+      "Water supply | 41 m3 | 1.92 | 78.72",
+      "Sewerage | 41 m3 | 1.55 | 63.55",
+      "Last payment received | 12 Jan 2027 | 70.00",
+      "Amount due | 142.27",
+      "Payment due date | 4 June 2027",
+    );
+    expect(whole(bill)).toEqual([["142.27", "USD", "due", "Amount due"]]);
+    // The rates (1.92, 1.55) are no amounts; a payment under a name the table knows is one, and is no total.
+    expect(amountLines(bill, table).map((amount) => [amount.value, amount.label])).toEqual([
+      ["78.72", "Water supply"],
+      ["63.55", "Sewerage"],
+      ["70.00", "Last payment received"],
+      ["142.27", "Amount due"],
+    ]);
+    // Two currencies named: which one is not known, so the number is no amount.
+    expect(whole(lines("Item | Price (USD) | Price (EUR)", "Ticket | 20.00 | 18.00", "Total due | 20.00"))).toEqual([]);
+  });
+
   it("a number with no currency anywhere near is still no amount", () => {
     expect(whole(lines("Fare | Qty | Amount", "Adult | 2 | 108.00", "Total | | 108.00"))).toEqual([]);
   });

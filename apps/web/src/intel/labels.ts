@@ -985,15 +985,21 @@ function closingLabel(words: string): string | undefined {
  */
 export function amountLines(text: string, lexicon?: Lexicon): AmountLine[] {
   const stated = moneyEvery(text);
-  const cells = rowCells(text);
-  // A number alone in a cell, under a column that names its currency, is an amount too.
+  const { cells, currencies } = rowCells(text);
+  // The one currency a document names, in its tables' headers and on its amounts.
+  const named = new Set([...currencies, ...stated.map((amount) => amount.unit)]);
+  const only = named.size === 1 ? [...named][0] : undefined;
+  // A number alone in a cell is an amount too: under a column that names
+  // its currency, or beside a name the label table knows ("Amount due")
+  // in a document that names one currency.
   const alone = cells.flatMap((cell): Money[] => {
-    const number = cell.unit ? AMOUNT_ALONE.exec(cell.text) : null;
-    if (!number || stated.some((amount) => amount.at >= cell.at && amount.at < cell.end)) {
+    const unit = cell.unit ?? (only && lexicon && cell.first && amountMeaningOf(lexicon, cell.first) !== undefined ? only : undefined);
+    const number = unit ? AMOUNT_ALONE.exec(cell.text) : null;
+    if (!unit || !number || stated.some((amount) => amount.at >= cell.at && amount.at < cell.end)) {
       return [];
     }
     const value = number[2] !== undefined ? fromComma(number[2]) : plain(number[3]!);
-    return Number(value) > 0 ? [{ value, unit: cell.unit!, at: cell.at, end: cell.end, ...(number[1] ? { minus: true as const } : {}) }] : [];
+    return Number(value) > 0 ? [{ value, unit, at: cell.at, end: cell.end, ...(number[1] ? { minus: true as const } : {}) }] : [];
   });
   const found = alone.length > 0 ? [...stated, ...alone].sort((a, b) => a.at - b.at) : stated;
   let next = 0;
@@ -1072,18 +1078,19 @@ interface RowCell {
   unit?: string;
 }
 
-/** Every cell of every table row of a text, in the order they stand. */
-function rowCells(text: string): RowCell[] {
-  if (!ROW_MARK.test(text)) {
-    return [];
-  }
+/** Every cell of every table row of a text, in the order they stand, and the currencies the tables name. */
+function rowCells(text: string): { cells: RowCell[]; currencies: string[] } {
   const cells: RowCell[] = [];
-  for (const block of tableBlocks(text)) {
+  const currencies: string[] = [];
+  for (const block of ROW_MARK.test(text) ? tableBlocks(text) : []) {
     const names = block.header ?? block.rows[0]!;
     const units = names.map((name) => currencyNamed(name.text));
-    // One currency named for the whole table stands for every column that names none.
-    const named = [...new Set(units.filter((unit) => unit !== undefined))];
-    const shared = named.length === 1 ? named[0] : undefined;
+    const named = [...new Set(units.filter((unit): unit is string => unit !== undefined))];
+    currencies.push(...named);
+    // Under a header, a number takes the currency of its own column only: a
+    // rate or a count beside the amounts is no amount. With no header, the
+    // one currency the first row names stands for the block.
+    const shared = !block.header && named.length === 1 ? named[0] : undefined;
     for (const row of block.rows) {
       const first = row[0] && namesACell(row[0].text) ? row[0].text : undefined;
       for (const [column, cell] of row.entries()) {
@@ -1091,12 +1098,15 @@ function rowCells(text: string): RowCell[] {
           continue;
         }
         const header = block.header?.[column]?.text;
-        const unit = units[column] ?? shared;
+        // A sum that stands alone after its row's name, in a table of two
+        // currencies: which column it belongs to is not known.
+        const adrift = named.length > 1 && column > 1 && row.slice(1, column).every((between) => between.text === "");
+        const unit = adrift ? undefined : (units[column] ?? shared);
         cells.push({ at: cell.at, end: cell.end, text: cell.text, ...(column > 0 && first ? { first } : {}), ...(header ? { header } : {}), ...(unit ? { unit } : {}) });
       }
     }
   }
-  return cells;
+  return { cells, currencies };
 }
 
 const AMOUNT_DUE_LINE = /\b(?:(?:amount|total|balance)\s+due|amount\s+payable|(?:is|are)\s+due)\b/i;
