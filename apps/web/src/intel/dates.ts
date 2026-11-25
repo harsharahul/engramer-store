@@ -57,7 +57,7 @@ const ISO = /\b(\d{4})-(\d{2})-(\d{2})\b/;
 const YEAR_FIRST_NAMED = /\b(\d{4})\s+([A-Za-z]{3,9})\.?\s+(\d{1,2})\b/;
 // A number followed by a colon is a clock, never a year: "November 12, 10:30"
 // names no year, and reading one out of its hour would say 2010.
-const DAY_FIRST_NAMED = /\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{2,4})\b(?!:\d)/;
+const DAY_FIRST_NAMED = /\b(\d{1,2})(?:(?:st|nd|rd|th)\s+of|(?:st|nd|rd|th)?)\s+([A-Za-z]{3,9})\.?,?\s+(\d{2,4})\b(?!:\d)/;
 const MONTH_FIRST_NAMED = /\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{2,4})\b(?!:\d)/;
 // A month and a day with no year, as a message writes them ("Thursday,
 // November 12", "Thu 12 Nov"). The month is capitalised and is a month's
@@ -66,7 +66,8 @@ const MONTH_FIRST_NAMED = /\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+
 const WEEKDAY = "(?:(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\\.?,?\\s+)?";
 const MONTH_DAY = new RegExp(`\\b${WEEKDAY}([A-Z][a-z]{2,8})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?![\\d/:-]|\\.\\d)`, "g");
 // The last day of a range ("5-7 June") is not the day it starts.
-const DAY_MONTH = new RegExp(`(?<!\\d[-–/.])\\b${WEEKDAY}(\\d{1,2})(?:st|nd|rd|th)?\\s+([A-Z][a-z]{2,8})\\b`, "g");
+// "the 5th of December" says the same day with "of".
+const DAY_MONTH = new RegExp(`(?<!\\d[-–/.])\\b${WEEKDAY}(\\d{1,2})(?:(?:st|nd|rd|th)\\s+of|(?:st|nd|rd|th)?)\\s+([A-Z][a-z]{2,8})\\b`, "g");
 const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 // Year-first numeric only reads one way: nobody writes year, day, month.
 const YEAR_FIRST_NUMERIC = /\b(\d{4})[/.](\d{1,2})[/.](\d{1,2})\b/;
@@ -255,6 +256,118 @@ export function findDates(text: string, context: DateContext = {}): FoundDate[] 
   return placed.sort((a, b) => a.at - b.at);
 }
 
+const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+const WEEKDAY_NAME = String.raw`(sunday|monday|tuesday|wednesday|thursday|friday|saturday)`;
+/** "today", "tonight", "tomorrow". */
+// Not "the day after tomorrow", "a week from today" or "a week tomorrow": another day.
+const NEAR_DAY = /(?<!\b(?:after|from|week)\s)\b(today|tonight|tomorrow)\b/gi;
+/** "this Saturday", "next Friday", "on Saturday"; "on Saturdays" is every week and no day. */
+// Not "Monday's call" (said of a call, often past) or "on Monday, Wednesday and Friday" (a schedule).
+const NAMED_WEEKDAY = new RegExp(
+  String.raw`\b(this|next|on)\s+${WEEKDAY_NAME}\b(?!['\u2019]s)(?![ \t]*(?:,|and|or|to|through|-|\u2013)[ \t]*${WEEKDAY_NAME})`,
+  "gi",
+);
+/** Words before a weekday in its sentence that say it was said of the past. */
+const PAST_BEFORE =
+  /\b(?:was|were|had|did|sent|went|met|discussed|spoke|talked|called|following|after|earned|paid|purchased|bought|ordered|received)\b[^.!?\n]*$/i;
+/** A sentence about an offer: its days are a sale's, nobody's plan. */
+const OFFER = /\b(?:offers?|on sale|discount|deals?|promo(?:tion)?|coupon|voucher|free (?:delivery|shipping)|points)\b|\d+\s?% off/i;
+/** A sentence that says it is done. */
+const DONE_AFTER = /^[^.!?\n]*\balready\b/i;
+/** "Saturday the 5th". */
+const WEEKDAY_THE_DAY = new RegExp(String.raw`\b${WEEKDAY_NAME}\s+the\s+(\d{1,2})(?:st|nd|rd|th)\b`, "gi");
+/** How far ahead "Saturday the 5th" is looked for. */
+const WEEKDAY_THE_DAY_REACH = 42;
+/** A reply's quoted message starts here: "On Mon, 9 Nov 2026, Alex wrote:". */
+const QUOTE_HEADER = /^On\s.{1,200}\bwrote:\s*$/im;
+/** A forward's separator line, as mail programs write it. */
+const FORWARD_LINE = /^[ \t]*[-_]*[ \t]*(?:forwarded message|original message|begin forwarded message:)/im;
+/** A forwarded message starts at a "From:" line with its "Sent:" or "Date:" line close below. */
+const FORWARD_HEADER =
+  /^\*?From:\*?[^\n]*\n(?:[^\n]*\n){0,3}?\*?(?:Sent|Date):|^\*?(?:Sent|Date):\*?[^\n]*\n(?:[^\n]*\n){0,3}?\*?From:/im;
+
+/** The UTC day a number of days after a moment, as YYYY-MM-DD. */
+function dayAfter(writtenAt: number, days: number): string {
+  const written = new Date(writtenAt);
+  return new Date(Date.UTC(written.getUTCFullYear(), written.getUTCMonth(), written.getUTCDate() + days)).toISOString().slice(0, 10);
+}
+
+/**
+ * The days a message says in words, each read against the day it was sent
+ * (its UTC day): "today" and "tonight" are that day, "tomorrow" the next,
+ * "this Saturday" and "on Saturday" the coming one, "next Saturday" the one
+ * a week after, and "Saturday the 5th" the next 5th that falls on a
+ * Saturday, within six weeks. What a reply quotes or a message forwards
+ * was said on another day, so the text stops where the quote starts, and a
+ * line that begins with ">" is never read.
+ */
+export function findRelativeDays(text: string, writtenAt: number): { at: number; end: number; iso: string; relative: true }[] {
+  const cut = Math.min(
+    ...[QUOTE_HEADER, FORWARD_LINE, FORWARD_HEADER, /$(?![\s\S])/]
+      .map((form) => form.exec(text)?.index)
+      .filter((at): at is number => at !== undefined),
+  );
+  const own = text.slice(0, cut).replace(/^>[^\n]*/gm, (quoted) => " ".repeat(quoted.length));
+  const today = new Date(writtenAt).getUTCDay();
+  const ahead = (name: string) => (DAY_NAMES.indexOf(name.toLowerCase()) - today + 7) % 7;
+  const days: { at: number; end: number; iso: string; relative: true }[] = [];
+  /** The sentence a place in the text stands in, as its start and end. */
+  const sentenceAround = (at: number, end: number) => {
+    const start = Math.max(own.lastIndexOf(".", at - 1), own.lastIndexOf("!", at - 1), own.lastIndexOf("?", at - 1), own.lastIndexOf("\n", at - 1)) + 1;
+    const stops = [".", "!", "?", "\n"].map((stop) => own.indexOf(stop, end)).filter((index) => index !== -1);
+    return { start, stop: stops.length > 0 ? Math.min(...stops) : own.length };
+  };
+  /** Said of an offer, or of what was already done. */
+  const notAPlan = (at: number, end: number) => {
+    const { start, stop } = sentenceAround(at, end);
+    return OFFER.test(own.slice(start, stop)) || PAST_BEFORE.test(own.slice(start, at)) || DONE_AFTER.test(own.slice(end));
+  };
+  for (const match of own.matchAll(NEAR_DAY)) {
+    if (notAPlan(match.index, match.index + match[0].length)) {
+      continue;
+    }
+    const word = match[1]!.toLowerCase();
+    days.push({ at: match.index, end: match.index + match[0].length, iso: dayAfter(writtenAt, word === "tomorrow" ? 1 : 0), relative: true });
+  }
+  // "Friday the 5th" names its own day, found or not: "on Friday" there is not the coming Friday.
+  const dayOfMonthSpans = [...own.matchAll(WEEKDAY_THE_DAY)].map((match) => ({ at: match.index, end: match.index + match[0].length }));
+  for (const match of own.matchAll(NAMED_WEEKDAY)) {
+    const at = match.index;
+    const end = at + match[0].length;
+    if (dayOfMonthSpans.some((span) => at < span.end && span.at < end) || notAPlan(at, end)) {
+      continue;
+    }
+    const d = ahead(match[2]!);
+    const which = match[1]!.toLowerCase();
+    const offset = which === "this" ? d : which === "next" ? (d === 0 ? 7 : d + 7) : d === 0 ? 7 : d;
+    days.push({ at: match.index, end: match.index + match[0].length, iso: dayAfter(writtenAt, offset), relative: true });
+  }
+  for (const match of own.matchAll(WEEKDAY_THE_DAY)) {
+    if (notAPlan(match.index, match.index + match[0].length)) {
+      continue;
+    }
+    const weekday = DAY_NAMES.indexOf(match[1]!.toLowerCase());
+    const dayOfMonth = Number(match[2]);
+    for (let offset = 0; offset <= WEEKDAY_THE_DAY_REACH; offset += 1) {
+      const iso = dayAfter(writtenAt, offset);
+      const date = new Date(`${iso}T00:00:00Z`);
+      if (date.getUTCDate() === dayOfMonth && date.getUTCDay() === weekday) {
+        days.push({ at: match.index, end: match.index + match[0].length, iso, relative: true });
+        break;
+      }
+    }
+  }
+  // Where two readings overlap ("on Saturday the 5th"), the one that names
+  // the day of the month is the exact one; it was added last.
+  const placed: { at: number; end: number; iso: string; relative: true }[] = [];
+  for (const day of [...days].reverse()) {
+    if (!placed.some((held) => day.at < held.end && held.at < day.end)) {
+      placed.push(day);
+    }
+  }
+  return placed.sort((a, b) => a.at - b.at);
+}
+
 /** A month and a day with no year, read against when the text was written. */
 function undatedIn(text: string, writtenAt: number): ParsedDate | null {
   // The first of each form whose word really is a month ("Thu 12" is not).
@@ -416,6 +529,105 @@ const TIME_24 = /\b([01]?\d|2[0-3]):([0-5]\d)\b/;
  * so is a word that only begins with the marker ("10 Amsterdam").
  */
 const TIME_HOUR = /(?<![\d.:,])\b(\d{1,2})\s?([ap])\.?m(?![A-Za-z])/i;
+/**
+ * An hour said with "o'clock", and what after it says which half of the day
+ * ("9 o'clock in the evening", "8 o'clock tonight", "7 o'clock pm"). With
+ * nothing after it the half of the day is unknown ("dinner at 7 o'clock"),
+ * and no clock is read rather than a wrong one.
+ */
+const TIME_OCLOCK = /\b(\d{1,2})\s?o[’']?\s?clock\b(?:\s*(?:([ap])\.?m\.?(?![A-Za-z])|in the (morning|afternoon|evening)|(tonight|at night)))?/i;
+/** Words before a length of time, not a time of day ("Running time: 2h30", "up to 2h"). */
+const DURATION_BEFORE = String.raw`(?<!(?:duration|running time|flight time|journey time|travel time|takes|lasts|up to|dur[eé]e|about|approx\.?|around)[ \t]*:?[ \t]*)`;
+/**
+ * The hour written with an h ("15h00", "15h30"), as much of Europe writes it.
+ * A bare "15h" is a clock only after a word that says when ("at 15h",
+ * "from 9h"): "Room 15h" and "a 24h service" are not.
+ */
+const TIME_H = new RegExp(String.raw`${DURATION_BEFORE}(?<![\d.:,])\b([01]?\d|2[0-3])h([0-5]\d)(?![\dA-Za-z])`, "i");
+const TIME_H_BARE = /\b(?:at|from|until|till|by|before|after|à|dès|vers)\s+([01]?\d|2[0-3])h(?![\dA-Za-z])/i;
+/** Noon said in words. Midnight is not read: which day it closes is unclear. */
+const TIME_NOON = /\b(?:noon|midday)\b/i;
+
+/**
+ * One end of a range: an hour, its minutes, its half of the day. Spaces
+ * are bounded and never a line break, so a range stays on its line and a
+ * long run of blanks costs nothing.
+ */
+const RANGE_END = String.raw`(\d{1,2})(?::([0-5]\d))?(?:[ \t]{0,2}([ap])\.?m\.?(?![A-Za-z]))?`;
+/** Not after a month's name, a slash or a digit: "December 3 - 7:00 PM" and "5/12 - 7pm" are a day and a clock. */
+const RANGE_NOT_AFTER = String.raw`(?<!(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?[ \t]{1,3})(?<![\d.:,/\-])`;
+/** "7-9pm", "7:00-9:00 PM", "11am to 1pm", "14:00 until 17:30". */
+const RANGE_TO = new RegExp(
+  String.raw`${RANGE_NOT_AFTER}\b${RANGE_END}([ \t]{0,3}(?:-|\u2013|to|until|till)[ \t]{0,3})${RANGE_END}(?![\dA-Za-z:])`,
+  "i",
+);
+/** "between 10:00 and 14:00": "and" joins a range only after "between". */
+const RANGE_BETWEEN = new RegExp(String.raw`\bbetween[ \t]{1,3}${RANGE_END}([ \t]{1,3}and[ \t]{1,3})${RANGE_END}(?![\dA-Za-z:])`, "i");
+/** A dash with a space beside it. */
+const SPACED_DASH = /[ \t][-\u2013]|[-\u2013][ \t]/;
+/** How long a range may run when its start leaves its half of the day unsaid ("11-1pm"). */
+const IMPLIED_SPAN_MINUTES = 6 * 60;
+
+const minutesOf = (hour: number, minute: number) => hour * 60 + minute;
+const clockOf = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+/** An hour in a half of the day, as minutes after midnight; null when the hour cannot be in that half. */
+function inHalf(hour: number, minute: number, half: string | undefined): number | null {
+  if (!half) {
+    return hour <= 23 ? minutesOf(hour, minute) : null;
+  }
+  if (hour < 1 || hour > 12) {
+    return null;
+  }
+  const pm = half.toLowerCase() === "p";
+  return minutesOf(hour === 12 ? (pm ? 12 : 0) : pm ? hour + 12 : hour, minute);
+}
+
+/**
+ * The start and end of a range of hours, or null when the match is not one.
+ * Two bare numbers ("7-9", pages, ages, a score) are not a range: the end
+ * says its half of the day, or both ends carry minutes. A start that leaves
+ * its half unsaid takes the end's ("7-9pm" is the evening), or the other
+ * half when that would put it after the end ("11-1pm"), and then only for a
+ * short span. A range that would end before it starts is none. A start
+ * that is only a number ("3", no minutes, no half of the day) joins its end
+ * only by an unspaced dash or a word ("7-9pm", "7 to 9pm"): "Room 3 - 7pm"
+ * is a room and a clock.
+ */
+function rangeIn(match: RegExpExecArray): { start: string; end: string } | null {
+  const [, h1, m1, half1, joined = "", h2, m2, half2] = match;
+  if (!half2 && !(m1 && m2)) {
+    return null;
+  }
+  if (!m1 && !half1 && SPACED_DASH.test(joined)) {
+    return null;
+  }
+  const end = inHalf(Number(h2), Number(m2 ?? 0), half2);
+  if (end === null) {
+    return null;
+  }
+  let start = inHalf(Number(h1), Number(m1 ?? 0), half1 ?? half2);
+  if (!half1 && half2 && start !== null && start >= end) {
+    const other = half2.toLowerCase() === "p" ? "a" : "p";
+    const earlier = inHalf(Number(h1), Number(m1 ?? 0), other);
+    start = earlier !== null && earlier < end && end - earlier <= IMPLIED_SPAN_MINUTES ? earlier : null;
+  }
+  return start !== null && start < end ? { start: clockOf(start), end: clockOf(end) } : null;
+}
+
+/** The start of a range of hours that holds the given place in a text, if one does. */
+function rangeAround(text: string, at: number): string | null {
+  for (const form of RANGE_FORMS) {
+    for (const match of text.matchAll(form)) {
+      if (at >= match.index && at < match.index + match[0].length) {
+        const range = rangeIn(match);
+        if (range) {
+          return range.start;
+        }
+      }
+    }
+  }
+  return null;
+}
 
 /**
  * A local time of day as "HH:MM".
@@ -429,6 +641,18 @@ export function parseTime(text: string): string | null {
   if (!text) {
     return null;
   }
+  const pick = clockPick(text);
+  if (!pick) {
+    return null;
+  }
+  // A clock that is one end of a range ("9pm" in "7-9pm") stands for the
+  // range, which is its start. A range elsewhere on the line (opening hours
+  // after an appointment) takes nothing from the clock that was picked.
+  return rangeAround(text, pick.at) ?? pick.time;
+}
+
+/** The clock a text states, in the order of the forms, with where it stands. */
+function clockPick(text: string): { time: string; at: number } | null {
   const meridiem = TIME.exec(text);
   if (meridiem) {
     const raw = Number(meridiem[1]);
@@ -437,13 +661,13 @@ export function parseTime(text: string): string | null {
     }
     const pm = meridiem[3]!.toLowerCase() === "p";
     const hour = raw === 12 ? (pm ? 12 : 0) : pm ? raw + 12 : raw;
-    return `${String(hour).padStart(2, "0")}:${meridiem[2]}`;
+    return { time: `${String(hour).padStart(2, "0")}:${meridiem[2]}`, at: meridiem.index };
   }
   const plain = TIME_24.exec(text);
   if (plain) {
-    return `${String(Number(plain[1])).padStart(2, "0")}:${plain[2]}`;
+    return { time: `${String(Number(plain[1])).padStart(2, "0")}:${plain[2]}`, at: plain.index };
   }
-  // Last, so a clock written with a colon always wins.
+  // After the colon forms, so a clock written with a colon always wins.
   const hourOnly = TIME_HOUR.exec(text);
   if (hourOnly) {
     const raw = Number(hourOnly[1]);
@@ -452,16 +676,56 @@ export function parseTime(text: string): string | null {
     }
     const pm = hourOnly[2]!.toLowerCase() === "p";
     const hour = raw === 12 ? (pm ? 12 : 0) : pm ? raw + 12 : raw;
-    return `${String(hour).padStart(2, "0")}:00`;
+    return { time: `${String(hour).padStart(2, "0")}:00`, at: hourOnly.index };
+  }
+  const oclock = TIME_OCLOCK.exec(text);
+  if (oclock) {
+    const raw = Number(oclock[1]);
+    const half = (oclock[2] ?? "").toLowerCase();
+    const part = (oclock[3] ?? "").toLowerCase();
+    const pm = half === "p" || part === "afternoon" || part === "evening" || oclock[4] !== undefined;
+    const am = half === "a" || part === "morning";
+    if (raw >= 1 && raw <= 12 && (pm || am)) {
+      const hour = raw === 12 ? (am ? 0 : 12) : pm ? raw + 12 : raw;
+      return { time: `${String(hour).padStart(2, "0")}:00`, at: oclock.index };
+    }
+  }
+  const withH = TIME_H.exec(text);
+  if (withH) {
+    return { time: `${String(Number(withH[1])).padStart(2, "0")}:${withH[2]}`, at: withH.index };
+  }
+  const bareH = TIME_H_BARE.exec(text);
+  if (bareH) {
+    return { time: `${String(Number(bareH[1])).padStart(2, "0")}:00`, at: bareH.index };
+  }
+  const noon = TIME_NOON.exec(text);
+  if (noon) {
+    return { time: "12:00", at: noon.index };
   }
   return null;
 }
 
-const CLOCK_FORMS = [TIME, TIME_24, TIME_HOUR].map((form) => new RegExp(form.source, `${form.flags}g`));
+const CLOCK_FORMS = [TIME, TIME_24, TIME_HOUR, TIME_OCLOCK, TIME_H, TIME_H_BARE, TIME_NOON].map(
+  (form) => new RegExp(form.source, `${form.flags}g`),
+);
 
-/** Every clock in a text, in the order they stand, each read as `parseTime` reads it alone. */
-export function findTimes(text: string): { at: number; end: number; time: string }[] {
-  const clocks: { at: number; end: number; time: string; rank: number }[] = [];
+const RANGE_FORMS = [RANGE_BETWEEN, RANGE_TO].map((form) => new RegExp(form.source, `${form.flags}g`));
+
+/**
+ * Every clock in a text, in the order they stand, each read as `parseTime`
+ * reads it alone. A range of hours is one clock, its start, with the end
+ * kept beside it.
+ */
+export function findTimes(text: string): { at: number; end: number; time: string; endTime?: string }[] {
+  const clocks: { at: number; end: number; time: string; endTime?: string; rank: number }[] = [];
+  for (const form of RANGE_FORMS) {
+    for (const match of text.matchAll(form)) {
+      const range = rangeIn(match);
+      if (range) {
+        clocks.push({ at: match.index, end: match.index + match[0].length, time: range.start, endTime: range.end, rank: -1 });
+      }
+    }
+  }
   CLOCK_FORMS.forEach((form, rank) => {
     for (const match of text.matchAll(form)) {
       const time = parseTime(match[0]);
@@ -470,7 +734,7 @@ export function findTimes(text: string): { at: number; end: number; time: string
       }
     }
   });
-  const placed: { at: number; end: number; time: string }[] = [];
+  const placed: { at: number; end: number; time: string; endTime?: string }[] = [];
   let end = -1;
   for (const { rank: _rank, ...clock } of clocks.sort((a, b) => a.at - b.at || a.rank - b.rank)) {
     if (clock.at >= end) {

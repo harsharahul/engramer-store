@@ -8,6 +8,7 @@
 
 import { DISTRACTOR_CASES } from "./distractors";
 import { FORM_CASES } from "./forms";
+import { TIME_CASES } from "./timecases";
 import type { EvalCase } from "./score";
 
 const EMAIL = "application/vnd.engram.email+json";
@@ -716,4 +717,6 @@ export const EVAL_CASES: readonly EvalCase[] = [
   ...DISTRACTOR_CASES,
   // Documents laid out as forms: nearly every date and amount on a labelled line.
   ...FORM_CASES,
+  // Time language: clocks written many ways, ranges, doors and show, days in words.
+  ...TIME_CASES,
 ];

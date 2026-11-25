@@ -31,6 +31,65 @@ describe("the dates a document holds, each with the clock beside it", () => {
     expect(dates(spotCandidates("The show is on 5 May 2027. Doors open at 18:00."))).toEqual([["d1", "2027-05-05", undefined]]);
   });
 
+  it("a clock alone on the line under a date line is that date's clock", () => {
+    expect(dates(spotCandidates("Concert\nSat 14 Nov 2026\n8:00 PM\nGreat Hall"))).toEqual([["d1", "2026-11-14", "20:00"]]);
+    expect(dates(spotCandidates("Example Lecture Series\nThursday 3 December 2026\n19:30\nGreat Hall"))).toEqual([["d1", "2026-12-03", "19:30"]]);
+    // Two lines down, past a line that holds no date or clock.
+    expect(dates(spotCandidates("Thursday 3 December 2026\nGreat Hall\n7pm"))).toEqual([["d1", "2026-12-03", "19:00"]]);
+  });
+
+  it("a day said in words in a message is a candidate, marked as read against the sending day", () => {
+    const sent = { writtenAt: Date.UTC(2026, 10, 12, 9) };
+    const dinner = spotCandidates("Hi,\n\nDinner tomorrow at 7pm? I found a place near the station.", sent);
+    expect(dates(dinner)).toEqual([["d1", "2026-11-13", "19:00"]]);
+    expect(dinner[0]).toMatchObject({ relative: true, printed: "tomorrow, 19:00" });
+    // In a stored file no sending day is known: nothing is read.
+    expect(spotCandidates("Dinner tomorrow at 7pm?")).toEqual([]);
+    // The same day said twice is one candidate.
+    expect(dates(spotCandidates("Tomorrow, Friday 13 November 2026, at 7pm.", sent))).toEqual([["d1", "2026-11-13", "19:00"]]);
+    // What a reply quotes is not this message's day.
+    expect(spotCandidates("Thanks, noted.\n\nOn Mon, 9 Nov 2026 at 09:00, Alex wrote:\n> Dinner tomorrow at 7pm?", sent)).toEqual([]);
+  });
+
+  it("a day in words beside a written date in the same sentence gives way to it, whatever the sending day", () => {
+    // Sent on Thursday evening in California: already Friday in UTC.
+    const lateSent = { writtenAt: Date.UTC(2026, 10, 13, 4) };
+    expect(dates(spotCandidates("Reminder: dinner is tomorrow, Friday 13 November, at 7pm.", lateSent))).toEqual([["d1", "2026-11-13", "19:00"]]);
+  });
+
+  it("written dates come first when there are more than ten: a day in words never pushes one out", () => {
+    const sent = { writtenAt: Date.UTC(2026, 11, 1, 9) };
+    const intro = "Today's picks, tonight's show, tomorrow's market, this Saturday's fair and next Sunday's run.";
+    const events = Array.from({ length: 10 }, (_, i) => `Event ${i + 1}: ${i + 10} December 2026.`).join("\n");
+    const found = spotCandidates(`${intro}\n${events}`, sent).filter((c) => c.what === "date");
+    expect(found.filter((c) => !c.relative).map((c) => c.value)).toHaveLength(10);
+  });
+
+  it("both ends of a range of hours are offered: a journey's second clock is its arrival", () => {
+    expect(dates(spotCandidates("Train on 14 Nov 2026, 10:30 - 12:45, platform 4"))).toEqual([
+      ["d1", "2026-11-14", "10:30"],
+      ["d2", "2026-11-14", "12:45"],
+    ]);
+    expect(dates(spotCandidates("Class on 18 Nov 2026, 7-9pm"))).toEqual([
+      ["d1", "2026-11-18", "19:00"],
+      ["d2", "2026-11-18", "21:00"],
+    ]);
+  });
+
+  it("a blank line, a sentence or a date in between keeps a clock line from a date above", () => {
+    expect(dates(spotCandidates("Saturday 21 November 2026\n\n8:00 PM"))).toEqual([["d1", "2026-11-21", undefined]]);
+    expect(dates(spotCandidates("Saturday 21 November 2026\n8:00 PM is when the evening lecture series moves to its new room."))).toEqual([
+      ["d1", "2026-11-21", undefined],
+    ]);
+    expect(dates(spotCandidates("Saturday 21 November 2026\nSunday 22 November 2026\n8:00 PM"))).toEqual([
+      ["d1", "2026-11-21", undefined],
+      ["d2", "2026-11-22", "20:00"],
+    ]);
+    // The day above is nobody's business: the clock lends itself to nothing.
+    const text = "Statement date: 3 February 2027\n10:00";
+    expect(dates(spotCandidates(text, undefined, { skip: [{ at: 0, end: 31 }] }))).toEqual([]);
+  });
+
   it("reads a clock written 3pm, 2:30 PM or 14:30", () => {
     expect(dates(spotCandidates("Check-in: 12 March 2027 from 3pm\nYour appointment is on December 8, 2026 at 2:30 PM\nDeparture 4 March 2027 14:30"))).toEqual([
       ["d1", "2027-03-12", "15:00"],

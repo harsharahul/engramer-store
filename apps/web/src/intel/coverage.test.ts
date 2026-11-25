@@ -156,6 +156,12 @@ const LINES: Line[] = [
   },
   { what: "a show's doors", subject: "Your tickets", text: "Sat 14 Nov 2026, doors 7:00 PM", rows: [row("event", "BOOKED", "2026-11-14", "19:00", "Doors", "", "asks")] },
   {
+    what: "a ticket with doors and show: one row, at the show",
+    subject: "Your tickets",
+    text: "Example Quartet\nSaturday 14 November 2026\nDoors: 7:00 PM\nShow starts: 8:00 PM",
+    rows: [row("event", "BOOKED", "2026-11-14", "20:00", "Show starts", "", "asks")],
+  },
+  {
     what: "a parcel's estimated delivery",
     subject: "Your order has shipped",
     text: "Your order has shipped.\nEstimated delivery: November 12, 2026",

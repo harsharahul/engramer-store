@@ -8,8 +8,8 @@
  * list here is short on purpose: a statement with a hundred dated lines
  * must not become a hundred questions.
  */
-import { findDates, findTimes, type DateContext } from "./dates";
-import { moneyEvery } from "./labels";
+import { findDates, findRelativeDays, findTimes, type DateContext, type FoundDate } from "./dates";
+import { clockLineTime, moneyEvery } from "./labels";
 
 export interface Candidate {
   /** "d1".."d10" for dates, "a1".."a6" for amounts: the name a reader answers by. */
@@ -25,6 +25,8 @@ export interface Candidate {
   assumedYear?: true;
   /** The date could be read two ways. */
   ambiguous?: true;
+  /** A day said in words ("tomorrow", "this Saturday"), read against the day the message was sent. */
+  relative?: true;
   /** As the text prints it. */
   printed: string;
   /** The sentence it stands in, at most 200 characters. */
@@ -122,6 +124,48 @@ function amountsOf(text: string): { value: string; unit: string; at: number; sum
   return [...placed.values()].sort((a, b) => a.at - b.at);
 }
 
+/** How many lines up a clock line looks for its date, as the form reader does. */
+const CLOCK_LINE_REACH = 3;
+
+/**
+ * The date a clock line belongs to: the last date on the nearest line above
+ * that holds one, no blank line between, at most three lines up. The clock
+ * line is a short line with one clock and no date or sentence. A date that
+ * is nobody's business lends its clock line to nothing.
+ */
+function dateLineAbove(
+  text: string,
+  at: number,
+  found: readonly { at: number; end: number }[],
+  writtenAt: number | undefined,
+  skip: Known["skip"],
+): number | null {
+  const start = text.lastIndexOf("\n", at - 1) + 1;
+  const stop = text.indexOf("\n", at);
+  if (clockLineTime(text.slice(start, stop === -1 ? text.length : stop), writtenAt) === null) {
+    return null;
+  }
+  let end = start - 1;
+  for (let step = 0; step < CLOCK_LINE_REACH && end > 0; step += 1) {
+    const lineStart = text.lastIndexOf("\n", end - 1) + 1;
+    if (!text.slice(lineStart, end).trim()) {
+      return null;
+    }
+    let last = -1;
+    for (let i = 0; i < found.length; i += 1) {
+      if (found[i]!.at >= lineStart && found[i]!.at < end) {
+        last = i;
+      }
+    }
+    if (last >= 0) {
+      const date = found[last]!;
+      return skip?.some((span) => date.at >= span.at && date.at < span.end) ? null : last;
+    }
+    end = lineStart - 1;
+  }
+  return null;
+}
+
 /** What is already known of a document before anything is asked about it. */
 export interface Known {
   /** For a stored file: the day it was kept. */
@@ -150,7 +194,29 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
   if (!text) {
     return [];
   }
-  const found = findDates(text, context);
+  const written = findDates(text, context);
+  // In a message, a day said in words is a date too, unless a written date
+  // stands there or the message writes the same day out elsewhere
+  // ("Tomorrow, Friday 13 November"): the written date is the reading.
+  const writtenSentences = sentencesOf(text, written);
+  const said =
+    context?.writtenAt === undefined
+      ? []
+      : findRelativeDays(text, context.writtenAt)
+          .filter((day) => {
+            // A written date in the same sentence is what the words point at
+            // ("dinner is tomorrow, Friday 13 November"), whatever day the
+            // sending moment falls on in UTC.
+            const sentence = writtenSentences.find((span) => day.at >= span.at && day.at < span.end);
+            return !written.some(
+              (hit) =>
+                (day.at < hit.end && hit.at < day.end) ||
+                hit.date.iso === day.iso ||
+                (sentence !== undefined && hit.at >= sentence.at && hit.at < sentence.end),
+            );
+          })
+          .map((day) => ({ at: day.at, end: day.end, date: { iso: day.iso, ambiguous: false }, relative: true as const }));
+  const found: (FoundDate & { relative?: true })[] = [...written, ...said].sort((a, b) => a.at - b.at);
   const money = known.total ? [] : amountsOf(text);
   if (found.length === 0 && money.length === 0) {
     return [];
@@ -191,9 +257,23 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
           nearest = i;
         }
       }
+      if (nearest < 0) {
+        // A clock alone on its line ("8:00 PM" under "Sat 14 Nov 2026")
+        // belongs to the date line above it, in the same block.
+        const above = dateLineAbove(text, clock.at, found, context?.writtenAt, known.skip);
+        if (above !== null) {
+          nearest = above;
+          gap = clock.at - found[above]!.end;
+        }
+      }
       if (nearest >= 0) {
         const held = clocksOf.get(nearest) ?? [];
         held.push({ time: clock.time, printed: text.slice(clock.at, clock.end), gap });
+        // A range's end is offered too: on a journey ("10:30 - 12:45") it is
+        // the arrival, and the model says which end is what.
+        if (clock.endTime) {
+          held.push({ time: clock.endTime, printed: text.slice(clock.at, clock.end), gap: gap + 1 });
+        }
         clocksOf.set(nearest, held);
       }
     }
@@ -210,7 +290,10 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
   const candidates: Candidate[] = [];
   const seen = new Set<string>();
   let dates = 0;
-  for (const [index, hit] of found.entries()) {
+  // Written dates first, then days in words: under the cap, a day said in
+  // words never takes the place of a date the message writes out.
+  const order = [...found.entries()].sort(([, a], [, b]) => Number(a.relative === true) - Number(b.relative === true));
+  for (const [index, hit] of order) {
     if (dates === MAX_DATES) {
       break;
     }
@@ -242,6 +325,7 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
         ...(clock ? { time: clock.time } : {}),
         ...(hit.date.assumedYear ? { assumedYear: true as const } : {}),
         ...(hit.date.ambiguous ? { ambiguous: true as const } : {}),
+        ...(hit.relative ? { relative: true as const } : {}),
         printed: clock ? `${printed}, ${clock.time}` : printed,
         sentence,
       });

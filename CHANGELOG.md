@@ -5,6 +5,24 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Added
+- **Clocks in more forms.** "Noon", "midday", "9 o'clock in the evening"
+  and "15h30" are read as times, and a range of hours ("7-9pm", "between
+  10:00 and 14:00") as its start.
+- **A show's start, not its doors.** When a ticket gives both ("Doors: 7:00
+  PM", "Show starts: 8:00 PM"), the event is at the show's start.
+- **A time on the line under a date** ("Sat 14 Nov 2026", then "8:00 PM")
+  belongs to that date.
+- **Days said in words, in mail.** "Tomorrow at 7pm", "this Saturday",
+  "next Friday" and "Saturday the 5th" are read against the day a message
+  was sent, and always wait for your yes. What a reply quotes or a message
+  forwards is not read against the new message.
+
+### Fixed
+- **"Dinner at 7 o'clock" is not read as 07:00.** An hour o'clock with no
+  word for the half of the day gives no time rather than a wrong one, and a
+  length of time ("Running time: 2h30") is not a time of day.
+
 ## [0.61.0] - 2026-11-13
 
 ### Added

@@ -2,7 +2,7 @@
 process.env.TZ = "UTC";
 
 import { describe, expect, it } from "vitest";
-import { daysUntil, findDates, parseDate, parseTime, swappedReading } from "./dates";
+import { daysUntil, findDates, findRelativeDays, findTimes, parseDate, parseTime, swappedReading } from "./dates";
 
 describe("parseDate", () => {
   it("reads an unambiguous slash date, where the first number cannot be a month", () => {
@@ -219,6 +219,94 @@ describe("a date with no year", () => {
       expect(parseDate(text, at), text).toBeNull();
     }
   });
+
+  it("reads the day of the month said with 'of'", () => {
+    expect(parseDate("the cake sale on the 5th of December", at)).toEqual({ iso: "2026-12-05", ambiguous: false, assumedYear: true });
+    expect(parseDate("see you on 12th of November", at)?.iso).toBe("2026-11-12");
+    expect(findDates("Dinner on the 5th of December at 18:00", at).map((hit) => hit.date.iso)).toEqual(["2026-12-05"]);
+  });
+
+  it("a day said with 'of' keeps the year written after it", () => {
+    expect(parseDate("Our next meeting is on the 5th of December 2027.", at)).toEqual({ iso: "2027-12-05", ambiguous: false });
+    expect(parseDate("opened on the 3rd of March 2019", at)).toEqual({ iso: "2019-03-03", ambiguous: false });
+    expect(findDates("You were born on the 5th of December 1990.", at).map((hit) => hit.date.iso)).toEqual(["1990-12-05"]);
+  });
+});
+
+describe("days said in words, in mail", () => {
+  // Thursday 12 November 2026, in the morning.
+  const SENT = Date.UTC(2026, 10, 12, 9);
+  const days = (text: string, sent = SENT) => findRelativeDays(text, sent).map((day) => [text.slice(day.at, day.end), day.iso]);
+
+  it("reads a day said in words against the day the message was sent", () => {
+    expect(days("Dinner tomorrow at 7pm?")).toEqual([["tomorrow", "2026-11-13"]]);
+    expect(days("Are you free tonight?")).toEqual([["tonight", "2026-11-12"]]);
+    expect(days("It arrives today.")).toEqual([["today", "2026-11-12"]]);
+    expect(days("See you this Saturday at 10:30")).toEqual([["this Saturday", "2026-11-14"]]);
+    expect(days("Can we meet next Friday at 9am?")).toEqual([["next Friday", "2026-11-20"]]);
+    expect(days("How about next Saturday?")).toEqual([["next Saturday", "2026-11-21"]]);
+    expect(days("Lunch on Saturday?")).toEqual([["on Saturday", "2026-11-14"]]);
+    expect(days("lunch on saturday?")).toEqual([["on saturday", "2026-11-14"]]);
+    expect(days("The cake sale is on Saturday the 5th, from 4pm.")).toEqual([["Saturday the 5th", "2026-12-05"]]);
+  });
+
+  it("a weekday and a day of the month that never meet within six weeks, or a weekday said for every week, are not read", () => {
+    expect(days("Friday the 5th")).toEqual([]);
+    expect(days("We are open on Saturdays.")).toEqual([]);
+    expect(days("Every Saturday from 10am.")).toEqual([]);
+  });
+
+  it("a weekday that does not match its day of the month gives nothing, not the coming weekday", () => {
+    expect(days("Lunch on Friday the 5th?")).toEqual([]);
+    expect(days("See you this Friday the 5th")).toEqual([]);
+  });
+
+  it("a weekday said of the past, of a call, or in a list of days is not read", () => {
+    expect(days("Following our call on Monday, here are the notes.")).toEqual([]);
+    expect(days("As discussed on Monday's call")).toEqual([]);
+    expect(days("I sent it this Monday already.")).toEqual([]);
+    expect(days("Classes are on Monday, Wednesday and Friday.")).toEqual([]);
+    expect(days("Open on Monday to Friday.")).toEqual([]);
+    expect(days("Can we meet on Monday?")).toEqual([["on Monday", "2026-11-16"]]);
+  });
+
+  it("a day in words in a sentence about an offer, or about what was already done, is not read", () => {
+    expect(days("Offer ends 15h30 on Friday.")).toEqual([]);
+    expect(days("Today only: 20% off all boots.")).toEqual([]);
+    expect(days("Free delivery this Saturday on every order.")).toEqual([]);
+    expect(days("You earned 23 points today and now have 140 points.")).toEqual([]);
+    expect(days("We received your payment today.")).toEqual([]);
+    // A plan or a delivery still reads.
+    expect(days("It arrives today.")).toEqual([["today", "2026-11-12"]]);
+    expect(days("Dinner tomorrow at 7pm?")).toEqual([["tomorrow", "2026-11-13"]]);
+  });
+
+  it("'the day after tomorrow' and 'a week from today' are not today or tomorrow", () => {
+    expect(days("See you the day after tomorrow")).toEqual([]);
+    expect(days("A week from today we fly")).toEqual([]);
+    expect(days("Back a week tomorrow")).toEqual([]);
+  });
+
+  it("a forward is cut at its separator line and at a header block in either order", () => {
+    const thunderbird = "Dinner tomorrow?\n\n-------- Forwarded Message --------\nSubject: Lunch\nDate: Mon, 9 Nov 2026 09:00\nFrom: Sam <sam@example.com>\nTo: Alex\n\nLunch tomorrow at 1pm?";
+    expect(days(thunderbird)).toEqual([["tomorrow", "2026-11-13"]]);
+    const gmail = "FYI\n\n---------- Forwarded message ---------\nFrom: Sam\nDate: Mon, 9 Nov 2026\n\nLunch tomorrow?";
+    expect(days(gmail)).toEqual([]);
+    const outlook = "See below.\n\n-----Original Message-----\nFrom: Sam\nSent: Monday, 9 November 2026\n\nLunch tomorrow?";
+    expect(days(outlook)).toEqual([]);
+    const starred = "See below.\n\n*From:* Sam\n*Sent:* Monday, 9 November 2026\n*Subject:* Lunch\n\nLunch tomorrow?";
+    expect(days(starred)).toEqual([]);
+    const apple = "FYI\n\nBegin forwarded message:\n\nFrom: Sam\nDate: 9 November 2026\n\nLunch tomorrow?";
+    expect(days(apple)).toEqual([]);
+  });
+
+  it("a quoted or forwarded message's days are its own, not this one's", () => {
+    expect(days("Thanks, noted.\n\nOn Mon, 9 Nov 2026 at 09:00, Alex Sample wrote:\n> Dinner tomorrow at 7pm?")).toEqual([]);
+    expect(days("Thanks!\n> Dinner tomorrow at 7pm?")).toEqual([]);
+    expect(days("FYI\n\nFrom: Sam Example\nSent: Monday, 9 November 2026 09:00\nSubject: Dinner\n\nDinner tomorrow?")).toEqual([]);
+    // What this message says before the quote still counts.
+    expect(days("Yes, tomorrow works.\n\nOn Mon, 9 Nov 2026, Alex wrote:\n> Dinner tomorrow?")).toEqual([["tomorrow", "2026-11-13"]]);
+  });
 });
 
 describe("a clock after the day is not its year", () => {
@@ -291,6 +379,92 @@ describe("parseTime", () => {
 
   it("a clock with a colon wins over one without", () => {
     expect(parseTime("3pm show, doors 18:30")).toBe("18:30");
+  });
+
+  it("reads noon, midday, an hour o'clock and the hour written with an h", () => {
+    expect(parseTime("Lunch at noon")).toBe("12:00");
+    expect(parseTime("Collection from midday")).toBe("12:00");
+    expect(parseTime("Starts at 9 o'clock in the evening")).toBe("21:00");
+    expect(parseTime("Dinner at 8 o'clock tonight")).toBe("20:00");
+    expect(parseTime("7 o'clock pm")).toBe("19:00");
+    expect(parseTime("Rendez-vous 15h00")).toBe("15:00");
+    expect(parseTime("Rendez-vous 15h30")).toBe("15:30");
+    expect(parseTime("Opening at 15h")).toBe("15:00");
+    expect(parseTime("from 9h")).toBe("09:00");
+  });
+
+  it("an amount, a room or an hour count is not one of those clocks", () => {
+    const not = ["Total: 14.30", "EUR 19.00", "Room 15h, second floor", "midnight", "Noonan Street", "a 24h service", "48h delivery", "13 o'clock", "15h75", "noonday"];
+    expect(not.map((text) => parseTime(text))).toEqual(not.map(() => null));
+  });
+
+  it("reads a range of hours from its start, the start taking the end's half of the day", () => {
+    const range = (text: string) => findTimes(text).map(({ time, endTime }) => [time, endTime]);
+    expect(range("Class 7:00-9:00 PM")).toEqual([["19:00", "21:00"]]);
+    expect(range("Class 7-9pm")).toEqual([["19:00", "21:00"]]);
+    expect(range("Open 11-1pm")).toEqual([["11:00", "13:00"]]);
+    expect(range("Delivery between 10:00 and 14:00")).toEqual([["10:00", "14:00"]]);
+    expect(range("Workshop 14:00 to 17:30")).toEqual([["14:00", "17:30"]]);
+    expect(range("Session 9:30-11:00")).toEqual([["09:30", "11:00"]]);
+    expect(range("Lunch 11am to 1pm")).toEqual([["11:00", "13:00"]]);
+    expect(range("Class 7–9pm")).toEqual([["19:00", "21:00"]]);
+    expect(parseTime("Class 7-9pm")).toBe("19:00");
+  });
+
+  it("a range whose start is after its end, or numbers that are not clocks, give no range", () => {
+    expect(findTimes("Shift 9pm-7am").map(({ time, endTime }) => [time, endTime])).toEqual([
+      ["21:00", undefined],
+      ["07:00", undefined],
+    ]);
+    expect(findTimes("Pages 7-9")).toEqual([]);
+    expect(findTimes("Ages 7-9 years, class at 4pm").map(({ time }) => time)).toEqual(["16:00"]);
+    expect(findTimes("Score 2-1pm").map(({ time }) => time)).toEqual(["13:00"]);
+  });
+
+  it("a range later on the line does not take the place of the clock beside the date", () => {
+    expect(parseTime("Your appointment is on 8 Dec 2026 at 14:30, clinic open 9:00-17:00")).toBe("14:30");
+    expect(parseTime("Check-in: 12 March 2027 from 15:00 (reception 8:00-22:00)")).toBe("15:00");
+    expect(parseTime("Appointment: 8 Dec 2026 at 14:30 (arrive 10 min early; desk 8-9am)")).toBe("14:30");
+    expect(parseTime("Class 7-9pm")).toBe("19:00");
+    expect(parseTime("Class 7:00-9:00 PM")).toBe("19:00");
+  });
+
+  it("a day of the month, a slash date or a room number before a dash is not a range's start", () => {
+    expect(parseTime("Doors: Thursday, December 3 - 7:00 PM")).toBe("19:00");
+    expect(findTimes("Concert Thursday, December 3 - 7:00 PM").map(({ time, endTime }) => [time, endTime])).toEqual([["19:00", undefined]]);
+    expect(findTimes("Party 5/12 - 7pm").map(({ time }) => time)).toEqual(["19:00"]);
+    expect(findTimes("Room 3 - 7pm").map(({ time }) => time)).toEqual(["19:00"]);
+  });
+
+  it("a range does not reach across a line, and long runs of spaces stay fast", () => {
+    expect(findTimes("Saturday 14 November 2026, Day 1\n- 9am Breakfast").map(({ time }) => time)).toEqual(["09:00"]);
+    expect(findTimes("Party for guests aged 4\n- 7pm").map(({ time }) => time)).toEqual(["19:00"]);
+    expect(findTimes("at 3\n\n- 5pm").map(({ time }) => time)).toEqual(["17:00"]);
+    for (const padding of [" ", "\t"]) {
+      const started = performance.now();
+      findTimes(`12${padding.repeat(50_000)}`);
+      parseTime(`12${padding.repeat(50_000)}`);
+      expect(performance.now() - started).toBeLessThan(200);
+    }
+  });
+
+  it("a duration written with an h is not a clock", () => {
+    const not = ["Running time: 2h30", "Flight time 1h45", "Journey time 3h", "up to 2h", "It takes 3h", "Lasts 2h15", "Durée 1h30"];
+    expect(not.map((text) => findTimes(text).map(({ time }) => time))).toEqual(not.map(() => []));
+    expect(parseTime("Rendez-vous 15h30")).toBe("15:30");
+    expect(parseTime("Opening at 15h")).toBe("15:00");
+  });
+
+  it("an hour o'clock with nothing to say which half of the day is not read", () => {
+    expect(parseTime("Tea at 4 o'clock")).toBeNull();
+    expect(parseTime("Dinner at 7 o'clock")).toBeNull();
+    expect(parseTime("The site visit is at 9 o'clock sharp")).toBeNull();
+    expect(parseTime("Starts at 9 o'clock in the morning")).toBe("09:00");
+    expect(parseTime("Starts at 9 o'clock in the evening")).toBe("21:00");
+  });
+
+  it("finds the new forms in running text, in order", () => {
+    expect(findTimes("Lunch at noon, coffee 15h30, close at 6 o'clock in the evening").map((clock) => clock.time)).toEqual(["12:00", "15:30", "18:00"]);
   });
 });
 
