@@ -85,7 +85,7 @@ import {
 } from "./resumeupload";
 import { resumableUpload, type UploadJournal } from "./transfer";
 import { openWithFreshEntry } from "./freshen";
-import { ocrEnabled } from "./intel/ocr";
+import { ocrEnabled, renderPdfPage } from "./intel/ocr";
 import { categorize } from "./intel/categorize";
 import { SCENES_VERSION, readScenes } from "./intel/scenes";
 import {
@@ -99,13 +99,14 @@ import {
   type ActivityKind,
   type ProcessingCounts,
 } from "./activity";
-import { isPdf } from "./intel/extract";
+import { extractText, isPdf, TEXT_EDITION } from "./intel/extract";
 import { CLIP_MODEL_VERSION, embedImage, semanticEnabled } from "./intel/semantic";
 import {
   asFacts,
   mergeFacts,
   ownerDecided,
   reconcileFacts,
+  rereadFacts,
   settleDisputes,
   withoutUnreadLines,
   type Fact,
@@ -115,7 +116,7 @@ import { factsEnabled, scanForFacts } from "./intel/scan";
 import { assistantAvailableNow, assistantEnabled, lastAssistantState } from "./intel/assistant";
 import { CATEGORIES } from "./intel/categorize";
 import { FactsOwed, MIN_MAIL_TEXT, MIN_TEXT, cleanTags, outcomeFor, readingContext, summarize, type Summary } from "./intel/summarize";
-import { isEmailRecord } from "./mail/kind";
+import { isEmailRecord, parseEmailRecord } from "./mail/kind";
 import { remainingModelReads, spendModelReads } from "./modelbudget";
 import { acceptance, modelScores, trustedKind, trustedMailKind } from "./intel/confidence";
 import {
@@ -170,6 +171,8 @@ export interface FileEntry {
   clipVersion?: number;
   /** Which scene vocabulary labeled the tags from the vector; absent = never. */
   scenesVersion?: number;
+  /** Which text step wrote the search text; absent = the first. */
+  textEdition?: number;
   /** One sentence the assistant read from the opening; absent = none. */
   summary?: string;
   /** Which assistant model last had its turn, whatever the outcome. */
@@ -270,6 +273,8 @@ export interface ActivityState {
 export interface ProcessNeeds {
   thumb: boolean;
   text: boolean;
+  /** The text an older text step wrote is read again with the current one. */
+  reread: boolean;
   meaning: boolean;
   category: boolean;
   scenes: boolean;
@@ -608,6 +613,13 @@ interface StoreState {
   ) => Promise<ProcessingCounts>;
   /** Reads (or re-reads) the text of one stored image or scan. */
   recognizeFile: (id: string) => Promise<boolean>;
+  /**
+   * Reads a file's text again with the current text step, from bytes that
+   * are already at hand (the preview holds them), when an older step wrote
+   * it. True when new text was written. A file of any age: opening it is
+   * what brings an old file its new text.
+   */
+  rereadText: (id: string, bytes: Uint8Array) => Promise<boolean>;
   /** Reads dates out of documents stored before this feature existed. */
   scanLibraryForFacts: (opts?: SweepOptions) => Promise<number>;
   /** Computes (or recomputes) one file's meaning vector. */
@@ -650,6 +662,7 @@ function decryptFile(dto: FileDto, masterKey: Uint8Array, prior?: FileEntry): Fi
     hasClip: meta.hasClip === true,
     clipVersion: meta.clipVersion,
     scenesVersion: meta.scenesVersion,
+    textEdition: meta.textEdition,
     summary: meta.summary,
     assistVersion: meta.assistVersion,
     noSummary: meta.noSummary,
@@ -710,6 +723,7 @@ export function entryFromUpdate(
     hasClip: meta.hasClip === true,
     clipVersion: meta.clipVersion,
     scenesVersion: meta.scenesVersion,
+    textEdition: meta.textEdition,
     summary: meta.summary,
     assistVersion: meta.assistVersion,
     noSummary: meta.noSummary,
@@ -756,6 +770,7 @@ export function decryptSharedFile(dto: SharedFileDto, session: Session): FileEnt
     hasClip: meta.hasClip === true,
     clipVersion: meta.clipVersion,
     scenesVersion: meta.scenesVersion,
+    textEdition: meta.textEdition,
     summary: meta.summary,
     assistVersion: meta.assistVersion,
     noSummary: meta.noSummary,
@@ -809,6 +824,8 @@ export function metadataOf(file: FileEntry): FileMetadata {
     // unable to tell fresh embeddings from stale ones.
     ...(file.clipVersion !== undefined ? { clipVersion: file.clipVersion } : {}),
     ...(file.scenesVersion !== undefined ? { scenesVersion: file.scenesVersion } : {}),
+    // Without it a rename would make a file read again look never read.
+    ...(file.textEdition !== undefined ? { textEdition: file.textEdition } : {}),
     ...(file.summary !== undefined ? { summary: file.summary } : {}),
     ...(file.assistVersion !== undefined ? { assistVersion: file.assistVersion } : {}),
     ...(file.noSummary !== undefined ? { noSummary: file.noSummary } : {}),
@@ -876,6 +893,30 @@ export function needsText(file: FileEntry): boolean {
 }
 
 /**
+ * Whether the file's search text was written by an older text step: a PDF
+ * that has text, or a stored mail, whose stamp lags. Such a file is read
+ * again once. A file shared for viewing is its owner's to write, and a row
+ * that still carries its text inside its metadata is left as it is.
+ */
+export function staleText(file: FileEntry): boolean {
+  return (
+    !file.trashed &&
+    !file.inlineText &&
+    (file.textEdition ?? 1) < TEXT_EDITION &&
+    !(file.shared && file.role === "viewer") &&
+    ((isPdf(file.name, file.mime) && file.hasText) || isEmailRecord(file.name, file.mime))
+  );
+}
+
+/** How far back the pass reads stale text again by itself; an older file is read again when it is opened. */
+const TEXT_REREAD_DAYS = 90;
+
+/** Whether the pass owes this file its text read again: stale, and stored lately. Never the whole archive. */
+function owesReread(file: FileEntry): boolean {
+  return staleText(file) && Date.now() - file.createdAt <= TEXT_REREAD_DAYS * 86_400_000;
+}
+
+/**
  * Whether the file was stored without ever being categorized: the iOS
  * Files provider writes name, type, size and time and nothing else, so a
  * photo from there has no category and no tags until a device that can
@@ -891,6 +932,7 @@ export function needsProcessing(file: FileEntry): boolean {
     needsThumb(file) ||
     needsCategory(file) ||
     (ocrEnabled() && needsText(file)) ||
+    owesReread(file) ||
     (semanticEnabled() &&
       (needsClip(file, CLIP_MODEL_VERSION) || needsScenes(file, CLIP_MODEL_VERSION, SCENES_VERSION))) ||
     owesModelReading(file)
@@ -916,6 +958,7 @@ export function wantsOriginal(file: FileEntry): boolean {
   return (
     needsThumb(file) ||
     (ocrEnabled() && needsText(file)) ||
+    owesReread(file) ||
     (semanticEnabled() && isImage && needsClip(file, CLIP_MODEL_VERSION)) ||
     (isImage && needsCategory(file))
   );
@@ -1413,6 +1456,83 @@ export const useStore = create<StoreState>((set, get) => {
     });
     applyFile(dto);
   };
+
+  /**
+   * Reads a stored file's text again with the current text step, from its
+   * bytes. True when new text was written.
+   *
+   * The new text replaces the old in the index blob; the blob's vectors
+   * stay, and so does the evidence of every fact that stays. The label
+   * rules' readings are made fresh from the new text (`rereadFacts`); the
+   * owner's answers and every other reader's facts stand, and the model is
+   * not asked again: its reading is of the same bytes.
+   *
+   * A file that reads as nothing, or as less than half of what is stored,
+   * keeps its text (a scan's text came from recognition, not from this
+   * reader) and is stamped all the same: it is settled, for every device.
+   * A reader that could not run throws; nothing is written and the file
+   * stays owed. A second call finds the stamp and does nothing.
+   */
+  const rereadStored = async (id: string, source: File): Promise<boolean> => {
+    const file = get().files.get(id);
+    if (!file || !staleText(file)) {
+      return false;
+    }
+    const fresh = await extractText(source, { strict: true });
+    const payload = decodeIndexPayload(decryptBytes(await api.downloadBlob(id, "index", { timeoutMs: SWEEP_DOWNLOAD_MS }), file.key));
+    // Another device may have finished while this one was reading.
+    const current = get().files.get(id);
+    if (!current || !staleText(current)) {
+      return false;
+    }
+    if (fresh === undefined || fresh.length * 2 < (payload.text ?? "").length) {
+      await patchFileMeta(id, { textEdition: TEXT_EDITION });
+      return false;
+    }
+    let text = fresh;
+    let facts: Fact[] | undefined;
+    let evidence = payload.evidence ?? [];
+    if (factsEnabled()) {
+      const record = isEmailRecord(current.name, current.mime) ? parseEmailRecord(await source.text()) : undefined;
+      const writtenAt = record && Number.isFinite(record.date) && record.date > 0 ? record.date : undefined;
+      // A code read off the page at upload joined the text then; where the
+      // file has such a fact, the code is read again so it joins the new text.
+      const coded = isPdf(current.name, current.mime) && current.facts.some((fact) => fact.source === "barcode");
+      const page = coded ? await renderPdfPage(source).catch(() => null) : null;
+      const scanned = await scanForFacts({
+        name: current.name,
+        mime: current.mime,
+        text: fresh,
+        ...(record?.html ? { raw: record.html } : {}),
+        ...(page ? { file: page } : {}),
+        storedAt: current.mtime || Date.now(),
+        ...(writtenAt !== undefined ? { writtenAt } : {}),
+      });
+      if (scanned.decoded.length > 0) {
+        text = [fresh, ...scanned.decoded].join("\n").trim();
+      }
+      const merged = mergeFacts(
+        rereadFacts(current.facts, scanned.facts),
+        scanned.facts.map((fact) => ({ ...fact, digest: current.digest })),
+      );
+      if (JSON.stringify(merged) !== JSON.stringify(current.facts)) {
+        facts = merged;
+      }
+      const kept = new Set(merged.map((fact) => fact.id));
+      const again = new Set(scanned.evidence.map((item) => item.id));
+      evidence = [...evidence.filter((item) => kept.has(item.id) && !again.has(item.id)), ...scanned.evidence];
+    }
+    await uploadBlob(
+      id,
+      "index",
+      encryptBytes(encodeIndexPayload({ text, clip: payload.clip, clips: payload.clips, ...(evidence.length > 0 ? { evidence } : {}) }), current.key),
+    );
+    await patchFileMeta(id, { textEdition: TEXT_EDITION, hasText: true, ...(facts ? { facts } : {}) });
+    setEntryText(id, text, false);
+    return true;
+  };
+  /** Files whose text could not be read again when they were opened in this session: one failed try for each. */
+  const rereadTried = new Set<string>();
 
   /**
    * Facts for contents that have just been replaced.
@@ -3247,6 +3367,7 @@ export const useStore = create<StoreState>((set, get) => {
       const needs: ProcessNeeds = {
         thumb: force.thumb ?? needsThumb(file),
         text: force.text ?? (ocrEnabled() && needsText(file)),
+        reread: force.reread ?? owesReread(file),
         meaning: force.meaning ?? (semanticEnabled() && needsClip(file, CLIP_MODEL_VERSION)),
         category: force.category ?? needsCategory(file),
         scenes:
@@ -3257,6 +3378,7 @@ export const useStore = create<StoreState>((set, get) => {
       if (
         !needs.thumb &&
         !needs.text &&
+        !needs.reread &&
         !needs.meaning &&
         !needs.category &&
         !needs.scenes &&
@@ -3450,8 +3572,9 @@ export const useStore = create<StoreState>((set, get) => {
 
       // The original is worth fetching for a preview, a text reading, an
       // image's meaning, or an image's EXIF (which its category reads).
-      const wantsOriginal =
-        needs.thumb || needs.text || (needs.meaning && isImage) || (needs.category && isImage);
+      // What the analyzer every upload goes through is run for.
+      const wantsAnalysis = needs.thumb || needs.text || (needs.meaning && isImage) || (needs.category && isImage);
+      const wantsOriginal = wantsAnalysis || needs.reread;
       // A video already showing a poster embeds from that poster.
       const wantsPoster = !wantsOriginal && needs.meaning && isVideo && file.hasThumb;
 
@@ -3476,6 +3599,27 @@ export const useStore = create<StoreState>((set, get) => {
           type: file.mime,
           lastModified: file.mtime,
         });
+        if (needs.reread) {
+          // Text an older text step wrote is read again. A reader that
+          // could not run throws: nothing is written, and the pass counts
+          // a failed try for this file.
+          if (await withAnalysisSlot(() => rereadStored(id, source))) {
+            outcome.text = 1;
+          }
+          if (!wantsAnalysis) {
+            const reread = get().files.get(id);
+            if (reread && needs.summary) {
+              await readSummary(reread, reread.text ?? (await keptText(reread)));
+              if (tagsChanged(tags, reread.tags)) {
+                meta.tags = normalizeTags([...tags]);
+              }
+              if (Object.keys(meta).length > 0) {
+                await patchFileMeta(id, meta);
+              }
+            }
+            return outcome;
+          }
+        }
         // The one analyzer every upload goes through, told what this file
         // already holds so nothing is computed twice. The slot serializes
         // the decode with every other analysis; a phone holds one decoded
@@ -3528,6 +3672,10 @@ export const useStore = create<StoreState>((set, get) => {
         if (readText) {
           meta.hasText = true;
           meta.text = undefined;
+          // Read with the current text step: it is not owed a second reading.
+          if (isPdf(current.name, current.mime) || isEmailRecord(current.name, current.mime)) {
+            meta.textEdition = TEXT_EDITION;
+          }
           outcome.text = 1;
         } else if (needs.text && prepared.meta.noText) {
           // Read, or judged wordless by its meaning: finished either way,
@@ -3805,6 +3953,23 @@ export const useStore = create<StoreState>((set, get) => {
     recognizeFile: async (id) => {
       const outcome = await get().processFile(id, { force: { text: true } });
       return (outcome?.text ?? 0) > 0;
+    },
+
+    rereadText: async (id, bytes) => {
+      const file = get().files.get(id);
+      if (!file || !staleText(file) || rereadTried.has(id)) {
+        return false;
+      }
+      try {
+        const source = new File([bytes.slice().buffer as ArrayBuffer], file.name, { type: file.mime, lastModified: file.mtime });
+        return await withAnalysisSlot(() => rereadStored(id, source));
+      } catch {
+        // Opening a file never fails for this. The file stays owed; it is
+        // not tried again in this session, and the next session's opening
+        // tries once more.
+        rereadTried.add(id);
+        return false;
+      }
     },
 
     /**

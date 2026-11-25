@@ -13,6 +13,7 @@ import {
   mergeFacts,
   offeredFacts,
   reconcileFacts,
+  rereadFacts,
   sumOf,
   type Fact,
 } from "./facts";
@@ -25,6 +26,35 @@ const fact = (over: Partial<Fact> = {}): Fact => ({
   source: "label",
   confidence: 0.7,
   ...over,
+});
+
+describe("rereadFacts: what a file keeps when its text is read again", () => {
+  // The rules read the old text; a fresh scan of the new text says what they read now.
+  const due = fact({ id: "due:2027-04-30", kind: "due", value: "2027-04-30" });
+  const line = fact({ id: "dated:2027-04-01", kind: "dated", value: "2027-04-01", label: "12 High Street Invoice date", confidence: 0.4 });
+
+  it("a rule's reading that nobody answered and the new scan does not find is dropped", () => {
+    expect(rereadFacts([due, line], [])).toEqual([]);
+    expect(rereadFacts([due, line], [due])).toEqual([due]);
+  });
+
+  it("what the owner answered stays, found again or not", () => {
+    const yes = { ...due, confirmed: true };
+    const no = { ...line, dismissed: true };
+    expect(rereadFacts([yes, no], [])).toEqual([yes, no]);
+  });
+
+  it("every other reader's fact stays: the model's, a booking's own data, a barcode's", () => {
+    const model = fact({ id: "event:1", kind: "event", value: "2027-05-02", source: "model", reader: "apple" });
+    const booking = fact({ id: "event:2", kind: "event", value: "2027-06-01", source: "jsonld", confidence: 1, accepted: "exact" });
+    const pass = fact({ id: "event:3", kind: "event", value: "2027-06-02", source: "barcode", confidence: 1, accepted: "exact" });
+    expect(rereadFacts([model, booking, pass], [])).toEqual([model, booking, pass]);
+  });
+
+  it("a rule's reading that a second reader agreed on stays", () => {
+    const agreed = { ...due, accepted: "agreement" as const };
+    expect(rereadFacts([agreed, line], [])).toEqual([agreed]);
+  });
 });
 
 describe("groundFacts", () => {

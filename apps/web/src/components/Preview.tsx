@@ -475,6 +475,9 @@ export function Preview(props: {
         setProgress(null);
         // Reading it through was the check; record that it passed.
         useStore.getState().markVerified(file.id);
+        // Text an older text step wrote is read again now that the bytes
+        // are here; the store does nothing for any other file.
+        void useStore.getState().rereadText(file.id, bytes);
         const empty = { url: null, text: null, docx: null, sheet: null, pdf: null, archive: null, mail: null };
         if (kind === "mail") {
           // A record this version cannot read still shows as its text.

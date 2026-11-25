@@ -78,6 +78,10 @@ export interface FileMetadata {
   /** Which scene vocabulary labeled this file's tags from its vector;
    * absent = never labeled. A vocabulary change re-labels what lags. */
   scenesVersion?: number;
+  /** Which text step wrote this file's search text; absent = the first,
+   * which kept no lines of a PDF page and no cells of an HTML mail. A
+   * file whose stamp lags is read again once. */
+  textEdition?: number;
   /** One sentence the on-device assistant read from the opening of a
    * text-bearing document; capped and masked before it is stored. */
   summary?: string;

@@ -29,7 +29,7 @@ import {
   type FileDto,
 } from "./api";
 import { categorize, type Analysis } from "./intel/categorize";
-import { extractExif, extractText, isPdf } from "./intel/extract";
+import { extractExif, extractText, isPdf, TEXT_EDITION } from "./intel/extract";
 import { ocrEnabled, recognizeImage, recognizePdf, renderPdfPage } from "./intel/ocr";
 import { CLIP_MODEL_VERSION, embedImage, semanticEnabled } from "./intel/semantic";
 import { SCENES_VERSION, readScenes, type SceneReading } from "./intel/scenes";
@@ -722,6 +722,9 @@ export async function analyzeFile(
     ...(text === undefined && ocrRan ? { noText: true } : {}),
     ...(clip ? { hasClip: true, clipVersion: CLIP_MODEL_VERSION } : {}),
     ...(scenes ? { scenesVersion: SCENES_VERSION } : {}),
+    // A PDF and a stored mail say which text step read them, so an older
+    // one can be read again when the step changes.
+    ...(isPdf(file.name, file.type) || isEmailRecord(file.name, file.type) ? { textEdition: TEXT_EDITION } : {}),
     ...(facts.length > 0 ? { facts } : {}),
   };
   return { meta, analysis: { ...analysis, tags }, thumbnail, text, clip, clips, evidence, scenes };
