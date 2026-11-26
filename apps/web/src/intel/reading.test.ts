@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReadingStamp } from "@engramer/crypto";
 import {
+  datesJudged,
   emailsOutsideWindow,
   legacyOf,
   needsReading,
@@ -126,6 +127,28 @@ describe("needsReading", () => {
     expect(needsReading(file({ trashed: true }), "apple", wants)).toBe(false);
     // A legacy row that still keeps its text inside its metadata is readable.
     expect(needsReading(file({ hasText: false, inlineText: true }), "apple", wants)).toBe(true);
+  });
+});
+
+describe("datesJudged: a model was asked about this file's dates, and answered", () => {
+  it("a reading of the dates that found something, or nothing, is an answer", () => {
+    expect(datesJudged({ reading: stamp({ outcome: "found" }), digest: "d1" })).toBe(true);
+    expect(datesJudged({ reading: stamp({ outcome: "none" }), digest: "d1" })).toBe(true);
+    // An older build's pair: it read summary and dates in one pass.
+    expect(datesJudged({ assistVersion: 1 })).toBe(true);
+  });
+
+  it("no reading, a summary alone, or a reading that never reached the dates is no answer", () => {
+    expect(datesJudged({})).toBe(false);
+    expect(datesJudged({ reading: stamp({ tasks: ["summary"] }) })).toBe(false);
+    for (const outcome of ["short", "declined", "language", "unsupported", "retrying", "failed", "user"] as const) {
+      expect(datesJudged({ reading: stamp({ outcome }) })).toBe(false);
+    }
+    expect(datesJudged({ assistVersion: 1, noSummary: "short" })).toBe(false);
+  });
+
+  it("a reading of other contents says nothing about these", () => {
+    expect(datesJudged({ reading: stamp({ digest: "d1" }), digest: "d2" })).toBe(false);
   });
 });
 

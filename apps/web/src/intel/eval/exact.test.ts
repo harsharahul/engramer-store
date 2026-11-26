@@ -23,7 +23,8 @@ describe("exact readers on the eval set", () => {
   });
 
   it("the first set holds the distractor, the form, the time-language and the amount cases, each id once, none shared with the held-out set", () => {
-    expect(EVAL_CASES).toHaveLength(222);
+    expect(EVAL_CASES).toHaveLength(238);
+    expect(EVAL_CASES.filter((c) => c.id.startsWith("p-"))).toHaveLength(16);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("s-"))).toHaveLength(30);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("x-"))).toHaveLength(30);
     expect(EVAL_CASES.filter((c) => c.id.startsWith("f-"))).toHaveLength(40);

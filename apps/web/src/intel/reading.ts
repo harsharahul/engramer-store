@@ -65,8 +65,11 @@ const LEGACY_OUTCOMES: Record<string, ReadingStamp["outcome"]> = {
   retrying: "retrying",
 };
 
+/** What a file says of its last reading: the stamp, or the pair older builds wrote, and the contents it holds now. */
+export type ReadFile = Pick<ReadingCandidate, "reading" | "assistVersion" | "noSummary" | "digest">;
+
 /** The reading a file carries, reading an older build's pair as the model's first version. */
-export function stampOf(file: ReadingCandidate): ReadingStamp | undefined {
+export function stampOf(file: ReadFile): ReadingStamp | undefined {
   if (file.reading) {
     return file.reading;
   }
@@ -85,6 +88,23 @@ export function stampOf(file: ReadingCandidate): ReadingStamp | undefined {
     tries: 1,
     at: 0,
   };
+}
+
+/**
+ * Whether a model was asked about this file's dates and answered: it read
+ * the contents the file holds now, for its dates, and found something or
+ * nothing. A file no device has read, one the model declined or could not
+ * read, and one read for its summary alone have no such answer.
+ */
+export function datesJudged(file: ReadFile): boolean {
+  const stamp = stampOf(file);
+  if (!stamp || !stamp.tasks.includes("facts")) {
+    return false;
+  }
+  if (file.digest && stamp.digest && file.digest !== stamp.digest) {
+    return false;
+  }
+  return stamp.outcome === "found" || stamp.outcome === "none";
 }
 
 /** A document a model can read at all: text, not media, not in the trash. */

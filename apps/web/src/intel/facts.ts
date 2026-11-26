@@ -1,5 +1,6 @@
 import { daysUntil, findTimes } from "./dates";
-import type { Subject } from "./subject";
+import { datesJudged, type ReadFile } from "./reading";
+import { subjectOf, type Subject } from "./subject";
 
 /**
  * Typed facts read out of documents: an expiry, an amount due, a reference
@@ -248,7 +249,7 @@ export const RECENT_PAST_OFFER_DAYS = 60;
  * the owner, which is the only set worth their attention.
  */
 export function offeredFacts(
-  files: { id: string; trashed: boolean; facts: Fact[] }[],
+  files: readonly ({ id: string; trashed: boolean; facts: Fact[] } & ReadFile)[],
   now: number,
 ): { fileId: string; fact: Fact; alternative?: Fact }[] {
   const offered: { fileId: string; fact: Fact; alternative?: Fact }[] = [];
@@ -256,6 +257,7 @@ export function offeredFacts(
     if (file.trashed) {
       continue;
     }
+    const judged = datesJudged(file);
     const byId = new Map(file.facts.map((fact) => [fact.id, fact]));
     for (const fact of file.facts) {
       if (isTracked(fact) || fact.dismissed) {
@@ -274,9 +276,14 @@ export function offeredFacts(
         continue;
       }
       // A line that only names its date says nothing of a deadline. Once
-      // its day is behind there is nothing left to be reminded of, so it is
-      // not asked about; the line stays on the file, quietly.
-      if (fact.kind === "dated" && daysUntil(fact.value, now) < 0) {
+      // its day is behind there is nothing left to be reminded of. And once
+      // a model was asked about the file's dates, a line a label rule read
+      // under a label nobody knows is no question any more: what the model
+      // said of that date is what is offered. Where no model read the file
+      // (no device runs one, or it could not read this file), nobody said
+      // what the date is, so the line still asks. Either way it stays on
+      // the file, quietly.
+      if (fact.kind === "dated" && (daysUntil(fact.value, now) < 0 || (fact.source === "label" && judged))) {
         continue;
       }
       if (partner) {
@@ -810,11 +817,21 @@ const MEANT_KINDS: ReadonlySet<FactKind> = new Set(["event", "due", "expiry", "i
  * meaning yet, so the model is asked what it is; once the owner answered that
  * line, yes or no, the day is settled and is not asked about under new words.
  */
-export function alreadyRead(facts: readonly Fact[]): { read: { value: string; time?: string }[]; total: boolean } {
+export function alreadyRead(facts: readonly Fact[]): { read: { value: string; time?: string; journey?: true }[]; total: boolean } {
   const settled = facts.filter((fact) => fact.source !== "model" || ownerDecided(fact));
   const read = settled.filter((fact) => MEANT_KINDS.has(fact.kind) || (fact.kind === "dated" && ownerDecided(fact)));
+  // A departure or an arrival is one end of a journey: the other end may
+  // stand beside it on the same day, and is still open to ask about.
+  const journeyEnd = (fact: Fact) => {
+    const role = subjectOf(fact)?.role;
+    return role === "depart" || role === "arrive";
+  };
   return {
-    read: read.map((fact) => ({ value: fact.value, ...(fact.time ? { time: fact.time } : {}) })),
+    read: read.map((fact) => ({
+      value: fact.value,
+      ...(fact.time ? { time: fact.time } : {}),
+      ...(journeyEnd(fact) ? { journey: true as const } : {}),
+    })),
     total: settled.some((fact) => slotOf(fact) === "amount"),
   };
 }

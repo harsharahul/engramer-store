@@ -9,7 +9,7 @@
  * must not become a hundred questions.
  */
 import { findDates, findRelativeDays, findTimes, type DateContext, type FoundDate } from "./dates";
-import { amountLines, clockLineTime, SUM_LINE } from "./labels";
+import { amountLines, boundsAnOccasion, clockLineTime, SUM_LINE } from "./labels";
 import type { Lexicon } from "./lexicon";
 import { tableBlocks } from "./tables";
 
@@ -39,6 +39,16 @@ const MAX_DATES = 10;
 const MAX_AMOUNTS = 6;
 /** A date in a table of times is the day of each; two are enough to say what the day is. */
 const CLOCKS_PER_DATE = 2;
+/** A clock that stands beside a printed date. */
+interface Beside {
+  time: string;
+  printed: string;
+  gap: number;
+  /** Its own words say it opens, closes or bounds an occasion. */
+  bounds: boolean;
+  /** The end of a range of hours: the clock the range starts at. */
+  endOf?: string;
+}
 const SENTENCE_MAX = 200;
 /** A sentence ends at a line's end, or at a full stop before a new start. */
 const SENTENCE_END = /\n+|[.!?]\s+(?=[A-Z0-9"'(])/g;
@@ -196,8 +206,12 @@ function dateLineAbove(
 export interface Known {
   /** For a stored file: the day it was kept. */
   keptAt?: number;
-  /** Days a reader already gave a meaning, each with its clock when it has one. */
-  read?: readonly { value: string; time?: string }[];
+  /**
+   * Days a reader already gave a meaning, each with its clock when it has
+   * one. `journey` marks one end of a journey (a departure or an arrival):
+   * its other end may stand beside it on the same day.
+   */
+  read?: readonly { value: string; time?: string; journey?: true }[];
   /** A reader already named the document's total. */
   total?: boolean;
   /** Places whose dates are nobody's business (a form line such as "Statement date: ..."): nothing is asked about a date found there. */
@@ -217,6 +231,10 @@ export interface Known {
  *
  * A day and clock a reader already gave a meaning is not a candidate either,
  * and no amount is once a reader named the total: one moment is read once.
+ * Beside a moment that was read, the end of its own range and a clock that
+ * only opens, closes or bounds it (the doors before a show) are no second
+ * thing to ask about; a clock with a name of its own still is, and one end
+ * of a journey that was read leaves the other open.
  */
 export function spotCandidates(text: string, context?: DateContext, known: Known = {}): Candidate[] {
   if (!text) {
@@ -264,10 +282,24 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
   };
 
   // Each clock goes to the nearest date in its own sentence.
-  const clocksOf = new Map<number, { time: string; printed: string; gap: number }[]>();
+  const clocksOf = new Map<number, Beside[]>();
   if (found.length > 0) {
     let first = 0;
-    for (const clock of findTimes(text)) {
+    const times = findTimes(text);
+    // A clock's own words: what stands before it on its line, back to the
+    // date or the clock before it.
+    const ends = [...found.map((date) => date.end), ...times.map((clock) => clock.end)].sort((a, b) => a - b);
+    const wordsBefore = (at: number) => {
+      let from = text.lastIndexOf("\n", at - 1) + 1;
+      for (const end of ends) {
+        if (end > at) {
+          break;
+        }
+        from = Math.max(from, end);
+      }
+      return text.slice(from, at);
+    };
+    for (const clock of times) {
       const sentence = sentenceAt(clock.at);
       while (first < found.length && found[first]!.end <= sentence.at) {
         first += 1;
@@ -297,11 +329,12 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
       }
       if (nearest >= 0) {
         const held = clocksOf.get(nearest) ?? [];
-        held.push({ time: clock.time, printed: text.slice(clock.at, clock.end), gap });
+        const bounds = boundsAnOccasion(wordsBefore(clock.at));
+        held.push({ time: clock.time, printed: text.slice(clock.at, clock.end), gap, bounds });
         // A range's end is offered too: on a journey ("10:30 - 12:45") it is
         // the arrival, and the model says which end is what.
         if (clock.endTime) {
-          held.push({ time: clock.endTime, printed: text.slice(clock.at, clock.end), gap: gap + 1 });
+          held.push({ time: clock.endTime, printed: text.slice(clock.at, clock.end), gap: gap + 1, bounds, endOf: clock.time });
         }
         clocksOf.set(nearest, held);
       }
@@ -316,6 +349,22 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
   // that clock, and the same day standing with no clock at all.
   const settled = (value: string, time: string | undefined) =>
     (known.read ?? []).some((read) => read.value === value && (read.time === undefined || time === undefined || read.time === time));
+  // The moments a reader gave a clock that stand at a printed date: at one
+  // of the clocks beside it. The end of a range is not where a moment
+  // stands (a range is read from its start), and one end of a journey is no
+  // such moment: its other end stands beside it, and is still open.
+  const momentsAt = (value: string, beside: readonly Beside[]) =>
+    new Set(
+      (known.read ?? [])
+        .filter(
+          (read) =>
+            read.value === value &&
+            read.time !== undefined &&
+            !read.journey &&
+            beside.some((clock) => clock.endOf === undefined && clock.time === read.time),
+        )
+        .map((read) => read.time),
+    );
   const candidates: Candidate[] = [];
   const seen = new Set<string>();
   let dates = 0;
@@ -332,10 +381,17 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
     if (known.skip?.some((span) => hit.at >= span.at && hit.at < span.end)) {
       continue;
     }
+    const beside = clocksOf.get(index) ?? [];
+    // Beside a moment that was read, the end of its own range and a clock
+    // that only opens, closes or bounds it are no second thing to ask
+    // about. A clock with a name of its own still is.
+    const moments = momentsAt(hit.date.iso, beside);
+    const open =
+      moments.size === 0 ? beside : beside.filter((clock) => !clock.bounds && !(clock.endOf !== undefined && moments.has(clock.endOf)));
     const printed = text.slice(hit.at, hit.end);
     const sentence = rowWords(hit.at) ?? shortened(text, sentenceAt(hit.at), hit.at, hit.end);
     // The nearest clocks, then back in the order they stand.
-    const clocks = (clocksOf.get(index) ?? [])
+    const clocks = open
       .map((clock, order) => ({ ...clock, order }))
       .sort((a, b) => a.gap - b.gap)
       .slice(0, CLOCKS_PER_DATE)

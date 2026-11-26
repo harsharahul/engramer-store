@@ -13,12 +13,29 @@ import { scoreReader, type EvalCase } from "./score";
  * no figure here is asserted, so no rule is ever shaped to its cases.
  */
 describe("the held-out set", () => {
-  it("holds 60 cases with unique ids, none shared with the first set", () => {
-    expect(HELDOUT_CASES).toHaveLength(60);
+  it("holds 100 cases with unique ids, none shared with the first set", () => {
+    expect(HELDOUT_CASES).toHaveLength(100);
     const ids = HELDOUT_CASES.map((c) => c.id);
-    expect(new Set(ids).size).toBe(60);
+    expect(new Set(ids).size).toBe(100);
     const first = new Set(EVAL_CASES.map((c) => c.id));
     expect(ids.filter((id) => first.has(id))).toEqual([]);
+  });
+
+  it("forty of them are bills, notices and statements: 24 emails and 16 stored files", () => {
+    const notices = HELDOUT_CASES.filter((c) => c.id.startsWith("h2-"));
+    expect(notices).toHaveLength(40);
+    expect(notices.filter((c) => c.mime === EMAIL_MIME)).toHaveLength(24);
+    expect(notices.filter((c) => c.mime === "application/pdf")).toHaveLength(16);
+    // Each names at most one amount: the one sum the document is about.
+    expect(notices.filter((c) => c.expected.filter((want) => want.kind === "amount").length > 1).map((c) => c.id)).toEqual([]);
+  });
+
+  it("a stored file expects nothing that was over before the day it is taken as kept", () => {
+    // The eval takes every stored file as kept on 9 November 2026.
+    for (const c of HELDOUT_CASES.filter((c) => c.writtenAt === undefined)) {
+      const behind = c.expected.filter((want) => want.kind !== "amount" && want.kind !== "issued" && want.value < "2026-11-09");
+      expect({ id: c.id, behind }).toEqual({ id: c.id, behind: [] });
+    }
   });
 
   it("no document of the first set is repeated in it", () => {
@@ -26,8 +43,8 @@ describe("the held-out set", () => {
     expect(HELDOUT_CASES.filter((c) => first.has(c.text)).map((c) => c.id)).toEqual([]);
   });
 
-  it("twelve of its documents state nothing", () => {
-    expect(HELDOUT_CASES.filter((c) => c.expected.length === 0)).toHaveLength(12);
+  it("twelve of its first sixty documents state nothing", () => {
+    expect(HELDOUT_CASES.filter((c) => !c.id.startsWith("h2-") && c.expected.length === 0)).toHaveLength(12);
   });
 
   it("every email names its sender, the day it was sent and its kind; a stored file names none", () => {

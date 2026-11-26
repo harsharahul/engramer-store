@@ -9,6 +9,7 @@
 import { AMOUNT_CASES } from "./amountcases";
 import { DISTRACTOR_CASES } from "./distractors";
 import { FORM_CASES } from "./forms";
+import { PROMPT_CASES } from "./promptcases";
 import { STRUCTURE_CASES } from "./structurecases";
 import { TIME_CASES } from "./timecases";
 import type { EvalCase } from "./score";
@@ -725,4 +726,6 @@ export const EVAL_CASES: readonly EvalCase[] = [
   ...AMOUNT_CASES,
   // Structure: HTML mail with tables, a quoted reply and a footer; stored files with rows of cells.
   ...STRUCTURE_CASES,
+  // Whose date it is: an offer inside a booking, a record of the past, public events, a day with several clocks.
+  ...PROMPT_CASES,
 ];

@@ -213,7 +213,7 @@ for the version and the exact prompt of the reader that ships, over at
 least 30 readings, on each of two synthetic sets; never for a travel time,
 an identity document's expiry or a legal deadline, which need exact data;
 and only when the value passes sanity checks (the day exists, a stay ends
-after it begins, an amount names its currency). The first set is 222
+after it begins, an amount names its currency). The first set is 238
 invented emails and documents: a third of them written so that the date or
 amount that matters stands among others that do not, forty written as
 forms (labels and values, flattened tables, a time on the line under its
@@ -221,23 +221,36 @@ date), thirty about time (doors and a show's start, ranges of hours,
 clocks in words, days said in words), thirty about amounts (a total
 among its parts, the currency behind the number, a label on the line
 above its amount), and thirty about structure (HTML mails laid out as
-tables, pages with rows of cells, a quoted reply, a footer); the rules,
-the label tables and the model's instructions are written against it. The second is 60 more,
-written without sight of the readers: nothing is ever tuned on it, and it
-is the one that says how unseen documents are read. The exact readers are
+tables, pages with rows of cells, a quoted reply, a footer), and sixteen
+about one day that holds several clocks or a list of records; the rules,
+the label tables and the model's instructions are written against it. The
+second is 100 more, written without sight of the readers: nothing is ever
+tuned on it, and it is the one that says how unseen documents are read.
+Forty of its documents are bills, notices and statements, most with a
+labelled date that is not the day to pay (a payment received, the last
+bill's due day, the day a statement was made). The exact readers are
 scored in the test suite, and Apple's on-device model is scored on a Mac
 by a harness that runs the app's own reading code (`tools/eval/apple`).
 
-On the second set today, the rules and the model together find 84% of the
-dates and 95% of the amounts a careful reader would, and of what they
-offer 73% of the dates and 90% of the amounts are right; two of twelve
+On the second set today, the rules and the model together find 86% of the
+dates and 93% of the amounts a careful reader would, and of what they
+offer 56% of the dates and 92% of the amounts are right (the dates offered
+include every form line kept with its own words); three of fourteen
 documents that state nothing still get an offer. Where a label names the
-whole amount, the rule states it with no model: that covers 30% of the
+whole amount, the rule states it with no model: that covers 26% of the
 second set's amounts, and every one of them is right. The model's own
-readings measure 71% right for dates and 87% for amounts, well below the
-bar, so they are offered for a yes, and naming an email's kind (82%) is
+readings measure 63% right for dates and 89% for amounts, well below the
+bar, so they are offered for a yes, and naming an email's kind (81%) is
 below its bar too. The bar never moves: a task earns trust only by
 measuring above it.
+
+The label rules are measured the same way, by kind
+(`apps/web/src/intel/eval/rulescores.json`, computed from the two sets by
+a test, so the table cannot drift from the code). A due date read from a
+label is right 56 times of 56 on the first set and 31 of 32 on the second:
+one wrong reading in thirty-two is under the bar, so a labelled due date
+still waits for your yes, as an event (56 of 58, and too few on the
+second set) and an expiry (12 of 13) do.
 
 Until the text of a PDF kept its lines, a page reached the readers as one
 line, while the stored-file cases of both sets held their line breaks. The
@@ -251,10 +264,17 @@ either way.
 
 The same harness counts what a person is asked, the way the app asks it:
 every unanswered date still ahead, or a deadline lately behind, on the day
-the document arrived. On the second set that is 97 suggestions for every
-100 documents, 8 of them on a day the document does not state for its
-reader or under the wrong meaning. Both numbers are tracked from change to
-change, and a change that raises either does not ship.
+the document arrived. On the second set that is 96 suggestions for every
+100 documents, 9 of them on a day the document does not state for its
+reader or under the wrong meaning. Before a form line under an unknown
+label went quiet, the same hundred documents gave 112 and 23: on a busy
+bill most such lines are dates that are nobody's reminder. Both numbers
+are tracked from change to change, and a change that raises either does
+not ship. The harness also counts what was given up for that: a day that
+matters, named only by such a line and by no other reading, is shown
+nowhere. That is 2 days in the hundred documents. With no model to say
+what such a date is it would be 10, which is why the line goes quiet only
+in a file the model has read.
 
 **Mail is read newest first, within a window.** The model reads email from
 the last 12 months by default (3 to 12 in Profile, following your account);
@@ -407,7 +427,13 @@ metadata and index blob like every other derived signal.
     asked about that line either;
   - a label the table does not hold, or one whose meaning depends on the
     document ("Date", "Start date", "Arrival"), is kept with the
-    document's own words and waits for your yes.
+    document's own words in the file's details. The on-device model is
+    asked what that date is, and once it has read the file, what it said
+    is what is offered: the line itself asks nothing, since a label whose
+    meaning is not known is no question to put to you. Where no model
+    read the file's dates (no signed-in device runs one, or it could not
+    read this file), nobody said what the date is, so the line still
+    waits for your yes while its day is ahead.
 
   No label that speaks of paying, expiring, attending, travelling or
   delivering can be marked as needing no reminder; a test holds the whole
@@ -529,6 +555,13 @@ metadata and index blob like every other derived signal.
   was sent or the file was kept, a part of a bill (a rate, a deposit, an
   amount with a minus sign, an amount whose label the table calls a part),
   and anything a rule or the document's own booking data already read.
+  A moment that was read with its clock also settles the end of its own
+  range of hours and the clocks beside that printed date which only open,
+  close or bound it ("Doors: 7:00 PM", "Gates open at 1pm", "Registration
+  from 17:30", "Arrive by: 09:20", "until 22:00"): they are no second
+  thing to ask about. A clock with a name of its own ("School play: 7:00
+  PM" beside an appointment) still is, and a departure that was read
+  leaves the arrival beside it open.
   Where the totals a document labels differ, only those are kept. Then
   the on-device model is asked once about what is left. For each date it
   answers from a short fixed list: something that happens, a check-in, a
@@ -569,7 +602,9 @@ A suggestion is made only while it can still matter. A date more than sixty
 days behind is not asked about; a deadline missed lately still is, because
 it can be acted on. A form line that only names its date ("Job completed:
 28 October") says nothing of a deadline, so it is not asked about once its
-day is behind. Such facts stay in the file's details, quietly.
+day is behind, and not at all once the on-device model has read the file.
+Such facts stay in the file's details, quietly, where you can still track
+or ignore them, and an answer you gave to one earlier stays as it is.
 
 **Reference numbers are kept short.** Metadata carries the last four
 characters; the whole value lives in the file's index blob and is fetched only

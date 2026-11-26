@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { spotCandidates } from "./candidates";
 import { judgedFacts } from "./judge";
 import { labelledFacts } from "./labels";
+import { modelStamp } from "./reading";
 import { reservationFacts } from "./reservation";
 import {
   alreadyRead,
@@ -200,17 +201,50 @@ describe("offeredFacts", () => {
     expect(offeredFacts(shelf([fact({ kind: "due", value: "2026-07-28" })]), NOW)).toHaveLength(1);
   });
 
-  it("offers a labelled date whose meaning is unknown", () => {
+  // A file the on-device model read: it was asked about every date the rules gave no meaning.
+  const read = (facts: Fact[], outcome: "found" | "none" | "short" = "found") => [
+    { id: "f1", trashed: false, facts, reading: modelStamp({ factsWanted: true, outcome, now: NOW }) },
+  ];
+
+  it("once the model read the file, a labelled date whose meaning is unknown is not asked about; the owner's own answer to it stays", () => {
     const generic = fact({ kind: "dated", value: "2027-10-19", label: "Benefit End Date" });
-    expect(offeredFacts(shelf([generic]), NOW)).toHaveLength(1);
+    expect(offeredFacts(read([generic]), NOW)).toHaveLength(0);
+    // The model found nothing in the file: that is its answer about this date too.
+    expect(offeredFacts(read([generic], "none"), NOW)).toHaveLength(0);
+    // Answered before this rule: the yes still counts, the no stays a no.
+    expect(isTracked({ ...generic, confirmed: true })).toBe(true);
+    expect(isTracked({ ...generic, dismissed: true })).toBe(false);
   });
 
-  it("does not ask about a line that only names a date once its day is behind", () => {
+  it("where no model read the file's dates, that line still asks while its day is ahead", () => {
+    const generic = fact({ kind: "dated", value: "2027-10-19", label: "Benefit End Date" });
+    // No device that runs the model, or the file is not read yet.
+    expect(offeredFacts(shelf([generic]), NOW)).toHaveLength(1);
+    // The model could not read this file: nobody said what the date is.
+    expect(offeredFacts(read([generic], "short"), NOW)).toHaveLength(1);
+    // A summary alone asked nothing about the dates.
+    const summarized = [{ id: "f1", trashed: false, facts: [generic], reading: modelStamp({ factsWanted: false, outcome: "found", now: NOW }) }];
+    expect(offeredFacts(summarized, NOW)).toHaveLength(1);
+  });
+
+  it("does not ask about a line that only names a date once its day is behind, whoever read the file", () => {
     const named = (value: string) => fact({ kind: "dated", value, label: "Job completed" });
     expect(offeredFacts(shelf([named("2026-08-01")]), NOW)).toHaveLength(0);
     expect(offeredFacts(shelf([named("2026-08-09")]), NOW)).toHaveLength(1);
+    expect(offeredFacts(read([named("2026-08-01")]), NOW)).toHaveLength(0);
+    expect(offeredFacts(read([named("2026-08-09")]), NOW)).toHaveLength(0);
+    // A named date another reader gave is that reader's own offer: it asks while ahead.
+    expect(offeredFacts(read([{ ...named("2026-08-09"), source: "model" }]), NOW)).toHaveLength(1);
     // A deadline missed lately still asks: it can be acted on.
-    expect(offeredFacts(shelf([fact({ kind: "due", value: "2026-08-01" })]), NOW)).toHaveLength(1);
+    expect(offeredFacts(read([fact({ kind: "due", value: "2026-08-01" })]), NOW)).toHaveLength(1);
+  });
+
+  it("a disagreement between two readings still asks once, whatever else is quiet", () => {
+    const rule = fact({ id: "due:2027-04-10", kind: "due", value: "2027-04-10", disputed: "due:2027-04-17" });
+    const model = fact({ id: "due:2027-04-17", kind: "due", value: "2027-04-17", source: "model", confidence: 0.45, disputed: "due:2027-04-10" });
+    const line = fact({ id: "dated:2027-04-01", kind: "dated", value: "2027-04-01", label: "Reference day", confidence: 0.4 });
+    const offered = offeredFacts(read([rule, model, line]), NOW);
+    expect(offered.map(({ fact: asked, alternative }) => [asked.id, alternative?.id])).toEqual([["due:2027-04-10", "due:2027-04-17"]]);
   });
 
   it("never re-offers what is answered, and never reads trash", () => {
@@ -678,8 +712,20 @@ describe("what the model is not asked about again", () => {
       fact({ id: "due:2027-06-30", kind: "due", value: "2027-06-30", source: "label", confidence: 0.7 }),
       event({ value: "2027-04-08", time: "15:00", label: "Check-in", source: "jsonld", confidence: 1, accepted: "exact" }),
     ]);
-    expect(known.read).toEqual([{ value: "2027-03-04", time: "10:15" }, { value: "2027-06-30" }, { value: "2027-04-08", time: "15:00" }]);
+    // One end of a journey says so: its other end may stand beside it on the same day.
+    expect(known.read).toEqual([{ value: "2027-03-04", time: "10:15", journey: true }, { value: "2027-06-30" }, { value: "2027-04-08", time: "15:00" }]);
     expect(known.total).toBe(false);
+  });
+
+  it("a departure and an arrival are the ends of a journey, however the reader said so; one end of a stay is not", () => {
+    const stated = event({ value: "2027-05-15", time: "08:42", label: "Train to Lyon", source: "label", confidence: 0.7, subject: { role: "arrive", mode: "train" } });
+    const named = event({ value: "2027-05-15", time: "06:10", label: "Train 6607 departs Paris", source: "label", confidence: 0.7 });
+    const stay = event({ value: "2027-05-15", time: "15:00", label: "Check-in", source: "label", confidence: 0.7, subject: { role: "check-in" } });
+    expect(alreadyRead([stated, named, stay]).read).toEqual([
+      { value: "2027-05-15", time: "08:42", journey: true },
+      { value: "2027-05-15", time: "06:10", journey: true },
+      { value: "2027-05-15", time: "15:00" },
+    ]);
   });
 
   it("the model's own earlier reading is asked about again, unless the owner answered it", () => {

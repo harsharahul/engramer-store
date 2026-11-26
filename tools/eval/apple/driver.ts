@@ -16,6 +16,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { generate, type AssistantTransport, type GenerateRequest } from "../../../apps/web/src/intel/assistant";
 import { CATEGORIES } from "../../../apps/web/src/intel/categorize";
+import { acceptance, modelScores } from "../../../apps/web/src/intel/confidence";
 import { EVAL_CASES } from "../../../apps/web/src/intel/eval/cases";
 import { HELDOUT_CASES } from "../../../apps/web/src/intel/eval/heldout";
 import { hashRequest, keptAnswers, replayRunner, StaleAnswer, type SavedAnswer } from "../../../apps/web/src/intel/eval/replay";
@@ -95,6 +96,8 @@ const transport: AssistantTransport = {
 type Runner = (request: GenerateRequest) => Promise<unknown>;
 const kept = new Map<string, SavedAnswer[]>();
 const keptFile = (id: string) => join(rawDir, `${id}.json`);
+/** The time the model took for each document, over all the calls its reading made. */
+const spent = new Map<string, { ms: number; calls: number }>();
 
 /** The model, with each answer kept under the name of its request. */
 function recording(id: string, change: (request: GenerateRequest) => GenerateRequest = (request) => request): Runner {
@@ -103,6 +106,9 @@ function recording(id: string, change: (request: GenerateRequest) => GenerateReq
     const name = hashRequest(request);
     const held = kept.get(id) ?? [];
     kept.set(id, held);
+    const started = performance.now();
+    const timed = spent.get(id) ?? { ms: 0, calls: 0 };
+    spent.set(id, timed);
     try {
       const answer = await generate(request, transport);
       held.push({ request: name, answer });
@@ -110,6 +116,9 @@ function recording(id: string, change: (request: GenerateRequest) => GenerateReq
     } catch (error) {
       held.push({ request: name, error: (error as { code?: string }).code ?? "other" });
       throw error;
+    } finally {
+      timed.ms += performance.now() - started;
+      timed.calls += 1;
     }
   };
 }
@@ -261,6 +270,19 @@ for (const { evalCase, quiet } of chosen) {
   }
 }
 harness?.stdin.end();
+if (spent.size > 0) {
+  // What a reading costs on this Mac: the model's time for a whole document,
+  // its summary and every request about its dates and amounts together.
+  const times = [...spent.values()];
+  const seconds = (ms: number) => (ms / 1000).toFixed(1);
+  const total = times.reduce((sum, timed) => sum + timed.ms, 0);
+  const calls = times.reduce((sum, timed) => sum + timed.calls, 0);
+  const longest = times.reduce((most, timed) => (timed.ms > most.ms ? timed : most));
+  process.stdout.write(
+    `\nmodel time: ${times.length} documents, ${calls} calls (${(calls / times.length).toFixed(2)} per document); ` +
+      `mean ${seconds(total / times.length)} s per document; longest ${seconds(longest.ms)} s (${longest.calls} calls)\n`,
+  );
+}
 if (stale > 0) {
   // An answer to another request says nothing about this one: no scores.
   process.stdout.write(`\n${stale} of ${chosen.length} cases need the model: their request changed since the kept run. Run without EVAL_REPLAY.\n`);
@@ -271,13 +293,24 @@ if (only) {
   process.exit(0);
 }
 
+/** The day a document reached its reader: a message's sending day, a file's kept day. */
+const dayOf = (evalCase: EvalCase) => evalCase.writtenAt ?? KEPT;
+
 // The model's own readings, and what the owner is shown: the rules' readings
 // and the model's together, as the app joins them. An amount no reader named
 // (the weakest harvest, listed in a file's details and never on the
 // Timeline) is not a reading of what the document is about, and is left out.
 const judged = async (evalCase: EvalCase): Promise<Fact[]> => readings.get(evalCase.id)?.facts ?? [];
 const shown = async (evalCase: EvalCase): Promise<Fact[]> => {
-  const joined = mergeFacts(await scanned(evalCase), (await judged(evalCase)).map((fact) => ({ ...fact, reader: MODEL_READER })));
+  // A model reading counts without a question only where the app lets it:
+  // by the scores this build ships, on the day the document reached its reader.
+  const proposals = await judged(evalCase);
+  const fresh = proposals.map((fact) => {
+    const read: Fact = { ...fact, reader: MODEL_READER };
+    const basis = acceptance(read, { scores: modelScores(), siblings: proposals, now: dayOf(evalCase) });
+    return basis === "grounded" ? { ...read, accepted: basis } : read;
+  });
+  const joined = mergeFacts(await scanned(evalCase), fresh);
   return joined.filter((fact) => !(fact.kind === "amount" && fact.source === "pattern"));
 };
 
@@ -288,12 +321,13 @@ const report = (title: string, figures: SetFigures, documents: number) =>
   `amounts found ${percent(figures.amounts.recall)} (${figures.amounts.expected} stated), right ${percent(figures.amounts.precision)} of ${figures.amounts.offered} offered; ` +
   `noise ${figures.noise.loud} of ${figures.noise.cases} empty documents; ` +
   `${documents - figures.wrong.length} of ${documents} documents read with nothing missed and nothing added`;
-/** The day a document reached its reader: a message's sending day, a file's kept day. */
-const dayOf = (evalCase: EvalCase) => evalCase.writtenAt ?? KEPT;
 const questions = (title: string, figures: SetFigures) =>
   `${title}: questions shown per 100 documents ${figures.asked.askedPer100} ` +
   `(${figures.asked.asked} in ${figures.asked.documents}); wrong day or meaning ${figures.asked.wrongPer100} per 100 (${figures.asked.wrong}); ` +
-  `right but for the clock ${figures.asked.clock}; a named-only line on a day that matters ${figures.asked.untyped}`;
+  `right but for the clock ${figures.asked.clock}; a named-only line on a day that matters ${figures.asked.untyped}\n` +
+  `${title}: dated readings that count with no question ${figures.counted.counted} ` +
+  `(wrong day or meaning ${figures.counted.wrong}; right but for the clock ${figures.counted.clock}); ` +
+  `days that matter, named by a line and shown nowhere ${figures.counted.unshown}`;
 
 interface SetScores {
   cases: number;
@@ -304,8 +338,11 @@ interface SetScores {
 }
 const measured: Record<string, SetScores> = {};
 for (const set of sets) {
-  const model = await measure(set.cases, judged, dayOf);
-  const whole = await measure(set.cases, shown, dayOf);
+  // A case the model answered carries its reading, as a file does in the app:
+  // only there is a form line under an unknown label no longer asked about.
+  const modelRead = (evalCase: EvalCase) => Boolean(readings.get(evalCase.id));
+  const model = await measure(set.cases, judged, dayOf, modelRead);
+  const whole = await measure(set.cases, shown, dayOf, modelRead);
   const kinds = await scoreKinds(kindCases(set.cases), async (evalCase) => readings.get(evalCase.id)?.mailKind ?? null);
   const documents = factCases(set.cases).length;
   measured[set.key] = {
