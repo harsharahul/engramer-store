@@ -46,6 +46,19 @@ All notable changes to Engram Store are documented here, following
 - **A label on the line above its amount** ("Amount due", then "$57.45"),
   as a table read out cell by cell prints it, names that amount.
 
+### Changed
+- **Fewer questions about dates nobody needs.** A form line under a label
+  no reader knows ("Review date: 19 October 2027") no longer asks on its
+  own. It stays in the file's details, the on-device model is still asked
+  what the date is, and an answer you gave to such a line earlier stays.
+  On a hundred unseen test documents the questions fall from 112 to 96 and
+  the wrong ones from 23 to 9.
+- **One moment, one question.** Once a show's start or an appointment is
+  read with its clock, the other clocks beside that date (the doors, the
+  end of a range of hours) are no longer put to the on-device model as a
+  second date. A journey still has two ends: a departure that was read
+  leaves the arrival open.
+
 ### Fixed
 - **A quoted reply and a footer are not read.** A date or an amount in
   the message a reply quotes, or in a sender's footer ("book again before
