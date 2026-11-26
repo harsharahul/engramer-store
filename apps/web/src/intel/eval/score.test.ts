@@ -240,23 +240,34 @@ describe("scoreAsked: the questions a person would be shown", () => {
     expect(await scoreAsked(cases, async (c) => answers[c.id]!, onApril1)).toMatchObject({ asked: 2, wrong: 0, clock: 2, untyped: 0, wrongPer100: 0 });
   });
 
-  it("a named-only line on the document's own issue day is not a day the reader is asked about", async () => {
-    const cases = [evalCase("policy", [{ kind: "issued", value: "2027-04-20" }, { kind: "expiry", value: "2028-03-19" }])];
-    const lines: Fact[] = [{ ...fact("dated", "2027-04-20"), label: "Date of letter", source: "label", confidence: 0.4 }];
-    expect(await scoreAsked(cases, async () => lines, onApril1)).toMatchObject({ asked: 1, wrong: 1, untyped: 0 });
-  });
-
-  it("a named-only line on a day already behind is not asked about at all", async () => {
-    const cases = [evalCase("invoice", [{ kind: "due", value: "2027-04-20" }])];
-    const lines: Fact[] = [{ ...fact("dated", "2027-03-20"), label: "Job completed", source: "label", confidence: 0.4 }];
-    expect(await scoreAsked(cases, async () => lines, onApril1)).toMatchObject({ asked: 0, wrong: 0 });
-  });
-
-  it("a named-only line on an expected day is untyped; on another day it is wrong", async () => {
+  it("a line a label rule only named asks nothing, on a day that matters or on any other", async () => {
     const cases = [evalCase("ticket", [{ kind: "event", value: "2027-05-15", time: "08:42" }])];
     const lines: Fact[] = [
       { ...fact("dated", "2027-05-15"), label: "Date", source: "label", confidence: 0.4 },
       { ...fact("dated", "2027-04-20"), label: "Booked on", source: "label", confidence: 0.4 },
+    ];
+    expect(await scoreAsked(cases, async () => lines, onApril1)).toMatchObject({ asked: 0, untyped: 0, wrong: 0 });
+  });
+
+  // A named-only reading can still ask when another reader gave it (an
+  // older build's, kept on the file): it is judged like any question.
+  it("a named-only reading on the document's own issue day is not a day the reader is asked about", async () => {
+    const cases = [evalCase("policy", [{ kind: "issued", value: "2027-04-20" }, { kind: "expiry", value: "2028-03-19" }])];
+    const lines: Fact[] = [{ ...fact("dated", "2027-04-20"), label: "Date of letter" }];
+    expect(await scoreAsked(cases, async () => lines, onApril1)).toMatchObject({ asked: 1, wrong: 1, untyped: 0 });
+  });
+
+  it("a named-only reading on a day already behind is not asked about at all", async () => {
+    const cases = [evalCase("invoice", [{ kind: "due", value: "2027-04-20" }])];
+    const lines: Fact[] = [{ ...fact("dated", "2027-03-20"), label: "Job completed" }];
+    expect(await scoreAsked(cases, async () => lines, onApril1)).toMatchObject({ asked: 0, wrong: 0 });
+  });
+
+  it("a named-only reading on an expected day is untyped; on another day it is wrong", async () => {
+    const cases = [evalCase("ticket", [{ kind: "event", value: "2027-05-15", time: "08:42" }])];
+    const lines: Fact[] = [
+      { ...fact("dated", "2027-05-15"), label: "Date" },
+      { ...fact("dated", "2027-04-20"), label: "Booked on" },
     ];
     expect(await scoreAsked(cases, async () => lines, onApril1)).toMatchObject({ asked: 2, untyped: 1, wrong: 1 });
   });
@@ -326,9 +337,10 @@ describe("scoreCounted: what counts with no question, and what is shown nowhere"
   });
 
   it("a day that matters, named by a form line nothing asks about and shown by nothing else, is shown nowhere", async () => {
-    // The line's day is behind 1 April, so the line is not asked about.
-    const cases = [evalCase("invoice", [{ kind: "due", value: "2027-03-20" }])];
-    expect(await scoreCounted(cases, async () => [line("2027-03-20", "Settle by")], onApril1)).toEqual({ counted: 0, wrong: 0, clock: 0, unshown: 1 });
+    // A line a label rule only named is not asked about, behind 1 April or ahead of it.
+    const cases = [evalCase("invoice", [{ kind: "due", value: "2027-03-20" }]), evalCase("permit", [{ kind: "due", value: "2027-04-20" }])];
+    const answers: Record<string, Fact[]> = { invoice: [line("2027-03-20", "Settle by")], permit: [line("2027-04-20", "Settle by")] };
+    expect(await scoreCounted(cases, async (c) => answers[c.id]!, onApril1)).toEqual({ counted: 0, wrong: 0, clock: 0, unshown: 2 });
   });
 
   it("a day another reading asks about, or that counts, is shown", async () => {

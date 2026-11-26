@@ -273,10 +273,12 @@ export function offeredFacts(
       if (DATED_KINDS.has(fact.kind) && daysUntil(fact.value, now) < -RECENT_PAST_OFFER_DAYS) {
         continue;
       }
-      // A line that only names its date says nothing of a deadline. Once
-      // its day is behind there is nothing left to be reminded of, so it is
-      // not asked about; the line stays on the file, quietly.
-      if (fact.kind === "dated" && daysUntil(fact.value, now) < 0) {
+      // A line that only names its date says nothing of a deadline. One a
+      // label rule read stands under a label no reader knows: that is no
+      // question to put to the owner, so it is not asked about, and neither
+      // is any such line once its day is behind. The line stays on the
+      // file, quietly, and the model is still asked what its date is.
+      if (fact.kind === "dated" && (fact.source === "label" || daysUntil(fact.value, now) < 0)) {
         continue;
       }
       if (partner) {

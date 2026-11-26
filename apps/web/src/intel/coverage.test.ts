@@ -191,6 +191,11 @@ const LINES: Line[] = [
     text: "Order date: 6 November 2026\nEstimated delivery: 12 November 2026",
     rows: [row("parcel", "DELIVERY", "2026-11-12", "", "Your order", "", "asks")],
   },
+  {
+    what: "a form line under a label nothing knows: kept on the file, no row and no question",
+    text: "Staff benefits summary\nReview date: 19 October 2027",
+    rows: [],
+  },
   // Running words no rule reads: the rules find the date or the amount, and
   // the on-device model says what it is. Its answer is stated here.
   {

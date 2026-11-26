@@ -200,17 +200,34 @@ describe("offeredFacts", () => {
     expect(offeredFacts(shelf([fact({ kind: "due", value: "2026-07-28" })]), NOW)).toHaveLength(1);
   });
 
-  it("offers a labelled date whose meaning is unknown", () => {
+  it("does not ask about a labelled date whose meaning is unknown; the owner's own answer to it stays", () => {
     const generic = fact({ kind: "dated", value: "2027-10-19", label: "Benefit End Date" });
-    expect(offeredFacts(shelf([generic]), NOW)).toHaveLength(1);
+    expect(offeredFacts(shelf([generic]), NOW)).toHaveLength(0);
+    // Answered before this rule: the yes still counts, the no stays a no.
+    expect(isTracked({ ...generic, confirmed: true })).toBe(true);
+    expect(isTracked({ ...generic, dismissed: true })).toBe(false);
   });
 
-  it("does not ask about a line that only names a date once its day is behind", () => {
+  it("does not ask about a line that only names a date, ahead or behind; a deadline missed lately still asks", () => {
     const named = (value: string) => fact({ kind: "dated", value, label: "Job completed" });
     expect(offeredFacts(shelf([named("2026-08-01")]), NOW)).toHaveLength(0);
-    expect(offeredFacts(shelf([named("2026-08-09")]), NOW)).toHaveLength(1);
+    expect(offeredFacts(shelf([named("2026-08-09")]), NOW)).toHaveLength(0);
     // A deadline missed lately still asks: it can be acted on.
     expect(offeredFacts(shelf([fact({ kind: "due", value: "2026-08-01" })]), NOW)).toHaveLength(1);
+  });
+
+  it("a named date from any other reader still asks while its day is ahead", () => {
+    const other = (value: string) => fact({ kind: "dated", value, label: "Job completed", source: "model" });
+    expect(offeredFacts(shelf([other("2026-08-01")]), NOW)).toHaveLength(0);
+    expect(offeredFacts(shelf([other("2026-08-09")]), NOW)).toHaveLength(1);
+  });
+
+  it("a disagreement between two readings still asks once, whatever else is quiet", () => {
+    const rule = fact({ id: "due:2027-04-10", kind: "due", value: "2027-04-10", disputed: "due:2027-04-17" });
+    const model = fact({ id: "due:2027-04-17", kind: "due", value: "2027-04-17", source: "model", confidence: 0.45, disputed: "due:2027-04-10" });
+    const line = fact({ id: "dated:2027-04-01", kind: "dated", value: "2027-04-01", label: "Reference day", confidence: 0.4 });
+    const offered = offeredFacts(shelf([rule, model, line]), NOW);
+    expect(offered.map(({ fact: asked, alternative }) => [asked.id, alternative?.id])).toEqual([["due:2027-04-10", "due:2027-04-17"]]);
   });
 
   it("never re-offers what is answered, and never reads trash", () => {
