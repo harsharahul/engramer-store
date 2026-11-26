@@ -54,7 +54,8 @@ export interface ReaderScore {
   perCase: CaseScore[];
 }
 
-function matches(fact: Fact, expected: EvalCase["expected"][number]): boolean {
+/** A reading is the expected fact: its kind and value, and its clock where the document states one. */
+export function matches(fact: Fact, expected: EvalCase["expected"][number]): boolean {
   if (fact.kind !== expected.kind || fact.value !== expected.value) {
     return false;
   }

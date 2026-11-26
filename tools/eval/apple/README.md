@@ -14,6 +14,14 @@ of messages and documents, per task, and writes
 The app accepts a model reading without the owner's yes only for tasks whose
 measured precision is at least 98% on both sets, over enough readings.
 
+The label rules have a measured record of their own,
+`apps/web/src/intel/eval/rulescores.json`: how often a rule's reading of a
+due date, an event or an expiry is right on each set. The rules are
+deterministic, so it needs no model: `rulescore.test.ts` computes it from the
+two sets and fails when a rule change moves a figure, until the table says
+so. No kind of rule reading clears the 98% bar on both sets today, so each
+one waits for a yes.
+
 The harness is the app's own Swift shim (`apps/desktop/src-tauri/apple/Intel`,
 linked into `Sources/EvalApple`, not copied) run from the command line, and
 the requests are built by the app's own `summarize()`, at the window size the

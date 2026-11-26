@@ -1,0 +1,12 @@
+{
+  "first": {
+    "due": { "offered": 56, "right": 56 },
+    "event": { "offered": 58, "right": 56 },
+    "expiry": { "offered": 13, "right": 12 }
+  },
+  "heldout": {
+    "due": { "offered": 32, "right": 31 },
+    "event": { "offered": 4, "right": 4 },
+    "expiry": { "offered": 8, "right": 7 }
+  }
+}
