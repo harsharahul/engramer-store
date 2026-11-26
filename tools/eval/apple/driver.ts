@@ -95,6 +95,8 @@ const transport: AssistantTransport = {
 type Runner = (request: GenerateRequest) => Promise<unknown>;
 const kept = new Map<string, SavedAnswer[]>();
 const keptFile = (id: string) => join(rawDir, `${id}.json`);
+/** The time the model took for each document, over all the calls its reading made. */
+const spent = new Map<string, { ms: number; calls: number }>();
 
 /** The model, with each answer kept under the name of its request. */
 function recording(id: string, change: (request: GenerateRequest) => GenerateRequest = (request) => request): Runner {
@@ -103,6 +105,9 @@ function recording(id: string, change: (request: GenerateRequest) => GenerateReq
     const name = hashRequest(request);
     const held = kept.get(id) ?? [];
     kept.set(id, held);
+    const started = performance.now();
+    const timed = spent.get(id) ?? { ms: 0, calls: 0 };
+    spent.set(id, timed);
     try {
       const answer = await generate(request, transport);
       held.push({ request: name, answer });
@@ -110,6 +115,9 @@ function recording(id: string, change: (request: GenerateRequest) => GenerateReq
     } catch (error) {
       held.push({ request: name, error: (error as { code?: string }).code ?? "other" });
       throw error;
+    } finally {
+      timed.ms += performance.now() - started;
+      timed.calls += 1;
     }
   };
 }
@@ -261,6 +269,19 @@ for (const { evalCase, quiet } of chosen) {
   }
 }
 harness?.stdin.end();
+if (spent.size > 0) {
+  // What a reading costs on this Mac: the model's time for a whole document,
+  // its summary and every request about its dates and amounts together.
+  const times = [...spent.values()];
+  const seconds = (ms: number) => (ms / 1000).toFixed(1);
+  const total = times.reduce((sum, timed) => sum + timed.ms, 0);
+  const calls = times.reduce((sum, timed) => sum + timed.calls, 0);
+  const longest = times.reduce((most, timed) => (timed.ms > most.ms ? timed : most));
+  process.stdout.write(
+    `\nmodel time: ${times.length} documents, ${calls} calls (${(calls / times.length).toFixed(2)} per document); ` +
+      `mean ${seconds(total / times.length)} s per document; longest ${seconds(longest.ms)} s (${longest.calls} calls)\n`,
+  );
+}
 if (stale > 0) {
   // An answer to another request says nothing about this one: no scores.
   process.stdout.write(`\n${stale} of ${chosen.length} cases need the model: their request changed since the kept run. Run without EVAL_REPLAY.\n`);
