@@ -5,6 +5,8 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-11-26
+
 ### Added
 - **A PDF's text keeps its lines and columns.** A page was stored as one
   long line; now pieces on one baseline are a line, a wide gap parts two
