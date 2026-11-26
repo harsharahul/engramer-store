@@ -7,9 +7,9 @@
   "cases": 238,
   "tasks": {
     "dates": {
-      "precision": 0.4,
-      "recall": 0.20833333333333334,
-      "offered": 125,
+      "precision": 0.4375,
+      "recall": 0.20416666666666666,
+      "offered": 112,
       "expected": 240
     },
     "amounts": {
@@ -32,12 +32,12 @@
     },
     "asked": {
       "documents": 227,
-      "asked": 125,
-      "wrong": 52,
-      "clock": 23,
+      "asked": 112,
+      "wrong": 53,
+      "clock": 10,
       "untyped": 0,
-      "askedPer100": 55.1,
-      "wrongPer100": 22.9
+      "askedPer100": 49.3,
+      "wrongPer100": 23.3
     },
     "counted": {
       "counted": 0,
@@ -82,9 +82,9 @@
   },
   "together": {
     "dates": {
-      "precision": 0.6646706586826348,
+      "precision": 0.6915887850467289,
       "recall": 0.925,
-      "offered": 334,
+      "offered": 321,
       "expected": 240
     },
     "amounts": {
@@ -107,21 +107,21 @@
     },
     "asked": {
       "documents": 227,
-      "asked": 310,
-      "wrong": 70,
-      "clock": 23,
-      "untyped": 1,
-      "askedPer100": 136.6,
-      "wrongPer100": 30.8
+      "asked": 278,
+      "wrong": 53,
+      "clock": 10,
+      "untyped": 0,
+      "askedPer100": 122.5,
+      "wrongPer100": 23.3
     },
     "counted": {
       "counted": 4,
       "wrong": 0,
       "clock": 0,
-      "unshown": 0
+      "unshown": 1
     },
     "documents": 227,
-    "readWhole": 142
+    "readWhole": 153
   },
   "heldout": {
     "cases": 100,
@@ -227,18 +227,18 @@
       },
       "asked": {
         "documents": 100,
-        "asked": 112,
-        "wrong": 23,
+        "asked": 96,
+        "wrong": 9,
         "clock": 8,
-        "untyped": 2,
-        "askedPer100": 112,
-        "wrongPer100": 23
+        "untyped": 0,
+        "askedPer100": 96,
+        "wrongPer100": 9
       },
       "counted": {
         "counted": 0,
         "wrong": 0,
         "clock": 0,
-        "unshown": 0
+        "unshown": 2
       },
       "documents": 100,
       "readWhole": 51
