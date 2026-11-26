@@ -156,13 +156,60 @@ describe("what a reader already settled is not a candidate", () => {
   const text =
     "Flight UA 123 departs SFO 10:15 AM on March 4, 2027, arrives JFK 6:45 PM. Your dental check-up is on 22 July 2027 at 09:30. Amount due: $84.20. Pay by 30 June 2027.";
 
-  it("a day and clock a reader gave a meaning is left out; another clock that day, and every other date, stays", () => {
-    const found = spotCandidates(text, undefined, { read: [{ value: "2027-03-04", time: "10:15" }, { value: "2027-06-30" }] });
+  it("one end of a journey that a reader gave a meaning is left out; the other end that day, and every other date, stays", () => {
+    const found = spotCandidates(text, undefined, { read: [{ value: "2027-03-04", time: "10:15", journey: true }, { value: "2027-06-30" }] });
     expect(found.filter((c) => c.what === "date").map((c) => [c.key, c.value, c.time])).toEqual([
       ["d1", "2027-03-04", "18:45"],
       ["d2", "2027-07-22", "09:30"],
     ]);
     expect(found.filter((c) => c.what === "amount").map((c) => c.value)).toEqual(["84.20"]);
+  });
+
+  it("a moment a reader gave a clock settles the other clocks beside that date", () => {
+    const ticket = "Booking made on 2 November 2026.\n\nExample Quartet in concert\nSaturday 14 November 2026\nDoors: 7:00 PM\nShow starts: 8:00 PM";
+    // With nothing read, both clocks of the day are asked about.
+    expect(dates(spotCandidates(ticket))).toEqual([
+      ["d1", "2026-11-02", undefined],
+      ["d2", "2026-11-14", "19:00"],
+      ["d3", "2026-11-14", "20:00"],
+    ]);
+    // The show's start was read: the doors are no second event to ask about.
+    expect(dates(spotCandidates(ticket, undefined, { read: [{ value: "2026-11-14", time: "20:00" }] }))).toEqual([["d1", "2026-11-02", undefined]]);
+    // A range whose start was read: its end is not asked about.
+    const course = "Beginners pottery\nWednesday 18 November 2026\n7:00-9:00 PM";
+    expect(dates(spotCandidates(course))).toEqual([
+      ["d1", "2026-11-18", "19:00"],
+      ["d2", "2026-11-18", "21:00"],
+    ]);
+    expect(dates(spotCandidates(course, undefined, { read: [{ value: "2026-11-18", time: "19:00" }] }))).toEqual([]);
+  });
+
+  it("a day read as one end of a stay settles the clocks beside it, like any moment", () => {
+    const stay = "Check-in is from 15:00 on Friday 19 March 2027; the reception desk is staffed until 22:00.";
+    expect(dates(spotCandidates(stay))).toEqual([
+      ["d1", "2027-03-19", "15:00"],
+      ["d2", "2027-03-19", "22:00"],
+    ]);
+    expect(dates(spotCandidates(stay, undefined, { read: [{ value: "2027-03-19", time: "15:00" }] }))).toEqual([]);
+  });
+
+  it("the same day printed at another place with a clock of its own is still asked about", () => {
+    const twice = "Example Quartet in concert\nSaturday 14 November 2026\nDoors: 7:00 PM\nShow starts: 8:00 PM\n\nCollect your tickets on 14 November 2026 from 10:00 at the box office.";
+    const found = spotCandidates(twice, undefined, { read: [{ value: "2026-11-14", time: "20:00" }] });
+    expect(dates(found)).toEqual([["d1", "2026-11-14", "10:00"]]);
+    expect(found[0]!.sentence).toBe("Collect your tickets on 14 November 2026 from 10:00 at the box office.");
+  });
+
+  it("both ends of a journey read: nothing of that date is left; a third clock beside one read end stays", () => {
+    const flight = "Flight UA 123 departs SFO 10:15 AM on March 4, 2027, arrives JFK 6:45 PM.";
+    const ends = [
+      { value: "2027-03-04", time: "10:15", journey: true as const },
+      { value: "2027-03-04", time: "18:45", journey: true as const },
+    ];
+    expect(dates(spotCandidates(flight, undefined, { read: ends }))).toEqual([]);
+    // A journey's end settles only its own clock: what else stands there is still open.
+    const boarding = "Flight UA 123 departs SFO 10:15 AM on March 4, 2027; the gate closes at 9:55 AM.";
+    expect(dates(spotCandidates(boarding, undefined, { read: [ends[0]!] }))).toEqual([["d1", "2027-03-04", "09:55"]]);
   });
 
   it("a day read with no clock covers that day whatever clock stands beside it", () => {

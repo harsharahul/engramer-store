@@ -678,8 +678,20 @@ describe("what the model is not asked about again", () => {
       fact({ id: "due:2027-06-30", kind: "due", value: "2027-06-30", source: "label", confidence: 0.7 }),
       event({ value: "2027-04-08", time: "15:00", label: "Check-in", source: "jsonld", confidence: 1, accepted: "exact" }),
     ]);
-    expect(known.read).toEqual([{ value: "2027-03-04", time: "10:15" }, { value: "2027-06-30" }, { value: "2027-04-08", time: "15:00" }]);
+    // One end of a journey says so: its other end may stand beside it on the same day.
+    expect(known.read).toEqual([{ value: "2027-03-04", time: "10:15", journey: true }, { value: "2027-06-30" }, { value: "2027-04-08", time: "15:00" }]);
     expect(known.total).toBe(false);
+  });
+
+  it("a departure and an arrival are the ends of a journey, however the reader said so; one end of a stay is not", () => {
+    const stated = event({ value: "2027-05-15", time: "08:42", label: "Train to Lyon", source: "label", confidence: 0.7, subject: { role: "arrive", mode: "train" } });
+    const named = event({ value: "2027-05-15", time: "06:10", label: "Train 6607 departs Paris", source: "label", confidence: 0.7 });
+    const stay = event({ value: "2027-05-15", time: "15:00", label: "Check-in", source: "label", confidence: 0.7, subject: { role: "check-in" } });
+    expect(alreadyRead([stated, named, stay]).read).toEqual([
+      { value: "2027-05-15", time: "08:42", journey: true },
+      { value: "2027-05-15", time: "06:10", journey: true },
+      { value: "2027-05-15", time: "15:00" },
+    ]);
   });
 
   it("the model's own earlier reading is asked about again, unless the owner answered it", () => {

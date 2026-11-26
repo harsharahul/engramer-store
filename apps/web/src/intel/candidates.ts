@@ -196,8 +196,12 @@ function dateLineAbove(
 export interface Known {
   /** For a stored file: the day it was kept. */
   keptAt?: number;
-  /** Days a reader already gave a meaning, each with its clock when it has one. */
-  read?: readonly { value: string; time?: string }[];
+  /**
+   * Days a reader already gave a meaning, each with its clock when it has
+   * one. `journey` marks one end of a journey (a departure or an arrival):
+   * its other end may stand beside it on the same day.
+   */
+  read?: readonly { value: string; time?: string; journey?: true }[];
   /** A reader already named the document's total. */
   total?: boolean;
   /** Places whose dates are nobody's business (a form line such as "Statement date: ..."): nothing is asked about a date found there. */
@@ -217,6 +221,9 @@ export interface Known {
  *
  * A day and clock a reader already gave a meaning is not a candidate either,
  * and no amount is once a reader named the total: one moment is read once.
+ * The other clocks beside a moment that was read (the doors before a show,
+ * the end of a range) are no second thing to ask about; only a journey has
+ * two ends, so one end read leaves the other open.
  */
 export function spotCandidates(text: string, context?: DateContext, known: Known = {}): Candidate[] {
   if (!text) {
@@ -316,6 +323,13 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
   // that clock, and the same day standing with no clock at all.
   const settled = (value: string, time: string | undefined) =>
     (known.read ?? []).some((read) => read.value === value && (read.time === undefined || time === undefined || read.time === time));
+  // A moment read at one of the clocks beside a printed date is what happens
+  // at that place: the whole place is settled. One end of a journey settles
+  // only its own clock.
+  const momentAt = (value: string, beside: readonly { time: string }[]) =>
+    (known.read ?? []).some(
+      (read) => read.value === value && read.time !== undefined && !read.journey && beside.some((clock) => clock.time === read.time),
+    );
   const candidates: Candidate[] = [];
   const seen = new Set<string>();
   let dates = 0;
@@ -332,10 +346,14 @@ export function spotCandidates(text: string, context?: DateContext, known: Known
     if (known.skip?.some((span) => hit.at >= span.at && hit.at < span.end)) {
       continue;
     }
+    const beside = clocksOf.get(index) ?? [];
+    if (momentAt(hit.date.iso, beside)) {
+      continue;
+    }
     const printed = text.slice(hit.at, hit.end);
     const sentence = rowWords(hit.at) ?? shortened(text, sentenceAt(hit.at), hit.at, hit.end);
     // The nearest clocks, then back in the order they stand.
-    const clocks = (clocksOf.get(index) ?? [])
+    const clocks = beside
       .map((clock, order) => ({ ...clock, order }))
       .sort((a, b) => a.gap - b.gap)
       .slice(0, CLOCKS_PER_DATE)

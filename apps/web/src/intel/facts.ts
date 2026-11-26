@@ -1,5 +1,5 @@
 import { daysUntil, findTimes } from "./dates";
-import type { Subject } from "./subject";
+import { subjectOf, type Subject } from "./subject";
 
 /**
  * Typed facts read out of documents: an expiry, an amount due, a reference
@@ -810,11 +810,21 @@ const MEANT_KINDS: ReadonlySet<FactKind> = new Set(["event", "due", "expiry", "i
  * meaning yet, so the model is asked what it is; once the owner answered that
  * line, yes or no, the day is settled and is not asked about under new words.
  */
-export function alreadyRead(facts: readonly Fact[]): { read: { value: string; time?: string }[]; total: boolean } {
+export function alreadyRead(facts: readonly Fact[]): { read: { value: string; time?: string; journey?: true }[]; total: boolean } {
   const settled = facts.filter((fact) => fact.source !== "model" || ownerDecided(fact));
   const read = settled.filter((fact) => MEANT_KINDS.has(fact.kind) || (fact.kind === "dated" && ownerDecided(fact)));
+  // A departure or an arrival is one end of a journey: the other end may
+  // stand beside it on the same day, and is still open to ask about.
+  const journeyEnd = (fact: Fact) => {
+    const role = subjectOf(fact)?.role;
+    return role === "depart" || role === "arrive";
+  };
   return {
-    read: read.map((fact) => ({ value: fact.value, ...(fact.time ? { time: fact.time } : {}) })),
+    read: read.map((fact) => ({
+      value: fact.value,
+      ...(fact.time ? { time: fact.time } : {}),
+      ...(journeyEnd(fact) ? { journey: true as const } : {}),
+    })),
     total: settled.some((fact) => slotOf(fact) === "amount"),
   };
 }
