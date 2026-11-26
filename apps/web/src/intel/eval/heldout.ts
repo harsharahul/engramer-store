@@ -1,10 +1,12 @@
 /**
- * The held-out eval set: sixty invented messages and documents, written
+ * The held-out eval set: a hundred invented messages and documents, written
  * without sight of the readers. Each case names what a careful reader finds.
  * Its figures are the ones the app trusts; no case here is ever used to
- * tune a rule or an instruction.
+ * tune a rule or an instruction. Sixty stand here; forty bills, notices and
+ * statements stand in heldoutnotices.ts.
  */
 
+import { HELDOUT_NOTICE_CASES } from "./heldoutnotices";
 import type { EvalCase } from "./score";
 
 const EMAIL = "application/vnd.engram.email+json";
@@ -1002,4 +1004,5 @@ export const HELDOUT_CASES: readonly EvalCase[] = [
       "Minutes recorded by K. Sato.",
     expected: [],
   },
+  ...HELDOUT_NOTICE_CASES,
 ];

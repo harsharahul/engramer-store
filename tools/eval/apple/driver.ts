@@ -16,6 +16,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { generate, type AssistantTransport, type GenerateRequest } from "../../../apps/web/src/intel/assistant";
 import { CATEGORIES } from "../../../apps/web/src/intel/categorize";
+import { acceptance, modelScores } from "../../../apps/web/src/intel/confidence";
 import { EVAL_CASES } from "../../../apps/web/src/intel/eval/cases";
 import { HELDOUT_CASES } from "../../../apps/web/src/intel/eval/heldout";
 import { hashRequest, keptAnswers, replayRunner, StaleAnswer, type SavedAnswer } from "../../../apps/web/src/intel/eval/replay";
@@ -292,13 +293,24 @@ if (only) {
   process.exit(0);
 }
 
+/** The day a document reached its reader: a message's sending day, a file's kept day. */
+const dayOf = (evalCase: EvalCase) => evalCase.writtenAt ?? KEPT;
+
 // The model's own readings, and what the owner is shown: the rules' readings
 // and the model's together, as the app joins them. An amount no reader named
 // (the weakest harvest, listed in a file's details and never on the
 // Timeline) is not a reading of what the document is about, and is left out.
 const judged = async (evalCase: EvalCase): Promise<Fact[]> => readings.get(evalCase.id)?.facts ?? [];
 const shown = async (evalCase: EvalCase): Promise<Fact[]> => {
-  const joined = mergeFacts(await scanned(evalCase), (await judged(evalCase)).map((fact) => ({ ...fact, reader: MODEL_READER })));
+  // A model reading counts without a question only where the app lets it:
+  // by the scores this build ships, on the day the document reached its reader.
+  const proposals = await judged(evalCase);
+  const fresh = proposals.map((fact) => {
+    const read: Fact = { ...fact, reader: MODEL_READER };
+    const basis = acceptance(read, { scores: modelScores(), siblings: proposals, now: dayOf(evalCase) });
+    return basis === "grounded" ? { ...read, accepted: basis } : read;
+  });
+  const joined = mergeFacts(await scanned(evalCase), fresh);
   return joined.filter((fact) => !(fact.kind === "amount" && fact.source === "pattern"));
 };
 
@@ -309,12 +321,13 @@ const report = (title: string, figures: SetFigures, documents: number) =>
   `amounts found ${percent(figures.amounts.recall)} (${figures.amounts.expected} stated), right ${percent(figures.amounts.precision)} of ${figures.amounts.offered} offered; ` +
   `noise ${figures.noise.loud} of ${figures.noise.cases} empty documents; ` +
   `${documents - figures.wrong.length} of ${documents} documents read with nothing missed and nothing added`;
-/** The day a document reached its reader: a message's sending day, a file's kept day. */
-const dayOf = (evalCase: EvalCase) => evalCase.writtenAt ?? KEPT;
 const questions = (title: string, figures: SetFigures) =>
   `${title}: questions shown per 100 documents ${figures.asked.askedPer100} ` +
   `(${figures.asked.asked} in ${figures.asked.documents}); wrong day or meaning ${figures.asked.wrongPer100} per 100 (${figures.asked.wrong}); ` +
-  `right but for the clock ${figures.asked.clock}; a named-only line on a day that matters ${figures.asked.untyped}`;
+  `right but for the clock ${figures.asked.clock}; a named-only line on a day that matters ${figures.asked.untyped}\n` +
+  `${title}: dated readings that count with no question ${figures.counted.counted} ` +
+  `(wrong day or meaning ${figures.counted.wrong}; right but for the clock ${figures.counted.clock}); ` +
+  `days that matter, named by a line and shown nowhere ${figures.counted.unshown}`;
 
 interface SetScores {
   cases: number;

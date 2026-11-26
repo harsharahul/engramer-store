@@ -6,9 +6,10 @@ of messages and documents, per task, and writes
 
 - **The first set** (`apps/web/src/intel/eval/cases.ts`): the documents the
   rules and the model's instructions were written against.
-- **The held-out set** (`apps/web/src/intel/eval/heldout.ts`): sixty documents
-  written without sight of the readers. Nothing is ever tuned on it, and the
-  run prints its totals only, never its cases one by one.
+- **The held-out set** (`apps/web/src/intel/eval/heldout.ts`, with
+  `heldoutnotices.ts`): a hundred documents written without sight of the
+  readers. Nothing is ever tuned on it, and the run prints its totals only,
+  never its cases one by one.
 
 The app accepts a model reading without the owner's yes only for tasks whose
 measured precision is at least 98% on both sets, over enough readings.
@@ -61,7 +62,10 @@ is never counted.
 Beside found and right, each set reports the questions a person would be
 shown per 100 documents (counted the way the app asks them, on the day each
 document reached its reader), how many of those are wrong, and what kind of
-error each wrong reading is.
+error each wrong reading is. One more line gives the dated readings that
+count with no question (exact data, two readers that agree, a reader
+measured right) and how many of those are wrong, and the days that matter
+which a form line names and nothing shows.
 
 Run it again whenever a prompt, a schema, the model reader's version or a set
 changes, and commit the new `scores.json`. Dates and amounts are judged at

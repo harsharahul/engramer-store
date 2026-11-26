@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Fact } from "../facts";
 import { EMAIL_MIME } from "../../mail/kind";
 import { EVAL_CASES } from "./cases";
-import { errorsByClass, factCases, kindCases, measure, scoreAsked, scoreKinds, scoreNoise, scoreReader, scoreRoles, type EvalCase } from "./score";
+import { errorsByClass, factCases, kindCases, measure, scoreAsked, scoreCounted, scoreKinds, scoreNoise, scoreReader, scoreRoles, type EvalCase } from "./score";
 
 const evalCase = (id: string, expected: EvalCase["expected"], mailKind?: string): EvalCase => ({
   id,
@@ -275,5 +275,94 @@ describe("scoreAsked: the questions a person would be shown", () => {
       d: [fact("due", "2027-04-10")],
     };
     expect(await scoreAsked(cases, async (c) => answers[c.id]!, onApril1)).toEqual({ documents: 4, asked: 2, wrong: 1, clock: 0, untyped: 0, askedPer100: 50, wrongPer100: 25 });
+  });
+});
+
+describe("scoreCounted: what counts with no question, and what is shown nowhere", () => {
+  // Every document below is looked at on 1 April 2027, the day it reached the reader.
+  const onApril1 = () => Date.UTC(2027, 3, 1, 12);
+  const line = (value: string, label: string): Fact => ({ ...fact("dated", value), label, source: "label", confidence: 0.4 });
+
+  it("a reading counts when its evidence was accepted; an unanswered one and the owner's own yes are not counted here", async () => {
+    const cases = [
+      evalCase("accepted", [{ kind: "due", value: "2027-04-10" }]),
+      evalCase("asked", [{ kind: "due", value: "2027-04-11" }]),
+      evalCase("answered", [{ kind: "due", value: "2027-04-12" }]),
+      evalCase("put-away", [{ kind: "due", value: "2027-04-13" }]),
+    ];
+    const answers: Record<string, Fact[]> = {
+      accepted: [{ ...fact("due", "2027-04-10"), accepted: "grounded" }],
+      asked: [fact("due", "2027-04-11")],
+      answered: [{ ...fact("due", "2027-04-12"), confirmed: true }],
+      // Accepted once, then dismissed by the owner: it does not count.
+      "put-away": [{ ...fact("due", "2027-04-13"), accepted: "grounded", dismissed: true }],
+    };
+    expect(await scoreCounted(cases, async (c) => answers[c.id]!, onApril1)).toEqual({ counted: 1, wrong: 0, clock: 0, unshown: 0 });
+  });
+
+  it("a counted reading on a day the document does not state, or under the wrong meaning, is wrong, however far behind its day is", async () => {
+    const cases = [evalCase("bill", [{ kind: "due", value: "2027-04-10" }])];
+    const facts: Fact[] = [
+      // Last year's bill, read as this one's day to pay: nothing asks about a day so far behind, but it counts.
+      { ...fact("due", "2026-10-02"), accepted: "grounded" },
+      { ...fact("expiry", "2027-04-10"), accepted: "agreement" },
+    ];
+    expect(await scoreCounted(cases, async () => facts, onApril1)).toEqual({ counted: 2, wrong: 2, clock: 0, unshown: 0 });
+  });
+
+  it("a counted reading with another clock, or none, is counted apart from a wrong one", async () => {
+    const cases = [evalCase("train", [{ kind: "event", value: "2027-05-15", time: "08:42" }])];
+    const facts: Fact[] = [{ ...fact("event", "2027-05-15"), accepted: "exact" }];
+    expect(await scoreCounted(cases, async () => facts, onApril1)).toEqual({ counted: 1, wrong: 0, clock: 1, unshown: 0 });
+  });
+
+  it("an amount or an issue day that counts is not a dated reading", async () => {
+    const cases = [evalCase("receipt", [{ kind: "amount", value: "50.00" }])];
+    const facts: Fact[] = [
+      { ...fact("amount", "50.00"), accepted: "exact" },
+      { ...fact("issued", "2027-03-30"), accepted: "exact" },
+    ];
+    expect(await scoreCounted(cases, async () => facts, onApril1)).toEqual({ counted: 0, wrong: 0, clock: 0, unshown: 0 });
+  });
+
+  it("a day that matters, named by a form line nothing asks about and shown by nothing else, is shown nowhere", async () => {
+    // The line's day is behind 1 April, so the line is not asked about.
+    const cases = [evalCase("invoice", [{ kind: "due", value: "2027-03-20" }])];
+    expect(await scoreCounted(cases, async () => [line("2027-03-20", "Settle by")], onApril1)).toEqual({ counted: 0, wrong: 0, clock: 0, unshown: 1 });
+  });
+
+  it("a day another reading asks about, or that counts, is shown", async () => {
+    const cases = [
+      evalCase("asked", [{ kind: "due", value: "2027-03-20" }]),
+      evalCase("counted", [{ kind: "due", value: "2027-03-21" }]),
+    ];
+    const answers: Record<string, Fact[]> = {
+      // Eleven days behind: the model's reading of the day still asks.
+      asked: [line("2027-03-20", "Settle by"), fact("due", "2027-03-20")],
+      counted: [line("2027-03-21", "Settle by"), { ...fact("due", "2027-03-21"), accepted: "grounded" }],
+    };
+    expect(await scoreCounted(cases, async (c) => answers[c.id]!, onApril1)).toMatchObject({ counted: 1, unshown: 0 });
+  });
+
+  it("a day no line names is missed, not shown nowhere; a day counts once; an issue day and an amount are not days that matter", async () => {
+    const cases = [
+      evalCase("missed", [{ kind: "due", value: "2027-03-20" }]),
+      evalCase("two-on-a-day", [{ kind: "event", value: "2027-03-22", time: "09:00" }, { kind: "event", value: "2027-03-22", time: "17:00" }]),
+      evalCase("issue-day", [{ kind: "issued", value: "2027-03-23" }]),
+    ];
+    const answers: Record<string, Fact[]> = {
+      missed: [],
+      "two-on-a-day": [line("2027-03-22", "Date")],
+      "issue-day": [line("2027-03-23", "Date of letter")],
+    };
+    expect(await scoreCounted(cases, async (c) => answers[c.id]!, onApril1)).toMatchObject({ unshown: 1 });
+  });
+
+  it("a set's figures say what counts with no question", async () => {
+    const cases = [evalCase("bill", [{ kind: "due", value: "2027-04-10" }])];
+    const figures = await measure(cases, async () => [{ ...fact("due", "2027-04-10"), accepted: "grounded" as const }], onApril1);
+    expect(figures.counted).toEqual({ counted: 1, wrong: 0, clock: 0, unshown: 0 });
+    // What counts is not asked about.
+    expect(figures.asked.asked).toBe(0);
   });
 });
