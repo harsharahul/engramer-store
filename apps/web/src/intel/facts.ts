@@ -1,4 +1,5 @@
 import { daysUntil, findTimes } from "./dates";
+import { datesJudged, type ReadFile } from "./reading";
 import { subjectOf, type Subject } from "./subject";
 
 /**
@@ -248,7 +249,7 @@ export const RECENT_PAST_OFFER_DAYS = 60;
  * the owner, which is the only set worth their attention.
  */
 export function offeredFacts(
-  files: { id: string; trashed: boolean; facts: Fact[] }[],
+  files: readonly ({ id: string; trashed: boolean; facts: Fact[] } & ReadFile)[],
   now: number,
 ): { fileId: string; fact: Fact; alternative?: Fact }[] {
   const offered: { fileId: string; fact: Fact; alternative?: Fact }[] = [];
@@ -256,6 +257,7 @@ export function offeredFacts(
     if (file.trashed) {
       continue;
     }
+    const judged = datesJudged(file);
     const byId = new Map(file.facts.map((fact) => [fact.id, fact]));
     for (const fact of file.facts) {
       if (isTracked(fact) || fact.dismissed) {
@@ -273,12 +275,15 @@ export function offeredFacts(
       if (DATED_KINDS.has(fact.kind) && daysUntil(fact.value, now) < -RECENT_PAST_OFFER_DAYS) {
         continue;
       }
-      // A line that only names its date says nothing of a deadline. One a
-      // label rule read stands under a label no reader knows: that is no
-      // question to put to the owner, so it is not asked about, and neither
-      // is any such line once its day is behind. The line stays on the
-      // file, quietly, and the model is still asked what its date is.
-      if (fact.kind === "dated" && (fact.source === "label" || daysUntil(fact.value, now) < 0)) {
+      // A line that only names its date says nothing of a deadline. Once
+      // its day is behind there is nothing left to be reminded of. And once
+      // a model was asked about the file's dates, a line a label rule read
+      // under a label nobody knows is no question any more: what the model
+      // said of that date is what is offered. Where no model read the file
+      // (no device runs one, or it could not read this file), nobody said
+      // what the date is, so the line still asks. Either way it stays on
+      // the file, quietly.
+      if (fact.kind === "dated" && (daysUntil(fact.value, now) < 0 || (fact.source === "label" && judged))) {
         continue;
       }
       if (partner) {

@@ -272,7 +272,9 @@ bill most such lines are dates that are nobody's reminder. Both numbers
 are tracked from change to change, and a change that raises either does
 not ship. The harness also counts what was given up for that: a day that
 matters, named only by such a line and by no other reading, is shown
-nowhere. That is 2 days in the hundred documents.
+nowhere. That is 2 days in the hundred documents. With no model to say
+what such a date is it would be 10, which is why the line goes quiet only
+in a file the model has read.
 
 **Mail is read newest first, within a window.** The model reads email from
 the last 12 months by default (3 to 12 in Profile, following your account);
@@ -425,10 +427,13 @@ metadata and index blob like every other derived signal.
     asked about that line either;
   - a label the table does not hold, or one whose meaning depends on the
     document ("Date", "Start date", "Arrival"), is kept with the
-    document's own words in the file's details. It asks nothing on its
-    own: a label no reader knows is no question to put to you. The
-    on-device model is asked what that date is, and where it names it,
-    its reading is what is offered.
+    document's own words in the file's details. The on-device model is
+    asked what that date is, and once it has read the file, what it said
+    is what is offered: the line itself asks nothing, since a label whose
+    meaning is not known is no question to put to you. Where no model
+    read the file's dates (no signed-in device runs one, or it could not
+    read this file), nobody said what the date is, so the line still
+    waits for your yes while its day is ahead.
 
   No label that speaks of paying, expiring, attending, travelling or
   delivering can be marked as needing no reminder; a test holds the whole
@@ -550,10 +555,13 @@ metadata and index blob like every other derived signal.
   was sent or the file was kept, a part of a bill (a rate, a deposit, an
   amount with a minus sign, an amount whose label the table calls a part),
   and anything a rule or the document's own booking data already read.
-  A moment that was read with its clock settles the other clocks beside
-  that printed date too (the doors before a show, the end of a range of
-  hours): they are no second thing to ask about. Only a journey has two
-  ends, so a departure that was read leaves the arrival beside it open.
+  A moment that was read with its clock also settles the end of its own
+  range of hours and the clocks beside that printed date which only open,
+  close or bound it ("Doors: 7:00 PM", "Gates open at 1pm", "Registration
+  from 17:30", "Arrive by: 09:20", "until 22:00"): they are no second
+  thing to ask about. A clock with a name of its own ("School play: 7:00
+  PM" beside an appointment) still is, and a departure that was read
+  leaves the arrival beside it open.
   Where the totals a document labels differ, only those are kept. Then
   the on-device model is asked once about what is left. For each date it
   answers from a short fixed list: something that happens, a check-in, a
@@ -593,9 +601,10 @@ because it gets relied on. Each fact in a file's details says why it counts:
 A suggestion is made only while it can still matter. A date more than sixty
 days behind is not asked about; a deadline missed lately still is, because
 it can be acted on. A form line that only names its date ("Job completed:
-28 October") says nothing of a deadline, so it is not asked about, behind
-or ahead. Such facts stay in the file's details, quietly, and an answer
-you gave to one earlier stays as it is.
+28 October") says nothing of a deadline, so it is not asked about once its
+day is behind, and not at all once the on-device model has read the file.
+Such facts stay in the file's details, quietly, where you can still track
+or ignore them, and an answer you gave to one earlier stays as it is.
 
 **Reference numbers are kept short.** Metadata carries the last four
 characters; the whole value lives in the file's index blob and is fetched only

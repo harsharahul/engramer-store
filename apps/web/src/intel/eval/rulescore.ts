@@ -1,7 +1,7 @@
 /**
  * How often a label rule's dated reading is right, by kind, on a set of
  * cases: the measured record a rule reading would have to rest on before it
- * could count without the owner's yes (spec 3.14).
+ * could count without the owner's yes.
  *
  * The rules are deterministic, so the record needs no model: it is computed
  * from the cases and kept in rulescores.json, and a test compares the two.

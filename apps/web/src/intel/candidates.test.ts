@@ -165,7 +165,38 @@ describe("what a reader already settled is not a candidate", () => {
     expect(found.filter((c) => c.what === "amount").map((c) => c.value)).toEqual(["84.20"]);
   });
 
-  it("a moment a reader gave a clock settles the other clocks beside that date", () => {
+  it("a clock that only opens, closes or bounds a moment that was read is settled with it", () => {
+    const settledBy = (text: string, time: string) => {
+      const [first] = spotCandidates(text).filter((c) => c.what === "date" && c.time !== undefined);
+      return dates(spotCandidates(text, undefined, { read: [{ value: first!.value, time }] }));
+    };
+    expect(settledBy("Example United v Sample Rovers\nSunday 22 November 2026\nKick-off: 3pm\nGates open at 1pm", "15:00")).toEqual([]);
+    expect(settledBy("Appointment: Wednesday 20 January 2027\nArrive by: 09:20\nAppointment time: 09:40", "09:40")).toEqual([]);
+    expect(settledBy("Example Cellar Club\nSaturday 12 December 2026\nDoors open 6pm\nCloakroom closes at 2am", "18:00")).toEqual([]);
+    expect(settledBy("Friday 20 November 2026, doors 7pm, show 8pm.", "20:00")).toEqual([]);
+    expect(settledBy("Wednesday 25 November 2026\nRegistration from 17:30\nTalk begins 18:00", "18:00")).toEqual([]);
+    // A range beside the moment that only says when a place is open goes whole.
+    expect(settledBy("Saturday 14 November 2026\nShow starts: 8:00 PM\nBar open 6:00-11:00 PM", "20:00")).toEqual([]);
+  });
+
+  it("a second thing with a name and a clock of its own beside a read moment is still asked about", () => {
+    const read = [{ value: "2026-12-10", time: "16:30" }];
+    const lines = "Thursday 10 December 2026\nAppointment: 4:30 PM\nSchool play: 7:00 PM";
+    expect(dates(spotCandidates(lines, undefined, { read }))).toEqual([["d1", "2026-12-10", "19:00"]]);
+    const sentence = "Your appointment is on Thursday 10 December 2026 at 4:30 PM, and the school play starts at 7:00 PM.";
+    expect(dates(spotCandidates(sentence, undefined, { read }))).toEqual([["d1", "2026-12-10", "19:00"]]);
+    // A word that opens a name is no opening time.
+    const evening = "Saturday 14 November 2026\nShow starts: 8:00 PM\nOpen mic night: 10:30 PM";
+    expect(dates(spotCandidates(evening, undefined, { read: [{ value: "2026-11-14", time: "20:00" }] }))).toEqual([["d1", "2026-11-14", "22:30"]]);
+  });
+
+  it("a moment read at the end of another place's range does not settle that place", () => {
+    const twice =
+      "Example Quartet in concert\nSaturday 14 November 2026\nDoors: 7:00 PM\nShow starts: 8:00 PM\n\nThe ticket desk is staffed on 14 November 2026 from 10:00-20:00.";
+    expect(dates(spotCandidates(twice, undefined, { read: [{ value: "2026-11-14", time: "20:00" }] }))).toEqual([["d1", "2026-11-14", "10:00"]]);
+  });
+
+  it("a moment a reader gave a clock settles its doors and the end of its own range", () => {
     const ticket = "Booking made on 2 November 2026.\n\nExample Quartet in concert\nSaturday 14 November 2026\nDoors: 7:00 PM\nShow starts: 8:00 PM";
     // With nothing read, both clocks of the day are asked about.
     expect(dates(spotCandidates(ticket))).toEqual([
@@ -184,7 +215,7 @@ describe("what a reader already settled is not a candidate", () => {
     expect(dates(spotCandidates(course, undefined, { read: [{ value: "2026-11-18", time: "19:00" }] }))).toEqual([]);
   });
 
-  it("a day read as one end of a stay settles the clocks beside it, like any moment", () => {
+  it("a day read as one end of a stay settles the clock that bounds it, like any moment", () => {
     const stay = "Check-in is from 15:00 on Friday 19 March 2027; the reception desk is staffed until 22:00.";
     expect(dates(spotCandidates(stay))).toEqual([
       ["d1", "2027-03-19", "15:00"],

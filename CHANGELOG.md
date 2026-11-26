@@ -47,17 +47,20 @@ All notable changes to Engram Store are documented here, following
   as a table read out cell by cell prints it, names that amount.
 
 ### Changed
-- **Fewer questions about dates nobody needs.** A form line under a label
-  no reader knows ("Review date: 19 October 2027") no longer asks on its
-  own. It stays in the file's details, the on-device model is still asked
-  what the date is, and an answer you gave to such a line earlier stays.
-  On a hundred unseen test documents the questions fall from 112 to 96 and
-  the wrong ones from 23 to 9.
+- **Fewer questions about dates nobody needs.** Once the on-device model
+  has read a file, a form line under a label whose meaning is not known
+  ("Review date: 19 October 2027") no longer asks on its own: what the
+  model said of that date is what is offered. The line stays in the
+  file's details, where you can still track or ignore it, and an answer
+  you gave to such a line earlier stays. On a hundred unseen test
+  documents the questions fall from 112 to 96 and the wrong ones from 23
+  to 9. Where no device runs the model, such a line asks as before.
 - **One moment, one question.** Once a show's start or an appointment is
-  read with its clock, the other clocks beside that date (the doors, the
-  end of a range of hours) are no longer put to the on-device model as a
-  second date. A journey still has two ends: a departure that was read
-  leaves the arrival open.
+  read with its clock, the end of its own range of hours and the clocks
+  that only open, close or bound it (doors, gates, registration, "arrive
+  by", "until") are no longer put to the on-device model as a second
+  date. A second thing with a name and a clock of its own is still asked
+  about, and a departure that was read leaves the arrival open.
 
 ### Fixed
 - **A quoted reply and a footer are not read.** A date or an amount in

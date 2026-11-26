@@ -11,6 +11,7 @@
 import { isTrackedDate } from "../agenda";
 import { basisOf, isDated, offeredFacts, type Fact, type FactKind } from "../facts";
 import { EMAIL_MIME } from "../../mail/kind";
+import { modelStamp } from "../reading";
 import { subjectOf, type Role } from "../subject";
 
 export interface EvalCase {
@@ -243,6 +244,21 @@ const ASKED_ABOUT: ReadonlySet<FactKind> = new Set(["event", "due", "expiry"]);
 const per100 = (count: number, documents: number) => (documents === 0 ? 0 : Math.round((count * 1000) / documents) / 10);
 
 /**
+ * Whether a model read a case's dates. The app asks about a form line under
+ * an unknown label only where no model did, so the questions counted depend
+ * on it; with none named, no case was read by a model.
+ */
+export type ModelRead = (evalCase: EvalCase) => boolean;
+
+/** A case as the file the app would ask about, with the stamp a model's reading leaves on it. */
+const fileOf = (evalCase: EvalCase, facts: Fact[], now: number, read: boolean) => ({
+  id: evalCase.id,
+  trashed: false,
+  facts,
+  ...(read ? { reading: modelStamp({ factsWanted: true, outcome: "found", now }) } : {}),
+});
+
+/**
  * The questions a person would be shown. A question is counted the way the
  * app asks it (`offeredFacts`: unanswered, a date, still ahead or lately
  * behind), on the day each document reached its reader, so the number means
@@ -259,13 +275,14 @@ export async function scoreAsked(
   cases: readonly EvalCase[],
   read: (evalCase: EvalCase) => Promise<Fact[]>,
   dayOf: (evalCase: EvalCase) => number,
+  modelRead: ModelRead = () => false,
 ): Promise<AskedScore> {
   let asked = 0;
   let wrong = 0;
   let clock = 0;
   let untyped = 0;
   for (const evalCase of cases) {
-    const file = { id: evalCase.id, trashed: false, facts: await read(evalCase) };
+    const file = fileOf(evalCase, await read(evalCase), dayOf(evalCase), modelRead(evalCase));
     for (const { fact } of offeredFacts([file], dayOf(evalCase))) {
       if (!isDated(fact)) {
         continue;
@@ -315,6 +332,7 @@ export async function scoreCounted(
   cases: readonly EvalCase[],
   read: (evalCase: EvalCase) => Promise<Fact[]>,
   dayOf: (evalCase: EvalCase) => number,
+  modelRead: ModelRead = () => false,
 ): Promise<CountedScore> {
   let counted = 0;
   let wrong = 0;
@@ -334,7 +352,7 @@ export async function scoreCounted(
         wrong++;
       }
     }
-    const offered = offeredFacts([{ id: evalCase.id, trashed: false, facts }], dayOf(evalCase)).map(({ fact }) => fact);
+    const offered = offeredFacts([fileOf(evalCase, facts, dayOf(evalCase), modelRead(evalCase))], dayOf(evalCase)).map(({ fact }) => fact);
     const shown = new Set([...offered.filter(isDated), ...tracked].map((fact) => fact.value));
     const named = new Set(facts.filter((fact) => fact.kind === "dated").map((fact) => fact.value));
     const matter = new Set(evalCase.expected.filter((expected) => ASKED_ABOUT.has(expected.kind)).map((expected) => expected.value));
@@ -373,6 +391,7 @@ export async function measure(
   cases: readonly EvalCase[],
   read: (evalCase: EvalCase) => Promise<Fact[]>,
   dayOf: (evalCase: EvalCase) => number,
+  modelRead: ModelRead = () => false,
 ): Promise<SetFigures> {
   const asked = factCases(cases);
   const figures = (score: ReaderScore): Measured => ({
@@ -394,8 +413,8 @@ export async function measure(
     amounts: figures(amounts),
     roles: await scoreRoles(asked, read),
     noise: await scoreNoise(asked, read),
-    asked: await scoreAsked(asked, read, dayOf),
-    counted: await scoreCounted(asked, read, dayOf),
+    asked: await scoreAsked(asked, read, dayOf, modelRead),
+    counted: await scoreCounted(asked, read, dayOf, modelRead),
     wrong,
   };
 }

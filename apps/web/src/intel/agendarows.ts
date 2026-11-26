@@ -17,10 +17,12 @@ import { deviceZone, instantOf, localDay, localTime, shownWhen, zoneOf } from ".
 import { legsOf, type DatedEntry, type Leg } from "./legs";
 import { documentLabel } from "./describe";
 import { basisOf, isDated, isTracked, offeredFacts, sumOf, type AmountSum, type Fact } from "./facts";
+import type { ReadFile } from "./reading";
 import { isTripTag, tripTitle } from "./trips";
 import { isLegEnd, subjectOf } from "./subject";
 
-export interface RowFile extends PlanFile {
+/** A file as the Timeline reads it. The reading it carries says whether a model was asked about its dates: a form line under an unknown label asks only where none was. */
+export interface RowFile extends PlanFile, ReadFile {
   mime: string;
   mtime: number;
   category?: string;

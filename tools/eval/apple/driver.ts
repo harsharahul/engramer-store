@@ -338,8 +338,11 @@ interface SetScores {
 }
 const measured: Record<string, SetScores> = {};
 for (const set of sets) {
-  const model = await measure(set.cases, judged, dayOf);
-  const whole = await measure(set.cases, shown, dayOf);
+  // A case the model answered carries its reading, as a file does in the app:
+  // only there is a form line under an unknown label no longer asked about.
+  const modelRead = (evalCase: EvalCase) => Boolean(readings.get(evalCase.id));
+  const model = await measure(set.cases, judged, dayOf, modelRead);
+  const whole = await measure(set.cases, shown, dayOf, modelRead);
   const kinds = await scoreKinds(kindCases(set.cases), async (evalCase) => readings.get(evalCase.id)?.mailKind ?? null);
   const documents = factCases(set.cases).length;
   measured[set.key] = {

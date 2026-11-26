@@ -62,6 +62,22 @@ const START_LABELS = /\b(?:appointment|doors)\b/gi;
 const SHOW_LABELS =
   /\b(?:show(?:\s+starts?)?(?=\s*:|\s+\d{1,2}(?::[0-5]\d|\s?[ap]\.?m\b)|\s+at\s+\d|\s+starts?\b)|curtain(?:\s+(?:up|call)|(?=\s*:))|kick[- ]?off|(?:talk|performance|concert|event|lecture|match|game)\s+(?:starts?|begins?)|start\s+time)\b/gi;
 const DOORS = /^doors\b/i;
+/**
+ * The words before a clock that say it only opens, closes or bounds an
+ * occasion and is not one itself: "Doors: 7:00 PM", "Gates open at 1pm",
+ * "Registration from 17:30", "Arrive by: 09:20", "staffed until 22:00".
+ * The words for letting people in (doors, gates, registration, admission,
+ * entry) say so wherever they stand before the clock; the other words only
+ * as the last thing before it, so that a name which begins with one ("Open
+ * mic night: 8 PM") is not taken for an opening time.
+ */
+const BOUNDS =
+  /(?:\b(?:doors?|gates?|registration|admission|entry)\b.*|\b(?:opens?|opening|closes?|closing|until|till|by)(?:\s+(?:at|from))?)[\s:]*$/i;
+
+/** Whether the words that stand before a clock say it only opens, closes or bounds an occasion. */
+export function boundsAnOccasion(words: string): boolean {
+  return BOUNDS.test(words);
+}
 /** Start readings that are not a show's start. */
 const NOT_A_SHOW = /^(?:doors|appointment)\b/i;
 /** A line that says it is a delivery, in any message. */

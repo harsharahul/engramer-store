@@ -12,6 +12,7 @@ import { rowsOf, type AgendaRow, type RowContext, type RowFile } from "./agendar
 import { spotCandidates } from "./candidates";
 import { alreadyRead, mergeFacts, type DocumentKind, type Fact } from "./facts";
 import { judgedFacts } from "./judge";
+import { modelStamp } from "./reading";
 import { scanForFacts } from "./scan";
 
 const EMAIL = "application/vnd.engram.email+json";
@@ -192,9 +193,15 @@ const LINES: Line[] = [
     rows: [row("parcel", "DELIVERY", "2026-11-12", "", "Your order", "", "asks")],
   },
   {
-    what: "a form line under a label nothing knows: kept on the file, no row and no question",
+    what: "a form line under a label nothing knows, in a file the model read and gave no meaning: kept on the file, no row and no question",
     text: "Staff benefits summary\nReview date: 19 October 2027",
+    judged: {},
     rows: [],
+  },
+  {
+    what: "the same line where no model read the file: nobody said what the date is, so it asks",
+    text: "Staff benefits summary\nReview date: 19 October 2027",
+    rows: [row("doc", "DOCUMENT", "2027-10-19", "", "Review date", "", "asks")],
   },
   // Running words no rule reads: the rules find the date or the amount, and
   // the on-device model says what it is. Its answer is stated here.
@@ -292,6 +299,8 @@ describe("what the Timeline shows for everyday documents", () => {
         tags: [],
         facts: mergeFacts(facts, read),
         trashed: false,
+        // A file the model read carries the stamp of that reading.
+        ...(line.judged ? { reading: modelStamp({ factsWanted: true, outcome: read.length > 0 ? "found" : "none", now: NOW }) } : {}),
         ...(line.subject ? { mail: { subject: line.subject, from: "Sender", date: WRITTEN } } : {}),
       };
       const rows = await rowsOf([file], none, NOW);
