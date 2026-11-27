@@ -120,6 +120,8 @@ describe("basisLabel", () => {
     expect(basisLabel(fact({ source: "jsonld", confidence: 1, accepted: "exact" }))).toBe("read from the booking data");
     expect(basisLabel(fact({ accepted: "agreement", reader: "label + model" }))).toBe("two readers agree");
     expect(basisLabel(fact({ source: "model", accepted: "grounded" }))).toBe("read by the on-device model, found in the text");
+    // A label rule's own reading that counts: a mail's plain day to pay.
+    expect(basisLabel(fact({ kind: "due", accepted: "grounded" }))).toBe("read from its label");
   });
 
   it("names the reader of a fact that waits for a yes", () => {

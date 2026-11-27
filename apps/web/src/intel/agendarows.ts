@@ -78,6 +78,8 @@ export interface AgendaRow {
   ask?: true;
   /** A date the owner confirmed. */
   confirmedByYou?: true;
+  /** A day to pay that counts on a label rule's own reading, with no yes from the owner. */
+  readFromLabel?: true;
   proposal?: TripPlan;
   past: boolean;
 }
@@ -344,6 +346,7 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
           sub: subOf(file),
           ...(price ? { amount: price } : {}),
           ...(basisOf(fact) === "confirmed" ? { confirmedByYou: true as const } : {}),
+          ...(basisOf(fact) === "grounded" && fact.source === "label" ? { readFromLabel: true as const } : {}),
         });
       }
     }

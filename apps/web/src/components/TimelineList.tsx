@@ -504,6 +504,7 @@ function TimelineRow(props: {
           </div>
         )}
         {row.confirmedByYou && <div className="tln-evs tln-ok">Date confirmed by you</div>}
+        {row.readFromLabel && <div className="tln-evs">Date read from its label</div>}
         {row.proposal &&
           (props.kept ? (
             <div className="tln-evs">Kept. Bookings that arrive later join it on their own.</div>

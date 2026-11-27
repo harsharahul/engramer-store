@@ -86,7 +86,9 @@ export function basisLabel(fact: Fact): string {
     case "agreement":
       return "two readers agree";
     case "grounded":
-      return "read by the on-device model, found in the text";
+      // A label rule's own reading that counts (a mail's plain day to pay),
+      // or the model's reading where its measured record allows.
+      return fact.source === "label" ? "read from its label" : "read by the on-device model, found in the text";
     default:
       return sourceLabel(fact.source);
   }

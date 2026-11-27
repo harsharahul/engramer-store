@@ -289,6 +289,13 @@ describe("the timeline list", () => {
     expect(onToast).toHaveBeenCalledWith("Kept out of the trip.");
   });
 
+  it("a date that counts on its label says so, and asks nothing", () => {
+    const now = new Date("2026-09-08T08:40:00").getTime();
+    render({ now, rows: [row("water", "due", "2026-09-30", undefined, { readFromLabel: true, factIds: ["due:water"] })] });
+    expect(text()).toContain("Date read from its label");
+    expect(text()).not.toContain("Not confirmed yet.");
+  });
+
   it("Confirm date confirms", () => {
     const now = new Date("2026-09-08T08:40:00").getTime();
     render({ now, rows: [row("dmv", "due", "2026-09-30", undefined, { ask: true, factIds: ["due:dmv"] })] });
