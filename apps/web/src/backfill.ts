@@ -2,6 +2,7 @@ import { isHandheld } from "./analysisslot";
 import { loadPolicy } from "./backuppolicy";
 import { settingChanged } from "./settingsbus";
 import { connectionIsUnmetered } from "./connection";
+import { ruleEdition } from "./intel/rulerecord";
 import { ownerDecided } from "./intel/facts";
 import { loadLexicon } from "./intel/lexicon";
 import { factsEnabled } from "./intel/scan";
@@ -179,21 +180,41 @@ export async function runBackfill(): Promise<BackfillResult | null> {
    * its own words is owed one more look, once per edition of the table.
    * Every file the pass reads is noted for the edition, so the look is
    * never owed twice, whatever another device writes back.
+   *
+   * The same holds for the rule that lets a mail's labelled day to pay
+   * count without a question: a mail that still holds such a day, read by
+   * a label and answered by nobody, is owed one look per edition of that
+   * rule. A stored file's day never counts on a label, so it is owed none.
    */
   const datesPass = async () => {
+    const file = (id: string) => useStore.getState().files.get(id);
+    const looks: { memory: SweepMemory; open: (id: string) => boolean }[] = [];
     const edition = (await loadLexicon())?.edition;
-    if (!edition) {
+    if (edition) {
+      looks.push({
+        memory: new SweepMemory(account, "lines", edition),
+        open: (id) => file(id)?.facts.some((fact) => fact.kind === "dated" && fact.source === "label" && !ownerDecided(fact)) ?? false,
+      });
+    }
+    const rule = ruleEdition();
+    if (rule) {
+      looks.push({
+        memory: new SweepMemory(account, "rules", rule),
+        open: (id) => {
+          const mail = file(id);
+          return (
+            (mail?.mail?.date ?? 0) > 0 &&
+            (mail?.facts.some((fact) => fact.kind === "due" && fact.source === "label" && fact.accepted === undefined && !ownerDecided(fact)) ?? false)
+          );
+        },
+      });
+    }
+    if (looks.length === 0) {
       return pass("facts", attemptedFacts);
     }
-    const lines = new SweepMemory(account, "lines", edition);
-    const openLine = (id: string) =>
-      useStore
-        .getState()
-        .files.get(id)
-        ?.facts.some((fact) => fact.kind === "dated" && fact.source === "label" && !ownerDecided(fact)) ?? false;
     return pass("facts", attemptedFacts, {
-      owed: (id) => !lines.exhausted(id) && openLine(id),
-      record: (id, ok) => lines.record(id, ok),
+      owed: (id) => looks.some((look) => !look.memory.exhausted(id) && look.open(id)),
+      record: (id, ok) => looks.forEach((look) => look.memory.record(id, ok)),
     });
   };
 

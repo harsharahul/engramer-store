@@ -15,7 +15,7 @@
  * thirty readings, on the first set and on the unseen documents.
  */
 
-import { plainAmount, plainDue, withoutDoubt, type RuleScores } from "../confidence";
+import { plainAmount, plainDue, withoutDoubt, type RuleScores } from "../rulerecord";
 import { scanForFacts } from "../scan";
 import { matches, type EvalCase } from "./score";
 

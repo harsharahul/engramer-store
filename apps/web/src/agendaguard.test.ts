@@ -109,11 +109,11 @@ describe("one reading of what a fact is about", () => {
   it("reads a label's meaning only in intel/subject.ts", () => {
     // A label is the document's own words; what it means comes from subjectOf.
     // An amount's "Total" label is not a date's subject: facts.ts reads it for
-    // slots. confidence.ts raises the stakes on any travel word in a label, on
+    // slots. stakes.ts raises the stakes on any travel word in a label, on
     // top of the subject, so that check stays deliberately broad. labels.ts is
     // the reader that writes labels from a document's text, and the palette
     // filters its own action names, not facts.
-    const allowed = ["subject.ts", "facts.ts", "confidence.ts", "labels.ts"].map((name) => join("intel", name));
+    const allowed = ["subject.ts", "facts.ts", "stakes.ts", "labels.ts"].map((name) => join("intel", name));
     expect(offenders(MEANING, [...allowed, join("components", "CommandPalette.tsx")])).toEqual([]);
   });
 });

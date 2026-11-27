@@ -329,6 +329,20 @@ function standsApart(after: string, iso: string, writtenAt?: number): boolean {
   return words.some((word) => !JOINING_WORDS.has(word.toLowerCase()) && !CURRENCY_CODES.has(word.toUpperCase()));
 }
 
+/** A label whose own words say the day is due or to pay. */
+const SAYS_DUE = /\b(?:dues?|pay|paid|payable|payments?|repayments?|owing|remit)\b/i;
+/** A renewal's label says when a plan or a cover renews; the money may leave on another day. */
+const SAYS_RENEWAL = /\brenew/i;
+
+/**
+ * Whether a label's own words say "due" or "pay". Every other label a day
+ * to act by is read under (a renewal, "return by", "confirm by", "will be
+ * charged on", a direct debit, a disconnection) names another matter.
+ */
+function saysPay(words: string): boolean {
+  return SAYS_DUE.test(words) && !SAYS_RENEWAL.test(words);
+}
+
 /** Words that make a label a point of reference: the clause is about missing the day, not about the day. */
 const REFERS_BACK = /\b(?:after|not|if|unless|past|following|beyond)\b/i;
 /** How far back a label's own clause is read. */
@@ -443,6 +457,8 @@ export function labelledFacts(text: string, writtenAt?: number, lexicon?: Lexico
   // line under it: each cell there is read under its own column.
   const headers = headerLines(text);
   const inHeader = (at: number) => headers.some((header) => at >= header.at && at < header.end);
+  // The days to act by whose first label says due or pay.
+  const saidToPay = new Set<string>();
   for (const { kind, labels, reach, label } of KINDS) {
     labels.lastIndex = 0;
     for (let match = labels.exec(text); match; match = labels.exec(text)) {
@@ -457,19 +473,27 @@ export function labelledFacts(text: string, writtenAt?: number, lexicon?: Lexico
         continue;
       }
       const id = factId(kind, parsed.iso);
-      // A day to act by that its label reads across other words, or from a
-      // clause that only refers to the day, is marked: the date may not be
-      // the day itself.
-      const apart = kind === "due" && (refersBack(text, match.index) || standsApart(window, parsed.iso, writtenAt));
+      // A day to pay is stated outright where the label's own words say due
+      // or pay (a rule with no label of its own is the rule for "due date"
+      // and "pay by"), and the date is the label's own: the label states
+      // the day and does not only refer to it, and no other words stand
+      // between the label and the date.
+      const says = kind === "due" && (label === undefined || saysPay(label(match[0])));
+      const own = kind === "due" && !refersBack(text, match.index) && !standsApart(window, parsed.iso, writtenAt);
       const held = byId.get(id);
       if (held) {
-        // A second label that states the same day straight makes it whole.
-        if (held.apart && kind === "due" && !apart) {
-          const { apart: _apart, ...whole } = held;
-          byId.set(id, whole);
+        // The day keeps the label that read it first. Where that label says
+        // due or pay but read the date loosely, a second label that states
+        // the same day as its own settles it.
+        if (own && saidToPay.has(id) && !held.toPay) {
+          byId.set(id, { ...held, toPay: true });
         }
         continue;
       }
+      if (says) {
+        saidToPay.add(id);
+      }
+      const toPay = says && own;
       // A day to act by keeps the clock that stands straight after or before
       // it on the label's own line ("Return by: Fri 30 July 2027 17:00").
       const time = kind === "due" ? clockOfDay(window.split("\n", 1)[0]!, writtenAt) : null;
@@ -480,7 +504,7 @@ export function labelledFacts(text: string, writtenAt?: number, lexicon?: Lexico
         value: parsed.iso,
         ...(time ? { time } : {}),
         ...(label ? { label: label(match[0]) } : {}),
-        ...(apart ? { apart: true } : {}),
+        ...(toPay ? { toPay: true } : {}),
         source: "label",
         // A date that could be read two ways is worth less than one that
         // could not, and the difference is what the confirmation card asks
@@ -683,7 +707,7 @@ export function structuralDatedFacts(
       const id = factId(meaning, parsed.iso);
       if (!byId.has(id)) {
         const time = meaning === "due" ? clockOfDay(line.value, opts.writtenAt) : null;
-        const apart = meaning === "due" && standsApart(line.value.slice(0, WINDOW), parsed.iso, opts.writtenAt);
+        const toPay = meaning === "due" && saysPay(label) && !standsApart(line.value.slice(0, WINDOW), parsed.iso, opts.writtenAt);
         byId.set(id, {
           id,
           kind: meaning,
@@ -691,7 +715,7 @@ export function structuralDatedFacts(
           value: parsed.iso,
           ...(time ? { time } : {}),
           label,
-          ...(apart ? { apart: true } : {}),
+          ...(toPay ? { toPay: true } : {}),
           source: "label",
           ...sure,
         });

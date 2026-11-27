@@ -151,14 +151,17 @@ export interface Fact {
    */
   relative?: boolean;
   /**
-   * A label rule read this day to act by loosely: other words stand between
-   * the label and the date ("not paid by the due date, interest from 22
-   * April"), or the label stands in a clause that only refers to the day
-   * ("after the due date (15 December)"). The date may then be another
-   * day's. Such a reading is offered like any other, and never counts on
-   * the rule's word alone.
+   * A label rule read this day to act by outright as a day to pay: the
+   * label's own words say due or pay, and the date is the label's own (it
+   * stands straight after the label, which states the day and does not only
+   * refer to it). Stated by the reader where it reads the label. A day read
+   * under any other label (a renewal, "return by"), across other words
+   * ("not paid by the due date, interest from 22 April") or from a clause
+   * about missing the day ("after the due date (15 December)") lacks it:
+   * such a reading is offered like any other, and never counts on the
+   * rule's word alone.
    */
-  apart?: boolean;
+  toPay?: boolean;
   /**
    * What an amount is, stated by the reader: the amount still to pay, an
    * order's total, or a total. Kept as stored; read it only through `sumOf`,
@@ -417,7 +420,7 @@ export function reconcileFacts(existing: Fact[], rescanned: Fact[], digest: stri
       continue;
     }
     if (again) {
-      const forward: Fact = { ...withSubjectFrom(fact, again), digest };
+      const forward: Fact = { ...withRuleAcceptance(withSubjectFrom(fact, again), again), digest };
       delete forward.stale;
       kept.push(forward);
       continue;
@@ -690,7 +693,31 @@ export function withoutUnreadLines(existing: readonly Fact[], rescanned: readonl
  */
 export function rereadFacts(existing: readonly Fact[], rescanned: readonly Fact[]): Fact[] {
   const again = new Set(rescanned.map((fact) => fact.id));
-  return existing.filter((fact) => !(fact.source === "label" && !ownerDecided(fact) && fact.accepted === undefined && !again.has(fact.id)));
+  // A reading that counts on the rule's own word is still the rule's alone.
+  const rulesAlone = (fact: Fact) => fact.accepted === undefined || fact.accepted === "grounded";
+  return existing.filter((fact) => !(fact.source === "label" && !ownerDecided(fact) && rulesAlone(fact) && !again.has(fact.id)));
+}
+
+/**
+ * A stored reading of a label rule, with the acceptance the newest scan
+ * gives that reading. A rule reads the same text the same way every time,
+ * so what it counts on its own word now is the whole truth about what it
+ * counts: a stored reading takes that acceptance, and loses it when the
+ * scan no longer gives it. What the owner answered, an exact reading and a
+ * reading a second reader agreed on are not the rule's alone, and stay.
+ */
+function withRuleAcceptance(kept: Fact, fresh: Fact): Fact {
+  if (kept.source !== "label" || fresh.source !== "label" || ownerDecided(kept)) {
+    return kept;
+  }
+  if (fresh.accepted === "grounded" && kept.accepted === undefined) {
+    return { ...kept, accepted: "grounded" };
+  }
+  if (fresh.accepted === undefined && kept.accepted === "grounded") {
+    const { accepted: _taken, ...rest } = kept;
+    return rest;
+  }
+  return kept;
 }
 
 /**
@@ -884,6 +911,11 @@ function pick(prior: Fact, fact: Fact): Fact {
     return isExact(prior) ? prior : withExactAcceptance(fact);
   }
   const winner = fact.confidence > prior.confidence ? fact : prior;
+  // The same rule reading the file again: its own acceptance is the newest
+  // scan's to give or to take.
+  if (prior.source === "label" && fact.source === "label") {
+    return withRuleAcceptance(winner, fact);
+  }
   // An ambiguous date stays a question even when a second reader picked the
   // same reading: both may have guessed the day and month the same wrong way.
   if (
@@ -900,7 +932,10 @@ function pick(prior: Fact, fact: Fact): Fact {
     !fact.relative
   ) {
     const names = [...new Set([...readers(prior), ...readers(fact)])].sort();
-    return { ...winner, accepted: winner.accepted ?? "agreement", reader: names.join(" + ") };
+    // A reading that counted on a label rule's own word now rests on two
+    // readers, which no later scan of the rule alone takes back.
+    const rulesAlone = winner.source === "label" && winner.accepted === "grounded";
+    return { ...winner, accepted: rulesAlone ? "agreement" : (winner.accepted ?? "agreement"), reader: names.join(" + ") };
   }
   return winner;
 }

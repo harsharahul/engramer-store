@@ -5,6 +5,7 @@ import {
   MIN_SAMPLE,
   plainAmount,
   plainDue,
+  ruleEdition,
   saneFact,
   stakesOf,
   trustedKind,
@@ -180,7 +181,7 @@ describe("trustedMailKind", () => {
 });
 
 /** A day to pay as a label rule reads it: 10 April 2027, in a mail sent on 1 March 2027. */
-const due = (over: Partial<Fact> = {}): Fact => fact({ id: "due:2027-04-10", source: "label", confidence: 0.75, ...over });
+const due = (over: Partial<Fact> = {}): Fact => fact({ id: "due:2027-04-10", source: "label", confidence: 0.75, toPay: true, ...over });
 const amount = (over: Partial<Fact> = {}): Fact =>
   fact({ id: "amount:84.20", kind: "amount", value: "84.20", unit: "USD", label: "Amount due", source: "label", confidence: 0.75, ...over });
 
@@ -221,31 +222,14 @@ describe("plainDue: a day to pay that leaves no room for doubt", () => {
     expect(plainDue(due({ value: "2027-04-31" }), [], NOW)).toBe(false);
   });
 
-  it("only under a label that itself says due or pay: a renewal, a day to answer or return by, a sentence about a charge still ask", () => {
-    // A word rule for "due date" or "pay by" states no label of its own.
-    const bare = due();
-    delete bare.label;
-    expect(plainDue(bare, [], NOW)).toBe(true);
-    for (const label of ["Due", "Due date", "Payable by", "Minimum payment due", "Must be paid by", "Deposit payable by", "Next payment due"]) {
-      expect({ label, plain: plainDue(due({ label }), [], NOW) }).toEqual({ label, plain: true });
-    }
-    for (const label of [
-      "Renews",
-      "Renew by",
-      "Renewal premium due",
-      "Return by",
-      "Please confirm by",
-      "Will be charged on",
-      "Free cancellation until",
-      "Direct debit date",
-      "Disconnection",
-    ]) {
-      expect({ label, plain: plainDue(due({ label }), [], NOW) }).toEqual({ label, plain: false });
-    }
-  });
-
-  it("a date that stands apart from its label is not plain: it may belong to the words between", () => {
-    expect(plainDue(due({ apart: true }), [], NOW)).toBe(false);
+  it("only a day the reader stated outright as a day to pay: any other day to act by still asks", () => {
+    // The reader states it where the label says due or pay and the date is
+    // the label's own; a renewal, "return by" or a date further along the
+    // sentence comes without it, whatever its label reads like here.
+    const other = due();
+    delete other.toPay;
+    expect(plainDue(other, [], NOW)).toBe(false);
+    expect(plainDue(due({ label: "Renews", toPay: false }), [], NOW)).toBe(false);
   });
 
   it("only a label rule's day to pay: no other reader's, and no other kind", () => {
@@ -396,6 +380,14 @@ describe("acceptance of a label rule's reading", () => {
     expect(acceptance(facts[0]!, ctx(facts, DAY_ONLY))).toBe("grounded");
     // An amount with no plain day to pay beside it.
     expect(acceptance(amount(), ctx([amount()]))).toBeNull();
+  });
+
+  it("the rule has a name that changes with what it is trusted with, and none while it is trusted with nothing", () => {
+    expect(ruleEdition(TRUSTED)).toBe("due+amount.1");
+    expect(ruleEdition(DAY_ONLY)).toBe("due.1");
+    expect(ruleEdition(UNDER)).toBeUndefined();
+    // The record this build ships trusts the day alone.
+    expect(ruleEdition()).toBe("due.1");
   });
 
   it("the model's reading takes nothing from the rules' record", () => {

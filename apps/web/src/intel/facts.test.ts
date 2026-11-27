@@ -56,6 +56,74 @@ describe("rereadFacts: what a file keeps when its text is read again", () => {
     const agreed = { ...due, accepted: "agreement" as const };
     expect(rereadFacts([agreed, line], [])).toEqual([agreed]);
   });
+
+  it("a reading that counts on the rule's own word is still the rule's reading: gone when the new text does not give it", () => {
+    const counted = { ...due, accepted: "grounded" as const };
+    expect(rereadFacts([counted], [])).toEqual([]);
+    expect(rereadFacts([counted], [due])).toEqual([counted]);
+    // The model's reading that counts on its measured record does not come from the lines of the text.
+    const model = fact({ id: "due:2027-05-02", kind: "due", value: "2027-05-02", source: "model", reader: "apple", accepted: "grounded" });
+    expect(rereadFacts([model], [])).toEqual([model]);
+  });
+});
+
+describe("a label reading counts on the rule's word only as the newest scan reads it", () => {
+  const stored = fact({ id: "due:2027-04-30", kind: "due", document: "invoice", value: "2027-04-30", label: "Due date" });
+  const counted = { ...stored, accepted: "grounded" as const };
+
+  it("a stored reading nobody answered takes the acceptance a fresh scan gives it", () => {
+    expect(mergeFacts([stored], [counted])).toEqual([counted]);
+  });
+
+  it("and loses it when the fresh scan no longer gives it", () => {
+    expect(mergeFacts([counted], [stored])).toEqual([stored]);
+  });
+
+  it("a second pass writes nothing", () => {
+    const once = mergeFacts([stored], [counted]);
+    expect(mergeFacts(once, [counted])).toEqual(once);
+    const back = mergeFacts([counted], [stored]);
+    expect(mergeFacts(back, [stored])).toEqual(back);
+  });
+
+  it("what the owner answered is untouched, yes or no", () => {
+    const yes = { ...stored, confirmed: true };
+    const no = { ...stored, dismissed: true };
+    expect(mergeFacts([yes], [counted])).toEqual([yes]);
+    expect(mergeFacts([no], [counted])).toEqual([no]);
+  });
+
+  it("what two readers agreed on stands when the rule alone no longer counts it", () => {
+    const agreed = { ...stored, accepted: "agreement" as const, reader: "label + model" };
+    expect(mergeFacts([agreed], [stored])).toEqual([agreed]);
+  });
+
+  it("a second reader that states the same day makes it an agreement, which the rule's own word no longer moves", () => {
+    const model = fact({ id: "due:2027-04-30", kind: "due", document: "invoice", value: "2027-04-30", source: "model", confidence: 0.45, reader: "apple" });
+    const [agreed] = mergeFacts([counted], [model]);
+    expect(agreed).toMatchObject({ accepted: "agreement", reader: "apple + label" });
+    expect(mergeFacts([agreed!], [stored])).toEqual([agreed]);
+  });
+
+  it("the model's own measured acceptance is not the rule's to take", () => {
+    const model = fact({ id: "due:2027-04-30", kind: "due", document: "invoice", value: "2027-04-30", source: "model", confidence: 0.75, reader: "apple", accepted: "grounded" });
+    const [kept] = mergeFacts([model], [stored]);
+    expect(kept).toMatchObject({ source: "model", accepted: "grounded" });
+  });
+
+  it("a counted reading is not asked about; one the scan no longer counts is asked about again", () => {
+    const now = Date.UTC(2027, 3, 1);
+    const file = (facts: Fact[]) => ({ id: "bill", trashed: false, facts });
+    expect(offeredFacts([file([counted])], now)).toEqual([]);
+    expect(offeredFacts([file(mergeFacts([counted], [stored]))], now).map(({ fact: offered }) => offered.id)).toEqual(["due:2027-04-30"]);
+  });
+
+  it("a save follows the scan of the new contents the same way", () => {
+    expect(reconcileFacts([stored], [counted], "d2")).toEqual([{ ...counted, digest: "d2" }]);
+    expect(reconcileFacts([counted], [stored], "d2")).toEqual([{ ...stored, digest: "d2" }]);
+    const yes = { ...stored, confirmed: true };
+    expect(reconcileFacts([yes], [counted], "d2")).toEqual([{ ...yes, digest: "d2" }]);
+  });
 });
 
 describe("groundFacts", () => {

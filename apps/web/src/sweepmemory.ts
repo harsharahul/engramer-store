@@ -13,10 +13,10 @@
  * clears the slate, because asking for it explicitly means "try again".
  */
 
-export type SweepKind = "process" | "thumbs" | "text" | "meaning" | "facts" | "lines" | "backup";
+export type SweepKind = "process" | "thumbs" | "text" | "meaning" | "facts" | "lines" | "rules" | "backup";
 
 /** Passes that read a file once, whatever the outcome. */
-const ONCE: ReadonlySet<SweepKind> = new Set(["facts", "lines"]);
+const ONCE: ReadonlySet<SweepKind> = new Set(["facts", "lines", "rules"]);
 
 /**
  * How many automatic attempts a file gets on this device before it is
@@ -25,7 +25,9 @@ const ONCE: ReadonlySet<SweepKind> = new Set(["facts", "lines"]);
  * iCloud). One for the dates pass, which is re-eligible by design:
  * without a budget it would re-read the whole library on every open. One
  * as well for its second look at form lines kept with their own words,
- * which a file is owed once per edition of the label table.
+ * which a file is owed once per edition of the label table, and for its
+ * look at a mail's labelled day to pay, owed once per edition of the rule
+ * that may count it.
  */
 export function attemptCap(kind: SweepKind): number {
   return ONCE.has(kind) ? 1 : 3;
