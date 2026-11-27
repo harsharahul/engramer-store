@@ -245,12 +245,30 @@ below its bar too. The bar never moves: a task earns trust only by
 measuring above it.
 
 The label rules are measured the same way, by kind
-(`apps/web/src/intel/eval/rulescores.json`, computed from the two sets by
-a test, so the table cannot drift from the code). A due date read from a
-label is right 56 times of 56 on the first set and 31 of 32 on the second:
-one wrong reading in thirty-two is under the bar, so a labelled due date
-still waits for your yes, as an event (56 of 58, and too few on the
-second set) and an expiry (12 of 13) do.
+(`apps/web/src/intel/eval/rulescores.json`, computed by a test, so the
+table cannot drift from the code). One reading of theirs clears the bar: a
+plain day to pay in a mail. Plain means all of this: the mail states the
+day under a label that itself says due or pay ("Due date", "Pay by",
+"Payment due"), with the date straight after the label; it is the only day
+to pay the rules read in the mail; it is not behind the day the mail was
+sent and lies within a year of it; and the date is printed whole, with its
+year and one way to read it. It is measured on the first set with 100 more
+bill mails (44 right of 44), and on documents never seen: the second set,
+110 bills and notices, and 150 bills, notices and statements that arrive
+by mail, all written without sight of the readers (87 right of 87). So a
+mail's plain day to pay counts without your yes, and says "read from its
+label".
+
+Everything else a label rule reads still waits for your yes. A file you
+store (a PDF, a photo) states no day of its own, so a past bill's day
+cannot be told from the day to pay. A renewal date says when a plan
+renews, which may not be the day the money leaves. A day to answer or
+return something by, a second day to pay, and a date that belongs to other
+words than its label ("after the due date, interest from 22 April") are
+questions. The bill's amount is right 28 times of 29 on unseen documents,
+with too few readings on the first set, so it shows once a second reader
+agrees or you confirm it. An event (56 of 59) and an expiry (13 of 15)
+are under the bar.
 
 Until the text of a PDF kept its lines, a page reached the readers as one
 line, while the stored-file cases of both sets held their line breaks. The
@@ -584,10 +602,12 @@ metadata and index blob like every other derived signal.
 **What counts without asking, and what waits for a yes.** A fact counts
 (for the bell, notifications, the Timeline and trips) when you
 confirmed it, or when the evidence settles it on its own: a reading from a
-barcode, a passport's zone, booking data or an invite, or two independent
-readers (a labelled date and the assistant) stating the same value. Everything
-else arrives as a suggestion in a single line above your files and counts
-once you accept it. One fixed order decides between readings of the same
+barcode, a passport's zone, booking data or an invite, two independent
+readers (a labelled date and the assistant) stating the same value, or the
+one day to pay a mail states plainly under a label that says due or pay
+(the one reading of a label rule that is measured right often enough to
+stand alone). Everything else arrives as a suggestion in a single line
+above your files and counts once you accept it. One fixed order decides between readings of the same
 thing: your answer, then exact data, then the rest. Where the assistant and a
 labelled date disagree about a due date or an expiry, both are offered as one
 question ("Which one?"), and your answer (or Ignore) settles both. Booking
@@ -596,7 +616,8 @@ of that day, and a bill's own amount settles the assistant's. A date
 that could be read two ways (`03/04/2028`) offers both readings as dates
 rather than picking one. A wrong expiry date is worse than no expiry date,
 because it gets relied on. Each fact in a file's details says why it counts:
-"confirmed by you", "read from the booking data", "two readers agree".
+"confirmed by you", "read from the booking data", "two readers agree",
+"read from its label". Stop tracking takes any of them off.
 
 A suggestion is made only while it can still matter. A date more than sixty
 days behind is not asked about; a deadline missed lately still is, because
