@@ -16,7 +16,7 @@ import { lookupAirport, placeForCity } from "./airports";
 import { deviceZone, instantOf, localDay, localTime, shownWhen, zoneOf } from "./instants";
 import { legsOf, type DatedEntry, type Leg } from "./legs";
 import { documentLabel } from "./describe";
-import { basisOf, isDated, isTracked, offeredFacts, sumOf, type AmountSum, type Fact } from "./facts";
+import { basisOf, billAmountOf, isDated, isTracked, offeredFacts, sumOf, type AmountSum, type Fact } from "./facts";
 import type { ReadFile } from "./reading";
 import { isTripTag, tripTitle } from "./trips";
 import { isLegEnd, subjectOf } from "./subject";
@@ -78,6 +78,8 @@ export interface AgendaRow {
   ask?: true;
   /** A date the owner confirmed. */
   confirmedByYou?: true;
+  /** A day to pay that counts on a label rule's own reading, with no yes from the owner. */
+  readFromLabel?: true;
   proposal?: TripPlan;
   past: boolean;
 }
@@ -219,12 +221,8 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
   const amountOf = (file: RowFile) => pricesOf(file)[0];
   // The amount a bill that still asks is asking for: its amount due, else
   // the one total it states. Two totals are not guessed between.
-  const askedAmount = (file: RowFile): Fact | undefined => {
-    const open = file.facts.filter((candidate) => candidate.kind === "amount" && candidate.unit && !candidate.dismissed && !isTracked(candidate));
-    const named = (sum: AmountSum) => open.filter((candidate) => sumOf(candidate) === sum);
-    const totals = named("total");
-    return named("due")[0] ?? (totals.length === 1 ? totals[0] : undefined);
-  };
+  const askedAmount = (file: RowFile): Fact | undefined =>
+    billAmountOf(file.facts.filter((candidate) => candidate.kind === "amount" && candidate.unit && !candidate.dismissed && !isTracked(candidate)));
 
   // The trip each file belongs to, and the trips a date only suggests.
   const planByTag = new Map(ctx.plans.map((plan) => [plan.tag, plan]));
@@ -348,6 +346,7 @@ export async function rowsOf(files: readonly RowFile[], ctx: RowContext, now: nu
           sub: subOf(file),
           ...(price ? { amount: price } : {}),
           ...(basisOf(fact) === "confirmed" ? { confirmedByYou: true as const } : {}),
+          ...(basisOf(fact) === "grounded" && fact.source === "label" ? { readFromLabel: true as const } : {}),
         });
       }
     }

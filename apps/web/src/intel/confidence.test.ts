@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
 import type { Fact } from "./facts";
-import { acceptance, MIN_SAMPLE, saneFact, stakesOf, trustedKind, trustedMailKind, type ReaderScores } from "./confidence";
+import {
+  acceptance,
+  countedKinds,
+  MIN_SAMPLE,
+  plainAmount,
+  plainDue,
+  ruleEdition,
+  saneFact,
+  stakesOf,
+  trustedKind,
+  trustedKinds,
+  trustedMailKind,
+  type ReaderScores,
+  type RuleRecord,
+  type RuleScores,
+} from "./confidence";
 import { READER_VERSION } from "./reading";
 import { readingFingerprint } from "./summarize";
 
@@ -163,5 +178,233 @@ describe("trustedMailKind", () => {
     expect(trustedMailKind(newsletterScores(1, MIN_SAMPLE, 0), "newsletter")).toBe(false);
     expect(trustedMailKind(newsletterScores(1, MIN_SAMPLE), "bill")).toBe(false);
     expect(trustedMailKind({ ...newsletterScores(1, MIN_SAMPLE), prompt: "0000beef" }, "newsletter")).toBe(false);
+  });
+});
+
+/** A day to pay as a label rule reads it: 10 April 2027, in a mail sent on 1 March 2027. */
+const due = (over: Partial<Fact> = {}): Fact => fact({ id: "due:2027-04-10", source: "label", confidence: 0.75, toPay: true, ...over });
+const amount = (over: Partial<Fact> = {}): Fact =>
+  fact({ id: "amount:84.20", kind: "amount", value: "84.20", unit: "USD", label: "Amount due", source: "label", confidence: 0.75, ...over });
+
+describe("plainDue: a day to pay that leaves no room for doubt", () => {
+  it("the one labelled day to pay, ahead of the day its mail was sent, is plain", () => {
+    expect(plainDue(due(), [due()], NOW)).toBe(true);
+  });
+
+  it("a second day to pay under a label makes neither plain", () => {
+    const first = due();
+    const second = due({ id: "due:2027-05-10", value: "2027-05-10", label: "Final notice due" });
+    expect(plainDue(first, [first, second], NOW)).toBe(false);
+    expect(plainDue(second, [first, second], NOW)).toBe(false);
+    // The same day stated twice is one day.
+    const again = due({ id: "due:2027-04-10:b", label: "Pay by" });
+    expect(plainDue(first, [first, again], NOW)).toBe(true);
+  });
+
+  it("a day behind the day the mail was sent is not plain; the day itself is", () => {
+    expect(plainDue(due({ value: "2027-02-28" }), [], NOW)).toBe(false);
+    expect(plainDue(due({ value: "2027-03-01" }), [], NOW)).toBe(true);
+  });
+
+  it("a day more than a year ahead is not plain", () => {
+    expect(plainDue(due({ value: "2028-03-01" }), [], NOW)).toBe(true);
+    expect(plainDue(due({ value: "2028-03-03" }), [], NOW)).toBe(false);
+  });
+
+  it("a document that states no day of its own, as a stored file, has no plain day to pay", () => {
+    expect(plainDue(due(), [due()], undefined)).toBe(false);
+  });
+
+  it("a date of doubt, a costly one, or one that fails the sanity checks is not plain", () => {
+    expect(plainDue(due({ relative: true }), [], NOW)).toBe(false);
+    expect(plainDue(due({ assumedYear: true }), [], NOW)).toBe(false);
+    expect(plainDue(due({ ambiguous: true }), [], NOW)).toBe(false);
+    expect(plainDue(due({ label: "Deadline to file" }), [], NOW)).toBe(false);
+    expect(plainDue(due({ value: "2027-04-31" }), [], NOW)).toBe(false);
+  });
+
+  it("only a day the reader stated outright as a day to pay: any other day to act by still asks", () => {
+    // The reader states it where the label says due or pay and the date is
+    // the label's own; a renewal, "return by" or a date further along the
+    // sentence comes without it, whatever its label reads like here.
+    const other = due();
+    delete other.toPay;
+    expect(plainDue(other, [], NOW)).toBe(false);
+    expect(plainDue(due({ label: "Renews", toPay: false }), [], NOW)).toBe(false);
+  });
+
+  it("only a label rule's day to pay: no other reader's, and no other kind", () => {
+    expect(plainDue(due({ source: "model" }), [], NOW)).toBe(false);
+    expect(plainDue(due({ source: "pattern" }), [], NOW)).toBe(false);
+    expect(plainDue(due({ kind: "expiry" }), [], NOW)).toBe(false);
+    expect(plainDue(due({ kind: "event" }), [], NOW)).toBe(false);
+  });
+});
+
+describe("plainAmount: the amount of a bill whose day to pay is plain", () => {
+  it("the amount due beside a plain day to pay is plain", () => {
+    const facts = [due(), amount()];
+    expect(plainAmount(facts[1]!, facts, NOW)).toBe(true);
+  });
+
+  it("the amount due comes before a total; with no amount due, the one total", () => {
+    const total = amount({ id: "amount:99.00", value: "99.00", label: "Total" });
+    const both = [due(), amount(), total];
+    expect(plainAmount(both[1]!, both, NOW)).toBe(true);
+    expect(plainAmount(total, both, NOW)).toBe(false);
+    const one = [due(), total];
+    expect(plainAmount(total, one, NOW)).toBe(true);
+  });
+
+  it("two totals are not guessed between, and a sum that is neither is never the bill's", () => {
+    const first = amount({ id: "amount:99.00", value: "99.00", label: "Total" });
+    const second = amount({ id: "amount:120.00", value: "120.00", label: "Total" });
+    const two = [due(), first, second];
+    expect(plainAmount(first, two, NOW)).toBe(false);
+    expect(plainAmount(second, two, NOW)).toBe(false);
+    const other = amount({ id: "amount:12.00", value: "12.00", label: "Late fee" });
+    expect(plainAmount(other, [due(), other], NOW)).toBe(false);
+  });
+
+  it("without a plain day to pay beside it, no amount is plain", () => {
+    expect(plainAmount(amount(), [amount()], NOW)).toBe(false);
+    const doubt = due({ assumedYear: true });
+    expect(plainAmount(amount(), [doubt, amount()], NOW)).toBe(false);
+  });
+
+  it("only a label rule's amount, with its currency", () => {
+    const model = amount({ source: "model" });
+    expect(plainAmount(model, [due(), model], NOW)).toBe(false);
+    const bare = amount({ unit: undefined });
+    expect(plainAmount(bare, [due(), bare], NOW)).toBe(false);
+  });
+});
+
+describe("trustedKinds: the kinds of label reading measured right often enough to count", () => {
+  const none = { offered: 0, right: 0 };
+  const tally = (offered: number, right: number) => ({ offered, right });
+  /** A record by its day-to-pay tallies: the first set, then the three unseen parts (the held-out set, the bills, the mails). */
+  const record = (first: RuleScores["due"], unseen: readonly RuleScores["due"][], amounts = [none, none, none, none]): RuleRecord => ({
+    first: { due: first, event: none, expiry: none, amount: amounts[0]! },
+    heldout: { due: unseen[0]!, event: none, expiry: none, amount: amounts[1]! },
+    fresh: { due: unseen[1]!, event: none, expiry: none, amount: amounts[2]! },
+    mail: { due: unseen[2]!, event: none, expiry: none, amount: amounts[3]! },
+  });
+
+  it("a kind is trusted at 98% over thirty readings, on the first set and on the unseen documents together", () => {
+    expect(trustedKinds(record(tally(33, 33), [tally(18, 18), tally(24, 24), tally(60, 59)]))).toEqual(["due"]);
+    // The unseen parts are one measure: 101 right of 102.
+    expect(trustedKinds(record(tally(33, 33), [tally(18, 17), tally(24, 24), tally(60, 60)]))).toEqual(["due"]);
+    // 99 right of 102 is under the bar.
+    expect(trustedKinds(record(tally(33, 33), [tally(18, 17), tally(24, 23), tally(60, 59)]))).toEqual([]);
+  });
+
+  it("too few readings on either side mean nothing", () => {
+    expect(trustedKinds(record(tally(29, 29), [tally(18, 18), tally(24, 24), tally(60, 60)]))).toEqual([]);
+    expect(trustedKinds(record(tally(33, 33), [tally(10, 10), tally(10, 10), tally(9, 9)]))).toEqual([]);
+  });
+
+  it("both sides, not one", () => {
+    expect(trustedKinds(record(tally(33, 31), [tally(18, 18), tally(24, 24), tally(60, 60)]))).toEqual([]);
+  });
+
+  it("the amount is trusted only where it clears the bar and the day to pay does", () => {
+    const well = [tally(18, 18), tally(24, 24), tally(60, 60)];
+    const good = [tally(35, 35), tally(10, 10), tally(10, 10), tally(40, 40)];
+    expect(trustedKinds(record(tally(33, 33), well, good))).toEqual(["due", "amount"]);
+    expect(trustedKinds(record(tally(33, 33), [tally(18, 10), tally(24, 24), tally(60, 60)], good))).toEqual([]);
+    const poor = [tally(35, 35), tally(10, 8), tally(10, 10), tally(40, 40)];
+    expect(trustedKinds(record(tally(33, 33), well, poor))).toEqual(["due"]);
+  });
+
+  it("no record, or one that lacks a part, trusts nothing", () => {
+    expect(trustedKinds(undefined)).toEqual([]);
+    const whole = record(tally(33, 33), [tally(18, 18), tally(24, 24), tally(60, 60)]);
+    expect(trustedKinds(whole)).toEqual(["due"]);
+    const { mail: _mail, ...older } = whole;
+    expect(trustedKinds(older as RuleRecord)).toEqual([]);
+  });
+});
+
+describe("acceptance of a label rule's reading", () => {
+  const none = { offered: 0, right: 0 };
+  const well = { offered: 60, right: 60 };
+  const rules = (dues: RuleScores["due"], amounts: RuleScores["due"]): RuleRecord => ({
+    first: { due: dues, event: well, expiry: well, amount: amounts },
+    heldout: { due: dues, event: well, expiry: well, amount: amounts },
+    fresh: { due: dues, event: well, expiry: well, amount: amounts },
+    mail: { due: dues, event: well, expiry: well, amount: amounts },
+  });
+  const TRUSTED = rules(well, well);
+  const DAY_ONLY = rules(well, { offered: 60, right: 50 });
+  const UNDER = rules({ offered: 60, right: 50 }, well);
+  /** `written: null` is a document that states no day of its own: a stored file. */
+  const ctx = (siblings: Fact[], record: RuleRecord = TRUSTED, written: number | null = NOW) => ({
+    scores: undefined,
+    rules: record,
+    siblings,
+    now: NOW,
+    ...(written !== null ? { written } : {}),
+  });
+
+  it("a plain day to pay counts where the measured record trusts that kind", () => {
+    expect(acceptance(due(), ctx([due()]))).toBe("grounded");
+  });
+
+  it("it waits for a yes where the record is under the bar, or there is none", () => {
+    expect(acceptance(due(), ctx([due()], UNDER))).toBeNull();
+    expect(acceptance(due(), ctx([due()], rules(none, none)))).toBeNull();
+    expect(acceptance(due(), { scores: undefined, siblings: [due()], now: NOW, written: NOW })).toBeNull();
+  });
+
+  it("a day to pay that is not plain waits for a yes, however well the kind measures", () => {
+    const second = due({ id: "due:2027-05-10", value: "2027-05-10" });
+    expect(acceptance(due(), ctx([due(), second]))).toBeNull();
+    expect(acceptance(due(), ctx([due()], TRUSTED, null))).toBeNull();
+    expect(acceptance(due({ assumedYear: true }), ctx([]))).toBeNull();
+  });
+
+  it("an event or an expiry read by a label never counts on the rule's word", () => {
+    expect(acceptance(due({ kind: "event" }), ctx([]))).toBeNull();
+    expect(acceptance(due({ kind: "expiry" }), ctx([]))).toBeNull();
+  });
+
+  it("a reading another reader disputes waits for a yes", () => {
+    const disputed = due({ disputed: "due:2027-04-12" });
+    expect(acceptance(disputed, ctx([disputed]))).toBeNull();
+  });
+
+  it("the bill's amount counts with its day where amounts are trusted, and waits where they are not", () => {
+    const facts = [due(), amount()];
+    expect(acceptance(facts[1]!, ctx(facts))).toBe("grounded");
+    expect(acceptance(facts[1]!, ctx(facts, DAY_ONLY))).toBeNull();
+    expect(acceptance(facts[0]!, ctx(facts, DAY_ONLY))).toBe("grounded");
+    // An amount with no plain day to pay beside it.
+    expect(acceptance(amount(), ctx([amount()]))).toBeNull();
+  });
+
+  it("the rule has a name that changes with what it is trusted with, also when that becomes nothing", () => {
+    expect(ruleEdition(TRUSTED)).toBe("due+amount.1");
+    expect(ruleEdition(DAY_ONLY)).toBe("due.1");
+    expect(ruleEdition(UNDER)).toBe("none.1");
+    expect(countedKinds(UNDER)).toEqual([]);
+    // The record this build ships trusts the day alone.
+    expect(ruleEdition()).toBe("due.1");
+    expect(countedKinds()).toEqual(["due"]);
+  });
+
+  it("another reader's day to pay on another day makes the rule's reading a question", () => {
+    const booked = fact({ id: "due:2027-04-08", kind: "due", value: "2027-04-08", source: "jsonld", confidence: 1, accepted: "exact" });
+    expect(acceptance(due(), ctx([due(), booked]))).toBeNull();
+    // The same day from another reader contradicts nothing.
+    const same = fact({ id: "due:2027-04-10:b", kind: "due", value: "2027-04-10", source: "jsonld", confidence: 1, accepted: "exact" });
+    expect(acceptance(due(), ctx([due(), same]))).toBe("grounded");
+    // A reading the owner put away says nothing any more.
+    expect(acceptance(due(), ctx([due(), { ...booked, dismissed: true }]))).toBe("grounded");
+  });
+
+  it("the model's reading takes nothing from the rules' record", () => {
+    const model = fact({});
+    expect(acceptance(model, { scores: scores({ precision: 0.69, offered: 40 }), rules: TRUSTED, siblings: [model], now: NOW, written: NOW })).toBeNull();
   });
 });

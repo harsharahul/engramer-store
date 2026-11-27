@@ -5,6 +5,22 @@ All notable changes to Engram Store are documented here, following
 
 ## [Unreleased]
 
+### Added
+- **A bill that arrives by mail goes to the Timeline without a question.**
+  Where a mail states one day to pay under a label that says due or pay
+  ("Due date", "Pay by", "Payment due"), with the date straight after the
+  label, that day counts as it is read. The Timeline row and the file's
+  details say "read from its label", and Stop tracking takes it off. On
+  documents the rules never saw, every one of 87 such readings is right.
+  A bill kept as a PDF or a photo, a renewal date, a second day to pay, a
+  date with no year, and the bill's amount still ask.
+- **A deadline's clock before its day.** "Pay by 5pm, 5 February 2027" is
+  read with its clock.
+
+### Changed
+- **Mail already in the library is looked at once more,** so that a
+  labelled day to pay nobody answered can count. Your answers stay.
+
 ## [0.62.0] - 2026-11-26
 
 ### Added

@@ -1,12 +1,26 @@
 {
   "first": {
-    "due": { "offered": 56, "right": 56 },
-    "event": { "offered": 58, "right": 56 },
-    "expiry": { "offered": 13, "right": 12 }
+    "due": { "offered": 44, "right": 44 },
+    "event": { "offered": 59, "right": 56 },
+    "expiry": { "offered": 15, "right": 13 },
+    "amount": { "offered": 26, "right": 26 }
   },
   "heldout": {
-    "due": { "offered": 32, "right": 31 },
+    "due": { "offered": 11, "right": 11 },
     "event": { "offered": 4, "right": 4 },
-    "expiry": { "offered": 8, "right": 7 }
+    "expiry": { "offered": 8, "right": 7 },
+    "amount": { "offered": 3, "right": 3 }
+  },
+  "fresh": {
+    "due": { "offered": 22, "right": 22 },
+    "event": { "offered": 3, "right": 0 },
+    "expiry": { "offered": 6, "right": 4 },
+    "amount": { "offered": 7, "right": 7 }
+  },
+  "mail": {
+    "due": { "offered": 54, "right": 54 },
+    "event": { "offered": 2, "right": 0 },
+    "expiry": { "offered": 4, "right": 2 },
+    "amount": { "offered": 19, "right": 18 }
   }
 }

@@ -237,6 +237,55 @@ describe("the dates pass and a label table that came later", () => {
   });
 });
 
+/**
+ * A build that lets a label rule count a mail's day to pay must reach the
+ * mails this device already read: a mail that still holds a labelled day to
+ * pay nobody answered is owed one more look, once per edition of the rule.
+ * A stored file's day never counts on a label, so it is owed none.
+ */
+describe("the dates pass and a rule that counts a mail's day to pay", () => {
+  const due = { id: "due:2027-02-03", kind: "due", document: "invoice", value: "2027-02-03", source: "label", confidence: 0.7 };
+  const mail = { subject: "Your bill", from: "City Water", date: Date.UTC(2027, 0, 20) };
+
+  it("reads an already swept mail once more where a labelled day to pay still waits, then leaves it alone", async () => {
+    install();
+    resetBackfillSession();
+    const seen: string[][] = [];
+    const ids = ["plain", "bill-mail", "bill-file", "counted", "answered"];
+    useStore.setState({
+      files: new Map([
+        ["plain", { id: "plain", mail, facts: [] }],
+        ["bill-mail", { id: "bill-mail", mail, facts: [due] }],
+        ["bill-file", { id: "bill-file", facts: [due] }],
+        ["counted", { id: "counted", mail, facts: [{ ...due, accepted: "grounded" }] }],
+        ["answered", { id: "answered", mail, facts: [{ ...due, confirmed: true }] }],
+      ]) as never,
+      scanLibraryForFacts: async (o?: SweepCall) => {
+        const round: string[] = [];
+        for (const id of ids) {
+          if (o?.skip?.has(id)) {
+            continue;
+          }
+          round.push(id);
+          o?.skip?.add(id);
+          o?.onOutcome?.(id, true);
+        }
+        seen.push(round);
+        return 0;
+      },
+    });
+    // As an earlier build left it: every file swept once on this device.
+    localStorage.setItem("engram-sweep-facts:t@example.com", JSON.stringify(Object.fromEntries(ids.map((id) => [id, 1]))));
+    await runBackfill();
+    // The next open: each was looked at for this edition, whatever came of it.
+    resetBackfillSession();
+    await runBackfill();
+    // A day that already counts on the rule's word is looked at once per
+    // edition too: a rule that changed must be able to take its word back.
+    expect(seen).toEqual([["bill-mail", "counted"], []]);
+  });
+});
+
 describe("the automatic backfill can be declined and stopped", () => {
   it("is on by default and obeys the preference", async () => {
     expect(autoBackfillEnabled()).toBe(true);

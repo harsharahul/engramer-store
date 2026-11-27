@@ -14,6 +14,7 @@ import { CURRENCY_CODES, SYMBOL_CURRENCY, SYMBOL_FAMILY } from "./currency";
 import { type DocumentKind, type Fact, factId, maskTail } from "./facts";
 import { findDates, findTimes, parseDate, parseTime, type DateContext, type ParsedDate } from "./dates";
 import { amountMeaningOf, meaningOf, type AmountMeaning, type LabelMeaning, type Lexicon } from "./lexicon";
+import { LEGAL_WORDS } from "./stakes";
 import { serviceOf, type Role, type Subject } from "./subject";
 import { cellsOf, headerLines, tableBlocks } from "./tables";
 
@@ -302,19 +303,92 @@ function clockBelow(text: string, line: FieldLine, meaning: LabelMeaning, lexico
   return null;
 }
 
+/** Words that only join a label to its date: "Due date is on or before Friday 12 March", "by close of business on". */
+const JOINING_WORDS = new Set(
+  "is are was on by before or no not later than the date due at of for payment until till end close business day".split(" ").concat(
+    "monday tuesday wednesday thursday friday saturday sunday mon tue tues wed thu thur thurs fri sat sun".split(" "),
+  ),
+);
+
 /**
- * The clock that stands straight after a date on a line, with at most a
- * joining word between ("30 July 2027 17:00", "8 January at 6:00 PM"). A
- * clock further along the line is another matter ("open 9:00 to 17:00").
+ * Whether other words stand between a label and the date it claimed. The
+ * text after the label, up to that date, may hold joining words, a weekday,
+ * a clock and a sum; any other word makes the date possibly theirs ("...by
+ * the due date, interest from 22 April": the day interest starts). A date
+ * that cannot be placed in the text is taken as apart.
  */
-function clockAfterDate(line: string, writtenAt?: number): string | null {
+function standsApart(after: string, iso: string, writtenAt?: number): boolean {
+  const found = findDates(after, writtenAt === undefined ? undefined : { writtenAt }).find((hit) => hit.date.iso === iso);
+  if (!found) {
+    return true;
+  }
+  let lead = after.slice(0, found.at);
+  for (const clock of findTimes(lead).reverse()) {
+    lead = `${lead.slice(0, clock.at)} ${lead.slice(clock.end)}`;
+  }
+  const words = lead.match(/[A-Za-z]+/g) ?? [];
+  return words.some((word) => !JOINING_WORDS.has(word.toLowerCase()) && !CURRENCY_CODES.has(word.toUpperCase()));
+}
+
+/** A label whose own words say the day is due or to pay. */
+const SAYS_DUE = /\b(?:dues?|pay|paid|payable|payments?|repayments?|owing|remit)\b/i;
+/** A renewal's label says when a plan or a cover renews; the money may leave on another day. */
+const SAYS_RENEWAL = /\brenew/i;
+
+/**
+ * Whether a label's own words say "due" or "pay". Every other label a day
+ * to act by is read under (a renewal, "return by", "confirm by", "will be
+ * charged on", a direct debit, a disconnection) names another matter.
+ */
+function saysPay(words: string): boolean {
+  return SAYS_DUE.test(words) && !SAYS_RENEWAL.test(words);
+}
+
+/** Words that make a label a point of reference: the clause is about missing the day, not about the day. */
+const REFERS_BACK = /\b(?:after|not|if|unless|past|following|beyond)\b/i;
+/** How far back a label's own clause is read. */
+const CLAUSE_REACH = 120;
+
+/**
+ * Whether a label does not state a plain day to pay because of the clause
+ * it stands in: its own sentence, line and cell, read back from the label.
+ * The clause may only refer to the day ("not received by the 15th day after
+ * the due date (12/15/2026)", "if we have no payment by the due date"), and
+ * the date that follows is then the day a fee starts. Or it names a court,
+ * a hearing or a filing, where a wrong day would cost much: a label that
+ * states no words of its own gives the stakes check nothing else to read.
+ */
+function refersBack(text: string, at: number): boolean {
+  const before = text.slice(Math.max(0, at - CLAUSE_REACH), at);
+  const starts = Math.max(before.lastIndexOf("\n"), before.lastIndexOf(". "), before.lastIndexOf("; "), before.lastIndexOf(" | "));
+  const clause = before.slice(starts + 1);
+  return REFERS_BACK.test(clause) || LEGAL_WORDS.test(clause);
+}
+
+/** What may stand between a clock and the day it is said of: a comma, "on", the day's weekday. */
+const CLOCK_TO_DAY = /^[\s,]*(?:on\b)?[\s,]*(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day|mon|tues?|wed|thur?s?|fri|sat|sun)?[\s,.]*$/i;
+
+/**
+ * The clock of a day to act by, read from what follows its label. It is the
+ * clock that stands straight after the date, with at most a joining word
+ * between ("30 July 2027 17:00", "8 January at 6:00 PM"); else the one that
+ * stands straight before it ("5pm, 5 February 2027", "by 11:59 PM on March
+ * 3, 2027"). A clock further along the line is another matter ("open 9:00
+ * to 17:00"), and so is a range of hours.
+ */
+function clockOfDay(line: string, writtenAt?: number): string | null {
   const [date] = findDates(line, writtenAt === undefined ? undefined : { writtenAt });
   if (!date) {
     return null;
   }
   const rest = line.slice(date.end);
-  const [clock] = findTimes(rest);
-  return clock && /^[\s,]*(?:at|by|before|from|@)?\s*$/i.test(rest.slice(0, clock.at)) ? clock.time : null;
+  const [after] = findTimes(rest);
+  if (after && /^[\s,]*(?:at|by|before|from|@)?\s*$/i.test(rest.slice(0, after.at))) {
+    return after.time;
+  }
+  const lead = line.slice(0, date.at);
+  const before = findTimes(lead).at(-1);
+  return before && before.endTime === undefined && CLOCK_TO_DAY.test(lead.slice(before.end)) ? before.time : null;
 }
 
 // A flight's number as a line states it: after the word Flight ("Flight UA
@@ -387,6 +461,8 @@ export function labelledFacts(text: string, writtenAt?: number, lexicon?: Lexico
   // line under it: each cell there is read under its own column.
   const headers = headerLines(text);
   const inHeader = (at: number) => headers.some((header) => at >= header.at && at < header.end);
+  // The days to act by whose first label says due or pay.
+  const saidToPay = new Set<string>();
   for (const { kind, labels, reach, label } of KINDS) {
     labels.lastIndex = 0;
     for (let match = labels.exec(text); match; match = labels.exec(text)) {
@@ -401,12 +477,30 @@ export function labelledFacts(text: string, writtenAt?: number, lexicon?: Lexico
         continue;
       }
       const id = factId(kind, parsed.iso);
-      if (byId.has(id)) {
+      // A day to pay is stated outright where the label's own words say due
+      // or pay (a rule with no label of its own is the rule for "due date"
+      // and "pay by"), and the date is the label's own: the label states
+      // the day and does not only refer to it, and no other words stand
+      // between the label and the date.
+      const says = kind === "due" && (label === undefined || saysPay(label(match[0])));
+      const own = kind === "due" && !refersBack(text, match.index) && !standsApart(window, parsed.iso, writtenAt);
+      const held = byId.get(id);
+      if (held) {
+        // The day keeps the label that read it first. Where that label says
+        // due or pay but read the date loosely, a second label that says so
+        // too and states the same day as its own settles it.
+        if (says && own && saidToPay.has(id) && !held.toPay) {
+          byId.set(id, { ...held, toPay: true });
+        }
         continue;
       }
-      // A day to act by keeps the clock that stands straight after it on the
-      // label's own line ("Return by: Fri 30 July 2027 17:00").
-      const time = kind === "due" ? clockAfterDate(window.split("\n", 1)[0]!, writtenAt) : null;
+      if (says) {
+        saidToPay.add(id);
+      }
+      const toPay = says && own;
+      // A day to act by keeps the clock that stands straight after or before
+      // it on the label's own line ("Return by: Fri 30 July 2027 17:00").
+      const time = kind === "due" ? clockOfDay(window.split("\n", 1)[0]!, writtenAt) : null;
       byId.set(id, {
         id,
         kind,
@@ -414,6 +508,7 @@ export function labelledFacts(text: string, writtenAt?: number, lexicon?: Lexico
         value: parsed.iso,
         ...(time ? { time } : {}),
         ...(label ? { label: label(match[0]) } : {}),
+        ...(toPay ? { toPay: true } : {}),
         source: "label",
         // A date that could be read two ways is worth less than one that
         // could not, and the difference is what the confirmation card asks
@@ -615,8 +710,19 @@ export function structuralDatedFacts(
     if (meaning === "due" || meaning === "expiry" || meaning === "issued") {
       const id = factId(meaning, parsed.iso);
       if (!byId.has(id)) {
-        const time = meaning === "due" ? clockAfterDate(line.value, opts.writtenAt) : null;
-        byId.set(id, { id, kind: meaning, document, value: parsed.iso, ...(time ? { time } : {}), label, source: "label", ...sure });
+        const time = meaning === "due" ? clockOfDay(line.value, opts.writtenAt) : null;
+        const toPay = meaning === "due" && saysPay(label) && !standsApart(line.value.slice(0, WINDOW), parsed.iso, opts.writtenAt);
+        byId.set(id, {
+          id,
+          kind: meaning,
+          document,
+          value: parsed.iso,
+          ...(time ? { time } : {}),
+          label,
+          ...(toPay ? { toPay: true } : {}),
+          source: "label",
+          ...sure,
+        });
       }
     } else {
       const id = factId("event", `${parsed.iso} ${label.toLowerCase()}`);

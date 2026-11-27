@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import type { RuleRecord } from "./confidence";
+import type { Fact } from "./facts";
 import { scanForFacts } from "./scan";
 
 const base = { name: "policy.pdf", mime: "application/pdf" };
@@ -353,5 +355,82 @@ describe("scanForFacts", () => {
       document: "boarding-pass",
       label: "Departure",
     });
+  });
+});
+
+describe("a day to pay in a mail that counts on its label", () => {
+  const BILL = "City Water\nAmount due $84.20\nDue date: November 20, 2026";
+  const SENT = Date.UTC(2026, 10, 9, 12);
+  const MAIL = { name: "Your bill.email", mime: "application/vnd.engram.email+json", text: BILL };
+  const well = { offered: 60, right: 60 };
+  const poorly = { offered: 60, right: 50 };
+  const record = (due: typeof well, amount: typeof well): RuleRecord => ({
+    first: { due, event: well, expiry: well, amount },
+    heldout: { due, event: well, expiry: well, amount },
+    fresh: { due, event: well, expiry: well, amount },
+    mail: { due, event: well, expiry: well, amount },
+  });
+  const counted = (facts: readonly Fact[]) =>
+    facts
+      .filter((f) => f.accepted !== undefined)
+      .map((f) => `${f.kind} ${f.value} ${f.accepted}`)
+      .sort();
+
+  it("a plain day to pay is accepted as it is read, and the bill's amount with it, where the record trusts both", async () => {
+    const out = await scanForFacts({ ...MAIL, writtenAt: SENT, rules: record(well, well) });
+    expect(counted(out.facts)).toEqual(["amount 84.20 grounded", "due 2026-11-20 grounded"]);
+  });
+
+  it("the day counts alone where amounts are not measured right", async () => {
+    const out = await scanForFacts({ ...MAIL, writtenAt: SENT, rules: record(well, poorly) });
+    expect(counted(out.facts)).toEqual(["due 2026-11-20 grounded"]);
+  });
+
+  it("where the record does not trust a day to pay, it is read and waits for a yes", async () => {
+    const out = await scanForFacts({ ...MAIL, writtenAt: SENT, rules: record(poorly, well) });
+    expect(counted(out.facts)).toEqual([]);
+    expect(out.facts.some((f) => f.kind === "due" && f.value === "2026-11-20")).toBe(true);
+  });
+
+  it("with the record this build ships, the day counts and the amount waits", async () => {
+    const out = await scanForFacts({ ...MAIL, writtenAt: SENT });
+    expect(counted(out.facts)).toEqual(["due 2026-11-20 grounded"]);
+  });
+
+  it("a bill sent after its day to pay waits", async () => {
+    const out = await scanForFacts({ ...MAIL, writtenAt: Date.UTC(2026, 10, 25, 12), rules: record(well, well) });
+    expect(counted(out.facts)).toEqual([]);
+  });
+
+  it("a stored file states no day of its own: nothing in it counts on a label", async () => {
+    const out = await scanForFacts({ name: "bill.pdf", mime: "application/pdf", text: BILL, storedAt: SENT, rules: record(well, well) });
+    expect(counted(out.facts)).toEqual([]);
+    expect(out.facts.some((f) => f.kind === "due" && f.value === "2026-11-20")).toBe(true);
+  });
+
+  it("two days to pay are a question, not a reading", async () => {
+    const out = await scanForFacts({ ...MAIL, text: `${BILL}\nPayment due: December 20, 2026`, writtenAt: SENT, rules: record(well, well) });
+    expect(counted(out.facts)).toEqual([]);
+  });
+
+  it("a day to pay that the mail's own invoice data states otherwise waits: exact data is not contradicted without a question", async () => {
+    const data = (day: string) =>
+      `<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"Invoice","paymentDueDate":"${day}"}</script></head><body>${BILL}</body></html>`;
+    const other = await scanForFacts({ ...MAIL, raw: data("2026-11-18"), writtenAt: SENT, rules: record(well, well) });
+    expect(counted(other.facts).filter((line) => line.startsWith("due"))).toEqual(["due 2026-11-18 exact"]);
+    expect(other.facts.some((f) => f.kind === "due" && f.value === "2026-11-20" && f.accepted === undefined)).toBe(true);
+    // The same day from both is one statement, and exact.
+    const same = await scanForFacts({ ...MAIL, raw: data("2026-11-20"), writtenAt: SENT, rules: record(well, well) });
+    expect(counted(same.facts).filter((line) => line.startsWith("due"))).toEqual(["due 2026-11-20 exact"]);
+  });
+
+  it("a renewal, and a date that belongs to other words than its label, wait", async () => {
+    const renewal = "Your plan renews on December 1, 2026 for $9.99.";
+    expect(counted((await scanForFacts({ ...MAIL, text: renewal, writtenAt: SENT, rules: record(well, well) })).facts)).toEqual([]);
+    const penalty = "City Water\nInterest applies to amounts not paid by the due date, from 22 November 2026.";
+    const out = await scanForFacts({ ...MAIL, text: penalty, writtenAt: SENT, rules: record(well, well) });
+    expect(counted(out.facts)).toEqual([]);
+    // The day is still read, and offered as a question.
+    expect(out.facts.find((f) => f.kind === "due")).toMatchObject({ value: "2026-11-22" });
   });
 });

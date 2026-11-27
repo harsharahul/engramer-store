@@ -595,6 +595,22 @@ describe("plain words reach the Timeline", () => {
     expect(after!.ask).toBeUndefined();
   });
 
+  it("a mail's plain day to pay counts as it is read: the row does not ask, says how the date was read, and carries no amount", async () => {
+    const text = "Water bill\nAmount due $84.20\nDue date: November 20, 2026";
+    const { facts } = await scanForFacts({ name: "water.email", mime: EMAIL, text, writtenAt: at("2026-09-01", "09:00") });
+    const [row] = await rowsOf([email("water", "Your water bill", facts)], none, NOW);
+    expect(row).toMatchObject({ kind: "due", day: "2026-11-20", readFromLabel: true });
+    expect(row!.ask).toBeUndefined();
+    // The amount was read, and nobody confirmed it: it is not shown as settled.
+    expect(row!.amount).toBeUndefined();
+    expect(row!.factIds).toEqual(["due:2026-11-20"]);
+    // The same bill kept as a file states no day of its own, and asks as before.
+    const stored = await scanForFacts({ name: "water.pdf", mime: "application/pdf", text });
+    const [asking] = await rowsOf([file("water", stored.facts)], none, NOW);
+    expect(asking).toMatchObject({ kind: "due", ask: true });
+    expect(asking!.readFromLabel).toBeUndefined();
+  });
+
   it("a confirmed due date does not lend its yes to an amount nobody confirmed", async () => {
     const bill = await written("water", "Your water bill", "Water bill\nAmount due $84.20\nDue date: November 20, 2026");
     const dated = { ...bill, facts: bill.facts.map((fact) => (fact.kind === "due" ? { ...fact, confirmed: true } : fact)) };

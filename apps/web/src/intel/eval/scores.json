@@ -107,15 +107,15 @@
     },
     "asked": {
       "documents": 227,
-      "asked": 278,
+      "asked": 265,
       "wrong": 53,
       "clock": 10,
       "untyped": 0,
-      "askedPer100": 122.5,
+      "askedPer100": 116.7,
       "wrongPer100": 23.3
     },
     "counted": {
-      "counted": 4,
+      "counted": 17,
       "wrong": 0,
       "clock": 0,
       "unshown": 1
@@ -227,15 +227,15 @@
       },
       "asked": {
         "documents": 100,
-        "asked": 96,
+        "asked": 85,
         "wrong": 9,
         "clock": 8,
         "untyped": 0,
-        "askedPer100": 96,
+        "askedPer100": 85,
         "wrongPer100": 9
       },
       "counted": {
-        "counted": 0,
+        "counted": 11,
         "wrong": 0,
         "clock": 0,
         "unshown": 2

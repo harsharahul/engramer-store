@@ -18,6 +18,7 @@ import { settingChanged } from "../settingsbus";
 import { aamvaFacts } from "./aamva";
 import { readSymbols } from "./barcode";
 import { bcbpFacts } from "./bcbp";
+import { ruleAcceptance, ruleScores, type RuleRecord } from "./rulerecord";
 import {
   factId,
   groundFacts,
@@ -73,6 +74,11 @@ export interface ScanInput {
    * any other file such a date is not read at all.
    */
   writtenAt?: number;
+  /**
+   * The label rules' measured record, which says what a rule's reading may
+   * count as without a yes. The record this build ships, unless given.
+   */
+  rules?: RuleRecord;
 }
 
 export interface ScanResult {
@@ -192,5 +198,16 @@ export async function scanForFacts(input: ScanInput): Promise<ScanResult> {
     facts.push(withExactAcceptance({ ...fact, id, value: tail, masked: tail }));
     evidence.push({ id, full: fact.value });
   }
-  return { facts, evidence, decoded };
+  // A label rule's reading counts as it is read where it is plain and the
+  // rules' measured record trusts that kind (rulerecord.ts): a mail's one
+  // day to pay. Judged here, among everything the scan read, so every path
+  // that scans a file gives the same answer.
+  const rules = input.rules ?? ruleScores();
+  const written = input.writtenAt !== undefined ? { written: input.writtenAt } : {};
+  const counted = facts.map((fact) =>
+    fact.accepted === undefined && ruleAcceptance(fact, { rules, siblings: facts, ...written }) === "grounded"
+      ? { ...fact, accepted: "grounded" as const }
+      : fact,
+  );
+  return { facts: counted, evidence, decoded };
 }
