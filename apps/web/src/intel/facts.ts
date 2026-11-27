@@ -789,6 +789,16 @@ export function sumOf(fact: Fact): AmountSum | undefined {
   return SUM_NAMES[label] ?? (TOTAL_LABEL.test(label) ? "total" : undefined);
 }
 
+/**
+ * Of some amounts, the one a bill asks for: its amount due, else the one
+ * total it states. Two totals are not guessed between.
+ */
+export function billAmountOf(amounts: readonly Fact[]): Fact | undefined {
+  const named = (sum: AmountSum) => amounts.filter((candidate) => sumOf(candidate) === sum);
+  const totals = named("total");
+  return named("due")[0] ?? (totals.length === 1 ? totals[0] : undefined);
+}
+
 /** A fact with what another reading of the same amount says it is, where it says nothing itself. */
 function withSumFrom(kept: Fact, other: Fact): Fact {
   const sum = kept.kind === "amount" && kept.sum === undefined && sumOf(kept) === undefined ? sumOf(other) : undefined;
