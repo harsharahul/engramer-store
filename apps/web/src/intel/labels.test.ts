@@ -749,6 +749,24 @@ describe("a date line and the clock lines under it", () => {
     // A second label that states the same day as its own settles it.
     const both = "A late fee applies once the due date, which is shown below as 12 March 2027, is over.\nPay by: 12 March 2027";
     expect(due(both)).toMatchObject({ value: "2027-03-12", toPay: true });
+    // A second label that names another matter does not: the day interest
+    // starts is not a day to pay because a cover renews, or a form is due
+    // back, on that day.
+    for (const second of ["Your cover renews on 22 April 2027", "Return by 22 April 2027"]) {
+      const text = `Interest applies to amounts not paid by the due date, from 22 April 2027.\n${second}`;
+      expect({ second, fact: due(text) }).toMatchObject({ fact: { value: "2027-04-22" } });
+      expect({ second, toPay: due(text)?.toPay }).toEqual({ second, toPay: undefined });
+    }
+  });
+
+  it("a day to pay in a clause about a court, a hearing or a filing is not stated outright: a wrong one would cost much", () => {
+    const due = (text: string) => labelledFacts(text).find((fact) => fact.kind === "due");
+    const fine = due("Your court fine of $200 is due on 22 April 2027.");
+    expect(fine).toMatchObject({ value: "2027-04-22" });
+    expect(fine?.toPay).toBeUndefined();
+    expect(due("Hearing fee: payment due 22 April 2027")?.toPay).toBeUndefined();
+    // Another line of the same mail is its own clause.
+    expect(due("If unpaid we may refer the debt to the county court.\nDue date: 22 April 2027")).toMatchObject({ toPay: true });
   });
 
   it("a label inside a clause about missing the day only refers to it", () => {

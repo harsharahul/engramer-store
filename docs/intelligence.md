@@ -607,8 +607,10 @@ readers (a labelled date and the assistant) stating the same value, or the
 one day to pay a mail states plainly under a label that says due or pay
 (the one reading of a label rule that is measured right often enough to
 stand alone). Everything else arrives as a suggestion in a single line
-above your files and counts once you accept it. One fixed order decides between readings of the same
-thing: your answer, then exact data, then the rest. Where the assistant and a
+above your files and counts once you accept it. One fixed order decides
+between readings of the same thing: your answer, then exact data, then the
+rest. A mail's own invoice data that states another day to pay than the
+labelled one keeps the labelled day a question. Where the assistant and a
 labelled date disagree about a due date or an expiry, both are offered as one
 question ("Which one?"), and your answer (or Ignore) settles both. Booking
 data or an invite that states an event's day settles the assistant's reading

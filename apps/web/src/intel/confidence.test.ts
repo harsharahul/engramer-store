@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Fact } from "./facts";
 import {
   acceptance,
+  countedKinds,
   MIN_SAMPLE,
   plainAmount,
   plainDue,
@@ -382,12 +383,24 @@ describe("acceptance of a label rule's reading", () => {
     expect(acceptance(amount(), ctx([amount()]))).toBeNull();
   });
 
-  it("the rule has a name that changes with what it is trusted with, and none while it is trusted with nothing", () => {
+  it("the rule has a name that changes with what it is trusted with, also when that becomes nothing", () => {
     expect(ruleEdition(TRUSTED)).toBe("due+amount.1");
     expect(ruleEdition(DAY_ONLY)).toBe("due.1");
-    expect(ruleEdition(UNDER)).toBeUndefined();
+    expect(ruleEdition(UNDER)).toBe("none.1");
+    expect(countedKinds(UNDER)).toEqual([]);
     // The record this build ships trusts the day alone.
     expect(ruleEdition()).toBe("due.1");
+    expect(countedKinds()).toEqual(["due"]);
+  });
+
+  it("another reader's day to pay on another day makes the rule's reading a question", () => {
+    const booked = fact({ id: "due:2027-04-08", kind: "due", value: "2027-04-08", source: "jsonld", confidence: 1, accepted: "exact" });
+    expect(acceptance(due(), ctx([due(), booked]))).toBeNull();
+    // The same day from another reader contradicts nothing.
+    const same = fact({ id: "due:2027-04-10:b", kind: "due", value: "2027-04-10", source: "jsonld", confidence: 1, accepted: "exact" });
+    expect(acceptance(due(), ctx([due(), same]))).toBe("grounded");
+    // A reading the owner put away says nothing any more.
+    expect(acceptance(due(), ctx([due(), { ...booked, dismissed: true }]))).toBe("grounded");
   });
 
   it("the model's reading takes nothing from the rules' record", () => {

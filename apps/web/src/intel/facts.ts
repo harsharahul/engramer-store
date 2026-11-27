@@ -159,7 +159,8 @@ export interface Fact {
    * ("not paid by the due date, interest from 22 April") or from a clause
    * about missing the day ("after the due date (15 December)") lacks it:
    * such a reading is offered like any other, and never counts on the
-   * rule's word alone.
+   * rule's word alone. Only the scan that made the reading acts on it; a
+   * stored reading does not take it from a later scan.
    */
   toPay?: boolean;
   /**
@@ -699,6 +700,26 @@ export function rereadFacts(existing: readonly Fact[], rescanned: readonly Fact[
 }
 
 /**
+ * What a file carries, with a label rule's own word taken back from every
+ * reading the newest scan of the file no longer gives. The rule read the
+ * day once and counted it; it does not read that day now, so nothing
+ * stands behind the count, and the day asks again like any reading nobody
+ * settled. For the passes that fold a full scan of a file into its facts.
+ * What the owner answered, what two readers agreed on and the model's own
+ * measured word are not the rule's, and stay.
+ */
+export function withoutStaleRuleWord(existing: readonly Fact[], rescanned: readonly Fact[]): Fact[] {
+  const again = new Set(rescanned.map((fact) => fact.id));
+  return existing.map((fact) => {
+    if (fact.source !== "label" || fact.accepted !== "grounded" || ownerDecided(fact) || again.has(fact.id)) {
+      return fact;
+    }
+    const { accepted: _taken, ...rest } = fact;
+    return rest;
+  });
+}
+
+/**
  * A stored reading of a label rule, with the acceptance the newest scan
  * gives that reading. A rule reads the same text the same way every time,
  * so what it counts on its own word now is the whole truth about what it
@@ -707,7 +728,9 @@ export function rereadFacts(existing: readonly Fact[], rescanned: readonly Fact[
  * reading a second reader agreed on are not the rule's alone, and stay.
  */
 function withRuleAcceptance(kept: Fact, fresh: Fact): Fact {
-  if (kept.source !== "label" || fresh.source !== "label" || ownerDecided(kept)) {
+  // One side of a disagreement is a question until it is settled, whatever
+  // the rule alone would say.
+  if (kept.source !== "label" || fresh.source !== "label" || ownerDecided(kept) || kept.disputed) {
     return kept;
   }
   if (fresh.accepted === "grounded" && kept.accepted === undefined) {

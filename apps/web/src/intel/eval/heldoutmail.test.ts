@@ -18,9 +18,7 @@ import type { EvalCase } from "./score";
 /**
  * Bills, notices and statements that arrive by mail: three held-out files
  * that no rule was shaped to, and three files of the first set written the
- * same way. These tests check only that each file is well formed, and every
- * one of them reports a count, never a case: what the held-out mails say
- * stays unseen by whoever writes the rules.
+ * same way. These tests check each file's form and report counts only.
  */
 const BATCHES: readonly { prefix: string; size: number; html: number; cases: readonly EvalCase[] }[] = [
   { prefix: "h5-", size: 50, html: 20, cases: HELDOUT_MAIL_CASES },

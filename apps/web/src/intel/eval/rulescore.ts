@@ -6,7 +6,7 @@
  * The rules are deterministic, so the record needs no model: it is computed
  * from the cases and kept in rulescores.json, and a test compares the two.
  * Only readings one reader could be trusted with are measured. A day to pay
- * is measured where it is plain (confidence.ts: the one such day in a mail,
+ * is measured where it is plain (rulerecord.ts: the one such day in a mail,
  * ahead of the day the mail was sent, printed whole), and with it the
  * amount such a bill asks for. A stored file states no day of its own, so
  * neither is measured there. An event or an expiry is measured where it is

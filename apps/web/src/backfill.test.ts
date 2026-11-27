@@ -277,10 +277,12 @@ describe("the dates pass and a rule that counts a mail's day to pay", () => {
     // As an earlier build left it: every file swept once on this device.
     localStorage.setItem("engram-sweep-facts:t@example.com", JSON.stringify(Object.fromEntries(ids.map((id) => [id, 1]))));
     await runBackfill();
-    // The next open: the mail was looked at for this edition, counted or not.
+    // The next open: each was looked at for this edition, whatever came of it.
     resetBackfillSession();
     await runBackfill();
-    expect(seen).toEqual([["bill-mail"], []]);
+    // A day that already counts on the rule's word is looked at once per
+    // edition too: a rule that changed must be able to take its word back.
+    expect(seen).toEqual([["bill-mail", "counted"], []]);
   });
 });
 

@@ -16,6 +16,7 @@ import {
   reconcileFacts,
   rereadFacts,
   sumOf,
+  withoutStaleRuleWord,
   type Fact,
 } from "./facts";
 
@@ -116,6 +117,26 @@ describe("a label reading counts on the rule's word only as the newest scan read
     const file = (facts: Fact[]) => ({ id: "bill", trashed: false, facts });
     expect(offeredFacts([file([counted])], now)).toEqual([]);
     expect(offeredFacts([file(mergeFacts([counted], [stored]))], now).map(({ fact: offered }) => offered.id)).toEqual(["due:2027-04-30"]);
+  });
+
+  it("a reading still marked as one side of a disagreement is not the rule's to count", () => {
+    // A pair an older build left unsettled: the owner ignored the model's side.
+    const other = fact({ id: "due:2027-05-02", kind: "due", document: "invoice", value: "2027-05-02", source: "model", reader: "apple", dismissed: true });
+    const disputed = { ...stored, disputed: other.id };
+    const merged = mergeFacts([disputed, other], [counted]);
+    expect(merged.find((kept) => kept.id === stored.id)).toEqual(disputed);
+  });
+
+  it("a scan that no longer reads a counted day takes the rule's word back, and the day asks again", () => {
+    const moved = { ...fact({ id: "due:2027-05-14", kind: "due", document: "invoice", value: "2027-05-14", label: "Due date" }), accepted: "grounded" as const };
+    expect(withoutStaleRuleWord([counted], [moved])).toEqual([stored]);
+    // Read again, it is the merge that decides.
+    expect(withoutStaleRuleWord([counted], [stored])).toEqual([counted]);
+    // An answer, an agreement and the model's own measured word are not the rule's.
+    const yes = { ...counted, confirmed: true };
+    const agreed = { ...stored, accepted: "agreement" as const, reader: "apple + label" };
+    const model = fact({ id: "due:2027-06-01", kind: "due", value: "2027-06-01", source: "model", reader: "apple", accepted: "grounded" });
+    expect(withoutStaleRuleWord([yes, agreed, model], [])).toEqual([yes, agreed, model]);
   });
 
   it("a save follows the scan of the new contents the same way", () => {

@@ -71,16 +71,24 @@ export function trustedKinds(record: RuleRecord | undefined): RuleKind[] {
 const PLAIN_RULE = 1;
 
 /**
- * A name for what the label rules may count on their own word: the kinds
- * the record trusts and the version of the plain-reading rule. It changes
- * when either does, so a pass that reads stored mail once per name reaches
- * every mail again exactly then. There is none while nothing is trusted.
+ * The kinds of reading a label rule may count on its own word under a
+ * record: a day to pay and its amount, where trusted (see
+ * `ruleAcceptance`). What an event or an expiry measures moves nothing.
  */
-export function ruleEdition(record: RuleRecord | undefined = ruleScores()): string | undefined {
-  // Only a day to pay and its amount can count on a rule's word (see
-  // `ruleAcceptance`); what an event or an expiry measures moves nothing.
-  const counted = trustedKinds(record).filter((kind) => kind === "due" || kind === "amount");
-  return counted.length > 0 ? `${counted.join("+")}.${PLAIN_RULE}` : undefined;
+export function countedKinds(record: RuleRecord | undefined = ruleScores()): RuleKind[] {
+  return trustedKinds(record).filter((kind) => kind === "due" || kind === "amount");
+}
+
+/**
+ * A name for what the label rules may count on their own word: the kinds
+ * the record lets them count and the version of the plain-reading rule. It
+ * changes when either does, also when the kinds become none, so a pass that
+ * looks at stored mail once per name can give a rule's word where it is
+ * new and take it back where it no longer holds.
+ */
+export function ruleEdition(record: RuleRecord | undefined = ruleScores()): string {
+  const counted = countedKinds(record);
+  return `${counted.length > 0 ? counted.join("+") : "none"}.${PLAIN_RULE}`;
 }
 
 /** A reading one reader could be trusted with at all: not a date of doubt, not where a wrong value costs much, and sane. */
@@ -153,6 +161,15 @@ export function ruleAcceptance(
   },
 ): "grounded" | null {
   if (fact.source !== "label" || fact.disputed) {
+    return null;
+  }
+  // Another reader's day to pay on another day (the mail's own invoice
+  // data, most of all) makes this one a question: a rule's word never
+  // stands against what another reader states.
+  if (
+    fact.kind === "due" &&
+    ctx.siblings.some((other) => other.kind === "due" && other.source !== "label" && !other.dismissed && other.value !== fact.value)
+  ) {
     return null;
   }
   const trusted = trustedKinds(ctx.rules);

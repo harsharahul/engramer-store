@@ -19,7 +19,8 @@ export const MIN_SAMPLE = 30;
 
 const IDENTITY_DOCUMENTS = new Set(["passport", "visa", "residence-permit", "id-card", "drivers-license"]);
 const TRAVEL_TIME = /\b(?:depart|departs|arrive|arrives|flight|boarding)\b/i;
-const LEGAL = /\b(?:deadline|court|filing|hearing)\b/i;
+/** Words of a matter where a wrong day would cost much. */
+export const LEGAL_WORDS = /\b(?:deadline|court|filing|hearing)\b/i;
 const YEARS = 20;
 export const DAY = 86_400_000;
 
@@ -35,7 +36,7 @@ export function stakesOf(fact: Fact): Stakes {
   if (fact.kind === "event" && (role === "depart" || role === "arrive" || TRAVEL_TIME.test(label))) {
     return "high";
   }
-  if (LEGAL.test(label)) {
+  if (LEGAL_WORDS.test(label)) {
     return "high";
   }
   if (fact.kind === "amount" || fact.document === "delivery" || fact.document === "dining") {

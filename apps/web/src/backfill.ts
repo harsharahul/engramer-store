@@ -2,7 +2,7 @@ import { isHandheld } from "./analysisslot";
 import { loadPolicy } from "./backuppolicy";
 import { settingChanged } from "./settingsbus";
 import { connectionIsUnmetered } from "./connection";
-import { ruleEdition } from "./intel/rulerecord";
+import { countedKinds, ruleEdition } from "./intel/rulerecord";
 import { ownerDecided } from "./intel/facts";
 import { loadLexicon } from "./intel/lexicon";
 import { factsEnabled } from "./intel/scan";
@@ -182,9 +182,12 @@ export async function runBackfill(): Promise<BackfillResult | null> {
    * never owed twice, whatever another device writes back.
    *
    * The same holds for the rule that lets a mail's labelled day to pay
-   * count without a question: a mail that still holds such a day, read by
-   * a label and answered by nobody, is owed one look per edition of that
-   * rule. A stored file's day never counts on a label, so it is owed none.
+   * count without a question: a mail that holds such a day, read by a
+   * label and answered by nobody, is owed one look per edition of that
+   * rule. A day that waits is looked at where the edition lets a rule
+   * count at all; a day that already counts on the rule's word is looked
+   * at under every edition, so a rule that changed can take its word back.
+   * A stored file's day never counts on a label, so it is owed none.
    */
   const datesPass = async () => {
     const file = (id: string) => useStore.getState().files.get(id);
@@ -196,22 +199,24 @@ export async function runBackfill(): Promise<BackfillResult | null> {
         open: (id) => file(id)?.facts.some((fact) => fact.kind === "dated" && fact.source === "label" && !ownerDecided(fact)) ?? false,
       });
     }
-    const rule = ruleEdition();
-    if (rule) {
-      looks.push({
-        memory: new SweepMemory(account, "rules", rule),
-        open: (id) => {
-          const mail = file(id);
-          return (
-            (mail?.mail?.date ?? 0) > 0 &&
-            (mail?.facts.some((fact) => fact.kind === "due" && fact.source === "label" && fact.accepted === undefined && !ownerDecided(fact)) ?? false)
-          );
-        },
-      });
-    }
-    if (looks.length === 0) {
-      return pass("facts", attemptedFacts);
-    }
+    const counts = countedKinds().length > 0;
+    looks.push({
+      memory: new SweepMemory(account, "rules", ruleEdition()),
+      open: (id) => {
+        const mail = file(id);
+        return (
+          (mail?.mail?.date ?? 0) > 0 &&
+          (mail?.facts.some(
+            (fact) =>
+              fact.kind === "due" &&
+              fact.source === "label" &&
+              !ownerDecided(fact) &&
+              (fact.accepted === "grounded" || (counts && fact.accepted === undefined)),
+          ) ??
+            false)
+        );
+      },
+    });
     return pass("facts", attemptedFacts, {
       owed: (id) => looks.some((look) => !look.memory.exhausted(id) && look.open(id)),
       record: (id, ok) => looks.forEach((look) => look.memory.record(id, ok)),

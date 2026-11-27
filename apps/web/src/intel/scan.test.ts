@@ -413,6 +413,17 @@ describe("a day to pay in a mail that counts on its label", () => {
     expect(counted(out.facts)).toEqual([]);
   });
 
+  it("a day to pay that the mail's own invoice data states otherwise waits: exact data is not contradicted without a question", async () => {
+    const data = (day: string) =>
+      `<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"Invoice","paymentDueDate":"${day}"}</script></head><body>${BILL}</body></html>`;
+    const other = await scanForFacts({ ...MAIL, raw: data("2026-11-18"), writtenAt: SENT, rules: record(well, well) });
+    expect(counted(other.facts).filter((line) => line.startsWith("due"))).toEqual(["due 2026-11-18 exact"]);
+    expect(other.facts.some((f) => f.kind === "due" && f.value === "2026-11-20" && f.accepted === undefined)).toBe(true);
+    // The same day from both is one statement, and exact.
+    const same = await scanForFacts({ ...MAIL, raw: data("2026-11-20"), writtenAt: SENT, rules: record(well, well) });
+    expect(counted(same.facts).filter((line) => line.startsWith("due"))).toEqual(["due 2026-11-20 exact"]);
+  });
+
   it("a renewal, and a date that belongs to other words than its label, wait", async () => {
     const renewal = "Your plan renews on December 1, 2026 for $9.99.";
     expect(counted((await scanForFacts({ ...MAIL, text: renewal, writtenAt: SENT, rules: record(well, well) })).facts)).toEqual([]);

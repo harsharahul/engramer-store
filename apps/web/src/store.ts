@@ -108,6 +108,7 @@ import {
   reconcileFacts,
   rereadFacts,
   settleDisputes,
+  withoutStaleRuleWord,
   withoutUnreadLines,
   type Fact,
   type FactEvidence,
@@ -3703,7 +3704,8 @@ export const useStore = create<StoreState>((set, get) => {
         labelFrom(prepared.scenes ?? null);
         if (facts.length > 0) {
           meta.facts = mergeFacts(
-            current.facts,
+            // A day the rules counted on their own word and no longer read asks again.
+            withoutStaleRuleWord(current.facts, facts),
             facts.map((fact) => ({ ...fact, digest: current.digest })),
           );
           outcome.facts = facts.length;
@@ -4048,8 +4050,10 @@ export const useStore = create<StoreState>((set, get) => {
             continue;
           }
           // A stored line the rules no longer read (its label now means the
-          // date needs no reminder) goes; everything else is folded as before.
-          const held = withoutUnreadLines(current.facts, scanned.facts);
+          // date needs no reminder) goes, and a day the rules counted on
+          // their own word and no longer read asks again; everything else
+          // is folded as before.
+          const held = withoutStaleRuleWord(withoutUnreadLines(current.facts, scanned.facts), scanned.facts);
           if (scanned.facts.length === 0 && held.length === current.facts.length) {
             opts?.onOutcome?.(file.id, true);
             continue;

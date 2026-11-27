@@ -14,6 +14,7 @@ import { CURRENCY_CODES, SYMBOL_CURRENCY, SYMBOL_FAMILY } from "./currency";
 import { type DocumentKind, type Fact, factId, maskTail } from "./facts";
 import { findDates, findTimes, parseDate, parseTime, type DateContext, type ParsedDate } from "./dates";
 import { amountMeaningOf, meaningOf, type AmountMeaning, type LabelMeaning, type Lexicon } from "./lexicon";
+import { LEGAL_WORDS } from "./stakes";
 import { serviceOf, type Role, type Subject } from "./subject";
 import { cellsOf, headerLines, tableBlocks } from "./tables";
 
@@ -349,16 +350,19 @@ const REFERS_BACK = /\b(?:after|not|if|unless|past|following|beyond)\b/i;
 const CLAUSE_REACH = 120;
 
 /**
- * Whether a label stands in a clause that only refers to its day ("not
- * received by the 15th day after the due date (12/15/2026)", "if we have no
- * payment by the due date"). The date that follows may then be the day a fee
- * starts. The clause is the label's own sentence, line and cell, read back
- * from the label.
+ * Whether a label does not state a plain day to pay because of the clause
+ * it stands in: its own sentence, line and cell, read back from the label.
+ * The clause may only refer to the day ("not received by the 15th day after
+ * the due date (12/15/2026)", "if we have no payment by the due date"), and
+ * the date that follows is then the day a fee starts. Or it names a court,
+ * a hearing or a filing, where a wrong day would cost much: a label that
+ * states no words of its own gives the stakes check nothing else to read.
  */
 function refersBack(text: string, at: number): boolean {
   const before = text.slice(Math.max(0, at - CLAUSE_REACH), at);
   const starts = Math.max(before.lastIndexOf("\n"), before.lastIndexOf(". "), before.lastIndexOf("; "), before.lastIndexOf(" | "));
-  return REFERS_BACK.test(before.slice(starts + 1));
+  const clause = before.slice(starts + 1);
+  return REFERS_BACK.test(clause) || LEGAL_WORDS.test(clause);
 }
 
 /** What may stand between a clock and the day it is said of: a comma, "on", the day's weekday. */
@@ -483,9 +487,9 @@ export function labelledFacts(text: string, writtenAt?: number, lexicon?: Lexico
       const held = byId.get(id);
       if (held) {
         // The day keeps the label that read it first. Where that label says
-        // due or pay but read the date loosely, a second label that states
-        // the same day as its own settles it.
-        if (own && saidToPay.has(id) && !held.toPay) {
+        // due or pay but read the date loosely, a second label that says so
+        // too and states the same day as its own settles it.
+        if (says && own && saidToPay.has(id) && !held.toPay) {
           byId.set(id, { ...held, toPay: true });
         }
         continue;
