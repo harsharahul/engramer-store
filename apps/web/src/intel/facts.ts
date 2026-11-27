@@ -151,6 +151,15 @@ export interface Fact {
    */
   relative?: boolean;
   /**
+   * A label rule read this day to act by loosely: other words stand between
+   * the label and the date ("not paid by the due date, interest from 22
+   * April"), or the label stands in a clause that only refers to the day
+   * ("after the due date (15 December)"). The date may then be another
+   * day's. Such a reading is offered like any other, and never counts on
+   * the rule's word alone.
+   */
+  apart?: boolean;
+  /**
    * What an amount is, stated by the reader: the amount still to pay, an
    * order's total, or a total. Kept as stored; read it only through `sumOf`,
    * which also knows the facts stored before this field.

@@ -162,13 +162,15 @@ export type RuleScores = Record<RuleKind, RuleTally>;
 
 /**
  * What the label rules measure (eval/rulescore.ts): on the first set, on
- * the held-out set, and on a second held-out batch of bills and notices.
- * The two held-out parts are one measure of documents never seen.
+ * the held-out set, on a held-out batch of bills and notices, and on a
+ * held-out batch of bills that arrive by mail. The three held-out parts are
+ * one measure of documents never seen.
  */
 export interface RuleRecord {
   first: RuleScores;
   heldout: RuleScores;
   fresh: RuleScores;
+  mail: RuleScores;
 }
 
 /** The record measured for the label rules this build ships. */
@@ -183,14 +185,17 @@ export function ruleScores(): RuleRecord {
  * day to pay is. A record that lacks a part trusts nothing.
  */
 export function trustedKinds(record: RuleRecord | undefined): RuleKind[] {
-  if (!record?.first || !record.heldout || !record.fresh) {
+  if (!record?.first || !record.heldout || !record.fresh || !record.mail) {
     return [];
   }
   const clears = (tally: RuleTally | undefined) =>
     tally !== undefined && tally.offered >= MIN_SAMPLE && tally.right / tally.offered >= PRECISION_BAR;
   const unseen = (kind: RuleKind): RuleTally | undefined => {
-    const [a, b] = [record.heldout[kind], record.fresh[kind]];
-    return a && b ? { offered: a.offered + b.offered, right: a.right + b.right } : undefined;
+    const parts = [record.heldout[kind], record.fresh[kind], record.mail[kind]];
+    if (parts.some((part) => part === undefined)) {
+      return undefined;
+    }
+    return { offered: parts.reduce((sum, part) => sum + part.offered, 0), right: parts.reduce((sum, part) => sum + part.right, 0) };
   };
   const cleared = RULE_KINDS.filter((kind) => clears(record.first[kind]) && clears(unseen(kind)));
   return cleared.filter((kind) => kind !== "amount" || cleared.includes("due"));
@@ -204,16 +209,38 @@ export function withoutDoubt(fact: Fact, siblings: readonly Fact[], now: number)
 /** The longest a day to pay may lie ahead of its document and still be plain. */
 const PLAIN_DAYS_AHEAD = 366;
 
+/** A label whose own words say the day is due or to pay. */
+const SAYS_DUE = /\b(?:dues?|pay|paid|payable|payments?|repayments?|owing|remit)\b/i;
+/** A renewal's label says when a plan or a cover renews; the money may leave on another day. */
+const SAYS_RENEWAL = /\brenew/i;
+
+/**
+ * Whether the label a day was read under itself says "due" or "pay". The
+ * word rule for "due date" and "pay by" states no label of its own. Every
+ * other label a day to act by is read under (a renewal, "return by",
+ * "confirm by", "will be charged on", a direct debit, a disconnection)
+ * names another matter, and that day still asks.
+ */
+function saysDue(fact: Fact): boolean {
+  return fact.label === undefined || (SAYS_DUE.test(fact.label) && !SAYS_RENEWAL.test(fact.label));
+}
+
 /**
  * Whether a label rule's reading of a day to pay leaves no room for doubt:
- * it is the only such day the rules read in the file, it is not behind the
- * day the document was written or kept and lies within a year of it, the
- * text prints it whole, and a wrong value would not cost much. Only a plain
- * reading is measured (eval/rulescore.ts), and only a plain reading can
- * count on the rule's word. With no day the document arrived on, none is.
+ * the document states the day it was written (a mail's sending day), the
+ * label itself says due or pay and its date stands straight after it, the
+ * reading is the only day to pay the rules read in the mail, it is not
+ * behind the sending day and lies within a year of it, the text prints it
+ * whole, and a wrong value would not cost much. Only a plain reading is
+ * measured (eval/rulescore.ts), and only a plain reading can count on the
+ * rule's word. A stored file states no day of its own: the day it was kept
+ * says nothing about a day printed in it, so none of its readings is plain.
  */
-export function plainDue(fact: Fact, siblings: readonly Fact[], arrived: number | undefined): boolean {
-  if (fact.kind !== "due" || fact.source !== "label" || arrived === undefined || !withoutDoubt(fact, siblings, arrived)) {
+export function plainDue(fact: Fact, siblings: readonly Fact[], written: number | undefined): boolean {
+  if (fact.kind !== "due" || fact.source !== "label" || written === undefined || !withoutDoubt(fact, siblings, written)) {
+    return false;
+  }
+  if (fact.apart || !saysDue(fact)) {
     return false;
   }
   // A second day to pay (an instalment, a final notice) is a choice to make.
@@ -221,7 +248,7 @@ export function plainDue(fact: Fact, siblings: readonly Fact[], arrived: number 
     return false;
   }
   // Counted on one ruler, so the answer is the same in every time zone.
-  const ahead = Math.round((Date.parse(`${fact.value}T00:00:00Z`) - Math.floor(arrived / DAY) * DAY) / DAY);
+  const ahead = Math.round((Date.parse(`${fact.value}T00:00:00Z`) - Math.floor(written / DAY) * DAY) / DAY);
   return ahead >= 0 && ahead <= PLAIN_DAYS_AHEAD;
 }
 
@@ -229,15 +256,15 @@ export function plainDue(fact: Fact, siblings: readonly Fact[], arrived: number 
  * Whether an amount is the one a bill asks for, on a bill whose day to pay
  * is plain: its amount due, else its one total, as a label rule read it.
  */
-export function plainAmount(fact: Fact, siblings: readonly Fact[], arrived: number | undefined): boolean {
-  if (fact.kind !== "amount" || fact.source !== "label" || arrived === undefined) {
+export function plainAmount(fact: Fact, siblings: readonly Fact[], written: number | undefined): boolean {
+  if (fact.kind !== "amount" || fact.source !== "label" || written === undefined) {
     return false;
   }
-  if (!siblings.some((other) => plainDue(other, siblings, arrived))) {
+  if (!siblings.some((other) => plainDue(other, siblings, written))) {
     return false;
   }
   const stated = siblings.filter((other) => other.kind === "amount" && other.source === "label" && other.unit);
-  return billAmountOf(stated)?.id === fact.id && saneFact(fact, siblings, arrived);
+  return billAmountOf(stated)?.id === fact.id && saneFact(fact, siblings, written);
 }
 
 /** Whether a reading counts without a yes, and on what basis; null while it must ask. */
@@ -250,8 +277,8 @@ export function acceptance(
     /** The file's facts, the one judged among them. */
     siblings: readonly Fact[];
     now: number;
-    /** The day the document was written (a mail) or kept (a stored file), where known. */
-    arrived?: number;
+    /** The day the document itself states it was written: a mail's sending day. A stored file has none. */
+    written?: number;
   },
 ): "exact" | "grounded" | null {
   if (fact.confidence === 1 && fact.source !== "user" && EXACT_SOURCES.has(fact.source)) {
@@ -267,10 +294,10 @@ export function acceptance(
     }
     const trusted = trustedKinds(ctx.rules);
     if (fact.kind === "due") {
-      return trusted.includes("due") && plainDue(fact, ctx.siblings, ctx.arrived) ? "grounded" : null;
+      return trusted.includes("due") && plainDue(fact, ctx.siblings, ctx.written) ? "grounded" : null;
     }
     if (fact.kind === "amount") {
-      return trusted.includes("amount") && plainAmount(fact, ctx.siblings, ctx.arrived) ? "grounded" : null;
+      return trusted.includes("amount") && plainAmount(fact, ctx.siblings, ctx.written) ? "grounded" : null;
     }
     return null;
   }

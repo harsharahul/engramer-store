@@ -696,6 +696,57 @@ describe("a date line and the clock lines under it", () => {
     expect(moments(prose)).toEqual([]);
   });
 
+  it("a day to act by keeps the clock that stands straight before it", () => {
+    const due = (text: string) => labelledFacts(text).find((fact) => fact.kind === "due");
+    expect(due("Pay by: 5pm, 5 February 2027")).toMatchObject({ value: "2027-02-05", time: "17:00" });
+    expect(due("Pay by 5pm on Friday 5 February 2027")).toMatchObject({ value: "2027-02-05", time: "17:00" });
+    expect(due("Payment due: by 11:59 PM on March 3, 2027")).toMatchObject({ value: "2027-03-03", time: "23:59" });
+    // Words between the clock and the day make it another matter.
+    expect(due("Pay by: 5pm cut-off applies; 5 February 2027")?.time).toBeUndefined();
+    // A clock after the day still wins.
+    expect(due("Return by: 9am, Fri 30 July 2027 17:00")).toMatchObject({ value: "2027-07-30", time: "17:00" });
+  });
+
+  it("a day to act by whose date stands straight after its label is whole; only joining words may stand between", () => {
+    const due = (text: string) => labelledFacts(text).find((fact) => fact.kind === "due");
+    for (const text of [
+      "Due date: 12 March 2027",
+      "Payment due on or before Friday 12 March 2027",
+      "Pay by | 5pm, 12 March 2027",
+      "Amount due by\n12 March 2027",
+      "Payment due date is no later than Fri, 12 Mar 2027",
+    ]) {
+      expect({ text, fact: due(text) }).toMatchObject({ fact: { value: "2027-03-12" } });
+      expect({ text, apart: due(text)?.apart }).toEqual({ text, apart: undefined });
+    }
+  });
+
+  it("other words between a label and the date mark the reading apart: the date may be theirs", () => {
+    const due = (text: string) => labelledFacts(text).find((fact) => fact.kind === "due");
+    // The day interest starts, not the day to pay.
+    expect(due("Interest applies to amounts not paid by the due date, from 22 April 2027.")).toMatchObject({ value: "2027-04-22", apart: true });
+    expect(due("Interest of 5% a year will be charged on any unpaid tax from 1 Feb 2027.")).toMatchObject({ value: "2027-02-01", apart: true });
+    // The statement's own day.
+    expect(due("Payment due upon receipt. Statement date: 3 March 2027")).toMatchObject({ value: "2027-03-03", apart: true });
+    // A second label that states the same day straight makes it whole.
+    const both = "A late fee applies after the due date, which is shown below as 12 March 2027.\nPay by: 12 March 2027";
+    expect(due(both)).toMatchObject({ value: "2027-03-12" });
+    expect(due(both)?.apart).toBeUndefined();
+  });
+
+  it("a label inside a clause about missing the day only refers to it: its date is apart too", () => {
+    const due = (text: string) => labelledFacts(text).find((fact) => fact.kind === "due");
+    // The day the late fee starts, printed straight after the words "due date".
+    expect(due("Assessments not received by the 15th day after the due date (12/15/2026) will carry a late fee.")).toMatchObject({ apart: true });
+    expect(due("If we have no payment by the due date 12 March 2027, a fee is added.")).toMatchObject({ value: "2027-03-12", apart: true });
+    // A sentence that asks for the payment is whole, whatever it says about fees.
+    expect(due("To avoid a late fee, please pay by 12 March 2027.")?.apart).toBeUndefined();
+    // The clause ends with its sentence, its line or its cell.
+    expect(due("We have not received it. Pay by 12 March 2027.")?.apart).toBeUndefined();
+    expect(due("If paid late: $35.00 fee | Due date: 12 March 2027")?.apart).toBeUndefined();
+    expect(due("After that we add interest.\nDue date: 12 March 2027")?.apart).toBeUndefined();
+  });
+
   it("a clock that only stands on the same line as a day to act by is not its clock", () => {
     const notice = "Reply by 12 March 2027. Our office is open 9:00 to 17:00.";
     expect(labelledFacts(notice).find((fact) => fact.kind === "due")).toMatchObject({ value: "2027-03-12" });
@@ -773,6 +824,14 @@ describe("a form line read by what its label means", () => {
     expect(read("Cover ends: 30 November 2027")).toEqual([["expiry", "2027-11-30", undefined, "Cover ends", 0.7]]);
     expect(read("Direct debit date: 18 March 2027")).toEqual([["due", "2027-03-18", undefined, "Direct debit date", 0.7]]);
     expect(read("Class begins: Tuesday 2 November 2027 at 6:30 PM")).toEqual([["event", "2027-11-02", "18:30", "Class begins", 0.7]]);
+  });
+
+  it("a day to act by under a known label is whole when the date starts its value, and apart when other words do", () => {
+    const [whole] = structuralDatedFacts("Direct debit date: Thursday 18 March 2027", new Set(), { lexicon: table });
+    expect(whole).toMatchObject({ kind: "due", value: "2027-03-18" });
+    expect(whole?.apart).toBeUndefined();
+    const [apart] = structuralDatedFacts("Direct debit date: your bank sets it, and your cover starts 18 March 2027", new Set(), { lexicon: table });
+    expect(apart).toMatchObject({ kind: "due", value: "2027-03-18", apart: true });
   });
 
   it("an end of a journey or a stay carries its role", () => {
